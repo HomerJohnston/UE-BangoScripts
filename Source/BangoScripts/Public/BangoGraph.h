@@ -1,0 +1,146 @@
+#pragma once
+
+#include "CoreMinimal.h"
+
+/**
+ * The node-graph form of a Bango script, used by the graph editor.
+ *
+ * The .bango text is the source of truth. Bango::BuildGraph turns text into a graph document, and
+ * Bango::WriteGraphText turns a graph document back into text. Writing a document that was built from
+ * a file, without changes, gives the file back in a fixed layout (tab indents, aligned //@ comments).
+ *
+ * Graph shape:
+ * - Each graph (the script's main graph, and one per function) is a set of nodes. Nodes[0] is the entry node.
+ * - Every node except the entry node has one exec input. Each input has at most one wire into it.
+ * - Every node has one main exec output, Next: "Then" on if nodes and loops, and the plain exec
+ *   output on everything else. Return, break, continue and goto have one too; whatever follows them only
+ *   runs if it is reached through a label.
+ * - If nodes also have Do and Else outputs, and loops have a Do output (Branches).
+ * - A chain of nodes that nothing wires into, other than the entry node's chain, is "disconnected". It is
+ *   saved as `//~` comment lines, so the compiler ignores it but the graph keeps it.
+ *
+ * Positions are in grid units of BangoGraphGridSize pixels.
+ */
+
+/** Size of one graph coordinate unit, in graph-editor pixels (the Blueprint editor's default snap grid). */
+static constexpr int32 BangoGraphGridSize = 16;
+
+enum class EBangoGraphNodeKind : uint8
+{
+	/** Nodes[0] of every graph. Text: the inside of params (...) for the main graph, the signature for a function. */
+	Entry,
+
+	VarDecl,
+	Assign,
+	IncDec,
+	Call,
+	If,
+	While,
+	For,
+	ForEach,
+	Break,
+	Continue,
+	Return,
+	Label,
+	Goto,
+	/** A bend in a wire: no text, one input, one output. Written as a line with only its //@ comment. */
+	Reroute,
+};
+
+struct BANGOSCRIPTS_API FBangoGraphNode
+{
+	EBangoGraphNodeKind Kind = EBangoGraphNodeKind::Call;
+
+	/** The NodeID written in the //@ comment. Always 0 for entry nodes; unique across the file otherwise. */
+	int64 NodeID = 0;
+	int32 X = 0;
+	int32 Y = 0;
+
+	/**
+	 * The text the user edits, without keywords, brackets or ';':
+	 * - Entry: `int _a, string _b = "x"` (main graph) or `int AddScore(int _amount)` (function)
+	 * - VarDecl, Assign, IncDec, Call: the statement, like `int _x = 5`, `_x += 2`, `_x++`, `john Speak("Hi")`
+	 * - If, While: the condition. For: `int _i = 0; _i < 3; _i++`. ForEach: `_x in _array`
+	 * - Return: the value, or empty. Label, Goto: the label name. Break, Continue, Reroute: empty.
+	 */
+	FString Text;
+
+	/** The comment bubble, from `//` lines above the statement. Lines are separated by '\n'. Empty for none. */
+	FString Comment;
+
+	/** Index into the graph's Nodes of the node the main exec output leads to, or INDEX_NONE. */
+	int32 Next = INDEX_NONE;
+
+	/** If: [Do, Else]. While, For, ForEach: [Do]. Unused entries are INDEX_NONE. */
+	int32 Branches[2] = { INDEX_NONE, INDEX_NONE };
+
+	bool operator==(const FBangoGraphNode& Other) const;
+	bool operator!=(const FBangoGraphNode& Other) const { return !(*this == Other); }
+};
+
+struct BANGOSCRIPTS_API FBangoGraph
+{
+	/** True for a function's graph. */
+	bool bIsFunction = false;
+
+	/** The function's name (from the entry node's signature). Empty for the main graph. */
+	FString Name;
+
+	/** Nodes[0] is the entry node. */
+	TArray<FBangoGraphNode> Nodes;
+
+	bool operator==(const FBangoGraph& Other) const;
+	bool operator!=(const FBangoGraph& Other) const { return !(*this == Other); }
+};
+
+struct BANGOSCRIPTS_API FBangoGraphDocument
+{
+	/** The script's `#define LOCTEXT_NAMESPACE "..."` line (see FBangoScript::LocNamespace). Saved right after the params line, with `#undef LOCTEXT_NAMESPACE` at the end. */
+	bool bHasLocNamespace = false;
+	FString LocNamespace;
+
+	FBangoGraph Main;
+	/** In file order. */
+	TArray<FBangoGraph> Functions;
+
+	bool operator==(const FBangoGraphDocument& Other) const;
+	bool operator!=(const FBangoGraphDocument& Other) const { return !(*this == Other); }
+};
+
+struct FBangoCompileError;
+
+namespace Bango
+{
+	/** Number of Branches an exec node of this kind has: 2 for If, 1 for loops, 0 otherwise. */
+	BANGOSCRIPTS_API int32 GetGraphNodeBranchCount(EBangoGraphNodeKind Kind);
+
+	/** Display names: "Do"/"Else"/"Then" for If; "Do"/"Then" for loops; empty for a plain exec output. */
+	BANGOSCRIPTS_API FString GetGraphNodeNextName(EBangoGraphNodeKind Kind);
+	BANGOSCRIPTS_API FString GetGraphNodeBranchName(EBangoGraphNodeKind Kind, int32 Branch);
+
+	/**
+	 * The order functions are written in: depth-first by first use. Walking the main graph in the order
+	 * its lines are written (connected nodes, then disconnected ones), the first call to a function places
+	 * it, and that function's own calls are placed right after it, before the main graph goes on.
+	 * Functions nothing calls follow, in their current order (with their own callees after each).
+	 * Returns indices into Document.Functions. BuildGraph already stores functions in this order.
+	 */
+	BANGOSCRIPTS_API TArray<int32> GetFunctionWriteOrder(const FBangoGraphDocument& Document);
+
+	/** "Hint", "If", "Set", ... a short title for the node. */
+	BANGOSCRIPTS_API FString GetGraphNodeKindName(EBangoGraphNodeKind Kind);
+
+	/**
+	 * Parses Source and builds its graph. Statements without //@ metadata get new NodeIDs and positions
+	 * near the node before them. Fails with a syntax error, or if the `//~` lines of disconnected nodes
+	 * can't be read.
+	 */
+	BANGOSCRIPTS_API bool BuildGraph(const FString& Source, const FString& FileName, FBangoGraphDocument& OutDocument, FBangoCompileError& OutError);
+
+	/**
+	 * Writes Document as Bango text. Fails (with a message naming the node) if a node has two wires into it,
+	 * if wires form a loop, if a link points at a missing node, or if a node's text contains a line break.
+	 * Node text is written as-is; it is not checked for syntax.
+	 */
+	BANGOSCRIPTS_API bool WriteGraphText(const FBangoGraphDocument& Document, FString& OutText, FString& OutError);
+}
