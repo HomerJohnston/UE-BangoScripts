@@ -38,7 +38,7 @@ namespace BangoLexerPrivate
 		{ TEXT("vector3"), EBangoTokenKind::KwVector3 },
 		{ TEXT("void"), EBangoTokenKind::KwVoid },
 		{ TEXT("params"), EBangoTokenKind::KwParams },
-		{ TEXT("IsDefined"), EBangoTokenKind::KwIsDefined },
+		{ TEXT("IsNil"), EBangoTokenKind::KwIsNil },
 	};
 
 	static bool IsDigitChar(TCHAR C) { return C >= TEXT('0') && C <= TEXT('9'); }

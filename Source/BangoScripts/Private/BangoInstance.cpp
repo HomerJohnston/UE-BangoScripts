@@ -390,12 +390,38 @@ FString FBangoInstance::DescribePlace(const FBangoPlace& Place) const
 	return Program->Names.IsValidIndex(Place.Index) ? Program->Names[Place.Index] : FString(TEXT("<global>"));
 }
 
-bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Globals, const IBangoEntityResolver* Entities)
+bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Globals, const IBangoEntityResolver* Entities, bool bNilOk)
 {
 	TArray<int64> Indexes;
 	if (!PopIndexes(Place.NumIndexes, Indexes))
 	{
 		return false;
+	}
+
+	if (bNilOk && Place.Part < 0)
+	{
+		// Like IsNil: nil anywhere along the way (or a global nobody made, or past the end) gives nil.
+		const FBangoValue* Root = nullptr;
+		if (Place.Kind == EBangoPlaceKind::Local)
+		{
+			FBangoFrame& Frame = Frames.Last();
+			if (!Frame.Slots.IsValidIndex(Place.Index))
+			{
+				return RuntimeFail(TEXT("Internal error: bad local slot."));
+			}
+			Root = &Frame.Slots[Place.Index];
+		}
+		else
+		{
+			Root = Globals.Find(DescribePlace(Place));
+		}
+		const FBangoValue* Found = Root;
+		if (Root && Indexes.Num() > 0)
+		{
+			Found = !Root->IsNil() && Root->GetType().IsArray() ? Root->GetElementAtPath(Indexes) : nullptr;
+		}
+		Stack.Add(Found ? *Found : FBangoValue::MakeNil(FBangoType::Entity()));
+		return true;
 	}
 
 	const FString RootName = DescribePlace(Place);
@@ -440,7 +466,7 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 			{
 				return RuntimeFail(FString::Printf(TEXT("Index %lld for '%s' is negative."), Index, *Path));
 			}
-			return RuntimeFail(FString::Printf(TEXT("'%s[%lld]' is past the end of '%s', which has %lld element(s). Check with IsDefined first."),
+			return RuntimeFail(FString::Printf(TEXT("'%s[%lld]' is past the end of '%s', which has %lld element(s). Check with IsNil first."),
 				*Path, Index, *Path, Current->ArrayCount()));
 		}
 		Path += FString::Printf(TEXT("[%lld]"), Index);
@@ -457,9 +483,9 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 		}
 		if (Place.Kind == EBangoPlaceKind::Global && Indexes.Num() == 0)
 		{
-			return RuntimeFail(FString::Printf(TEXT("Global '%s' is nil. Give it a value before reading it, or check it with IsDefined(%s)."), *Path, *Path));
+			return RuntimeFail(FString::Printf(TEXT("Global '%s' is nil. Give it a value before reading it, or check it with IsNil(%s)."), *Path, *Path));
 		}
-		return RuntimeFail(FString::Printf(TEXT("'%s' is nil. Give it a value before reading it, or check it with IsDefined(%s)."), *Path, *Path));
+		return RuntimeFail(FString::Printf(TEXT("'%s' is nil. Give it a value before reading it, or check it with IsNil(%s)."), *Path, *Path));
 	}
 	if (Place.Part >= 0)
 	{
@@ -555,7 +581,7 @@ bool FBangoInstance::StorePlace(const FBangoPlace& Place, FBangoGlobalStore& Glo
 	return true;
 }
 
-bool FBangoInstance::IsDefinedPlace(const FBangoPlace& Place, FBangoGlobalStore& Globals)
+bool FBangoInstance::IsNilPlace(const FBangoPlace& Place, FBangoGlobalStore& Globals)
 {
 	TArray<int64> Indexes;
 	if (!PopIndexes(Place.NumIndexes, Indexes))
@@ -591,7 +617,7 @@ bool FBangoInstance::IsDefinedPlace(const FBangoPlace& Place, FBangoGlobalStore&
 			bDefined = Element && !Element->IsNil();
 		}
 	}
-	Stack.Add(FBangoValue::MakeBool(bDefined));
+	Stack.Add(FBangoValue::MakeBool(!bDefined));
 	return true;
 }
 
@@ -922,7 +948,7 @@ bool FBangoInstance::CallCommand(int32 NameIndex, int32 ArgCount, bool bHasTarge
 		}
 		for (int32 i = 0; i < Call.Args.Num() && i < Signature.Params.Num(); ++i)
 		{
-			if (!CheckEntity(Call.Args[i]))
+			if (!Signature.Params[i].bMayBeNil && !CheckEntity(Call.Args[i]))
 			{
 				return false;
 			}
@@ -1060,7 +1086,7 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 
 		case EBangoOp::LoadPlace:
 		case EBangoOp::StorePlace:
-		case EBangoOp::IsDefinedPlace:
+		case EBangoOp::IsNilPlace:
 		case EBangoOp::ArrayModify:
 		{
 			if (!Function.Places.IsValidIndex(I.A))
@@ -1070,9 +1096,9 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 			const FBangoPlace Place = Function.Places[I.A];
 			switch (I.Op)
 			{
-			case EBangoOp::LoadPlace:      LoadPlace(Place, Globals, Context.Entities); break;
+			case EBangoOp::LoadPlace:      LoadPlace(Place, Globals, Context.Entities, I.B != 0); break;
 			case EBangoOp::StorePlace:     StorePlace(Place, Globals); break;
-			case EBangoOp::IsDefinedPlace: IsDefinedPlace(Place, Globals); break;
+			case EBangoOp::IsNilPlace:     IsNilPlace(Place, Globals); break;
 			default:                       ArrayModify(Place, I.B, I.C != 0, Globals); break;
 			}
 			break;

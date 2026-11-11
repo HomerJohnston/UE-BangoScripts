@@ -23,9 +23,9 @@ enum class EBangoOp : uint8
 	DupN,               // A = n: duplicates the top n values
 
 	// ---- Variables (places: a local slot or a global, plus N indexes on the stack, and maybe a vector part) ----
-	LoadPlace,          // A = place.  indexes... -> value       (fails if the value is nil or missing)
+	LoadPlace,          // A = place, B = 1: nil ok.  indexes... -> value  (fails if the value is nil or missing, unless B: then nil)
 	StorePlace,         // A = place.  indexes..., value ->      (converts to the place's type; grows arrays)
-	IsDefinedPlace,     // A = place.  indexes... -> bool        (never fails)
+	IsNilPlace,         // A = place.  indexes... -> bool        (never fails)
 
 	// ---- Values ----
 	Index,              // array, index -> element               (fails if nil or out of range)

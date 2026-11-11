@@ -13,6 +13,12 @@ struct FBangoCommandParam
 	FBangoType Type;
 	/** Shown when hovering the parameter's value on the command's graph node, like "Seconds". Optional. */
 	FString Description;
+	/**
+	 * The command gets this argument as it is, even nil or naming no actor, and decides what that means itself
+	 * (IsNull does). A nil variable passed here doesn't stop the script, and an entity isn't checked against the
+	 * actor registry first. See FBangoCommandSignature::MayBeNil.
+	 */
+	bool bMayBeNil = false;
 };
 
 /**
@@ -77,6 +83,8 @@ struct BANGOSCRIPTS_API FBangoCommandSignature
 	FBangoCommandSignature& Target(const FBangoType& Type);
 	/** Adds a parameter. ParamDescription is the tooltip on its value in the graph editor (e.g. the unit: "Seconds"). */
 	FBangoCommandSignature& Param(const FString& ParamName, const FBangoType& Type, const FString& ParamDescription = FString());
+	/** The parameter added last may be nil, or an entity naming no actor: the command gets it as it is (bMayBeNil). */
+	FBangoCommandSignature& MayBeNil();
 	/** Marks every parameter added after this call as optional. */
 	FBangoCommandSignature& Optional();
 	/** Any number of extra values may follow the parameters. LabelPrefix and FirstIndex only change how the graph editor labels them. */
@@ -106,7 +114,7 @@ enum class EBangoCommandResult : uint8
  * One call of a C++ command, passed to its Start and Poll handlers.
  *
  * Arguments have already been converted to the signature's types, and entity arguments have been
- * checked against the actor registry. A nil argument is possible when the script passed nil.
+ * checked against the actor registry (except MayBeNil ones). A nil argument is possible when the script passed nil.
  */
 struct FBangoCommandCall
 {

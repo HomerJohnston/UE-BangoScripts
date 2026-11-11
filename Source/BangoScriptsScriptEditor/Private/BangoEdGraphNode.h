@@ -7,6 +7,46 @@
 #include "BangoGraphLayout.h"
 #include "BangoEdGraphNode.generated.h"
 
+/** A declaration (FBangoGraphDecl), kept on an entry node so that editing it can be undone. */
+USTRUCT()
+struct FBangoEdDecl
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FString Type;
+	UPROPERTY()
+	FString Name;
+	UPROPERTY()
+	bool bHasValue = false;
+	UPROPERTY()
+	FString Value;
+	UPROPERTY()
+	FString Comment;
+
+	static FBangoEdDecl From(const FBangoGraphDecl& Decl)
+	{
+		FBangoEdDecl Out;
+		Out.Type = Decl.Type;
+		Out.Name = Decl.Name;
+		Out.bHasValue = Decl.bHasValue;
+		Out.Value = Decl.Value;
+		Out.Comment = Decl.Comment;
+		return Out;
+	}
+
+	FBangoGraphDecl ToGraphDecl() const
+	{
+		FBangoGraphDecl Out;
+		Out.Type = Type;
+		Out.Name = Name;
+		Out.bHasValue = bHasValue;
+		Out.Value = Value;
+		Out.Comment = Comment;
+		return Out;
+	}
+};
+
 /**
  * One Bango statement in the graph editor. Mirrors an FBangoGraphNode: its kind, NodeID, text and comment.
  * Pins: an exec input (except on entry nodes), then the True/False or Body outputs, then the main output
@@ -51,6 +91,14 @@ public:
 	bool bHasLocNamespace = false;
 	UPROPERTY()
 	FString LocNamespace;
+
+	/** Entry nodes only: the locals declared at the top of this graph (FBangoGraph::Locals). Edited in the Locals list. */
+	UPROPERTY()
+	TArray<FBangoEdDecl> Locals;
+
+	/** The main Script Start node only: the file's globals (FBangoGraphDocument::Globals). Edited in the Globals list. */
+	UPROPERTY()
+	TArray<FBangoEdDecl> Globals;
 
 	/** Text fields whose Key, Namespace and Notes rows are shown (see SBangoGraphNode). Not saved. */
 	TSet<int32> ExpandedTextFields;

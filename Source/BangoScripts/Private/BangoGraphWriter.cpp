@@ -71,9 +71,26 @@ namespace BangoGraphWriterPrivate
 			{
 				AddCode(0, -1, FString(TEXT("#define LOCTEXT_NAMESPACE ")) + Bango::MakeStringLiteral(Doc.LocNamespace), nullptr);
 			}
+			// The declarations: globals, then the main graph's locals, each group after a blank line.
+			if (Doc.Globals.Num() > 0)
+			{
+				if (Out.Num() > 0)
+				{
+					AddBlank();
+				}
+				WriteDecls(Doc.Globals, true, 0);
+			}
+			if (Doc.Main.Locals.Num() > 0)
+			{
+				if (Out.Num() > 0)
+				{
+					AddBlank();
+				}
+				WriteDecls(Doc.Main.Locals, false, 0);
+			}
 			if (Out.Num() > 0 && MainEntry.Next != INDEX_NONE)
 			{
-				AddBlank(); // a blank line between nodes, here between the #define lines and the first statement
+				AddBlank(); // a blank line between nodes, here between the #define lines (or declarations) and the first statement
 			}
 			if (!WriteGraphBody(Doc.Main, 0))
 			{
@@ -89,6 +106,14 @@ namespace BangoGraphWriterPrivate
 				AddComment(Entry.Comment, 0, -1);
 				AddCode(0, -1, FString(TEXT("function ")) + Entry.Text, nullptr);
 				AddCode(0, -1, TEXT("{"), nullptr);
+				if (Function.Locals.Num() > 0)
+				{
+					WriteDecls(Function.Locals, false, 1);
+					if (Entry.Next != INDEX_NONE)
+					{
+						AddBlank();
+					}
+				}
 				if (!WriteGraphBody(Function, 1))
 				{
 					return false;
@@ -121,6 +146,22 @@ namespace BangoGraphWriterPrivate
 		{
 			Error = Message;
 			return false;
+		}
+
+		/** `global int gold;` or `int _count = 0;`, each under its comment. Declarations have no metadata. */
+		void WriteDecls(const TArray<FBangoGraphDecl>& Decls, bool bGlobal, int32 Indent)
+		{
+			for (const FBangoGraphDecl& Decl : Decls)
+			{
+				AddComment(Decl.Comment, Indent, -1);
+				FString Code = bGlobal ? FString(TEXT("global ")) : FString();
+				Code += Decl.Type + TEXT(" ") + Decl.Name;
+				if (Decl.bHasValue && !bGlobal)
+				{
+					Code += TEXT(" = ") + Decl.Value;
+				}
+				AddCode(Indent, -1, Code + TEXT(";"), nullptr);
+			}
 		}
 
 		static bool HasLineBreak(const FString& Text)
@@ -301,15 +342,14 @@ namespace BangoGraphWriterPrivate
 		}
 
 		/**
-		 * Statements that sit together without blank lines between them: declarations, assignments (Set, Add To,
-		 * ++ and the like), and calls. 0 for flow control (if, loops, break, continue, return, label, goto), which
+		 * Statements that sit together without blank lines between them: assignments (Set, Add To, ++ and the
+		 * like), and calls. 0 for flow control (if, loops, break, continue, return, label, goto), which
 		 * always gets a blank line before and after it.
 		 */
 		static int32 SpacingGroup(EBangoGraphNodeKind Kind)
 		{
 			switch (Kind)
 			{
-			case EBangoGraphNodeKind::VarDecl: return 1;
 			case EBangoGraphNodeKind::Assign:
 			case EBangoGraphNodeKind::IncDec:  return 2;
 			case EBangoGraphNodeKind::Call:    return 3;
@@ -365,7 +405,6 @@ namespace BangoGraphWriterPrivate
 			case EBangoGraphNodeKind::Entry:
 				return Fail(TEXT("Internal error: entry node in a chain."));
 
-			case EBangoGraphNodeKind::VarDecl:
 			case EBangoGraphNodeKind::Assign:
 			case EBangoGraphNodeKind::IncDec:
 			case EBangoGraphNodeKind::Call:

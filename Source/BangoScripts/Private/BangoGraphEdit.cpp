@@ -21,7 +21,7 @@ namespace BangoGraphEditPrivate
 
 	static bool IsStatementKind(EBangoGraphNodeKind Kind)
 	{
-		return Kind == EBangoGraphNodeKind::VarDecl || Kind == EBangoGraphNodeKind::Assign
+		return Kind == EBangoGraphNodeKind::Assign
 			|| Kind == EBangoGraphNodeKind::IncDec || Kind == EBangoGraphNodeKind::Call;
 	}
 
@@ -64,7 +64,6 @@ namespace Bango
 		case EBangoGraphNodeKind::Entry:
 			Source = bInFunctionGraph ? FString(TEXT("function ")) + Text + TEXT("\n{\n};") : FString(TEXT("#define params (")) + Text + TEXT(")");
 			break;
-		case EBangoGraphNodeKind::VarDecl:
 		case EBangoGraphNodeKind::Assign:
 		case EBangoGraphNodeKind::IncDec:
 		case EBangoGraphNodeKind::Call:
@@ -119,9 +118,14 @@ namespace Bango
 		const EBangoStmtKind Parsed = Script.TopLevel[0]->Kind;
 		if (IsStatementKind(Kind))
 		{
-			if (Parsed != EBangoStmtKind::VarDecl && Parsed != EBangoStmtKind::Assign && Parsed != EBangoStmtKind::IncDec && Parsed != EBangoStmtKind::Call)
+			if (Parsed == EBangoStmtKind::VarDecl)
 			{
-				OutError = TEXT("This should be a declaration, an assignment, ++/-- or a call.");
+				OutError = TEXT("A node can't be a declaration: add variables in the Globals or Locals list instead.");
+				return false;
+			}
+			if (Parsed != EBangoStmtKind::Assign && Parsed != EBangoStmtKind::IncDec && Parsed != EBangoStmtKind::Call)
+			{
+				OutError = TEXT("This should be an assignment, ++/-- or a call.");
 				return false;
 			}
 		}
@@ -138,7 +142,6 @@ namespace Bango
 		}
 		switch (Script.TopLevel[0]->Kind)
 		{
-		case EBangoStmtKind::VarDecl: OutKind = EBangoGraphNodeKind::VarDecl; return true;
 		case EBangoStmtKind::Assign:  OutKind = EBangoGraphNodeKind::Assign; return true;
 		case EBangoStmtKind::IncDec:  OutKind = EBangoGraphNodeKind::IncDec; return true;
 		case EBangoStmtKind::Call:    OutKind = EBangoGraphNodeKind::Call; return true;
@@ -432,7 +435,8 @@ namespace Bango
 		{
 			const FBangoToken& Token = Lexed.Tokens[i];
 			if (Token.Kind == EBangoTokenKind::Identifier && Token.Text.Equals(OldName, ESearchCase::CaseSensitive)
-				&& (i == 0 || Lexed.Tokens[i - 1].Kind != EBangoTokenKind::Dot))
+				&& (i == 0 || Lexed.Tokens[i - 1].Kind != EBangoTokenKind::Dot)
+				&& (i + 1 >= Lexed.Tokens.Num() || Lexed.Tokens[i + 1].Kind != EBangoTokenKind::LParen))
 			{
 				const int32 Begin = GraphEditPrivate::TokenBegin(LineStarts, Token);
 				const int32 End = GraphEditPrivate::TokenEnd(LineStarts, Token);
@@ -444,6 +448,64 @@ namespace Bango
 			}
 		}
 		return bChanged;
+	}
+
+	namespace GraphEditPrivate
+	{
+		static bool IsFixedValueExpr(const FBangoExpr& Expr)
+		{
+			if (Expr.Kind == EBangoExprKind::Literal)
+			{
+				return true;
+			}
+			if (const FBangoUnaryExpr* Unary = Expr.As<FBangoUnaryExpr>())
+			{
+				const FBangoLiteralExpr* Operand = Unary->Operand.IsValid() ? Unary->Operand->As<FBangoLiteralExpr>() : nullptr;
+				return Unary->Op == EBangoUnaryOp::Negate && Operand
+					&& (Operand->LiteralKind == EBangoLiteralKind::Int || Operand->LiteralKind == EBangoLiteralKind::Double);
+			}
+			if (const FBangoArrayLiteralExpr* ArrayExpr = Expr.As<FBangoArrayLiteralExpr>())
+			{
+				for (const FBangoExprPtr& Element : ArrayExpr->Elements)
+				{
+					if (!Element.IsValid() || !IsFixedValueExpr(*Element))
+					{
+						return false;
+					}
+				}
+				return true;
+			}
+			return false;
+		}
+	}
+
+	bool CheckDeclValue(const FString& Type, const FString& Value, FString& OutError)
+	{
+		if (BangoGraphEditPrivate::HasLineBreak(Value))
+		{
+			OutError = TEXT("A starting value is one line.");
+			return false;
+		}
+		FBangoScript Script;
+		FBangoCompileError Error;
+		const FString Source = FString::Printf(TEXT("%s _value = %s;"), *Type, *Value);
+		if (!ParseScript(Source, TEXT("value"), Script, Error) || Script.TopLevel.Num() != 1 || Script.Functions.Num() != 0)
+		{
+			OutError = Error.Message.IsEmpty() ? FString(TEXT("This doesn't read as a value.")) : Error.Message;
+			return false;
+		}
+		const FBangoVarDeclStmt* Decl = Script.TopLevel[0]->As<FBangoVarDeclStmt>();
+		if (!Decl || !Decl->Init.IsValid() || Decl->Init->Kind == EBangoExprKind::Empty)
+		{
+			OutError = TEXT("This doesn't read as a value.");
+			return false;
+		}
+		if (!GraphEditPrivate::IsFixedValueExpr(*Decl->Init))
+		{
+			OutError = TEXT("A starting value must be a fixed value: a number, a string, true, false, nil, a Bango ID like @john, a text, or an array of those. Set anything else in the code, with a Set node.");
+			return false;
+		}
+		return true;
 	}
 
 	bool ReadEntryParams(const FString& EntryText, bool bInFunctionGraph, TArray<FBangoEntryParam>& OutParams)

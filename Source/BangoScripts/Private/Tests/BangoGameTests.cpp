@@ -73,7 +73,7 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 	FBangoCommandTable Commands;
 	Bango::RegisterBuiltinCommands(Commands);
 	for (const TCHAR* Name : { TEXT("Hint"), TEXT("Log"), TEXT("Format"), TEXT("FormatText"), TEXT("ToText"), TEXT("ToString"), TEXT("Sleep"), TEXT("Random"), TEXT("RandomInt"), TEXT("Floor"), TEXT("Round"),
-		TEXT("GameTime"), TEXT("ToEntity"), TEXT("SetPos"), TEXT("GetPos"), TEXT("SetHidden"), TEXT("DistanceTo") })
+		TEXT("GameTime"), TEXT("ToEntity"), TEXT("SetPos"), TEXT("GetPos"), TEXT("SetHidden"), TEXT("DistanceTo"), TEXT("IsNull") })
 	{
 		TestNotNull(FString::Printf(TEXT("registered: %s"), Name), Commands.FindCommandImpl(Name));
 	}
@@ -82,22 +82,26 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 	FString Error;
 	const TCHAR* Source =
 		TEXT("#define LOCTEXT_NAMESPACE \"Bango.Tests\"\n")
-		TEXT("global float r = Random(1.0, 2.0);\n")
-		TEXT("global int ri = RandomInt(3, 3);\n")
-		TEXT("global int fl = Floor(-1.5);\n")
-		TEXT("global int ro = Round(2.5);\n")
-		TEXT("global int rn = Round(-2.5);\n")
-		TEXT("global string fm = Format(\"%0-%1-%2\", 1, \"a\", [1.5]);\n")
-		TEXT("global string en = Format(\"%0 %1\", ToEntity(\"door17\"), [@john, ToEntity(\"_x\")]);\n")
-		TEXT("global bool same = ToEntity(\"john\") == @john;\n")
+		TEXT("global float r;\nglobal int ri;\nglobal int fl;\nglobal int ro;\nglobal int rn;\nglobal string fm;\nglobal string en;\nglobal bool same;\n")
+		TEXT("global text tf;\nglobal string ts;\nglobal bool teq;\nglobal bool nobody;\nglobal bool nilnull;\nglobal bool done;\nentity _ne;\n")
+		TEXT("r = Random(1.0, 2.0);\n")
+		TEXT("ri = RandomInt(3, 3);\n")
+		TEXT("fl = Floor(-1.5);\n")
+		TEXT("ro = Round(2.5);\n")
+		TEXT("rn = Round(-2.5);\n")
+		TEXT("fm = Format(\"%0-%1-%2\", 1, \"a\", [1.5]);\n")
+		TEXT("en = Format(\"%0 %1\", ToEntity(\"door17\"), [@john, ToEntity(\"_x\")]);\n")
+		TEXT("same = ToEntity(\"john\") == @john;\n")
 		TEXT("Sleep(0.5);\n")
 		TEXT("Sleep(0);\n")
 		TEXT("Log(\"logged %0\", 1);\n")
 		TEXT("Hint(LOCTEXT(\"NoWorld\", \"a hint with no world goes to the log, {0}\"), 1);\n")
-		TEXT("global text tf = FormatText(LOCTEXT(\"Count\", \"{1}: {0}\"), 2, ToText(\"x\"));\n")
-		TEXT("global string ts = ToString(NSLOCTEXT(\"Bango.Other\", \"Hello\", \"Hello\"));\n")
-		TEXT("global bool teq = LOCTEXT(\"Hello\", \"Hello\") == ToText(\"Hello\");\n")
-		TEXT("global bool done = true;\n")
+		TEXT("tf = FormatText(LOCTEXT(\"Count\", \"{1}: {0}\"), 2, ToText(\"x\"));\n")
+		TEXT("ts = ToString(NSLOCTEXT(\"Bango.Other\", \"Hello\", \"Hello\"));\n")
+		TEXT("teq = LOCTEXT(\"Hello\", \"Hello\") == ToText(\"Hello\");\n")
+		TEXT("nobody = IsNull(@nobody);\n")
+		TEXT("nilnull = IsNull(_ne);\n")
+		TEXT("done = true;\n")
 		TEXT("#undef LOCTEXT_NAMESPACE");
 	const EBangoInstanceStatus Status = RunWithoutWorld(Source, Commands, Globals, Error);
 	if (!TestEqual(TEXT("built-ins script finishes"), (int32)Status, (int32)EBangoInstanceStatus::Finished))
@@ -117,22 +121,24 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("FormatText, with values moved around"), Globals.Find(TEXT("tf"))->GetText().ToString(), FString(TEXT("x: 2")));
 	TestEqual(TEXT("ToString of a text"), Globals.Find(TEXT("ts"))->GetString(), FString(TEXT("Hello")));
 	TestTrue(TEXT("texts are equal if they show the same thing"), Globals.Find(TEXT("teq"))->GetBool());
+	TestTrue(TEXT("IsNull: no actor has the ID (there's no world at all here)"), Globals.Find(TEXT("nobody"))->GetBool());
+	TestTrue(TEXT("IsNull: a nil entity is null"), Globals.Find(TEXT("nilnull"))->GetBool());
 	TestTrue(TEXT("ran to the end"), Globals.IsDefined(TEXT("done")));
 
 	struct FErrorCase { const TCHAR* Source; const TCHAR* Contains; };
 	const FErrorCase ErrorCases[] =
 	{
-		{ TEXT("int _x = RandomInt(5, 1);"), TEXT("Min (5) is greater than Max (1)") },
-		{ TEXT("float _x = Random(2.0, 1.0);"), TEXT("Min (2.0) is greater than Max (1.0)") },
+		{ TEXT("int _x;\n_x = RandomInt(5, 1);"), TEXT("Min (5) is greater than Max (1)") },
+		{ TEXT("float _x;\n_x = Random(2.0, 1.0);"), TEXT("Min (2.0) is greater than Max (1.0)") },
 		{ TEXT("Sleep(-1.0);"), TEXT("negative time") },
-		{ TEXT("float _t = GameTime();"), TEXT("needs a game world") },
-		{ TEXT("int _x = Floor(1e300);"), TEXT("too large to convert") },
+		{ TEXT("float _t;\n_t = GameTime();"), TEXT("needs a game world") },
+		{ TEXT("int _x;\n_x = Floor(1e300);"), TEXT("too large to convert") },
 		{ TEXT("string _text = \"%2\";\nLog(_text, 1);"), TEXT("uses %2") },   // a literal text is checked when compiling instead
-		{ TEXT("text _t = ToText(\"{2}\");\nHint(_t, 1);"), TEXT("uses {2}") },
-		{ TEXT("text _t = ToText(\"{Name}\");\nHint(_t);"), TEXT("uses {Name}") },
+		{ TEXT("text _t;\n_t = ToText(\"{2}\");\nHint(_t, 1);"), TEXT("uses {2}") },
+		{ TEXT("text _t;\n_t = ToText(\"{Name}\");\nHint(_t);"), TEXT("uses {Name}") },
 		{ TEXT("text _s;\nHint(_s);"), TEXT("'_s' is nil") },
-		{ TEXT("entity _e = ToEntity(\"two words\");"), TEXT("'two words' isn't a valid Bango ID name") },
-		{ TEXT("entity _e = ToEntity(\"\");"), TEXT("isn't a valid Bango ID name") },
+		{ TEXT("entity _e;\n_e = ToEntity(\"two words\");"), TEXT("'two words' isn't a valid Bango ID name") },
+		{ TEXT("entity _e;\n_e = ToEntity(\"\");"), TEXT("isn't a valid Bango ID name") },
 	};
 	for (const FErrorCase& Case : ErrorCases)
 	{

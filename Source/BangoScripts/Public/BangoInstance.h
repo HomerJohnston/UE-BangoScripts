@@ -135,9 +135,10 @@ private:
 	// Places
 	FString DescribePlace(const FBangoPlace& Place) const;
 	/** Entities is only used to add a hint when a missing global is really a Bango ID written without its `@`. */
-	bool LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Globals, const IBangoEntityResolver* Entities);
+	/** With bNilOk, a value that's nil or missing (a global nobody made, an element past the end) is loaded as nil instead of stopping the script. */
+	bool LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Globals, const IBangoEntityResolver* Entities, bool bNilOk = false);
 	bool StorePlace(const FBangoPlace& Place, FBangoGlobalStore& Globals);
-	bool IsDefinedPlace(const FBangoPlace& Place, FBangoGlobalStore& Globals);
+	bool IsNilPlace(const FBangoPlace& Place, FBangoGlobalStore& Globals);
 	bool ArrayModify(const FBangoPlace& Place, int32 Kind, bool bResultUsed, FBangoGlobalStore& Globals);
 
 	// Operators

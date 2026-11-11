@@ -48,28 +48,17 @@ static const FBangoFieldEditTestCase GBangoFieldEditTestCases[] =
 	// A call node has no Result field. A line that stores a call's result is a Declare or Set node, with the call
 	// as its Value.
 	{ EBangoGraphNodeKind::Call, false, TEXT("Random(1.0, 2.0)"), 2, TEXT("_t"), nullptr, EBangoGraphNodeKind::Call },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("float _t = Random(1.0, 2.0)"), 1, TEXT("Random(3.0, 4.0)"), TEXT("float _t = Random(3.0, 4.0)"), EBangoGraphNodeKind::VarDecl },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("float _t = Random(1.0, 2.0)"), 1, TEXT(""), TEXT("float _t"), EBangoGraphNodeKind::VarDecl },
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_t = Random(1.0, 2.0)"), 0, TEXT("_u[1]"), TEXT("_u[1] = Random(1.0, 2.0)"), EBangoGraphNodeKind::Assign },
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_t = Random(1.0, 2.0)"), 1, TEXT("@john GetPos()"), TEXT("_t = @john GetPos()"), EBangoGraphNodeKind::Assign },
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_t = Random(1.0, 2.0)"), 0, TEXT("_t = _u"), nullptr, EBangoGraphNodeKind::Assign },   // no chained assignment
 
 	// Generic nodes
 	// Local declarations have no Type field either: Name is field 0, Value field 1.
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("int _x"), 1, TEXT("5"), TEXT("int _x = 5"), EBangoGraphNodeKind::VarDecl },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("int _x = 5"), 1, TEXT(""), TEXT("int _x"), EBangoGraphNodeKind::VarDecl },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("int _x = 5"), 0, TEXT("_y"), TEXT("int _y = 5"), EBangoGraphNodeKind::VarDecl },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("int _x = 5"), 2, TEXT("float"), nullptr, EBangoGraphNodeKind::VarDecl },   // there's no third field
 	// Global declarations have no Type field: Name is field 0, Value field 1.
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("global int gold"), 0, TEXT("coins"), TEXT("global int coins"), EBangoGraphNodeKind::VarDecl },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("global int gold"), 1, TEXT("10"), TEXT("global int gold = 10"), EBangoGraphNodeKind::VarDecl },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("global int gold = 10"), 1, TEXT(""), TEXT("global int gold"), EBangoGraphNodeKind::VarDecl },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("global int gold = 10"), 2, TEXT("int"), nullptr, EBangoGraphNodeKind::VarDecl },   // there's no third field
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("global int gold"), 0, TEXT("two words"), nullptr, EBangoGraphNodeKind::VarDecl },
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_x = 1"), 0, TEXT("_y"), TEXT("_y = 1"), EBangoGraphNodeKind::Assign },
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_x += 1"), 1, TEXT("_a * 2"), TEXT("_x += _a * 2"), EBangoGraphNodeKind::Assign },
 	{ EBangoGraphNodeKind::IncDec, false, TEXT("_x++"), 0, TEXT("_a[1]"), TEXT("_a[1]++"), EBangoGraphNodeKind::IncDec },
-	{ EBangoGraphNodeKind::If, false, TEXT("_a > 1"), 0, TEXT("_a > 2 && IsDefined(g)"), TEXT("_a > 2 && IsDefined(g)"), EBangoGraphNodeKind::If },
+	{ EBangoGraphNodeKind::If, false, TEXT("_a > 1"), 0, TEXT("_a > 2 && !IsNil(g)"), TEXT("_a > 2 && !IsNil(g)"), EBangoGraphNodeKind::If },
 	// A value left out reads (it fails to compile instead), but text that doesn't read is still refused.
 	{ EBangoGraphNodeKind::If, false, TEXT("_a > 1"), 0, TEXT("_a >"), TEXT("_a >"), EBangoGraphNodeKind::If },
 	{ EBangoGraphNodeKind::If, false, TEXT("_a > 1"), 0, TEXT("_a 1"), nullptr, EBangoGraphNodeKind::If },
@@ -462,7 +451,7 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 	// the error is on the first empty field.
 	{
 		FBangoGraphDocument Doc;
-		Bango::BuildGraph(TEXT("int _i = 1;   //@1(0, 0)\nfunction int Twice(int _n)\n{\n\treturn _n * 2; //@2(0, 0)\n};\n"), TEXT("test.bango"), Doc, Error);
+		Bango::BuildGraph(TEXT("int _i = 1;\nHint(\"x\");   //@1(0, 0)\nfunction int Twice(int _n)\n{\n\treturn _n * 2; //@2(0, 0)\n};\n"), TEXT("test.bango"), Doc, Error);
 		const FBangoNodeLayoutContext MenuContext = Bango::MakeNodeLayoutContext(Doc, &Commands);
 		TArray<FBangoNodeMenuEntry> Entries;
 		Bango::GetNodeMenuEntries(Doc, MenuContext, Entries);
@@ -480,8 +469,6 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 			{ TEXT("Set"),         TEXT("="),                         0 },
 			{ TEXT("Add To"),      TEXT("+="),                        0 },
 			{ TEXT("Increment"),   TEXT("++"),                        0 },
-			{ TEXT("Declare Int"), TEXT("int _newInt"),               INDEX_NONE },
-			{ TEXT("Declare Global Float[]"), TEXT("global float[] newFloatList"), INDEX_NONE },
 			{ TEXT("Reroute"),     TEXT(""),                          INDEX_NONE },
 			{ TEXT("Twice"),       TEXT("Twice()"),                   -2 },  // fails (its argument is missing), on the node
 		};

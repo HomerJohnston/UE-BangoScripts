@@ -1,8 +1,12 @@
-# Bango Language Spec (draft v0.27)
+# Bango Language Spec (draft v0.29)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.29:** `IsDefined(x)` is replaced by **`IsNil(x)`**, which gives the opposite answer: `if (!IsDefined(_x))` is now `if (IsNil(_x))` (section 3). New **`IsNull`** command: `IsNull(_who)` is true if the entity is `nil`, or no actor in the level has its Bango ID because it was never there or has been destroyed (section 7).
+
+**Changes in v0.28:** **declarations go at the top.** Every `global` declaration is in one block at the top of the file, after the `#define` lines, and has no value: `global int foundThings;` only says the script uses that global and what type it is, and it stays `nil` until code or a Blueprint sets it. Every local is declared at the top of its graph (the main graph after the globals, a function at the top of its body), is visible in the whole graph rather than one block, and its value, if it has one, must be a fixed value like a parameter default. `for` and `forEach` still declare their loop variables. A declaration anywhere else is a compile error (sections 4, 8 and 9). In the graph editor, declarations aren't nodes any more: the Declare nodes are gone, and the script editor's **Globals** and **Locals** lists (replacing **Variables**) add, rename, retype and remove them (section 12).
 
 **Changes in v0.27:** the script editor has a toolbar across the top, and on its left three lists: **Functions** (add, rename and delete functions; drag one onto a graph to call it), **Inputs** (add, remove, reorder, rename and retype the shown graph's parameters, and edit the script's parameter defaults, which the Script Start node no longer shows) and **Variables** (the shown graph's locals and globals; click one to jump to its declaration). Dragging a variable or input onto the graph offers the nodes that work on it (Set, Add To, Increment, Push, ...). A function's graph has a **Back to Script Graph** button in its top-left corner (section 12).
 
@@ -84,7 +88,7 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
   - Text after the `)`
   - The same NodeID used twice in a file
   - NodeID 0 on any line
-  - Metadata on a `#define` or `#undef` line
+  - Metadata on a `#define` or `#undef` line, or on a declaration
   - Metadata on a line with no statement, including a `function` line or a line with only `{` or `};`
   - A reroute line where a statement couldn't go
 - Errors about the `params` line, and argument errors for a script with no `params` line, show `[node 0]`.
@@ -96,7 +100,7 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
 | Statement | Node pins |
 |---|---|
 | `#define params (...)` | the script's entry node (node 0): exec out; shows the parameter list |
-| Declaration / assignment / `+=` etc. / `++` / `--` | exec in → exec out |
+| Assignment / `+=` etc. / `++` / `--` | exec in → exec out |
 | Command or function call | exec in → exec out |
 | `if (cond)` | exec in → Do, Else, Then |
 | `while (cond)` | exec in → Do, Then |
@@ -109,7 +113,7 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
 
 The exec out of `break`, `continue`, `return` and `goto` leads to whatever comes after them in their block. That code only runs if it's reached through a label (see section 12).
 
-Expressions are typed as text inside the node, not drawn as separate data nodes. The `init` and `step` parts of a `for` header are part of the for node, not separate nodes.
+Declarations (section 4) aren't nodes: they're listed in the graph editor's side panel instead (section 12), so they can't have metadata. Expressions are typed as text inside the node, not drawn as separate data nodes. The `init` and `step` parts of a `for` header are part of the for node, not separate nodes.
 
 ### goto in the graph
 A `goto` node **does not draw a wire** to its label. It shows the target label's name on the node. A `label` node is shown as a named entry point.
@@ -166,11 +170,14 @@ A vector is written as an array literal with exactly the right number of numbers
 ```
 vector3 _pos = [100, 50, 75];
 vector2 _uv = [0.5, 1];
-vector3 _up = [0, 0, _height];      // parts can be any number expression
+vector3 _up;
+vector3[] _path;
+
+_up = [0, 0, _height];              // parts can be any number expression
 _who SetPos([0, 0, 100]);
-vector3[] _path = [[0, 0, 0], _pos];
+_path = [[0, 0, 0], _pos];
 ```
-- `vector3 _v = [1, 2];` and `vector3 _v = [1, 2, 3, 4];` are compile errors: *"A vector3 needs exactly 3 numbers, like [1, 2, 3], but this has 2."*
+- `_v = [1, 2];` and `_v = [1, 2, 3, 4];` for a `vector3 _v` are compile errors: *"A vector3 needs exactly 3 numbers, like [1, 2, 3], but this has 2."*
 - Each part must be a number (an int is turned into a float). A `nil` part is a compile error.
 - Only a literal becomes a vector. A `float[]` variable can't be assigned to a vector, even one with 3 elements.
 - An array literal next to a vector in an operator is a vector of the same kind: `_pos + [0, 0, 100]`, `_v -= [1, 0, 0];`.
@@ -180,11 +187,11 @@ vector3[] _path = [[0, 0, 0], _pos];
 ```
 _pos.z = 0;
 _pos.x += 10;
-float _height = _who GetPos().z;
+_height = _who GetPos().z;
 ```
 - A `vector2` has only `x` and `y`. Parts are lowercase; `.X` and any other name after a `.` is a compile error.
 - Setting a part of a `nil` vector stops the script; give the vector a whole value first. A part can't be set to `nil`.
-- A part is never `nil` on its own, so `IsDefined(_v.x)` is a compile error; use `IsDefined(_v)`.
+- A part is never `nil` on its own, so `IsNil(_v.x)` is a compile error; use `IsNil(_v)`.
 - `++` and `--` don't work on parts, since they are floats.
 - Vectors are values, like arrays: `_b = _a;` copies the vector.
 - `Format`, `Log` and `Hint` show a vector as `(1.0, 2.0, 3.0)`.
@@ -207,7 +214,7 @@ A text literal copies Unreal's macros. Each text has a **namespace**, a **key** 
 #define params (text _line = nil)
 #define LOCTEXT_NAMESPACE "Quest.Intro"
 
-if (!IsDefined(_line))
+if (IsNil(_line))
 {
 	_line = LOCTEXT("GuardHello", "Halt! Who goes there?");
 };
@@ -239,18 +246,20 @@ Hint(NSLOCTEXT("Shared.UI", "Continue", "Continue"));
   _arr[2] = nil;
   ```
 - `nil` with no known type is a compile error, like `[nil]` passed where any array would do. The exception is an extra value of a variadic command: `Log("%0", nil)` is allowed, and shows `nil`.
-- The only way to test for `nil` is `IsDefined(...)`. `x == nil` is a compile error, because comparing reads `x`.
+- The only way to test for `nil` is `IsNil(...)`. `x == nil` is a compile error, because comparing reads `x`.
 
-### IsDefined
-- Built into the compiler. Never reads the value, so it never stops the script.
+### IsNil
+- True if the value is `nil`. Built into the compiler, and never reads the value, so it never stops the script.
 - Accepts a variable name, a global name or an array element. Anything else (a call, a literal, an expression) is a compile error.
   ```
-  IsDefined(_name)
-  IsDefined(playerHasGun)     // false if the global was never created
-  IsDefined(_arr[5])          // false if index 5 is nil or past the end
-  IsDefined(_grid[3][2])      // false if any level is nil or past the end
+  IsNil(_name)
+  IsNil(playerHasGun)     // true if the global was never created
+  IsNil(_arr[5])          // true if index 5 is nil or past the end
+  IsNil(_grid[3][2])      // true if any level is nil or past the end
   ```
-- The index expressions inside `IsDefined(...)` are still evaluated normally, so `IsDefined(_a[_i])` stops the script if `_i` is `nil`.
+- The index expressions inside `IsNil(...)` are still evaluated normally, so `IsNil(_a[_i])` stops the script if `_i` is `nil`.
+- `IsNil` is about values, not actors: an entity that names an actor that's gone isn't `nil`. `IsNull` checks both (section 7).
+- It has no node of its own in the graph (it gives a value, like `Format`), so it's written in a field, such as an If's condition.
 
 ### Conversions
 - Strongly typed. The only automatic conversion is **int → float**. It also applies to arrays at the same depth (`int[][]` → `float[][]`), to array literals (`float[] _d = [1, 2.5];`), and to script arguments and parameter defaults. Everything else needs an explicit conversion command, such as `Floor`, `Round` or `Format` (section 7).
@@ -266,18 +275,26 @@ Hint(NSLOCTEXT("Shared.UI", "Continue", "Continue"));
 - **Names are case-sensitive**: `john` and `John` are different names. This covers variables, globals, functions, labels, commands, keywords, type names and Bango ID names (`@john` and `@John` are different actors).
 - Calling a command or function with the wrong capitalisation is a compile error that suggests the right name: *"Unknown command or function 'hint'. Did you mean 'Hint'? Names are case-sensitive."*
 - A name is letters, digits and `_`, and doesn't start with a digit.
-- Keywords and type names can't be used as names: `if else while for forEach in break continue return label goto function global params true false nil bool int float double string entity text vector2 vector3 void IsDefined LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
+- Keywords and type names can't be used as names: `if else while for forEach in break continue return label goto function global params true false nil bool int float double string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
 
 ### Locals
 - Names **must** start with `_`. This also applies to function parameters, script parameters and `forEach` loop variables. They only exist inside the running script instance.
-- Declared with a type. Scope is the block they're declared in, as in C. A local declared inside a loop body is reset each time its declaration runs.
-- Using a local that was never declared is a **compile error**. That includes using it in its own initializer (`int _x = _x;`) and after the block it was declared in has ended.
-- **No shadowing:** declaring a local with the same name as one already visible in an enclosing block (including function parameters, script parameters and `forEach` variables) is a compile error. The same name may be used again in a separate block that doesn't enclose the first, such as two sibling `if` blocks or two `for` loops one after the other.
+- **Declared at the top of their graph**, with a type: the main graph's after the `#define` lines and the global declarations, and a function's at the top of its body, before its first statement. A declaration anywhere else (after a statement, or inside a block) is a compile error that says to move it to the top.
+- **A local is visible in its whole graph**, not just one block, and holds its value until something changes it. A loop that needs a fresh value each time round sets it at the top of its body (`_tries = 0;`).
+- **A declaration's value must be a fixed value**, like a parameter default (section 10): a number (including negatives like `-2.5`), a string, `true`, `false`, `nil`, a Bango ID (`@john`), a text (`LOCTEXT(...)` and the like, section 3), or an array of those (`[1, -2]`, `[[0, 0, 1]]`, a vector literal like `[0, 0, 100]`). It must fit the local's type (int → float is allowed). A variable, call, operator or any other expression is a compile error that says to assign it in the code instead: `int _n = Count(_a);` becomes `int _n;` at the top and `_n = Count(_a);` where it's needed. A local without a value holds `nil`.
+- The values are given when the graph starts running: when the instance starts for the main graph, and on each call for a function.
+- Using a local that was never declared is a **compile error**.
+- Two locals of one graph can't share a name, or share one with a parameter of that graph. `for` and `forEach` loop variables are the exception to declaring at the top: they're declared by their loop's header and only exist inside the loop (section 8), so two loops one after the other can use the same name, but a loop variable can't have the name of a local, a parameter or the variable of a loop it's inside.
 - Functions can't see the top level's locals (including script parameters), and the top level can't see a function's.
 
 ```
+#define params (int _rounds = 3)
+
+global int foundThings;
+
 int _count = 0;
 string _name;          // nil
+
 _count = _count + 1;
 _count += 2;
 _count++;
@@ -286,17 +303,24 @@ _count++;
 ### Globals
 - Names **must not** start with `_`.
 - They are shared across all scripts and live in a single global registry on the game instance, so they survive level changes.
-- Declared with `global`:
+- Declared with `global`, **at the top of the file**: after the `#define` lines and before everything else, including the main graph's local declarations. A `global` line anywhere else (later in the file, in a block, in a function) is a compile error that says to move it to the top. Functions use the file's globals like the main graph does.
 
 ```
-global bool playerHasGun;        // declares the type, holds nil until assigned
-global int foundThings = 0;      // declares, and assigns 0 when this line runs
+global bool playerHasGun;
+global int foundThings;
 global string[] questLog;        // arrays can be global
 ```
 
-- **All of a script's global declarations take effect when an instance starts, before any of its code runs**, wherever they appear in the file (including inside functions and blocks). A `global` line with a value (`= 0`) still assigns that value only when execution reaches the line. A `global` line without a value does nothing when it runs.
-- Within one file, every declaration of the same global must have the same type. A mismatch is a compile error.
-- A declaration without `global` must be a local, so `int ArrayCount = ...;` is a compile error. Write `int _arrayCount = ...;` or `global int ArrayCount = ...;` instead.
+- **A declaration has no value.** It only says the script uses that global, and what its type is. `global int foundThings = 0;` is a compile error: *"A global declaration can't have a value, since it would reset the global every time the script starts. Declare it here, and set it in the code (foundThings = 0;)."* A global holds `nil` until a script or a Blueprint sets it, and a script that needs a starting value sets one:
+  ```
+  if (IsNil(foundThings))
+  {
+  	foundThings = 0;
+  };
+  ```
+- **All of a script's global declarations take effect when an instance starts, before any of its code runs.** A global that already exists keeps its value.
+- Each global is declared once per file. Declaring the same global twice is a compile error.
+- A declaration without `global` must be a local, so `int ArrayCount;` is a compile error. Write `int _arrayCount;` or `global int ArrayCount;` instead.
 - A `for` header can't declare a global.
 - Any number of scripts may declare the same global with the **same type**.
 - A **different type** is a conflict. Whichever script hits the conflict second stops with an error. Because declarations take effect at instance start, this happens as soon as the conflicting script is spawned. The first script's global is kept.
@@ -349,7 +373,7 @@ All binary operators are left-associative: `a - b - c` is `(a - b) - c`.
 | `!` | bool | bool |
 | unary `-` | number or vector | same type |
 
-- `&&` and `||` **short-circuit**, so `if (IsDefined(x) && x)` is safe.
+- `&&` and `||` **short-circuit**, so `if (!IsNil(x) && x)` is safe.
 - `int / int` gives `int`, rounded toward zero. `%` on floats gives the floating-point remainder.
 - **Dividing by zero stops the script**, for both ints and floats, with `/` or `%`.
 - **Integer overflow stops the script.** An int result outside -2147483648 to 2147483647 is an error that points at the operator, e.g. `2147483647 + 1`, `65536 * 65536`, `(-2147483647 - 1) / -1`, or negating -2147483648. It never wraps around. Mixing in a float (`65536 * 65536.0`) gives a float instead.
@@ -365,7 +389,7 @@ All binary operators are left-associative: `a - b - c` is `(a - b) - c`.
 - Expressions can be nested up to 64 levels deep (parentheses, unary operators and blocks combined).
 
 ### Empty values
-A value can be **left empty** where it comes right before a `)` or `;`: `if ()`, `while ()`, `_x = ;`, `int _i = ;`, `_a > ;`, `forEach (_e in )`. So can the variable of an assignment or `++`/`--` (`= 5;`, `+= 2;`, `++;`) and the name after `label` or `goto` (`label ;`). Such a line reads, so it can be saved, but **it doesn't compile**: the error says what's missing ("This value is missing. Fill it in."). This is how the graph editor saves a new node whose fields haven't been filled in yet (section 12). A value can't be left out before a `,` (`Hint("%0", , 2);` is an error), and a missing argument at the end is simply an argument that wasn't given.
+A value can be **left empty** where it comes right before a `)` or `;`: `if ()`, `while ()`, `_x = ;`, `_a > ;`, `forEach (_e in )`. So can the variable of an assignment or `++`/`--` (`= 5;`, `+= 2;`, `++;`) and the name after `label` or `goto` (`label ;`). Such a line reads, so it can be saved, but **it doesn't compile**: the error says what's missing ("This value is missing. Fill it in."). This is how the graph editor saves a new node whose fields haven't been filled in yet (section 12). A value can't be left out before a `,` (`Hint("%0", , 2);` is an error), and a missing argument at the end is simply an argument that wasn't given.
 
 ### Assignment statements
 | Form | Meaning | Allowed types |
@@ -381,7 +405,7 @@ A value can be **left empty** where it comes right before a `)` or `;`: `if ()`,
 - These are all **statements, not expressions**. `y = x++;`, `y = ++x;` and `y = (x += 1);` are compile errors.
 - Assignments can't be chained: `_a = _b = 1;` is a compile error.
 - All of them except `=` read `x` first, so they stop the script if `x` is `nil`. For an array element (`_g[1][2] += 5;`), that includes an inner array that doesn't exist yet.
-- The result of a compound assignment must fit the variable: `int _i; _i += 1.5;` is a compile error because the result is a float.
+- The result of a compound assignment must fit the variable: `_i += 1.5;` for an `int _i` is a compile error because the result is a float.
 - The left side may be a variable, a declared global, an array element (`_a[i] += 1;`, `_grid[i][j] = 0;`) or a vector part (`_pos.x = 0;`, `_path[i].y += 1;`). Anything else, such as a call, is a compile error. Index expressions on the left side are evaluated once.
 - Assigning a `float` value to an `int` is a compile error. `int → float` is allowed.
 - A line that only computes a value (`_x + 1;`) is a compile error. Only declarations, assignments, `++`/`--` and calls can be statements.
@@ -391,9 +415,10 @@ A value can be **left empty** where it comes right before a `)` or `;`: `if ()`,
 ## 6. Arrays
 
 ```
+global string[] questLog;
+
 int[] _intArray = [1, 2, 3];
 string[] _names = [];
-global string[] questLog;
 int[][] _grid = [[1, 2], [3]];
 ```
 
@@ -403,16 +428,16 @@ int[][] _grid = [[1, 2], [3]];
 - **Arrays are values.** `_b = _a;` copies the whole array, including any inner arrays, so changing `_b` afterwards doesn't change `_a`. This also keeps saving and loading simple.
 
 ### Array literals
-- Where the expected type is known (a declaration, an assignment, a typed argument, a return value), each element must fit the element type: `int[] _a = [1, "x"];` is a compile error.
+- Where the expected type is known (a declaration, an assignment, a typed argument, a return value), each element must fit the element type: `_a = [1, "x"];` for an `int[] _a` is a compile error.
 - Where it isn't known (e.g. an extra argument to `Hint`), the type is worked out from the elements: `[1, 2]` is `int[]`, `[1, 2.5]` is `float[]`, `[[], [1]]` is `int[][]`. Mixing types that don't fit together (`[1, "x"]`) is a compile error.
 - `[]` (or an array of only `nil`s) whose type can't be worked out is a compile error, e.g. `Count([])`. Declare a typed variable first.
 - An array literal where a non-array is expected is a compile error, except where a vector is expected (section 3, Vectors).
 
 ### Indexing
 ```
-int _x = _intArray[0];
+_x = _intArray[0];
 _intArray[1] = 17;
-int _y = _grid[0][1];
+_y = _grid[0][1];
 _grid[1][0] = 5;
 ```
 - Indices start at 0 and must be ints. A negative index stops the script with an error.
@@ -421,19 +446,19 @@ _grid[1][0] = 5;
   int[] _a = [1, 2];
   _a[5] = 9;          // _a is now [1, 2, nil, nil, nil, 9]
   ```
-- **Reading past the end stops the script with an error**, like any other `nil` read. A read never grows the array. Use `IsDefined(_a[i])` to check first.
+- **Reading past the end stops the script with an error**, like any other `nil` read. A read never grows the array. Use `IsNil(_a[i])` to check first.
 - Using more indices than the array has levels (`_intArray[0][0]`), or indexing a non-array, is a compile error.
 
 ### Nested writes
 Writing through several indices grows every level as needed. **Any missing or `nil` inner array along the way is created automatically.**
 ```
-int[][] _grid = [[1, 2], [3]];
+_grid = [[1, 2], [3]];
 _grid[3][2] = 7;    // _grid is now [[1, 2], [3], nil, [nil, nil, 7]]
 ```
 - Only the inner arrays on the path being written are created. Other gap slots, like `_grid[2]` above, stay `nil`.
-- The outermost array itself must not be `nil`. `int[][] _g; _g[0][0] = 1;` stops the script. Write `int[][] _g = [];` first.
+- The outermost array itself must not be `nil`. With `int[][] _g;` declared, `_g[0][0] = 1;` stops the script. Declare it as `int[][] _g = [];`, or set `_g = [];` first.
 - Everything is checked before anything changes, so a write that fails (wrong type, negative index, too large) leaves the array untouched.
-- Reading through a `nil` or missing inner array (`int _v = _grid[2][0];`) stops the script.
+- Reading through a `nil` or missing inner array (`_v = _grid[2][0];`) stops the script.
 
 ### Array commands
 These are built into the compiler. `Count`, `Push`, `InsertAt`, `Pop` and `RemoveAt` can't be used as names for C++ commands or script functions.
@@ -453,12 +478,12 @@ The target is read, not written, so it must already exist and not be `nil`.
 | `_a RemoveAt(i)` → `T` | Removes and returns element `i` and moves later elements down | `i` out of range; element is `nil` |
 
 ```
-int _arrayCount = Count(_intArray);
+_arrayCount = Count(_intArray);
 _intArray Push(8);           // adds 8 at the end
 _intArray InsertAt(8, 0);    // adds 8 at index 0
-int _last = _intArray Pop();
-int _first = _intArray RemoveAt(0);
-int[] _row = _grid Pop();    // removes and returns the last row
+_last = _intArray Pop();
+_first = _intArray RemoveAt(0);
+_row = _grid Pop();          // removes and returns the last row
 ```
 
 `Pop` and `RemoveAt` can also be used as statements to throw the value away (`_intArray Pop();`). In that case removing a `nil` element is allowed.
@@ -482,14 +507,14 @@ AwaitSpeak();
 AwaitSpeak(0.5);
 @door17 SetLocked(true);
 Log("There are %0 things left.", _thingCount);
-float _t = Random(3.0, 5.0);
+_t = Random(3.0, 5.0);
 ```
 
 - Command names are written in PascalCase (`Hint`, `SetPos`, `RandomInt`), and so are their parameter names (`Msg`, `Time`, `Min`), since they label the fields of the command's graph node. A parameter can also have a short description, shown when hovering its value on the node: `.Param(TEXT("Time"), Double, TEXT("Seconds"))`. Registering a command with a parameter name that starts with a lowercase letter logs a warning.
 - For the graph editor, a signature can also have a category and a one-line description (`.InCategory(TEXT("Actors")).Describe(TEXT("Moves the actor."))`), and a variadic command can choose how its extra values are labelled (`.Variadic(TEXT("%"), 0)` gives `%0`, `%1`, ...; the default gives `Value 1`, `Value 2`, ...). `.WithPlaceholders()` after a parameter marks it as a text whose `%0`, `%1`, ... the extra values fill, as `Hint`, `Log` and `Format` do; the graph editor then shows a row for each placeholder (section 12).
 - A command's signature declares:
   - **Target:** either none, or a required target of one type. A command with a target can't be called without one, and vice versa.
-  - **Parameters:** typed. Trailing parameters may be **optional**.
+  - **Parameters:** typed. Trailing parameters may be **optional**. Normally a `nil` variable passed to a command, or an entity naming no actor, stops the script before the command runs. `.MayBeNil()` after a `.Param(...)` hands the command that argument as it is instead, `nil` included, and leaves the actor check to the command (as `IsNull` does).
   - **Variadic:** optionally, any number of extra arguments of any type after the parameters (like `Hint`'s `%0` values).
   - **Return type:** optional.
   - **Discardable:** for a command with a return type, whether a script may call it on a line of its own and throw the value away (`.Discardable()`). Without it, the value **must be used** (see below).
@@ -498,8 +523,8 @@ float _t = Random(3.0, 5.0);
 - The target can be any value: a Bango ID (`@john Speak(...)`), a variable, an array element (`_grid[1] Push(4)`), or a call result. The command name must be on the same line as the target.
 - A call always needs parentheses, even with no arguments: `QuitGame();`. `@john Speak;` is a compile error.
 - Calling an unknown command is a compile error. If only the capitalisation is wrong, the error suggests the right name (section 4).
-- Calling a command that returns nothing where a value is needed (`int _x = QuitGame();`) is a compile error.
-- **A command's value must be used** unless its signature says `.Discardable()`, like C++'s `[[nodiscard]]` the other way round. Calling such a command on a line of its own is a compile error: *"'Format' gives a value that must be used, like '_result = Format(...);'. On a line of its own its value would be thrown away."* Its value can be used anywhere a value goes: a declaration or assignment, a condition, another command's argument, a `return`. Mark a command `.Discardable()` when calling it is useful by itself, like a latent dialogue choice whose pausing is the point (`.Returns(Int).Discardable()`). Every built-in command that returns a value must have it used. Script functions can always be called on a line of their own (section 9).
+- Calling a command that returns nothing where a value is needed (`_x = QuitGame();`) is a compile error.
+- **A command's value must be used** unless its signature says `.Discardable()`, like C++'s `[[nodiscard]]` the other way round. Calling such a command on a line of its own is a compile error: *"'Format' gives a value that must be used, like '_result = Format(...);'. On a line of its own its value would be thrown away."* Its value can be used anywhere a value goes: an assignment, a condition, another command's argument, a `return`. Mark a command `.Discardable()` when calling it is useful by itself, like a latent dialogue choice whose pausing is the point (`.Returns(Int).Discardable()`). Every built-in command that returns a value must have it used. Script functions can always be called on a line of their own (section 9).
 - **Any command may pause the script** ("latent"). The script resumes when the command finishes. The graph doesn't draw latent commands differently.
 - Latent commands can appear inside expressions, e.g. `if (AskChoice("A", "B") == 0)`. The interpreter can pause partway through evaluating an expression.
 - A latent command keeps its pending state (e.g. Sleep's remaining seconds) as Bango values, so a script paused on it can be saved and loaded.
@@ -539,6 +564,7 @@ Every placeholder needs a value. When the text is written as a literal (`Log("%0
 | `entity GetPos()` → `vector3` | The actor's location. |
 | `entity SetHidden(bool Hidden)` | Hides or shows the actor in game. |
 | `entity DistanceTo(entity Other)` → `float` | Distance between two actors. |
+| `IsNull(entity Entity)` → `bool` | True if the entity is `nil`, or no actor in the level has its Bango ID: it was never there (or never registered, like a duplicate name), or it's been destroyed. It never stops the script for those: a `nil` variable, a global nobody made or an element past the end counts as `nil` here, and a missing actor isn't an error. Use it before a command that would stop the script: `if (!IsNull(_who)) { _who SetHidden(true); }`. |
 
 Game-specific commands (`Speak`, `AwaitSpeak`, `SetLocked`, dialogue choices, ...) are written in C++ by each project and registered with `FBangoModule::Get().RegisterCommand(...)`.
 
@@ -567,7 +593,7 @@ for (int _i = 0; _i <= 8; _i++)
 };
 ```
 - `init` is one local declaration or assignment (or empty). `cond` must be `bool` (or empty, meaning `true`). `step` is one assignment statement (`=`, `+=`, `++`, etc.) or empty. Calls and global declarations are not allowed in `init` or `step`.
-- A variable declared in `init` is local to the loop.
+- A variable declared in `init` is local to the loop: it only exists inside it, and its value can be any expression (`for (int _i = Count(_a) - 1; _i >= 0; _i--)`). This and `forEach` are the only declarations allowed below the top of a graph (section 4). `init` can also assign a local declared at the top (`for (_i = 0; ...)`), which keeps its value after the loop.
 - `continue` runs `step` and then checks `cond` again.
 - The whole `for (...)` header is **one node** and must be on one line.
 
@@ -578,10 +604,10 @@ forEach (_x in _myArray)
 	// _x is a local holding the current element
 };
 ```
-- Declares the local `_x`, whose type is the array's element type. `_x` must start with `_`. For an `int[][]`, `_x` is an `int[]` (a copy of that row).
+- Declares the local `_x`, whose type is the array's element type and which only exists inside the loop. `_x` must start with `_`, and can't have the name of a local, a parameter or another loop's variable it's inside. For an `int[][]`, `_x` is an `int[]` (a copy of that row).
 - The array must have a type known to the compiler, so looping over a global the script hasn't declared is a compile error.
 - The array is copied once, when the loop starts. Changing the array inside the loop doesn't affect which elements the loop visits.
-- A `nil` element is visited too. Reading `_x` then stops the script, so check `IsDefined(_x)` if the array might have gaps.
+- A `nil` element is visited too. Reading `_x` then stops the script, so check `IsNil(_x)` if the array might have gaps.
 - `break` and `continue` work as usual.
 
 ### Labels and goto
@@ -606,11 +632,17 @@ function int AddScore(int _amount)
 
 function void Greet(entity _who)
 {
-	_who Speak("Hello.");
-	AwaitSpeak();
+	int _times = 2;
+
+	for (int _i = 0; _i < _times; _i++)
+	{
+		_who Speak("Hello.");
+		AwaitSpeak();
+	};
 };
 ```
 
+- A function's locals are declared at the top of its body, before its first statement (section 4), and get their values each time it's called. A function can't declare globals; it uses the ones declared at the top of the file.
 - Defined at the top level of a file. **Only usable within that file.** A `function` inside a block is a compile error.
 - Can be called before their definition in the file.
 - Function names must be unique in the file, and can't be the same as a registered command or a built-in array command.
@@ -647,7 +679,7 @@ for (int _i = 0; _i < _repeats; _i++)
 - **Defaults are fixed values only:** numbers (including negatives like `-2.5`), strings, `true`, `false`, `nil`, Bango IDs (`@john`), or arrays of those (`[1, -2]`, `[["a"], []]`, `[@bob, @alice]`). A global, variable, call, operator or any other expression is a compile error.
 - **Texts can't be defaults**, even inside an array: Unreal's localization gatherer skips `#define` lines, so the text would never be translated. Give a text parameter the default `nil` and set it in the script (section 3).
 - A default must fit its parameter's type (int → float is allowed). `int _a = "x"` and `int[] _a = [1, 2.5]` are compile errors.
-- Parameters are ordinary locals of the top level. Their names start with `_`, two parameters can't share a name, and a later local can't reuse a parameter's name. Functions in the file can't see them.
+- Parameters are ordinary locals of the top level. Their names start with `_`, two parameters can't share a name, and a local can't have a parameter's name. Functions in the file can't see them.
 - They are saved with the instance like any other local.
 - In the graph, the `#define params` line is the script's **entry node** (node 0 at (0,0)). It shows the parameter list; it has no data pins, since Bango expressions are text.
 - The `#define params` line can't have node metadata (section 1).
@@ -792,8 +824,9 @@ The graph editor shows a script as nodes and wires and saves it back as text. Th
 ### Graphs and nodes
 - A file has a **main graph** (the top-level code) and **one graph per function**.
 - Each graph starts at its **entry node**, node 0 at (0,0) (section 1). The main graph's entry, **Script Start**, shows the `#define params` list under an **Input Params** heading (left out when there are none), and a **Namespace** row under a **Localization** heading for the `#define LOCTEXT_NAMESPACE` line (section 3): typing a name there adds or changes the line (and the `#undef LOCTEXT_NAMESPACE` at the end), and clearing it removes both. A function's entry shows its signature, like `int AddScore(int _amount)`.
-- Every statement line is one node, and so is every reroute line (a line with only `//@` metadata, section 1). A reroute is drawn like Blueprint's: one dot that is both its input and its output, with a larger area around it to grab and move it. Dragging from the dot to the left wires its input, and to the right its output; Ctrl-dragging it moves it. Its grab area is two grid squares each way with the dot in the middle, so the dot is on a grid line. Every node's pins are a whole number of grid squares apart (currently two) and on grid lines too, so a wire between a pin and a reroute at the same height on the grid runs straight. **Double-clicking a wire adds a reroute** on it there, like in Blueprint; it gets the next free NodeID. **Deleting a reroute keeps its wire**: what led into it is wired to where it led.
-- A node shows its kind as the title and its text as one editable line, without keywords, brackets or `;`: the condition of `if`/`while`, the header of `for`/`forEach`, the name of `label`/`goto`, the value of `return`, and the whole statement for declarations, assignments and calls.
+- **Declarations aren't nodes.** A graph's locals, and the file's globals, are listed in the script editor's **Locals** and **Globals** lists and edited there (below); in the text they're the declarations at the top (section 4). The Script Start node and a function's entry node don't show them.
+- Every other statement line is one node, and so is every reroute line (a line with only `//@` metadata, section 1). A reroute is drawn like Blueprint's: one dot that is both its input and its output, with a larger area around it to grab and move it. Dragging from the dot to the left wires its input, and to the right its output; Ctrl-dragging it moves it. Its grab area is two grid squares each way with the dot in the middle, so the dot is on a grid line. Every node's pins are a whole number of grid squares apart (currently two) and on grid lines too, so a wire between a pin and a reroute at the same height on the grid runs straight. **Double-clicking a wire adds a reroute** on it there, like in Blueprint; it gets the next free NodeID. **Deleting a reroute keeps its wire**: what led into it is wired to where it led.
+- A node shows its kind as the title and its text as one editable line, without keywords, brackets or `;`: the condition of `if`/`while`, the header of `for`/`forEach`, the name of `label`/`goto`, the value of `return`, and the whole statement for assignments and calls.
 
 ### Pins and wires
 - Every node except the entry has one **exec input**, and each input can have **only one wire** into it.
@@ -817,7 +850,7 @@ The graph editor shows a script as nodes and wires and saves it back as text. Th
   //~ };
   ```
 - `//~` lines are written at the end of their graph: after the main graph's code, or at the end of a function's body. A blank line separates one disconnected chain from the next.
-- `//~` lines must read as valid statements (as if the `//~ ` were removed). A broken `//~` line, a `#` line or a `function` in them, or a NodeID already used elsewhere in the file stops the graph editor from opening the file.
+- `//~` lines must read as valid statements (as if the `//~ ` were removed). Declarations can't be in them: a disconnected chain uses the graph's locals like any other node. A broken `//~` line, a `#` line or a `function` in them, or a NodeID already used elsewhere in the file stops the graph editor from opening the file.
 - A disconnected `label` isn't part of the compiled script, so a `goto` to it is a compile error until it's wired in.
 
 ### Comments
@@ -830,17 +863,18 @@ The graph editor shows a script as nodes and wires and saves it back as text. Th
 ### Saved layout
 When the graph editor saves, it writes the whole file in a fixed layout:
 1. The entry node's comment, then the `#define params` line (if there are parameters, or a comment and no namespace line), then the `#define LOCTEXT_NAMESPACE` line.
-2. The main graph's code, then its disconnected chains.
-3. Each function, after a blank line: its comment, `function <signature>`, `{`, its code and disconnected chains, `};`.
-4. After a blank line, `#undef LOCTEXT_NAMESPACE`, if the script has a namespace. Comments below the last node, including one next to the `#undef`, move up to it, like other comments with no node after them (see Comments above).
+2. After a blank line, the global declarations, in the order the Globals list shows them; then, after another blank line, the main graph's local declarations, in the order of the Locals list. Each declaration's comment goes directly above it.
+3. After a blank line, the main graph's code, then its disconnected chains.
+4. Each function, after a blank line: its comment, `function <signature>`, `{`, its local declarations and a blank line (if it has any), its code and disconnected chains, `};`.
+5. After a blank line, `#undef LOCTEXT_NAMESPACE`, if the script has a namespace. Comments below the last node, including one next to the `#undef`, move up to it, like other comments with no node after them (see Comments above).
 
-**Function order** is depth-first by first use. Reading the main graph in the order its lines are written (connected nodes, then disconnected ones), the first call to a function places it, and that function's own calls are placed right after it, before the main graph goes on. Functions nothing calls follow, in their existing order, each followed by the functions it calls. A call counts wherever it appears in a node's text (conditions, arguments, declarations), but not inside a string. Recursive or circular calls don't change the order: a function is only placed the first time it's used. So if the main graph calls `A` then `B`, and `A` calls `C`, the order is `A`, `C`, `B`. Opening a file also lists its functions in this order.
+**Function order** is depth-first by first use. Reading the main graph in the order its lines are written (connected nodes, then disconnected ones), the first call to a function places it, and that function's own calls are placed right after it, before the main graph goes on. Functions nothing calls follow, in their existing order, each followed by the functions it calls. A call counts wherever it appears in a node's text (conditions, arguments, values), but not inside a string. Recursive or circular calls don't change the order: a function is only placed the first time it's used. So if the main graph calls `A` then `B`, and `A` calls `C`, the order is `A`, `C`, `B`. Opening a file also lists its functions in this order.
 
 Other details:
 - Blocks use the brace-on-its-own-line style of the examples in this spec, with one tab per level.
 - Every node line gets its `//@` comment, aligned in one column 4 spaces past the longest node line (lines over 100 characters don't move the column; they get 4 spaces). A reroute line is its block's indentation, then spaces to that column, then the `//@` comment (with an ` @<NodeID>(<X>, <Y>)` for each further reroute in the run); in a disconnected chain it's `//~ ` and the same.
 - Nodes without metadata get the next free NodeID and a position next to the node that leads into them.
-- Statements of the same kind sit together with no blank line between them: **declarations** (local and global), **assignments** (`=`, `+=` and the like, `++`, `--`), and **calls** (commands and functions). A blank line goes between statements of different kinds, before and after **flow control** (`if`, `while`, `for`, `forEach`, `break`, `continue`, `return`, `label`, `goto`), above a statement with a comment (its comment stays directly above it, after the blank line), and after the `#define` lines. Reroutes get no blank lines around them: they're written right after the statement before them, and reroutes in a row share one line (a reroute with a comment starts a new line, under its comment). Inside a disconnected chain the line between nodes is a bare `//~` instead, since a blank line would end the chain. There's no blank line just inside a `{` or before a `}`.
+- Statements of the same kind sit together with no blank line between them: **assignments** (`=`, `+=` and the like, `++`, `--`), and **calls** (commands and functions). A blank line goes between statements of different kinds, before and after **flow control** (`if`, `while`, `for`, `forEach`, `break`, `continue`, `return`, `label`, `goto`), above a statement with a comment (its comment stays directly above it, after the blank line), and after the `#define` lines. Reroutes get no blank lines around them: they're written right after the statement before them, and reroutes in a row share one line (a reroute with a comment starts a new line, under its comment). Inside a disconnected chain the line between nodes is a bare `//~` instead, since a blank line would end the chain. There's no blank line just inside a `{` or before a `}`.
 - Other blank lines, `#define params ()` with no comment, and an empty `else { }` block are not kept; none of them change what the script does.
 - Lines end with `\n`.
 
@@ -854,19 +888,21 @@ The graph editor is the **Bango Scripts** tab (Tools menu). It doesn't need the 
   - **Toolbar** (across the top): **Reload**, **Compile**, **Save** (also Ctrl+S), and the script's name, with a `*` while it has unsaved changes. **Reload** reads the script again from its file, so edits made to the text elsewhere show up; it asks first whether to save unsaved changes (Cancel keeps them and doesn't reload). It works on a script whose text didn't read too, so the text can be fixed elsewhere and reloaded. Reloading keeps the shown graph (if the script still has it) and its view.
   - **Functions** (left, top): the script's functions, in the order they are in the file. Clicking one shows its graph. **+ Add** adds `function void NewFunction()` (numbered if that name is taken), shows it, and starts renaming it. Double-clicking a function, or clicking it again once it's selected, renames it: the name must be a valid identifier that no other function and no command has, and every call to it in the script is renamed too, as one undoable edit. Dragging a function onto a graph adds a call to it where it's dropped (dropped on a pin, the call is wired to it, as with a node from the add-node menu). Its × deletes it, after asking; calls to it are left alone and won't compile until they're removed. Deleting a function can't be undone with Undo (Reload brings it back while it's unsaved). An option to sort functions alphabetically is planned.
   - **Inputs** (left, below Functions): the shown graph's parameters: the script's `#define params` in the main graph, or the function's in a function graph. Each row has a grab handle, its type's icon, its name and its type, and in the main graph a box for its default. **+ Add** adds a `bool` parameter at the end (`_newParam`, numbered if taken) and starts renaming it; after an optional script parameter it gets `= nil`, since required parameters come first. Dragging a row by its handle moves the parameter up or down (a script's required parameters must stay before its optional ones). Clicking the type icon opens a menu of the types and arrays of them (deeper arrays, like `int[][]`, aren't offered). Changing an optional parameter's type resets its default to `nil`. Double-clicking a name, or clicking it again once it's selected, renames it, and its uses in that graph are renamed too; the name must start with `_` and not clash with another parameter or a local of the graph. The default box is typed like a node's field (a string without quotes); leaving it empty makes the parameter required, and `nil` makes it optional with no particular value. × removes a parameter; its uses are left alone, so they won't compile until changed. Each of these is one undoable edit. Calls to a function aren't changed when its parameters are; they show errors until their arguments match. The type and default columns have fixed widths, so rows line up. A required parameter's default box is locked unless every parameter after it is optional (required parameters come before optional ones). The Script Start node lists the parameters' names and types, but not their defaults, which are shown and edited only here.
-  - **Variables** (left, below Inputs): the variables of the shown graph, each with its type's icon and its type: the **locals** it declares (declarations such as `int _count = 0;`, and `for` and `forEach` loop variables), then the **globals** it uses or declares. Its parameters are in **Inputs** instead. Clicking one shows and selects the node that declares it, even in another graph (a global declared in a function). A global the script uses but doesn't declare (declared by another script or a Blueprint, or a typo) is listed without a type, and clicking it does nothing.
-  - **Dragging a variable onto the graph:** a row of **Variables** or **Inputs** (an input by anything but its grab handle) can be dragged onto the graph. Dropping it opens a menu of the nodes that work on that variable, with it filled in: **Set** for every type; **Add To** for `int`, `float`, `string` and vectors; **Subtract From**, **Multiply** and **Divide** for `int`, `float` and vectors; **Increment** and **Decrement** for `int`; and for arrays **Push**, **Insert At**, **Pop**, **Remove At** and **For Each** (with a new loop variable). A global whose type isn't known (declared elsewhere) offers only Set. The node picked goes where the variable was dropped; dropped on a pin, it's wired to it, as with a node from the add-node menu.
+  - **Globals** (left, below Inputs): the file's globals, the same in every graph. Each row has a grab handle, its type's icon (a button with the type menu, as in Inputs), its name and its type; a global has no value (section 4). **+ Add** adds `global bool newGlobal;` (numbered if taken) and starts renaming it. Dragging a row by its handle reorders the declarations. Renaming one (double-click, or click it again once it's selected) renames its uses everywhere in the file, as one undoable edit; the name can't start with `_` and can't clash with another global. Its × removes the declaration, after asking if the script uses it; its uses are left alone. Under the list, **Used here, declared elsewhere** lists, greyed out and without a type, the globals the shown graph uses but the file doesn't declare (declared by another script or a Blueprint, or a typo); the + on one opens the type menu, and picking a type declares it here.
+  - **Locals** (left, below Globals): the shown graph's locals. Each row is like an Inputs row: grab handle, type icon and menu, name, type, and a box for its starting value, typed like a node's field (a string without quotes, a text as its source text); empty means it starts as `nil`. Only fixed values are allowed there (section 4). **+ Add** adds `bool _newLocal` (numbered if taken) and starts renaming it. Renaming renames its uses in the graph; the name must start with `_` and not clash with another local, a parameter or a loop variable of the graph. × removes it; its uses are left alone. Changing its type clears its starting value (unless it's `nil`, which fits any type). Under the list, greyed out, are the graph's `for` and `forEach` loop variables, with their type; clicking one shows and selects its loop.
+  - Each of the changes in Globals and Locals is one undoable edit.
+  - **Dragging a variable onto the graph:** a row of **Inputs**, **Globals** or **Locals** (by anything but its grab handle), or a loop variable, can be dragged onto the graph. Dropping it opens a menu of the nodes that work on that variable, with it filled in: **Set** for every type; **Add To** for `int`, `float`, `string` and vectors; **Subtract From**, **Multiply** and **Divide** for `int`, `float` and vectors; **Increment** and **Decrement** for `int`; and for arrays **Push**, **Insert At**, **Pop**, **Remove At** and **For Each** (with a new loop variable). A global whose type isn't known (declared elsewhere) offers only Set. The node picked goes where the variable was dropped; dropped on a pin, it's wired to it, as with a node from the add-node menu.
   - **Changes on disk:** when something other than the graph editor changes the open script's file (a text editor, source control), the editor notices within a moment. With no unsaved changes, it **reloads** the script, keeping the shown graph and its view. With unsaved changes, it never throws them away by itself: a bar above the graph says the file changed, with **Reload** (read the file, losing the changes) and **Keep Mine** (keep them; the bar goes away until the file changes again, and Save then overwrites the file without asking). A script tab that isn't shown checks when it's shown again. A file that's been deleted is left alone.
   - **Graph view**: a Blueprint-style graph of the selected graph.
     - A function's graph has a **Back to Script Graph** button in its top-left corner, which shows the main graph again.
     - Pins are Blueprint exec pins; wires have no arrowheads. There are no data pins: values are text in fields.
-    - Title colours follow Blueprint: red entry, blue commands, a calmer blue for this script's functions, green declarations and assignments, grey flow control, purple labels and `goto`, orange `return`/`break`/`continue`.
+    - Title colours follow Blueprint: red entry, blue commands, a calmer blue for this script's functions, green assignments, grey flow control, purple labels and `goto`, orange `return`/`break`/`continue`.
     - Comments are pinned comment bubbles.
     - Node coordinates are multiplied by 16 pixels.
 - A script whose text doesn't parse (or whose `//~` lines don't) shows the error instead of a graph.
 
 ### Fields
-Each node shows its text as **fields** in columns, like the details panel: each row starts with its type's icon (bool (a ?), int, float, string (an S), text (a T), entity, array, or any; hovering it shows the type), then the name, then the value, which fills the rest. Values stay on one line, in a box 90 to 240 pixels wide (wider only if the node is): a longer value ends in "…". Hovering a value shows its parameter's description if it has one (Sleep's Time says *Seconds*), or else the whole value. Rows that name a variable (a Var, a Declare node's Name, For Each's Variable, an array command's Target) show a variable icon, an italic `(x)`, tinted with the variable's type when it's known. Rows without a type leave the icon space empty so the names line up, and a node where no row has a type has no icon column. Empty fields show *not set* (optional) or *missing* (required).
+Each node shows its text as **fields** in columns, like the details panel: each row starts with its type's icon (bool (a ?), int, float, string (an S), text (a T), entity, array, or any; hovering it shows the type), then the name, then the value, which fills the rest. Values stay on one line, in a box 90 to 240 pixels wide (wider only if the node is): a longer value ends in "…". Hovering a value shows its parameter's description if it has one (Sleep's Time says *Seconds*), or else the whole value. Rows that name a variable (a Var, For Each's Variable, an array command's Target) show a variable icon, an italic `(x)`, tinted with the variable's type when it's known. Rows without a type leave the icon space empty so the names line up, and a node where no row has a type has no icon column. Empty fields show *not set* (optional) or *missing* (required).
 
 A statement that is exactly one call (`[target] Name(args);`) gets a **dedicated node** titled with the command or function's name:
 
@@ -878,21 +914,19 @@ A statement that is exactly one call (`[target] Name(args);`) gets a **dedicated
 
 This covers registered commands, this script's functions, and the array commands. A command whose value can be thrown away (`_a Pop();`, `AskChoice("A", "B");`, a script function) can be a node on its own; the node shows no row for the value.
 
-**Commands whose value must be used never get a node of their own** (section 7): `Format`, `Random`, `Count` and the like only appear inside a field's text, such as a Set or Declare's Value (`_s = Format("%0", _n)`) or a Hint's value. A file that has one on a line of its own shows it as that command's node with an **ERROR!** banner saying so, and it doesn't compile. The add-node menu leaves these commands out.
+**Commands whose value must be used never get a node of their own** (section 7): `Format`, `Random`, `Count` and the like only appear inside a field's text, such as a Set's Value (`_s = Format("%0", _n)`) or a Hint's value. A file that has one on a line of its own shows it as that command's node with an **ERROR!** banner saying so, and it doesn't compile. The add-node menu leaves these commands out.
 
-**A line that stores a value is about storing it.** Any declaration or assignment is a declaration or **Set** node, even when its value is a call: `_t = Random(1.0, 2.0);` is a **Set** node with Var `_t` and Value `Random(1.0, 2.0)`, and `float _t = Random(3.0, 5.0);` is a **Declare Float** node. So a line never changes kind depending on what its value is.
+**A line that stores a value is about storing it.** Any assignment is a **Set** node (or Add To and the like), even when its value is a call: `_t = Random(1.0, 2.0);` is a **Set** node with Var `_t` and Value `Random(1.0, 2.0)`. So a line never changes kind depending on what its value is.
 
 **For nodes** have two looks. A simple counting loop looks like Blueprint's For Loop, with **Var**, **First** and **Last** rows: its header is `int _i = First; _i <= Last; _i++` (or `_i = First` for a variable declared before it, `++_i`, or counting down with `>=` and `--`). Like Blueprint's Last Index, Last is included. Renaming Var renames it in all three parts. Any other header (`_i < 10`, `_i += 2`, two variables, an empty part) shows as one row holding the whole header, with no label. A For node has a toggle right after its title, in italics: *(Simple)* while it shows Var, First and Last, and *(Complex)*, lit, while it shows the whole header. On a simple loop it switches between the two, so the header can be rewritten into something else; on any other header it stays *(Complex)* and greyed out. The toggle isn't saved. The look follows the text: editing the whole header into a simple loop shows Var, First and Last (unless the toggle is on), and the other way round.
 
-**Set nodes know their variable's type** when they can see its declaration: the script's or function's parameters, a global declared anywhere in the file, or a local declared earlier in the node's own chain or in a chain around it (a `for` loop's variable inside its Do, For Each's variable inside its Do, typed from the array). The Var's `(x)` icon is then tinted for that type, an array element like `_grid[1]` takes off one `[]` per index, and the Value (or Multiply and Divide's By) takes the same type: it gets that type's icon, and for a `string` or `text` variable it's typed as text, like a Declare String's Value. A variable it can't see (a global declared by another script, a local from a block that has ended, a name being typed) stays grey. The same goes for For Each's Variable. Renaming a Var, or changing a Declare, updates the types on every node within a moment.
+**Set nodes know their variable's type** when they can see its declaration: the graph's parameters and locals, the file's globals, or the variable of a `for` or `forEach` loop the node is inside (For Each's typed from the array). The Var's `(x)` icon is then tinted for that type, an array element like `_grid[1]` takes off one `[]` per index, and the Value (or Multiply and Divide's By) takes the same type: it gets that type's icon, and for a `string` or `text` variable it's typed as text. A variable it can't see (a global declared by another script, a loop variable outside its loop, a name being typed) stays grey. The same goes for For Each's Variable. Changing a local's or global's type, or renaming a Var, updates the types on every node within a moment.
 
 Anything that isn't a single call is a generic node: **Set** / **Add To** / **Subtract From** (Var, Value), **Multiply** / **Divide** (Var, By), **Increment** / **Decrement** (Var), **If** / **While** (the condition, in one row with no label), **For** (see below), **For Each** (Variable, Array), **Return** (see below), **Label** and **Go To** (a name). The **Script Start** node has a row per parameter (its name and type; defaults are in the Inputs list); a function's start node shows its return type and parameters.
 
 **Return** nodes know where they are. In the main graph, Return ends the script and has no Value row. In a `void` function it ends the function, with no Value row. In a function with a return type, it has a **Value** row of that type (with its icon; for a `string` or `text` function it's typed as text). Changing the function's return type updates its Return nodes within a moment. A value where none belongs (`return 5;` in the main graph) still shows a Value row, so it can be cleared; compiling says why it's wrong.
 
 Problems visible from the line alone show Blueprint's **ERROR!** banner on the node: an unknown command or function, too many arguments, a target on a command that doesn't take one, or a command whose value must be used on a line of its own.
-
-A declaration gets a node for its type, with Name and Value fields: **Declare Bool**, **Declare Int**, **Declare Float**, **Declare String**, **Declare Entity**, and for arrays **Declare Int[]**, **Declare String[][]** and so on. Globals have their own set: **Declare Global Bool**, **Declare Global Int[]**, and so on. The type is part of what the node is, so it isn't a field; to change it, replace the node.
 
 ### Editing
 - **Fields:** click a value to edit it. Enter or clicking elsewhere applies it; Escape cancels. Every edit is checked before it's applied: the node's text must still read as code for its kind (one line, valid syntax). A refused edit leaves the node alone and a notification says why. Types and names aren't checked until Compile.
@@ -907,12 +941,12 @@ A declaration gets a node for its type, with Name and Value fields: **Declare Bo
   - A text field can hold a variable or expression instead: type it after a `=`, like `=_name` or `=Format("%0", _n)`. Such a field shows `=` and the expression. To start the text itself with `=`, type `\=`. Clearing an optional text field removes it; type `=""` for an empty text.
 - **Adding nodes:** right-click the graph, or drag a wire off a pin and let go, for the **add-node menu**: Blueprint's searchable menu, with the nodes grouped by category and sorted by name in each.
   - **Flow Control:** If, While, For, For Each, Break, Continue, Return, Label, Go To, Reroute.
-  - **Variables:** a Declare node per type (and per array type), Set, Add To, Subtract From, Multiply, Divide, Increment, Decrement. **Globals:** a Declare Global node per type.
+  - **Variables:** Set, Add To, Subtract From, Multiply, Divide, Increment, Decrement. (Variables themselves are added in the Globals and Locals lists.)
   - **Arrays:** Push, InsertAt, Pop, RemoveAt. Then a group per command category (commands without one are under **Commands**), and **This Script** for the script's own functions. Commands whose value must be used aren't offered.
-  - A new node's **fields start empty**, and it doesn't compile until they're filled in (section 5): nothing runs with a made-up value. The only things filled in are names a node needs to read at all, chosen not to clash with any name in the graph: a Declare's Name (`_newInt`, `_newInt2`, ...; `newInt` for a global), a For's Var (`_i`), and For Each's Variable (`_item`). Compile puts the error on the first empty field.
+  - A new node's **fields start empty**, and it doesn't compile until they're filled in (section 5): nothing runs with a made-up value. The only things filled in are names a node needs to read at all, chosen not to clash with any name in the graph: a For's Var (`_i`) and For Each's Variable (`_item`). Compile puts the error on the first empty field.
   - Dragged off a pin, the new node is wired to it. If that pin already had a wire, the new node goes **in the middle** of it.
 - **Nodes:** drag to move (saved positions are rounded to whole grid units). Delete removes the selected nodes. The entry node can't be moved or deleted: it stays at (0,0), even when it's dragged along with other nodes.
-- **Copy, Cut, Paste, Duplicate** (Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+W), as in Blueprint. Pasted nodes are centred on the mouse, keep their places relative to each other, and are selected. Wires between copied nodes are kept; wires to nodes that weren't copied are dropped. Each pasted node gets the next free NodeID. Nodes can be pasted into another graph of the script or another script (a pasted Declare whose name is already used fails to compile once it's wired in). The entry node isn't copied, and Bango nodes can't be pasted into a Blueprint (or Blueprint nodes into a Bango graph). The clipboard holds Unreal's text form of the nodes, not Bango code.
+- **Copy, Cut, Paste, Duplicate** (Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+W), as in Blueprint. Pasted nodes are centred on the mouse, keep their places relative to each other, and are selected. Wires between copied nodes are kept; wires to nodes that weren't copied are dropped. Each pasted node gets the next free NodeID. Nodes can be pasted into another graph of the script or another script; variables they use that the new graph doesn't declare fail to compile until they're declared there. The entry node isn't copied, and Bango nodes can't be pasted into a Blueprint (or Blueprint nodes into a Bango graph). The clipboard holds Unreal's text form of the nodes, not Bango code.
 - **Wires:** drag between exec pins. Each pin has at most one wire, so a new wire replaces the old ones. Wires that would form a loop are refused.
 - **Comments:** edit a node's comment bubble as in Blueprint.
 - **Undo / Redo** (Ctrl+Z / Ctrl+Y) undo every kind of change above.
@@ -930,6 +964,7 @@ A declaration gets a node for its type, with Name and Value fields: **Declare Bo
 - Maps
 - Vector commands: length, distance between two vectors, normalize, dot and cross products, and maybe rotators
 - A way to check whether a Bango ID's actor is in the level before using it
+- A shorthand for giving a global a starting value only if it's `nil` (like a "Set if not defined" node)
 - Graph editor: opening a script's editor in a window of its own, a pop-up for editing long text, updating a function's calls when its parameters change, an alphabetical-sort toggle for the function list, adding extra values to variadic commands, and asking before the tab closes with unsaved changes
 - Whether script files should be wrapped in Unreal assets (they are loose `.bango` files for now)
 
@@ -940,9 +975,9 @@ A declaration gets a node for its type, with Name and Value fields: **Declare Bo
 ```
 #define LOCTEXT_NAMESPACE "Examples.Things"
 
-global int foundThings;            //@1(0, 0)
-global bool playerHasGun;          //@2(0, 1)
-global string[] questLog;          //@3(0, 2)
+global int foundThings;
+global bool playerHasGun;
+global string[] questLog;
 
 function void Nag()
 {
@@ -950,7 +985,7 @@ function void Nag()
 	AwaitSpeak();                  //@21(0, 1)
 };
 
-if (IsDefined(foundThings) && foundThings >= 10)   //@4(0, 3)
+if (!IsNil(foundThings) && foundThings >= 10)   //@4(0, 3)
 {
 	Hint(LOCTEXT("FoundTen", "You found at least 10 things!"));    //@5(1, 4)
 	questLog Push("Found 10 things");              //@6(1, 5)
@@ -963,7 +998,7 @@ for (int _i = 0; _i < 3; _i++)     //@7(0, 6)
 };
 
 label Check;                       //@10(0, 9)
-if (!IsDefined(playerHasGun))      //@11(0, 10)
+if (IsNil(playerHasGun))      //@11(0, 10)
 {
 	@john Speak("Congrats! You found a bug.");     //@12(1, 11)
 	AwaitSpeak();                  //@13(1, 12)
@@ -981,7 +1016,7 @@ else
 
 forEach (_entry in questLog)       //@19(0, 15)
 {
-	if (IsDefined(_entry))         //@22(1, 16)
+	if (!IsNil(_entry))         //@22(1, 16)
 	{
 		Log(_entry);               //@23(2, 17)
 	};

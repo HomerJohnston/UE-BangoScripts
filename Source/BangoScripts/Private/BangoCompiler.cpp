@@ -114,7 +114,7 @@ namespace BangoCompilerPrivate
 	{
 		Read,
 		Write,
-		Check,  // IsDefined
+		Check,  // IsNil
 	};
 
 	class FCompiler
@@ -130,7 +130,7 @@ namespace BangoCompilerPrivate
 			Program = FBangoProgram();
 			Program.FileName = Script.FileName;
 
-			if (!CollectGlobals() || !CollectFunctions())
+			if (!CheckDeclarations() || !CollectGlobals() || !CollectFunctions())
 			{
 				return false;
 			}
@@ -373,7 +373,7 @@ namespace BangoCompilerPrivate
 			case ETypeKind::Void:
 				return Fail(Loc, FString::Printf(TEXT("This call doesn't return a value, so it can't be used %s."), Where));
 			case ETypeKind::Nil:
-				return Fail(Loc, FString::Printf(TEXT("nil can't be used %s. To check whether something is nil, use IsDefined(...)."), Where));
+				return Fail(Loc, FString::Printf(TEXT("nil can't be used %s. To check whether something is nil, use IsNil(...)."), Where));
 			case ETypeKind::EmptyArray:
 				return Fail(Loc, FString::Printf(TEXT("An array can't be used %s."), Where));
 			default:
@@ -431,7 +431,7 @@ namespace BangoCompilerPrivate
 			{
 				if (bEquality)
 				{
-					return Fail(Loc, TEXT("Comparing with nil isn't allowed, because comparing reads the value. Use IsDefined(...) instead."));
+					return Fail(Loc, TEXT("Comparing with nil isn't allowed, because comparing reads the value. Use IsNil(...) instead."));
 				}
 				return Fail(Loc, FString::Printf(TEXT("nil can't be used with '%s'."), OpText));
 			}
@@ -597,6 +597,207 @@ namespace BangoCompilerPrivate
 			default:
 				return Fail(Loc, TEXT("Unexpected operator."));
 			}
+		}
+
+		// ---- Where declarations may be (spec section 4) ----
+
+		/** A value allowed as a local's starting value: a literal, a negated number, or an array of those. */
+		static bool IsFixedValue(const FBangoExpr& Expr)
+		{
+			if (Expr.Kind == EBangoExprKind::Literal || Expr.Kind == EBangoExprKind::Empty)
+			{
+				return true; // an empty value fails later, as missing
+			}
+			if (const FBangoUnaryExpr* Unary = Expr.As<FBangoUnaryExpr>())
+			{
+				const FBangoLiteralExpr* Operand = Unary->Operand.IsValid() ? Unary->Operand->As<FBangoLiteralExpr>() : nullptr;
+				return Unary->Op == EBangoUnaryOp::Negate && Operand
+					&& (Operand->LiteralKind == EBangoLiteralKind::Int || Operand->LiteralKind == EBangoLiteralKind::Double);
+			}
+			if (const FBangoArrayLiteralExpr* ArrayExpr = Expr.As<FBangoArrayLiteralExpr>())
+			{
+				for (const FBangoExprPtr& Element : ArrayExpr->Elements)
+				{
+					if (!Element.IsValid() || !IsFixedValue(*Element))
+					{
+						return false;
+					}
+				}
+				return true;
+			}
+			return false;
+		}
+
+		bool FailMisplacedDecl(const FBangoVarDeclStmt& Decl, bool bInFunction)
+		{
+			CurrentStmt = &Decl;
+			if (Decl.bGlobal)
+			{
+				return Fail(Decl.Loc, bInFunction
+					? FString::Printf(TEXT("Globals are declared at the top of the file, not in a function: move 'global %s %s;' up there, after the #define lines."), *Decl.Type.ToString(), *Decl.Name)
+					: FString::Printf(TEXT("Globals are declared at the top of the file, after the #define lines and before everything else: move 'global %s %s;' up there."), *Decl.Type.ToString(), *Decl.Name));
+			}
+			return Fail(Decl.Loc, FString::Printf(TEXT("Locals are declared at the top of their %s, before its first statement: move '%s %s;' up there, and set it here with '%s = ...;' if it needs a value at this point."),
+				bInFunction ? TEXT("function") : TEXT("script"), *Decl.Type.ToString(), *Decl.Name, *Decl.Name));
+		}
+
+		/** A declaration nested in a block (not a for header, which isn't in a block). */
+		bool CheckNoDeclsInBlock(const FBangoBlock& Block, bool bInFunction)
+		{
+			for (const FBangoStmtPtr& Stmt : Block)
+			{
+				if (!CheckNoDeclsInStmt(*Stmt, bInFunction))
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+
+		bool CheckNoDeclsInStmt(const FBangoStmt& Stmt, bool bInFunction)
+		{
+			switch (Stmt.Kind)
+			{
+			case EBangoStmtKind::VarDecl:
+				return FailMisplacedDecl(*Stmt.As<FBangoVarDeclStmt>(), bInFunction);
+			case EBangoStmtKind::If:
+			{
+				const FBangoIfStmt& If = *Stmt.As<FBangoIfStmt>();
+				return CheckNoDeclsInBlock(If.Then, bInFunction) && CheckNoDeclsInBlock(If.Else, bInFunction);
+			}
+			case EBangoStmtKind::While:
+				return CheckNoDeclsInBlock(Stmt.As<FBangoWhileStmt>()->Body, bInFunction);
+			case EBangoStmtKind::For:
+				return CheckNoDeclsInBlock(Stmt.As<FBangoForStmt>()->Body, bInFunction);
+			case EBangoStmtKind::ForEach:
+				return CheckNoDeclsInBlock(Stmt.As<FBangoForEachStmt>()->Body, bInFunction);
+			default:
+				return true;
+			}
+		}
+
+		/** Declarations aren't graph nodes (they're listed in the editor's side panel), so they have no metadata. */
+		bool CheckDeclHasNoMetadata(const FBangoVarDeclStmt& Decl)
+		{
+			if (Decl.Node.bHasMetadata)
+			{
+				CurrentStmt = nullptr; // the error isn't on a node
+				return Fail(Decl.Loc, TEXT("A declaration isn't a graph node, so it can't have node metadata: remove the //@ comment."));
+			}
+			return true;
+		}
+
+		/** A local declared at the top of a graph: its starting value must be a fixed value. */
+		bool CheckLocalDecl(const FBangoVarDeclStmt& Decl)
+		{
+			if (!CheckDeclHasNoMetadata(Decl))
+			{
+				return false;
+			}
+			if (Decl.Init.IsValid() && !IsFixedValue(*Decl.Init))
+			{
+				CurrentStmt = &Decl;
+				return Fail(Decl.Init->Loc, FString::Printf(TEXT("A local's starting value must be a fixed value: a number, a string, true, false, nil, a Bango ID like @john, a text, or an array of those. Declare it as '%s %s;' and set it in the code: '%s = ...;'."),
+					*Decl.Type.ToString(), *Decl.Name, *Decl.Name));
+			}
+			return true;
+		}
+
+		/**
+		 * Globals are declared only at the top of the file (after the #define lines, before the main graph's locals and
+		 * anything else, functions included), once each and without a value. Locals are declared only at the top of
+		 * their graph, with fixed starting values. Loop variables (for and forEach headers) aren't in a block, so they
+		 * aren't checked here.
+		 */
+		bool CheckDeclarations()
+		{
+			int32 FirstFunctionLine = MAX_int32;
+			for (const TUniquePtr<FBangoFunction>& Function : Script.Functions)
+			{
+				FirstFunctionLine = FMath::Min(FirstFunctionLine, Function->Loc.Line);
+			}
+
+			TMap<FString, int32> GlobalLines;
+			bool bInLead = true;
+			bool bSeenLocal = false;
+			for (const FBangoStmtPtr& Stmt : Script.TopLevel)
+			{
+				if (Stmt->Kind == EBangoStmtKind::Params)
+				{
+					continue;
+				}
+				const FBangoVarDeclStmt* Decl = Stmt->As<FBangoVarDeclStmt>();
+				if (!Decl)
+				{
+					bInLead = false;
+					if (!CheckNoDeclsInStmt(*Stmt, false))
+					{
+						return false;
+					}
+					continue;
+				}
+				if (!bInLead || Decl->Loc.Line > FirstFunctionLine)
+				{
+					return FailMisplacedDecl(*Decl, false);
+				}
+				CurrentStmt = Decl;
+				if (Decl->bGlobal)
+				{
+					if (!CheckDeclHasNoMetadata(*Decl))
+					{
+						return false;
+					}
+					if (bSeenLocal)
+					{
+						return Fail(Decl->Loc, FString::Printf(TEXT("Global declarations come before the script's locals: move 'global %s %s;' above them."), *Decl->Type.ToString(), *Decl->Name));
+					}
+					if (Decl->Init.IsValid())
+					{
+						return Fail(Decl->Init->Loc, FString::Printf(TEXT("A global declaration can't have a value, since it would reset the global every time the script starts. Declare it here, and set it in the code (%s = ...;)."), *Decl->Name));
+					}
+					if (const int32* Line = GlobalLines.Find(Decl->Name))
+					{
+						return Fail(Decl->Loc, FString::Printf(TEXT("Global '%s' is already declared on line %d."), *Decl->Name, *Line));
+					}
+					GlobalLines.Add(Decl->Name, Decl->Loc.Line);
+				}
+				else
+				{
+					bSeenLocal = true;
+					if (!CheckLocalDecl(*Decl))
+					{
+						return false;
+					}
+				}
+			}
+
+			for (const TUniquePtr<FBangoFunction>& Function : Script.Functions)
+			{
+				bool bInFunctionLead = true;
+				for (const FBangoStmtPtr& Stmt : Function->Body)
+				{
+					const FBangoVarDeclStmt* Decl = Stmt->As<FBangoVarDeclStmt>();
+					if (!Decl)
+					{
+						bInFunctionLead = false;
+						if (!CheckNoDeclsInStmt(*Stmt, true))
+						{
+							return false;
+						}
+						continue;
+					}
+					if (!bInFunctionLead || Decl->bGlobal)
+					{
+						return FailMisplacedDecl(*Decl, true);
+					}
+					if (!CheckLocalDecl(*Decl))
+					{
+						return false;
+					}
+				}
+			}
+			CurrentStmt = nullptr;
+			return true;
 		}
 
 		// ---- File-level collection ----
@@ -990,7 +1191,7 @@ namespace BangoCompilerPrivate
 		{
 			if (FindLocal(Name))
 			{
-				return Fail(Loc, FString::Printf(TEXT("'%s' is already declared in this block or an enclosing one. Use a different name."), *Name));
+				return Fail(Loc, FString::Printf(TEXT("'%s' is already declared (as a local, a parameter or a loop's variable). Use a different name."), *Name));
 			}
 			FLocalVar Var;
 			Var.Name = Name;
@@ -1060,7 +1261,7 @@ namespace BangoCompilerPrivate
 		{
 			if (Decl.bGlobal)
 			{
-				// Globals are declared when the instance starts; the statement only assigns the initial value.
+				// Globals are declared when the instance starts, and never have a value (CheckDeclarations).
 				if (!Decl.Init)
 				{
 					Emit(EBangoOp::Nop);
@@ -1079,7 +1280,7 @@ namespace BangoCompilerPrivate
 			// The new local isn't visible in its own initializer.
 			if (FindLocal(Decl.Name))
 			{
-				return Fail(Decl.Loc, FString::Printf(TEXT("'%s' is already declared in this block or an enclosing one. Use a different name."), *Decl.Name));
+				return Fail(Decl.Loc, FString::Printf(TEXT("'%s' is already declared (as a local, a parameter or a loop's variable). Use a different name."), *Decl.Name));
 			}
 			if (Decl.Init)
 			{
@@ -1478,7 +1679,7 @@ namespace BangoCompilerPrivate
 			}
 			else if (Bango::IsLocalName(Root->Name))
 			{
-				return Fail(Root->Loc, FString::Printf(TEXT("'%s' is not declared. Declare it first, like 'int %s = 0;'."), *Root->Name, *Root->Name));
+				return Fail(Root->Loc, FString::Printf(TEXT("'%s' is not declared. Declare it at the top of the script, like 'int %s;'."), *Root->Name, *Root->Name));
 			}
 			else
 			{
@@ -1490,7 +1691,7 @@ namespace BangoCompilerPrivate
 				}
 				else if (Use == EPlaceUse::Write)
 				{
-					return Fail(Root->Loc, FString::Printf(TEXT("Global '%s' isn't declared in this script, so it can't be changed here. Declare it first, like 'global int %s;'."),
+					return Fail(Root->Loc, FString::Printf(TEXT("Global '%s' isn't declared in this script, so it can't be changed here. Declare it at the top of the file, like 'global int %s;'."),
 						*Root->Name, *Root->Name));
 				}
 				else
@@ -1693,14 +1894,14 @@ namespace BangoCompilerPrivate
 			case EBangoExprKind::Call:         return CompileCall(*Expr.As<FBangoCallExpr>(), true, OutType);
 			case EBangoExprKind::Member:       return CompileMember(*Expr.As<FBangoMemberExpr>(), OutType);
 			case EBangoExprKind::Empty:        return Fail(Expr.Loc, TEXT("This value is missing. Fill it in."));
-			case EBangoExprKind::IsDefined:
+			case EBangoExprKind::IsNil:
 			{
 				FPlaceInfo Place;
-				if (!ResolvePlace(*Expr.As<FBangoIsDefinedExpr>()->Operand, EPlaceUse::Check, Place))
+				if (!ResolvePlace(*Expr.As<FBangoIsNilExpr>()->Operand, EPlaceUse::Check, Place))
 				{
 					return false;
 				}
-				Emit(EBangoOp::IsDefinedPlace, Place.PlaceIndex);
+				Emit(EBangoOp::IsNilPlace, Place.PlaceIndex);
 				OutType = FExprType::MakeKnown(FBangoType::Bool());
 				return true;
 			}
@@ -2019,12 +2220,29 @@ namespace BangoCompilerPrivate
 
 		// ---- Calls ----
 
-		bool CompileArgs(const FBangoCallExpr& Call, const TArray<FBangoType>& ParamTypes, const FString& What)
+		/** NilOk (optional): the arguments a command takes even if nil (MayBeNil), so a nil variable there is passed on as nil. */
+		bool CompileArgs(const FBangoCallExpr& Call, const TArray<FBangoType>& ParamTypes, const FString& What, const TArray<bool>* NilOk = nullptr)
 		{
 			for (int32 i = 0; i < Call.Args.Num() && i < ParamTypes.Num(); ++i)
 			{
 				FExprType ArgType;
-				if (!CompileExpr(*Call.Args[i], &ParamTypes[i], ArgType)
+				bool bArgOk = false;
+				if (NilOk && NilOk->IsValidIndex(i) && (*NilOk)[i] && IsPlaceExpr(*Call.Args[i]))
+				{
+					// Like IsNil: a nil variable, a global nobody made or an element past the end is passed on as nil.
+					FPlaceInfo Place;
+					bArgOk = ResolvePlace(*Call.Args[i], EPlaceUse::Read, Place);
+					if (bArgOk)
+					{
+						Emit(EBangoOp::LoadPlace, Place.PlaceIndex, 1);
+						ArgType = Place.Type;
+					}
+				}
+				else
+				{
+					bArgOk = CompileExpr(*Call.Args[i], &ParamTypes[i], ArgType);
+				}
+				if (!bArgOk
 					|| !CanAssign(ParamTypes[i], ArgType, Call.Args[i]->Loc, FString::Printf(TEXT("Argument %d of %s"), i + 1, *What)))
 				{
 					return false;
@@ -2113,11 +2331,13 @@ namespace BangoCompilerPrivate
 			}
 
 			TArray<FBangoType> ParamTypes;
+			TArray<bool> NilOk;
 			for (const FBangoCommandParam& Param : Signature->Params)
 			{
 				ParamTypes.Add(Param.Type);
+				NilOk.Add(Param.bMayBeNil);
 			}
-			if (!CompileArgs(Call, ParamTypes, FString::Printf(TEXT("'%s'"), *Call.Name)))
+			if (!CompileArgs(Call, ParamTypes, FString::Printf(TEXT("'%s'"), *Call.Name), &NilOk))
 			{
 				return false;
 			}

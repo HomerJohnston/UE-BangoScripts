@@ -15,6 +15,13 @@ bool FBangoGraphNode::operator==(const FBangoGraphNode& Other) const
 		&& Branches[0] == Other.Branches[0] && Branches[1] == Other.Branches[1];
 }
 
+bool FBangoGraphDecl::operator==(const FBangoGraphDecl& Other) const
+{
+	return Type.Equals(Other.Type, ESearchCase::CaseSensitive) && Name.Equals(Other.Name, ESearchCase::CaseSensitive)
+		&& bHasValue == Other.bHasValue && (!bHasValue || Value.Equals(Other.Value, ESearchCase::CaseSensitive))
+		&& Comment.Equals(Other.Comment, ESearchCase::CaseSensitive);
+}
+
 bool FBangoGraph::operator==(const FBangoGraph& Other) const
 {
 	if (bIsFunction != Other.bIsFunction || !Name.Equals(Other.Name, ESearchCase::CaseSensitive) || Nodes.Num() != Other.Nodes.Num())
@@ -28,15 +35,33 @@ bool FBangoGraph::operator==(const FBangoGraph& Other) const
 			return false;
 		}
 	}
+	if (Locals.Num() != Other.Locals.Num())
+	{
+		return false;
+	}
+	for (int32 i = 0; i < Locals.Num(); ++i)
+	{
+		if (Locals[i] != Other.Locals[i])
+		{
+			return false;
+		}
+	}
 	return true;
 }
 
 bool FBangoGraphDocument::operator==(const FBangoGraphDocument& Other) const
 {
 	if (bHasLocNamespace != Other.bHasLocNamespace || !LocNamespace.Equals(Other.LocNamespace, ESearchCase::CaseSensitive)
-		|| Main != Other.Main || Functions.Num() != Other.Functions.Num())
+		|| Main != Other.Main || Functions.Num() != Other.Functions.Num() || Globals.Num() != Other.Globals.Num())
 	{
 		return false;
+	}
+	for (int32 i = 0; i < Globals.Num(); ++i)
+	{
+		if (Globals[i] != Other.Globals[i])
+		{
+			return false;
+		}
 	}
 	for (int32 i = 0; i < Functions.Num(); ++i)
 	{
@@ -88,7 +113,6 @@ namespace Bango
 		switch (Kind)
 		{
 		case EBangoGraphNodeKind::Entry:    return TEXT("Entry");
-		case EBangoGraphNodeKind::VarDecl:  return TEXT("Declare");
 		case EBangoGraphNodeKind::Assign:   return TEXT("Set");
 		case EBangoGraphNodeKind::IncDec:   return TEXT("Set");
 		case EBangoGraphNodeKind::Call:     return TEXT("Call");
@@ -268,7 +292,6 @@ namespace BangoGraphPrivate
 	{
 		switch (Kind)
 		{
-		case EBangoStmtKind::VarDecl:  return EBangoGraphNodeKind::VarDecl;
 		case EBangoStmtKind::Assign:   return EBangoGraphNodeKind::Assign;
 		case EBangoStmtKind::IncDec:   return EBangoGraphNodeKind::IncDec;
 		case EBangoStmtKind::Call:     return EBangoGraphNodeKind::Call;
@@ -294,6 +317,9 @@ namespace BangoGraphPrivate
 		/** -1 for the main graph, else the function index. */
 		int32 Graph = -1;
 		int32 Node = 0;
+		/** For a declaration: its index in the file's Globals (bGlobal) or the graph's Locals; Node is unused. */
+		int32 Decl = INDEX_NONE;
+		bool bGlobal = false;
 	};
 
 	/** A node that had no //@ comment, waiting for an ID and a position. */
@@ -342,6 +368,7 @@ namespace BangoGraphPrivate
 				Target.Node = 0;
 				MainTargets.Add(Target);
 			}
+			FirstTopLevel = ReadDecls(-1, Script.TopLevel, FirstTopLevel, MainTargets);
 			Doc.Main.Nodes[0].Next = BuildChain(-1, Script.TopLevel, FirstTopLevel, &MainTargets);
 
 			// Functions
@@ -368,7 +395,12 @@ namespace BangoGraphPrivate
 				FunctionTargets[FunctionIndex].Add(Target);
 				MainTargets.Add(Target); // comments just above a function line belong to the function
 
-				Doc.Functions[FunctionIndex].Nodes[0].Next = BuildChain(FunctionIndex, Function.Body, 0, &FunctionTargets[FunctionIndex]);
+				const int32 FirstStatement = ReadDecls(FunctionIndex, Function.Body, 0, FunctionTargets[FunctionIndex]);
+				Doc.Functions[FunctionIndex].Nodes[0].Next = BuildChain(FunctionIndex, Function.Body, FirstStatement, &FunctionTargets[FunctionIndex]);
+			}
+			if (bFailed)
+			{
+				return false;
 			}
 
 			SortTargets(MainTargets);
@@ -393,6 +425,10 @@ namespace BangoGraphPrivate
 			}
 
 			AttachComments(Comments);
+			if (bFailed)
+			{
+				return false;
+			}
 
 			for (const TArray<const FBangoSourceComment*>& Run : DetachedRuns)
 			{
@@ -419,6 +455,8 @@ namespace BangoGraphPrivate
 		TArray<FPending> Pending;
 		TSet<int64> UsedIds;
 		int64 MaxId = 0;
+		/** A failure found while building chains (which return node indexes, not success). */
+		bool bFailed = false;
 
 		FBangoGraph& GraphAt(int32 Graph) { return Graph < 0 ? Doc.Main : Doc.Functions[Graph]; }
 
@@ -462,6 +500,65 @@ namespace BangoGraphPrivate
 			return Result;
 		}
 
+		/**
+		 * Reads the declarations at Block[Start...] (the top of a graph) into the file's Globals and the graph's
+		 * Locals, and returns the index of the first statement after them. A global with a value fails: the
+		 * graph has nowhere to keep it, and it doesn't compile.
+		 */
+		int32 ReadDecls(int32 Graph, const FBangoBlock& Block, int32 Start, TArray<FTarget>& Targets)
+		{
+			int32 i = Start;
+			for (; i < Block.Num(); ++i)
+			{
+				const FBangoVarDeclStmt* Decl = Block[i]->As<FBangoVarDeclStmt>();
+				if (!Decl)
+				{
+					break;
+				}
+				// Globals go at the top of the file, before the main graph's locals.
+				if (Decl->bGlobal && (Graph >= 0 || Doc.Main.Locals.Num() > 0))
+				{
+					break; // BuildNode fails on it
+				}
+				if (Decl->bGlobal && Decl->Init.IsValid())
+				{
+					Fail(Decl->Loc.Line, FString::Printf(TEXT("The global declaration of '%s' has a value, which isn't allowed (it would reset the global every time the script starts). Remove the value in the text (set it in the code instead), then open the script again."), *Decl->Name));
+					bFailed = true;
+					return Block.Num();
+				}
+				FBangoGraphDecl Out;
+				Out.Type = Decl->Type.ToString();
+				Out.Name = Decl->Name;
+				if (Decl->Init.IsValid())
+				{
+					Out.bHasValue = true;
+					Out.Value = DeclValueText(*Decl);
+				}
+				FTarget Target;
+				Target.Line = Decl->Node.Line > 0 ? Decl->Node.Line : Decl->Loc.Line;
+				Target.Graph = Graph;
+				Target.bGlobal = Decl->bGlobal;
+				if (Decl->bGlobal)
+				{
+					Target.Decl = Doc.Globals.Add(Out);
+				}
+				else
+				{
+					Target.Decl = GraphAt(Graph).Locals.Add(Out);
+				}
+				Targets.Add(Target);
+			}
+			return i;
+		}
+
+		/** The text of a declaration's value: after its `=` (the first one; a type and a name have none). */
+		FString DeclValueText(const FBangoVarDeclStmt& Decl) const
+		{
+			const FString Text = NodeText(Decl);
+			int32 Equals = INDEX_NONE;
+			return Text.FindChar(TEXT('='), Equals) ? Text.Mid(Equals + 1, Text.Len() - Equals - 1).TrimStartAndEnd() : FString();
+		}
+
 		/** Builds Block[Start...] as a chain in Graph and returns the index of its first node (or INDEX_NONE). */
 		int32 BuildChain(int32 Graph, const FBangoBlock& Block, int32 Start, TArray<FTarget>* Targets)
 		{
@@ -485,6 +582,15 @@ namespace BangoGraphPrivate
 
 		int32 BuildNode(int32 Graph, const FBangoStmt& Stmt, TArray<FTarget>* Targets)
 		{
+			if (const FBangoVarDeclStmt* Decl = Stmt.As<FBangoVarDeclStmt>())
+			{
+				// Declarations are only at the top of a graph (ReadDecls); there's no node for one anywhere else.
+				if (!bFailed)
+				{
+					Fail(Decl->Loc.Line, FString::Printf(TEXT("'%s' is declared here, but declarations go at the top: globals after the #define lines, and locals at the top of their script or function. Move it there in the text (set its value here with '%s = ...;' if it needs one), then open the script again."), *Decl->Name, *Decl->Name));
+					bFailed = true;
+				}
+			}
 			const int32 Index = GraphAt(Graph).Nodes.Num();
 			{
 				FBangoGraphNode& Node = GraphAt(Graph).Nodes.AddDefaulted_GetRef();
@@ -555,6 +661,20 @@ namespace BangoGraphPrivate
 			}
 		}
 
+		static void AppendDeclComment(FBangoGraphDecl& Decl, const FString& Text)
+		{
+			FString Line = Text;
+			if (Line.Len() > 0 && Line[0] == TEXT(' '))
+			{
+				Line = Line.Mid(1, Line.Len() - 1);
+			}
+			if (!Decl.Comment.IsEmpty())
+			{
+				Decl.Comment += TEXT("\n");
+			}
+			Decl.Comment += Line;
+		}
+
 		static void AppendComment(FBangoGraphNode& Node, const FString& Text)
 		{
 			FString Line = Text;
@@ -614,7 +734,12 @@ namespace BangoGraphPrivate
 				Chosen = &Targets.Last();
 			}
 
-			if (Chosen)
+			if (Chosen && Chosen->Decl != INDEX_NONE)
+			{
+				FBangoGraphDecl& Decl = Chosen->bGlobal ? Doc.Globals[Chosen->Decl] : GraphAt(Chosen->Graph).Locals[Chosen->Decl];
+				AppendDeclComment(Decl, Comment.Text);
+			}
+			else if (Chosen)
 			{
 				AppendComment(GraphAt(Chosen->Graph).Nodes[Chosen->Node], Comment.Text);
 			}
@@ -686,6 +811,13 @@ namespace BangoGraphPrivate
 			if (SnippetScript.TopLevel.Num() == 0)
 			{
 				return true;
+			}
+			for (const FBangoStmtPtr& Stmt : SnippetScript.TopLevel)
+			{
+				if (Stmt->Kind == EBangoStmtKind::VarDecl)
+				{
+					return Fail(Stmt->Loc.Line, TEXT("Disconnected nodes (//~ lines) can't contain a declaration: declarations go at the top of their script or function."));
+				}
 			}
 
 			TArray<FString> SavedLines = MoveTemp(Lines);

@@ -63,8 +63,9 @@ namespace BangoProgramPrivate
 		case EBangoOp::DupN:
 			return FString::Printf(TEXT("%d"), I.A);
 		case EBangoOp::LoadPlace:
+			return DescribePlace(Program, Function, I.A) + (I.B != 0 ? TEXT(" (nil ok)") : TEXT(""));
 		case EBangoOp::StorePlace:
-		case EBangoOp::IsDefinedPlace:
+		case EBangoOp::IsNilPlace:
 			return DescribePlace(Program, Function, I.A);
 		case EBangoOp::MakeArray:
 			return FString::Printf(TEXT("%d %s"), I.A, *DescribeType(Program, I.B));
@@ -104,7 +105,7 @@ namespace Bango
 		case EBangoOp::DupN:               return TEXT("DupN");
 		case EBangoOp::LoadPlace:          return TEXT("LoadPlace");
 		case EBangoOp::StorePlace:         return TEXT("StorePlace");
-		case EBangoOp::IsDefinedPlace:     return TEXT("IsDefinedPlace");
+		case EBangoOp::IsNilPlace:         return TEXT("IsNilPlace");
 		case EBangoOp::Index:              return TEXT("Index");
 		case EBangoOp::Convert:            return TEXT("Convert");
 		case EBangoOp::MakeArray:          return TEXT("MakeArray");

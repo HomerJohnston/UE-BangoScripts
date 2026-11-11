@@ -106,9 +106,31 @@ private:
 	/** After + Add: the input to start renaming once its row exists. */
 	int32 PendingInputRename = INDEX_NONE;
 
-	// VARIABLES: the shown graph's (see Bango::GetGraphVariables).
+	// The shown graph's variables (see Bango::GetGraphVariables), for names and types.
 	TArray<TSharedPtr<FBangoGraphVariable>> VariableItems;
-	TSharedPtr<SListView<TSharedPtr<FBangoGraphVariable>>> VariableList;
+
+	// GLOBALS and LOCALS: the file's global declarations, and the shown graph's locals, from the entry nodes.
+	struct FDeclEntry
+	{
+		bool bGlobal = false;
+		/** Into the globals or the graph's locals; INDEX_NONE for a read-only row. */
+		int32 Index = INDEX_NONE;
+		FBangoGraphDecl Decl;
+		/** A loop variable (Locals) or a global declared elsewhere (Globals): shown greyed, not edited here. */
+		bool bReadOnly = false;
+		/** A loop variable: the loop's node, in the shown graph. */
+		int32 LoopNode = INDEX_NONE;
+		TWeakPtr<SInlineEditableTextBlock> NameWidget;
+	};
+	TArray<TSharedPtr<FDeclEntry>> GlobalItems;
+	TArray<TSharedPtr<FDeclEntry>> LocalItems;
+	TSharedPtr<SListView<TSharedPtr<FDeclEntry>>> GlobalList;
+	TSharedPtr<SListView<TSharedPtr<FDeclEntry>>> LocalList;
+	/** What the lists show, so they're only made again when it changes. */
+	FString DeclsShown;
+	/** After + Add: the declaration to start renaming once its row exists. */
+	bool bPendingDeclGlobal = false;
+	int32 PendingDeclRename = INDEX_NONE;
 
 	TSharedPtr<STextBlock> TitleText;
 	TSharedPtr<SBox> GraphHost;
@@ -171,6 +193,8 @@ private:
 	TSharedRef<ITableRow> OnGenerateInputRow(TSharedPtr<FInputEntry> Item, const TSharedRef<STableViewBase>& Owner);
 	/** The type menu of an input's icon: every type, and arrays of them. */
 	TSharedRef<SWidget> MakeInputTypeMenu(int32 Index);
+	/** A type menu: every type, and arrays of them, with Current checked. Picking one calls OnPick. */
+	TSharedRef<SWidget> MakeTypeMenu(const FString& Current, TFunction<void(const FString&)> OnPick);
 	/** Adds `bool _newParam` (numbered if the name is taken) at the end, and starts renaming it. */
 	FReply OnAddInputClicked();
 	void DeleteInput(int32 Index);
@@ -190,14 +214,36 @@ private:
 	 */
 	bool ApplyInputs(const TArray<FBangoEntryParam>& Params, const FText& Description, const FString& RenamedFrom = FString(), const FString& RenamedTo = FString());
 
-	// VARIABLES
-	/** Lists the shown graph's variables again, if they changed. Document and Context are the script as it is now. */
+	// GLOBALS and LOCALS
+	/** Reads the shown graph's variables, and the Globals and Locals lists, again if they changed. Document and Context are the script as it is now. */
 	void UpdateVariables(const FBangoGraphDocument& Document, const FBangoNodeLayoutContext& Context);
 	/** UpdateVariables, reading the graphs first. */
 	void UpdateVariablesNow();
-	TSharedRef<ITableRow> OnGenerateVariableRow(TSharedPtr<FBangoGraphVariable> Item, const TSharedRef<STableViewBase>& Owner);
-	/** Clicking a variable shows its declaration (in whichever graph it is) and selects it. */
-	void OnVariableClicked(TSharedPtr<FBangoGraphVariable> Item);
+	TSharedRef<ITableRow> OnGenerateDeclRow(TSharedPtr<FDeclEntry> Item, const TSharedRef<STableViewBase>& Owner);
+	/** Clicking a loop variable shows and selects its loop. */
+	void OnDeclClicked(TSharedPtr<FDeclEntry> Item);
+	/** The file's globals (from the Script Start node), or the shown graph's locals (from its entry node). */
+	TArray<FBangoGraphDecl> GetDecls(bool bGlobal) const;
+	/** Adds `global bool newGlobal;` or `bool _newLocal;` (numbered if taken) at the end, and starts renaming it. */
+	FReply OnAddDeclClicked(bool bGlobal);
+	/** Declares a global the graph uses but the file doesn't declare. */
+	void DeclareGlobal(const FString& Name, const FString& Type);
+	void DeleteDecl(bool bGlobal, int32 Index);
+	void SetDeclType(bool bGlobal, int32 Index, const FString& Type);
+	/** Sets a local's starting value from what was typed in its box (empty: none, so nil). */
+	void SetDeclValue(int32 Index, const FString& Typed);
+	void MoveDecl(bool bGlobal, int32 From, int32 To);
+	/** Why NewName can't be the name of declaration Index, or empty if it can. */
+	FString CheckDeclName(bool bGlobal, int32 Index, const FString& NewName) const;
+	/** Renames a declaration and its uses (in the shown graph for a local, everywhere for a global), as one undoable edit. */
+	void RenameDecl(bool bGlobal, int32 Index, const FString& NewName);
+	/** True if a node anywhere in the script uses the global. */
+	bool IsGlobalUsed(const FString& Name) const;
+	/**
+	 * Writes Decls as the file's globals or the shown graph's locals, as one undoable edit called Description. With
+	 * a RenamedFrom, that variable is renamed to RenamedTo in the nodes that can see it too.
+	 */
+	bool ApplyDecls(bool bGlobal, const TArray<FBangoGraphDecl>& Decls, const FText& Description, const FString& RenamedFrom = FString(), const FString& RenamedTo = FString());
 
 	void CloseScript();
 	/** Shows one of EdGraphs. With bZoomToFit, the view fits the whole graph; otherwise it's left for the caller to set. */

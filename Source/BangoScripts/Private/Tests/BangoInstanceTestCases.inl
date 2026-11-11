@@ -113,6 +113,16 @@ static void BangoMakeRuntimeTestCommands(FBangoCommandTable& Table, TArray<FStri
 	};
 	Table.Add(GetName, Error);
 
+	// Like the built-in IsNull: true for a nil entity or one no actor has (here, anything but john and player).
+	FBangoCommand IsNull;
+	IsNull.Signature = FBangoCommandSignature::Make(TEXT("IsNull")).Param(TEXT("Entity"), Entity).MayBeNil().Returns(FBangoType::Bool());
+	IsNull.Start = [](FBangoCommandCall& Call)
+	{
+		Call.Result = FBangoValue::MakeBool(Call.Args[0].IsNil() || !FBangoTestEntities().IsEntityRegistered(Call.Args[0].GetEntityName()));
+		return EBangoCommandResult::Done;
+	};
+	Table.Add(IsNull, Error);
+
 	// Latent: waits until the given seconds have passed.
 	FBangoCommand Sleep;
 	Sleep.Signature = FBangoCommandSignature::Make(TEXT("Sleep")).Param(TEXT("seconds"), Double);
@@ -248,13 +258,13 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 {
 	// ---- Vectors ----
 	{ TEXT("vector literals and operators"),
-		TEXT("vector3 _v1 = [1, 2, 3];\nvector3 _v2 = [0.5, 0, -1];\nvector3 _vec = _v1 + _v2;\nHint(\"%0 %1 %2 %3\", _vec, _v1 - _v2, _v1 * 2, 2 * _v1 / 4);\nHint(\"%0 %1 %2\", -_v1, _v1 == [1, 2, 3], _v1 != _v2);\nvector2 _w = [3, 4];\nHint(\"%0 %1\", _w, _w.x * _w.x + _w.y * _w.y);"),
+		TEXT("vector3 _v1 = [1, 2, 3];\nvector3 _v2 = [0.5, 0, -1];\nvector3 _vec;\nvector2 _w;\n_vec = _v1 + _v2;\nHint(\"%0 %1 %2 %3\", _vec, _v1 - _v2, _v1 * 2, 2 * _v1 / 4);\nHint(\"%0 %1 %2\", -_v1, _v1 == [1, 2, 3], _v1 != _v2);\n_w = [3, 4];\nHint(\"%0 %1\", _w, _w.x * _w.x + _w.y * _w.y);"),
 		TEXT("(1.5, 2.0, 2.0) (0.5, 2.0, 4.0) (2.0, 4.0, 6.0) (0.5, 1.0, 1.5)|(-1.0, -2.0, -3.0) true true|(3.0, 4.0) 25.0"), nullptr, nullptr },
 	{ TEXT("vector parts"),
-		TEXT("vector3 _vec = [1, 2, 3];\n_vec.x = 10;\n_vec.y += 0.5;\n_vec += [1, 1, 1];\n_vec *= 2;\nHint(\"%0 %1\", _vec, _vec.z);\nvector3[] _path = [[0, 0, 0], _vec];\n_path[1].z = 9;\n_path Push(_path[0] + [0, 0, 100]);\nHint(\"%0 %1\", _path, _path[2].z);"),
+		TEXT("vector3 _vec = [1, 2, 3];\nvector3[] _path;\n_vec.x = 10;\n_vec.y += 0.5;\n_vec += [1, 1, 1];\n_vec *= 2;\nHint(\"%0 %1\", _vec, _vec.z);\n_path = [[0, 0, 0], _vec];\n_path[1].z = 9;\n_path Push(_path[0] + [0, 0, 100]);\nHint(\"%0 %1\", _path, _path[2].z);"),
 		TEXT("(22.0, 7.0, 8.0) 8.0|[(0.0, 0.0, 0.0), (22.0, 7.0, 9.0), (0.0, 0.0, 100.0)] 100.0"), nullptr, nullptr },
 	{ TEXT("vector params, functions and globals"),
-		TEXT("#define params (vector3 _p = [1, 2, 3], vector2 _q = [-1, 0.5])\nglobal vector3 home = [1, 1, 1];\nhome.y = 7;\nHint(\"%0 %1 %2 %3 %4\", _p, _q, Up(5), Up(2).z, home);\nHint(\"%0 %1\", spot.y, spot + spot);\nfunction vector3 Up(float _h)\n{\n\treturn [0, 0, _h];\n};"),
+		TEXT("#define params (vector3 _p = [1, 2, 3], vector2 _q = [-1, 0.5])\nglobal vector3 home;\nhome = [1, 1, 1];\nhome.y = 7;\nHint(\"%0 %1 %2 %3 %4\", _p, _q, Up(5), Up(2).z, home);\nHint(\"%0 %1\", spot.y, spot + spot);\nfunction vector3 Up(float _h)\n{\n\treturn [0, 0, _h];\n};"),
 		TEXT("(1.0, 2.0, 3.0) (-1.0, 0.5) (0.0, 0.0, 5.0) 2.0 (1.0, 7.0, 1.0)|2.0 (2.0, 4.0, 6.0)"), nullptr, nullptr },
 	{ TEXT("a vector divided by zero"), TEXT("vector3 _v = [1, 2, 3];\nHint(\"%0\", _v / 0);"), nullptr, TEXT("(2:15)"), TEXT("Division by zero") },
 	{ TEXT("setting a part of a nil vector"), TEXT("vector2 _v;\n_v.x = 1;"), nullptr, TEXT("(2:1)"), TEXT("'_v' is nil, so its x can't be set on its own. Give it a whole vector first, like _v = [0, 0];") },
@@ -262,71 +272,73 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 	{ TEXT("a part of an undeclared global that isn't a vector"), TEXT("Hint(\"%0\", lots.x);"), nullptr, TEXT("(1:12)"), TEXT("'lots' is a string, which has no 'x' part") },
 	{ TEXT("arithmetic"), TEXT("Hint(\"%0 %1 %2 %3\", 1 + 2 * 3, 7 / 2, 7.0 / 2, 7 % 3);"), TEXT("7 3 3.5 1"), nullptr, nullptr },
 	{ TEXT("localized text"),
-		TEXT("#define LOCTEXT_NAMESPACE \"N\"\nSay(LOCTEXT(\"A\", \"Hello {0}, {1}\"), 3, \"you\");\nHint(\"%0\", LOCTEXT(\"B\", \"plain\"));\nSay(FormatText(LOCTEXT(\"F\", \"{1}-{0}\"), 1, @john));\nHint(\"%0 %1\", LOCTEXT(\"C\", \"x\") == ToText(\"x\"), LOCTEXT(\"C\", \"x\") != NSLOCTEXT(\"M\", \"C\", \"y\"));\ntext[] _all = [LOCTEXT(\"B\", \"plain\"), nil];\nHint(\"%0\", _all);\nSay(LOCTEXT(\"E\", \"`{0`} stays\"));\n#undef LOCTEXT_NAMESPACE"),
+		TEXT("#define LOCTEXT_NAMESPACE \"N\"\ntext[] _all;\nSay(LOCTEXT(\"A\", \"Hello {0}, {1}\"), 3, \"you\");\nHint(\"%0\", LOCTEXT(\"B\", \"plain\"));\nSay(FormatText(LOCTEXT(\"F\", \"{1}-{0}\"), 1, @john));\nHint(\"%0 %1\", LOCTEXT(\"C\", \"x\") == ToText(\"x\"), LOCTEXT(\"C\", \"x\") != NSLOCTEXT(\"M\", \"C\", \"y\"));\n_all = [LOCTEXT(\"B\", \"plain\"), nil];\nHint(\"%0\", _all);\nSay(LOCTEXT(\"E\", \"`{0`} stays\"));\n#undef LOCTEXT_NAMESPACE"),
 		TEXT("Hello 3, you|plain|john-1|true true|[plain, nil]|{0} stays"), nullptr, nullptr },
-	{ TEXT("a text placeholder with no value while running"), TEXT("text _t = ToText(\"{1}\");\nSay(_t, 1);"), nullptr, TEXT("(2:1)"), TEXT("uses {1}, but only 1 value(s) were given") },
+	{ TEXT("a text placeholder with no value while running"), TEXT("text _t;\n_t = ToText(\"{1}\");\nSay(_t, 1);"), nullptr, TEXT("(3:1)"), TEXT("uses {1}, but only 1 value(s) were given") },
 	{ TEXT("a nil text"), TEXT("text _t;\nSay(_t);"), nullptr, TEXT("(2:5)"), TEXT("'_t' is nil") },
 	{ TEXT("floats"), TEXT("Hint(\"%0 %1 %2\", 10 / 4.0, -2.5 * 2, 7.5 % 2);"), TEXT("2.5 -5.0 1.5"), nullptr, nullptr },
-	{ TEXT("strings"), TEXT("string _s = \"a\" + \"b\";\n_s += \"c\";\nHint(_s);\nHint(\"100%% sure\");"), TEXT("abc|100% sure"), nullptr, nullptr },
+	{ TEXT("strings"), TEXT("string _s;\n_s = \"a\" + \"b\";\n_s += \"c\";\nHint(_s);\nHint(\"100%% sure\");"), TEXT("abc|100% sure"), nullptr, nullptr },
 	{ TEXT("comparisons"), TEXT("Hint(\"%0 %1 %2 %3 %4\", 1 == 1.0, \"a\" == \"a\", 2 < 1, true != false, @john == @player);"), TEXT("true true false true false"), nullptr, nullptr },
 	{ TEXT("if chain"), TEXT("int _x = 2;\nif (_x == 1)\n{\n\tHint(\"one\");\n} else if (_x == 2)\n{\n\tHint(\"two\");\n} else\n{\n\tHint(\"other\");\n};"), TEXT("two"), nullptr, nullptr },
 	{ TEXT("while, break, continue"), TEXT("int _i = 0;\nwhile (true)\n{\n\t_i++;\n\tif (_i == 2)\n\t{\n\t\tcontinue;\n\t};\n\tif (_i > 4)\n\t{\n\t\tbreak;\n\t};\n\tHint(\"%0\", _i);\n};"), TEXT("1|3|4"), nullptr, nullptr },
 	{ TEXT("for"), TEXT("int _sum = 0;\nfor (int _i = 1; _i <= 10; _i++)\n{\n\t_sum += _i;\n};\nHint(\"%0\", _sum);"), TEXT("55"), nullptr, nullptr },
 	{ TEXT("for continue runs the step"), TEXT("for (int _i = 0; _i < 5; _i++)\n{\n\tif (_i % 2 == 0)\n\t{\n\t\tcontinue;\n\t};\n\tHint(\"%0\", _i);\n};"), TEXT("1|3"), nullptr, nullptr },
-	{ TEXT("loop body locals reset"), TEXT("for (int _i = 0; _i < 2; _i++)\n{\n\tint _t;\n\tHint(\"%0\", IsDefined(_t));\n\t_t = 1;\n};"), TEXT("false|false"), nullptr, nullptr },
-	{ TEXT("forEach with gaps"), TEXT("int[] _a = [1, 2];\n_a[4] = 5;\nforEach (_v in _a)\n{\n\tif (IsDefined(_v))\n\t{\n\t\tHint(\"%0\", _v);\n\t}\n\telse\n\t{\n\t\tHint(\"gap\");\n\t};\n};"), TEXT("1|2|gap|gap|5"), nullptr, nullptr },
+	{ TEXT("loop body locals reset"), TEXT("int _t;\nfor (int _i = 0; _i < 2; _i++)\n{\n\t_t = nil;\n\tHint(\"%0\", !IsNil(_t));\n\t_t = 1;\n};"), TEXT("false|false"), nullptr, nullptr },
+	{ TEXT("forEach with gaps"), TEXT("int[] _a = [1, 2];\n_a[4] = 5;\nforEach (_v in _a)\n{\n\tif (!IsNil(_v))\n\t{\n\t\tHint(\"%0\", _v);\n\t}\n\telse\n\t{\n\t\tHint(\"gap\");\n\t};\n};"), TEXT("1|2|gap|gap|5"), nullptr, nullptr },
 	{ TEXT("forEach loops over a copy"), TEXT("int[] _a = [1, 2];\nforEach (_v in _a)\n{\n\t_a Push(_v);\n};\nHint(\"%0\", _a);"), TEXT("[1, 2, 1, 2]"), nullptr, nullptr },
 	{ TEXT("forEach break and continue"), TEXT("forEach (_v in [1, 2, 3, 4])\n{\n\tif (_v == 2)\n\t{\n\t\tcontinue;\n\t};\n\tif (_v == 4)\n\t{\n\t\tbreak;\n\t};\n\tHint(\"%0\", _v);\n};"), TEXT("1|3"), nullptr, nullptr },
-	{ TEXT("nested arrays"), TEXT("int[][] _g = [[1, 2], [3]];\n_g[3][2] = 7;\n_g[0] Push(4);\n_g[0][0] += 10;\nHint(\"%0 %1\", _g, Count(_g));\nHint(\"%0 %1\", IsDefined(_g[2]), IsDefined(_g[3][2]));"), TEXT("[[11, 2, 4], [3], nil, [nil, nil, 7]] 4|false true"), nullptr, nullptr },
-	{ TEXT("array commands"), TEXT("int[] _a = [1, 2, 3];\n_a InsertAt(0, 0);\nint _last = _a Pop();\nint _first = _a RemoveAt(0);\n_a InsertAt(9, 5);\nHint(\"%0 %1 %2\", _a, _last, _first);"), TEXT("[1, 2, nil, nil, nil, 9] 3 0"), nullptr, nullptr },
-	{ TEXT("arrays are values"), TEXT("int[] _a = [1];\nint[] _b = _a;\n_b Push(2);\nHint(\"%0 %1\", Count(_a), Count(_b));"), TEXT("1 2"), nullptr, nullptr },
+	{ TEXT("nested arrays"), TEXT("int[][] _g = [[1, 2], [3]];\n_g[3][2] = 7;\n_g[0] Push(4);\n_g[0][0] += 10;\nHint(\"%0 %1\", _g, Count(_g));\nHint(\"%0 %1\", !IsNil(_g[2]), !IsNil(_g[3][2]));"), TEXT("[[11, 2, 4], [3], nil, [nil, nil, 7]] 4|false true"), nullptr, nullptr },
+	{ TEXT("array commands"), TEXT("int[] _a = [1, 2, 3];\nint _last;\nint _first;\n_a InsertAt(0, 0);\n_last = _a Pop();\n_first = _a RemoveAt(0);\n_a InsertAt(9, 5);\nHint(\"%0 %1 %2\", _a, _last, _first);"), TEXT("[1, 2, nil, nil, nil, 9] 3 0"), nullptr, nullptr },
+	{ TEXT("arrays are values"), TEXT("int[] _a = [1];\nint[] _b;\n_b = _a;\n_b Push(2);\nHint(\"%0 %1\", Count(_a), Count(_b));"), TEXT("1 2"), nullptr, nullptr },
 	{ TEXT("Pop of nil discarded"), TEXT("int[] _a = [];\n_a[1] = 5;\n_a RemoveAt(1);\n_a Pop();\nHint(\"%0\", Count(_a));"), TEXT("0"), nullptr, nullptr },
 	{ TEXT("recursion"), TEXT("function int Fact(int _n)\n{\n\tif (_n <= 1)\n\t{\n\t\treturn 1;\n\t};\n\treturn _n * Fact(_n - 1);\n};\nHint(\"%0\", Fact(10));"), TEXT("3628800"), nullptr, nullptr },
-	{ TEXT("function arguments are copies"), TEXT("function void Grow(int[] _a)\n{\n\t_a Push(1);\n};\nint[] _x = [];\nGrow(_x);\nHint(\"%0\", Count(_x));"), TEXT("0"), nullptr, nullptr },
+	{ TEXT("function arguments are copies"), TEXT("int[] _x = [];\nfunction void Grow(int[] _a)\n{\n\t_a Push(1);\n};\nGrow(_x);\nHint(\"%0\", Count(_x));"), TEXT("0"), nullptr, nullptr },
 	{ TEXT("function return conversion"), TEXT("function float Half(int _n)\n{\n\treturn _n / 2;\n};\nHint(\"%0\", Half(3));"), TEXT("1.0"), nullptr, nullptr },
-	{ TEXT("functions with globals and latent commands"), TEXT("global int gold = 1;\nfunction void Pay(int _n)\n{\n\tSleep(1.0);\n\tgold -= _n;\n\t@john Speak(\"thanks\");\n};\nPay(1);\nHint(\"%0\", gold);"), TEXT("john: thanks|0"), nullptr, nullptr },
+	{ TEXT("functions with globals and latent commands"), TEXT("global int gold;\ngold = 1;\nfunction void Pay(int _n)\n{\n\tSleep(1.0);\n\tgold -= _n;\n\t@john Speak(\"thanks\");\n};\nPay(1);\nHint(\"%0\", gold);"), TEXT("john: thanks|0"), nullptr, nullptr },
 	{ TEXT("goto loop"), TEXT("int _i = 0;\nlabel Top;\n_i++;\nif (_i < 3)\n{\n\tgoto Top;\n};\nHint(\"%0\", _i);"), TEXT("3"), nullptr, nullptr },
 	{ TEXT("goto out of a loop"), TEXT("while (true)\n{\n\tgoto Done;\n};\nlabel Done;\nHint(\"out\");"), TEXT("out"), nullptr, nullptr },
 	{ TEXT("top-level return"), TEXT("Hint(\"a\");\nreturn;\nHint(\"b\");"), TEXT("a"), nullptr, nullptr },
-	{ TEXT("globals"), TEXT("global int gold = 5;\ngold += 2;\nHint(\"%0\", gold);"), TEXT("7"), nullptr, nullptr },
+	{ TEXT("globals"), TEXT("global int gold;\ngold = 5;\ngold += 2;\nHint(\"%0\", gold);"), TEXT("7"), nullptr, nullptr },
 	{ TEXT("undeclared globals"), TEXT("if (flag)\n{\n\tboss Speak(\"hi\");\n};\nHint(\"%0\", boss GetName());"), TEXT("john: hi|john"), nullptr, nullptr },
 	{ TEXT("Bango IDs"), TEXT("entity _e = @john;\n_e Speak(\"a\");\n@player Speak(\"b\");\nHint(\"%0 %1 %2 %3\", _e, [@john, @ghost], @john == _e, @john != @player);"), TEXT("john: a|player: b|john [john, ghost] true true"), nullptr, nullptr },
 	{ TEXT("Bango ID that isn't in the level, unused"), TEXT("entity _g = @ghost;\nHint(\"%0\", _g);"), TEXT("ghost"), nullptr, nullptr },
 	{ TEXT("Bango IDs as parameter defaults"), TEXT("#define params (entity _who = @john, entity[] _all = [@john, @player])\n_who Speak(\"hi\");\nforEach (_x in _all)\n{\n\t_x Speak(\"all\");\n};"), TEXT("john: hi|john: all|player: all"), nullptr, nullptr },
-	{ TEXT("IsDefined on globals"), TEXT("Hint(\"%0 %1\", IsDefined(nothere), IsDefined(flag));"), TEXT("false true"), nullptr, nullptr },
-	{ TEXT("short-circuit"), TEXT("bool _b = IsDefined(nothere) && nothere;\nbool _c = flag || nothere;\nHint(\"%0 %1\", _b, _c);"), TEXT("false true"), nullptr, nullptr },
+	{ TEXT("IsNil on globals"), TEXT("Hint(\"%0 %1\", !IsNil(nothere), !IsNil(flag));"), TEXT("false true"), nullptr, nullptr },
+	{ TEXT("short-circuit"), TEXT("bool _b;\nbool _c;\n_b = !IsNil(nothere) && nothere;\n_c = flag || nothere;\nHint(\"%0 %1\", _b, _c);"), TEXT("false true"), nullptr, nullptr },
 	{ TEXT("latent commands"), TEXT("Hint(\"start\");\nSleep(1.0);\nif (AskChoice(\"a\", \"b\") == 2)\n{\n\tHint(\"two\");\n};"), TEXT("start|two"), nullptr, nullptr },
 	{ TEXT("nil as an extra value"), TEXT("Hint(\"%0 and %1\", 1, nil);"), TEXT("1 and nil"), nullptr, nullptr },
-	{ TEXT("nil assignment"), TEXT("int _x = 1;\n_x = nil;\nHint(\"%0\", IsDefined(_x));"), TEXT("false"), nullptr, nullptr },
+	{ TEXT("nil assignment"), TEXT("int _x = 1;\n_x = nil;\nHint(\"%0\", !IsNil(_x));"), TEXT("false"), nullptr, nullptr },
 
 	{ TEXT("read nil local"), TEXT("int _x;\nHint(\"%0\", _x);"), TEXT(""), TEXT("(2:12)"), TEXT("'_x' is nil") },
 	{ TEXT("missing global"), TEXT("Hint(\"%0\", nothere);"), TEXT(""), TEXT("(1:12)"), TEXT("Global 'nothere' doesn't exist") },
 	{ TEXT("index past end"), TEXT("int[] _a = [1];\nHint(\"%0\", _a[3]);"), TEXT(""), TEXT("(2:14)"), TEXT("'_a[3]' is past the end of '_a', which has 1 element(s)") },
 	{ TEXT("negative index"), TEXT("int[] _a = [1];\nint _i = -1;\nHint(\"%0\", _a[_i]);"), TEXT(""), TEXT("(3:14)"), TEXT("negative") },
-	{ TEXT("division by zero"), TEXT("int _z = 0;\nint _x = 1 / _z;"), TEXT(""), TEXT("(2:12)"), TEXT("Division by zero") },
-	{ TEXT("modulo by zero"), TEXT("float _z = 0.0;\nfloat _x = 1.5 % _z;"), TEXT(""), TEXT("(2:16)"), TEXT("Modulo by zero") },
+	{ TEXT("division by zero"), TEXT("int _z = 0;\nint _x;\n_x = 1 / _z;"), TEXT(""), TEXT("(3:8)"), TEXT("Division by zero") },
+	{ TEXT("modulo by zero"), TEXT("float _z = 0.0;\nfloat _x;\n_x = 1.5 % _z;"), TEXT(""), TEXT("(3:10)"), TEXT("Modulo by zero") },
 	{ TEXT("integer overflow"), TEXT("int _x = 2147483647;\n_x++;"), TEXT(""), TEXT("(2:1)"), TEXT("Integer overflow") },
-	{ TEXT("int range edges"), TEXT("int _min = -2147483647 - 1;\nHint(\"%0 %1 %2\", _min, 2147483647, _min + 2147483647);"), TEXT("-2147483648 2147483647 -1"), nullptr, nullptr },
+	{ TEXT("int range edges"), TEXT("int _min;\n_min = -2147483647 - 1;\nHint(\"%0 %1 %2\", _min, 2147483647, _min + 2147483647);"), TEXT("-2147483648 2147483647 -1"), nullptr, nullptr },
 	{ TEXT("int overflow subtract"), TEXT("int _x = -2147483647;\n_x -= 2;"), TEXT(""), TEXT("(2:1)"), TEXT("outside the int range") },
-	{ TEXT("int overflow multiply"), TEXT("int _x = 65536 * 65536;"), TEXT(""), TEXT("(1:16)"), TEXT("Integer overflow") },
-	{ TEXT("int overflow divide"), TEXT("int _min = -2147483647 - 1;\nint _x = _min / -1;"), TEXT(""), TEXT("(2:15)"), TEXT("Integer overflow") },
-	{ TEXT("int overflow negate"), TEXT("int _min = -2147483647 - 1;\nint _x = -_min;"), TEXT(""), TEXT("(2:10)"), TEXT("-2147483648 has no positive int") },
-	{ TEXT("large numbers as float"), TEXT("float _d = 65536 * 65536.0;\nHint(\"%0\", _d);"), TEXT("4294967296.0"), nullptr, nullptr },
+	{ TEXT("int overflow multiply"), TEXT("int _x;\n_x = 65536 * 65536;"), TEXT(""), TEXT("(2:12)"), TEXT("Integer overflow") },
+	{ TEXT("int overflow divide"), TEXT("int _min;\nint _x;\n_min = -2147483647 - 1;\n_x = _min / -1;"), TEXT(""), TEXT("(4:11)"), TEXT("Integer overflow") },
+	{ TEXT("int overflow negate"), TEXT("int _min;\nint _x;\n_min = -2147483647 - 1;\n_x = -_min;"), TEXT(""), TEXT("(4:6)"), TEXT("-2147483648 has no positive int") },
+	{ TEXT("large numbers as float"), TEXT("float _d;\n_d = 65536 * 65536.0;\nHint(\"%0\", _d);"), TEXT("4294967296.0"), nullptr, nullptr },
 	{ TEXT("infinite loop"), TEXT("while (true)\n{\n};"), TEXT(""), TEXT("(1:"), TEXT("stuck in an infinite loop") },
 	{ TEXT("runaway recursion"), TEXT("function void F()\n{\n\tF();\n};\nF();"), TEXT(""), TEXT("in F()"), TEXT("Too many nested function calls") },
 	{ TEXT("missing return"), TEXT("function int F(bool _b)\n{\n\tif (_b)\n\t{\n\t\treturn 1;\n\t};\n};\nHint(\"%0\", F(false));"), TEXT(""), TEXT("in F()"), TEXT("reached its end without returning") },
 	{ TEXT("command fails"), TEXT("Hint(\"before\");\nFail();"), TEXT("before"), TEXT("(2:1)"), TEXT("Fail: boom") },
+	{ TEXT("IsNull on nil and missing actors"), TEXT("entity _e;\nentity[] _a = [@john];\nHint(\"%0 %1 %2\", IsNull(@john), IsNull(@ghost), IsNull(_e));\nHint(\"%0 %1 %2\", IsNull(_a[0]), IsNull(_a[5]), IsNull(nobody));\n_e = @player;\nHint(\"%0\", IsNull(_e));"), TEXT("false true true|false true true|false"), nullptr, nullptr },
+	{ TEXT("IsNull on something that isn't an entity"), TEXT("bool _b;\n_b = IsNull(lots);"), TEXT(""), TEXT("(2:6)"), TEXT("Expected an entity here, but the value is a string") },
 	{ TEXT("unregistered entity"), TEXT("@ghost Speak(\"boo\");"), TEXT(""), TEXT("(1:1)"), TEXT("no actor is registered with the Bango ID name 'ghost'") },
 	{ TEXT("Bango ID written without @"), TEXT("john Speak(\"hi\");"), TEXT(""), TEXT("(1:1)"), TEXT("Global 'john' doesn't exist. There is an actor with the Bango ID 'john': write @john to use it.") },
 	{ TEXT("missing global that isn't a Bango ID"), TEXT("ghost Speak(\"hi\");"), TEXT(""), TEXT("(1:1)"), TEXT("Global 'ghost' doesn't exist. No script or Blueprint has declared it.") },
-	{ TEXT("undeclared global of the wrong type"), TEXT("int _x = lots + 1;"), TEXT(""), TEXT("(1:15)"), TEXT("'+' needs two numbers or two strings, but got a string and an int") },
+	{ TEXT("undeclared global of the wrong type"), TEXT("int _x;\n_x = lots + 1;"), TEXT(""), TEXT("(2:11)"), TEXT("'+' needs two numbers or two strings, but got a string and an int") },
 	{ TEXT("undeclared global as condition"), TEXT("if (lots)\n{\n};"), TEXT(""), TEXT("(1:"), TEXT("condition must be a bool") },
 	{ TEXT("undeclared global as wrong target"), TEXT("lots Speak(\"x\");"), TEXT(""), TEXT("(1:1)"), TEXT("Expected an entity here, but the value is a string") },
-	{ TEXT("Pop of nil used"), TEXT("int[] _a = [];\n_a[1] = 5;\n_a RemoveAt(1);\nint _x = _a Pop();"), TEXT(""), TEXT("(4:10)"), TEXT("removed a nil element") },
+	{ TEXT("Pop of nil used"), TEXT("int[] _a = [];\nint _x;\n_a[1] = 5;\n_a RemoveAt(1);\n_x = _a Pop();"), TEXT(""), TEXT("(5:6)"), TEXT("removed a nil element") },
 	{ TEXT("nested write into nil array"), TEXT("int[][] _g;\n_g[0][0] = 1;"), TEXT(""), TEXT("(2:1)"), TEXT("Writing to '_g'") },
 	{ TEXT("compound on missing inner array"), TEXT("int[][] _g = [];\n_g[1][2] += 5;"), TEXT(""), TEXT("(2:1)"), TEXT("past the end") },
-	{ TEXT("runtime error node id"), TEXT("int _x; //@7(0, 0)\nHint(\"%0\", _x); //@8(0, 1)"), TEXT(""), TEXT("[node 8]"), TEXT("'_x' is nil") },
-	{ TEXT("command returns the wrong type"), TEXT("int _x = BadReturn();"), TEXT(""), TEXT("(1:10)"), TEXT("returned a string, but it should return an int") },
+	{ TEXT("runtime error node id"), TEXT("int _x;\nHint(\"%0\", _x); //@8(0, 1)"), TEXT(""), TEXT("[node 8]"), TEXT("'_x' is nil") },
+	{ TEXT("command returns the wrong type"), TEXT("int _x;\n_x = BadReturn();"), TEXT(""), TEXT("(2:6)"), TEXT("returned a string, but it should return an int") },
 	{ TEXT("error inside a function"), TEXT("function void F()\n{\n\tint _x;\n\tHint(\"%0\", _x);\n};\nF();"), TEXT(""), TEXT("(4:13) in F()"), TEXT("'_x' is nil") },
 	{ TEXT("Hint with a missing value"), TEXT("Hint(\"%1\", 5);"), TEXT(""), TEXT("(1:1)"), TEXT("uses %1, but only 1 value(s)") },
 };
@@ -469,8 +481,8 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 	{
 		Log.Reset();
 		const TCHAR* Deep =
-			TEXT("function int Pick(int _base)\n{\n\tint _local = _base * 10;\n\treturn _local + AskChoice(\"a\", \"b\");\n};\n")
-			TEXT("int[] _list = [1, 2];\n_list Push(Pick(4));\nHint(\"%0\", _list);");
+			TEXT("int[] _list = [1, 2];\nfunction int Pick(int _base)\n{\n\tint _local;\n\t_local = _base * 10;\n\treturn _local + AskChoice(\"a\", \"b\");\n};\n")
+			TEXT("_list Push(Pick(4));\nHint(\"%0\", _list);");
 		TSharedPtr<FBangoProgram> DeepProgram = MakeShared<FBangoProgram>();
 		Expect(Bango::CompileSource(Deep, TEXT("deep.bango"), Commands, *DeepProgram, CompileError), TEXT("deep save: compiles"));
 
@@ -531,11 +543,11 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 		FBangoGlobalStore Globals;
 		BangoMakeRuntimeTestGlobals(Globals);  // "lots" is a string
 		TSharedPtr<FBangoProgram> Conflict = MakeShared<FBangoProgram>();
-		Expect(Bango::CompileSource(TEXT("Hint(\"never runs\");\nglobal int lots;"), TEXT("conflict.bango"), Commands, *Conflict, CompileError), TEXT("conflict: compiles"));
+		Expect(Bango::CompileSource(TEXT("global int lots;\nHint(\"never runs\");"), TEXT("conflict.bango"), Commands, *Conflict, CompileError), TEXT("conflict: compiles"));
 		FBangoInstance Instance;
 		FBangoRuntimeError Error;
 		Expect(!Instance.Start(Conflict, Commands, Globals, 6, Error), TEXT("conflict: start fails"));
-		Expect(Error.Message.Contains(TEXT("already exists as string"), ESearchCase::CaseSensitive) && Error.Line == 2, TEXT("conflict: error names the existing type and the line"));
+		Expect(Error.Message.Contains(TEXT("already exists as string"), ESearchCase::CaseSensitive) && Error.Line == 1, TEXT("conflict: error names the existing type and the line"));
 	}
 
 	// ---- A command with no implementation ----
@@ -559,7 +571,7 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 		Context.Globals = &Globals;
 		TSharedPtr<FBangoProgram> Writer = MakeShared<FBangoProgram>();
 		TSharedPtr<FBangoProgram> Reader = MakeShared<FBangoProgram>();
-		Bango::CompileSource(TEXT("global string message = \"hello\";"), TEXT("writer.bango"), Commands, *Writer, CompileError);
+		Bango::CompileSource(TEXT("global string message;\nmessage = \"hello\";"), TEXT("writer.bango"), Commands, *Writer, CompileError);
 		Bango::CompileSource(TEXT("Hint(message);"), TEXT("reader.bango"), Commands, *Reader, CompileError);
 		FBangoInstance A;
 		FBangoInstance B;
@@ -588,15 +600,15 @@ static void BangoRunArgumentTests(TArray<FString>& OutFailures)
 
 	const FBangoValue John = FBangoValue::MakeEntity(TEXT("john"));
 	const TCHAR* Greet = TEXT("#define params (entity _who, string _line, int _times = 2, entity _listener = nil)\n")
-		TEXT("for (int _i = 0; _i < _times; _i++)\n{\n\t_who Speak(_line);\n};\nHint(\"%0\", IsDefined(_listener));");
+		TEXT("for (int _i = 0; _i < _times; _i++)\n{\n\t_who Speak(_line);\n};\nHint(\"%0\", !IsNil(_listener));");
 
 	const FArgCase Cases[] =
 	{
 		{ TEXT("all arguments"), Greet, { John, FBangoValue::MakeString(TEXT("hi")), FBangoValue::MakeInt(1), FBangoValue::MakeEntity(TEXT("player")) }, TEXT("john: hi|true"), nullptr },
 		{ TEXT("defaults for trailing arguments"), Greet, { John, FBangoValue::MakeString(TEXT("hi")) }, TEXT("john: hi|john: hi|false"), nullptr },
 		{ TEXT("int argument for a float parameter"), TEXT("#define params (float _d)\nHint(\"%0\", _d);"), { FBangoValue::MakeInt(3) }, TEXT("3.0"), nullptr },
-		{ TEXT("explicit nil overrides a default"), TEXT("#define params (int _n = 5)\nHint(\"%0\", IsDefined(_n));"), { FBangoValue::MakeNil(FBangoType::Int()) }, TEXT("false"), nullptr },
-		{ TEXT("nil of any type fits any parameter"), TEXT("#define params (int _n)\nHint(\"%0\", IsDefined(_n));"), { FBangoValue::MakeNil(FBangoType::String()) }, TEXT("false"), nullptr },
+		{ TEXT("explicit nil overrides a default"), TEXT("#define params (int _n = 5)\nHint(\"%0\", !IsNil(_n));"), { FBangoValue::MakeNil(FBangoType::Int()) }, TEXT("false"), nullptr },
+		{ TEXT("nil of any type fits any parameter"), TEXT("#define params (int _n)\nHint(\"%0\", !IsNil(_n));"), { FBangoValue::MakeNil(FBangoType::String()) }, TEXT("false"), nullptr },
 		{ TEXT("array argument"), TEXT("#define params (int[] _list)\n_list Push(3);\nHint(\"%0\", _list);"), { FBangoValue::MakeArray(FBangoType::Int(), { FBangoValue::MakeInt(1), FBangoValue::MakeInt(2) }) }, TEXT("[1, 2, 3]"), nullptr },
 		{ TEXT("array default is fresh each spawn"), TEXT("#define params (int[] _a = [1, 2])\n_a Push(3);\nHint(\"%0\", _a);"), {}, TEXT("[1, 2, 3]"), nullptr },
 		{ TEXT("no params, no arguments"), TEXT("Hint(\"ok\");"), {}, TEXT("ok"), nullptr },

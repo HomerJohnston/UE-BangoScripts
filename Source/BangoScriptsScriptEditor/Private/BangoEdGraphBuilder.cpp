@@ -39,6 +39,13 @@ namespace BangoScriptEditor
 			Node->NodeComment = Source.Comment;
 			Node->bCommentBubbleVisible = !Source.Comment.IsEmpty();
 			Node->bCommentBubblePinned = Node->bCommentBubbleVisible;
+			if (Source.Kind == EBangoGraphNodeKind::Entry)
+			{
+				for (const FBangoGraphDecl& Local : Graph.Locals)
+				{
+					Node->Locals.Add(FBangoEdDecl::From(Local));
+				}
+			}
 			Node->UpdateLayout();
 			Node->AllocateDefaultPins();
 			EdGraph->AddNode(Node, /*bUserAction*/ false, /*bSelectNewNode*/ false);
@@ -73,6 +80,31 @@ namespace BangoScriptEditor
 				Node->bHasLocNamespace = bHasLocNamespace;
 				Node->LocNamespace = bHasLocNamespace ? LocNamespace : FString();
 				Node->UpdateLayout();
+			}
+		}
+	}
+
+	UBangoEdGraphNode* FindEntryNode(const UEdGraph* Graph)
+	{
+		for (UEdGraphNode* EdNode : Graph ? Graph->Nodes : TArray<TObjectPtr<UEdGraphNode>>())
+		{
+			UBangoEdGraphNode* Node = Cast<UBangoEdGraphNode>(EdNode);
+			if (Node && Node->IsEntry())
+			{
+				return Node;
+			}
+		}
+		return nullptr;
+	}
+
+	void SetGlobals(UEdGraph* MainGraph, const TArray<FBangoGraphDecl>& Globals)
+	{
+		if (UBangoEdGraphNode* Entry = FindEntryNode(MainGraph))
+		{
+			Entry->Globals.Reset();
+			for (const FBangoGraphDecl& Global : Globals)
+			{
+				Entry->Globals.Add(FBangoEdDecl::From(Global));
 			}
 		}
 	}
@@ -173,6 +205,10 @@ namespace BangoScriptEditor
 					Out.Branches[Branch] = Target(Node->GetBranchPin(Branch), Index);
 				}
 			}
+			for (const FBangoEdDecl& Local : Nodes[0]->Locals)
+			{
+				Graph.Locals.Add(Local.ToGraphDecl());
+			}
 			if (Graph.bIsFunction)
 			{
 				Graph.Name = Nodes[0]->Layout.Title;
@@ -181,6 +217,10 @@ namespace BangoScriptEditor
 			{
 				OutDocument.bHasLocNamespace = Nodes[0]->bHasLocNamespace;
 				OutDocument.LocNamespace = Nodes[0]->bHasLocNamespace ? Nodes[0]->LocNamespace : FString();
+				for (const FBangoEdDecl& Global : Nodes[0]->Globals)
+				{
+					OutDocument.Globals.Add(Global.ToGraphDecl());
+				}
 			}
 			if (OutNodes)
 			{

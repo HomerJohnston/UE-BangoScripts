@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 
 struct FBangoGraph;
+struct FBangoGraphDecl;
 struct FBangoGraphDocument;
 struct FBangoNodeLayoutContext;
 class UBangoEdGraphNode;
@@ -18,6 +19,12 @@ namespace BangoScriptEditor
 
 	/** Puts the script's #define LOCTEXT_NAMESPACE on the main graph's Script Start node. */
 	void SetLocNamespace(UEdGraph* MainGraph, bool bHasLocNamespace, const FString& LocNamespace);
+
+	/** Puts the file's global declarations on the main graph's Script Start node (CreateEdGraph puts each graph's locals on its entry). */
+	void SetGlobals(UEdGraph* MainGraph, const TArray<FBangoGraphDecl>& Globals);
+
+	/** A graph's entry node, or null. */
+	UBangoEdGraphNode* FindEntryNode(const UEdGraph* Graph);
 
 	/**
 	 * Reads editor graphs back into a document: EdGraphs[0] is the main graph, the rest are functions in order.

@@ -304,11 +304,11 @@ bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 	// types are kept by.
 	{
 		FBangoGraphDocument VarDoc;
-		if (TestTrue(TEXT("build variable graph"), Bango::BuildGraph(TEXT("int _n = 1;    //@1(0, 0)\n_n = 2;    //@2(0, 1)\n"), TEXT("vars.bango"), VarDoc, Error)))
+		if (TestTrue(TEXT("build variable graph"), Bango::BuildGraph(TEXT("int _n = 1;\n_n = 2;    //@2(0, 1)\n"), TEXT("vars.bango"), VarDoc, Error)))
 		{
 			const TSharedPtr<FBangoNodeLayoutContext> VarContext = MakeShared<FBangoNodeLayoutContext>(Bango::MakeNodeLayoutContext(VarDoc, &FBangoModule::Get().GetCommands()));
 			TStrongObjectPtr<UEdGraph> VarGraph(BangoScriptEditor::CreateEdGraph(VarDoc.Main, VarContext));
-			UBangoEdGraphNode* SetNode = VarGraph->Nodes.Num() == 3 ? Cast<UBangoEdGraphNode>(VarGraph->Nodes[2]) : nullptr;
+			UBangoEdGraphNode* SetNode = VarGraph->Nodes.Num() == 2 ? Cast<UBangoEdGraphNode>(VarGraph->Nodes[1]) : nullptr;
 			if (TestNotNull(TEXT("Set node"), SetNode))
 			{
 				TestTrue(TEXT("Set's Var is an int variable"), SetNode->Layout.Fields.Num() == 2 && SetNode->Layout.Fields[0].bVariable && SetNode->Layout.Fields[0].VariableType == TEXT("int"));

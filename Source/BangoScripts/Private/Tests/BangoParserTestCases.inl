@@ -76,9 +76,9 @@ static const FBangoParserTestCase GBangoParserTestCases[] =
 	{ TEXT("functions"),
 		TEXT("function int AddScore(int _amount, float[] _w)\n{\n\treturn _amount * 2;\n};\nfunction void Nag()\n{\n};\nNag();"),
 		TEXT("(function int AddScore (int _amount float[] _w) ((return (* _amount 2)))) (function void Nag () ()) (call Nag)"), nullptr, nullptr },
-	{ TEXT("IsDefined"),
-		TEXT("if (IsDefined(x) && !IsDefined(_g[3][2]))\n{\n};"),
-		TEXT("(if (&& (isdefined x) (! (isdefined (index (index _g 3) 2)))) ())"), nullptr, nullptr },
+	{ TEXT("IsNil"),
+		TEXT("if (!IsNil(x) && IsNil(_g[3][2]))\n{\n};"),
+		TEXT("(if (&& (! (isnil x)) (isnil (index (index _g 3) 2))) ())"), nullptr, nullptr },
 	{ TEXT("largest int literal"), TEXT("int _x = 2147483647;\nint _y = -2147483647;"), TEXT("(decl int _x 2147483647) (decl int _y (neg 2147483647))"), nullptr, nullptr },
 	{ TEXT("literals"),
 		TEXT("string _s = \"a\\\"b\\\\c\\nd\\te\";\nfloat _d = 1e3;\nfloat _e = 2.5e-1;\nbool _f = false;\nint _n = nil;\nfloat _z = 0.1;"),
@@ -100,7 +100,7 @@ static const FBangoParserTestCase GBangoParserTestCases[] =
 		TEXT("\tAwaitSpeak();                  //@21(0, 1)\n")
 		TEXT("};\n")
 		TEXT("\n")
-		TEXT("if (IsDefined(foundThings) && foundThings >= 10)   //@4(0, 3)\n")
+		TEXT("if (!IsNil(foundThings) && foundThings >= 10)   //@4(0, 3)\n")
 		TEXT("{\n")
 		TEXT("\tHint(\"You found at least 10 things!\");         //@5(1, 4)\n")
 		TEXT("\tquestLog Push(\"Found 10 things\");              //@6(1, 5)\n")
@@ -113,7 +113,7 @@ static const FBangoParserTestCase GBangoParserTestCases[] =
 		TEXT("};\n")
 		TEXT("\n")
 		TEXT("label Check;                       //@10(0, 9)\n")
-		TEXT("if (!IsDefined(playerHasGun))      //@11(0, 10)\n")
+		TEXT("if (IsNil(playerHasGun))      //@11(0, 10)\n")
 		TEXT("{\n")
 		TEXT("\tjohn Speak(\"Congrats! You found a bug.\");      //@12(1, 11)\n")
 		TEXT("\tAwaitSpeak();                  //@13(1, 12)\n")
@@ -131,7 +131,7 @@ static const FBangoParserTestCase GBangoParserTestCases[] =
 		TEXT("\n")
 		TEXT("forEach (_entry in questLog)       //@19(0, 15)\n")
 		TEXT("{\n")
-		TEXT("\tif (IsDefined(_entry))         //@22(1, 16)\n")
+		TEXT("\tif (!IsNil(_entry))         //@22(1, 16)\n")
 		TEXT("\t{\n")
 		TEXT("\t\tHint(_entry);              //@23(2, 17)\n")
 		TEXT("\t};\n")
@@ -199,7 +199,7 @@ static const FBangoParserTestCase GBangoParserTestCases[] =
 	{ TEXT("decimal point without digits"), TEXT("float _d = 1.;"), nullptr, TEXT("(1:13)"), TEXT("decimal point") },
 	{ TEXT("bare block"), TEXT("{\n};"), nullptr, TEXT("(1:1)"), TEXT("must belong to") },
 	{ TEXT("declaration in expression"), TEXT("Hint(int _x);"), nullptr, TEXT("(1:6)"), TEXT("own line") },
-	{ TEXT("IsDefined of a call"), TEXT("if (IsDefined(Foo()))\n{\n};"), nullptr, TEXT("(1:15)"), TEXT("IsDefined needs") },
+	{ TEXT("IsNil of a call"), TEXT("if (IsNil(Foo()))\n{\n};"), nullptr, TEXT("(1:11)"), TEXT("IsNil needs") },
 	{ TEXT("array type with size"), TEXT("int[3] _a;"), nullptr, TEXT("(1:4)"), TEXT("empty brackets") },
 	{ TEXT("stray semicolon"), TEXT("Hint();;"), nullptr, TEXT("(1:8)"), TEXT("Unexpected ';'") },
 	{ TEXT("missing condition paren"), TEXT("if a\n{\n};"), nullptr, TEXT("(1:4)"), TEXT("Expected '('") },
@@ -255,7 +255,7 @@ static const FBangoParserTestCase GBangoParserTestCases[] =
 	{ TEXT("unknown vector part"), TEXT("float _f = _v.w;"), nullptr, TEXT("(1:15)"), TEXT("'.w' isn't a vector part") },
 	{ TEXT("uppercase vector part"), TEXT("float _f = _v.X;"), nullptr, TEXT("(1:15)"), TEXT("write .x, not .X") },
 	{ TEXT("nothing after a dot"), TEXT("float _f = _v.;"), nullptr, TEXT("(1:15)"), TEXT("Expected a vector part (x, y or z) after '.'") },
-	{ TEXT("IsDefined on a vector part"), TEXT("bool _b = IsDefined(_v.x);"), nullptr, TEXT("(1:24)"), TEXT("Check the whole vector instead: IsDefined(_v)") },
+	{ TEXT("IsNil on a vector part"), TEXT("bool _b = IsNil(_v.x);"), nullptr, TEXT("(1:20)"), TEXT("Check the whole vector instead: IsNil(_v)") },
 	{ TEXT("vector3 is a keyword"), TEXT("int vector3 = 1;"), nullptr, TEXT("(1:5)"), TEXT("keyword") },
 	{ TEXT("reroutes"), TEXT("Hint(\"a\");\n   //@3(1, 2)\nif (true)\n{\n//@4(0, 0)\n};\n\t//@5(2, 2)"), TEXT("(call Hint \"a\") (reroute) (if true ((reroute))) (reroute)"), nullptr, nullptr },
 	{ TEXT("reroute between if and {"), TEXT("if (true)\n//@4(0, 0)\n{\n};"), nullptr, TEXT("(2:1)"), TEXT("so it's a reroute node, but it isn't where a statement could go") },

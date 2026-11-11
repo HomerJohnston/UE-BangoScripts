@@ -69,9 +69,7 @@ static const FBangoLayoutTestCase GBangoLayoutTestCases[] =
 	{ EBangoGraphNodeKind::Call, false, TEXT("Speak(\"x\")"), TEXT("Speak (Command) | Target <entity>: - | text <string>: `\"x\"`") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("AwaitSpeak()"), TEXT("AwaitSpeak (Command) | pause <float>: -?") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("QuitGame()"), TEXT("QuitGame (Command)") },
-	{ EBangoGraphNodeKind::Call, false, TEXT("Random(1.0, 2.0)"), TEXT("Random (Command) | min <float>: `1.0` | max <float>: `2.0` !! Random gives a value that must be used, so it can't be a node of its own. Use it in the Value of a Set or Declare node, like '_x = Random(...)'.") },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("float _t = Random(3.0, 5.0)"), TEXT("Declare Float (Generic) | Name (x float): `_t` | Value <float>: `Random(3.0, 5.0)`?") },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("global int choice = AskChoice(\"A\", \"B\")"), TEXT("Declare Global Int (Generic) | Name (x int): `choice` | Value <int>: `AskChoice(\"A\", \"B\")`?") },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Random(1.0, 2.0)"), TEXT("Random (Command) | min <float>: `1.0` | max <float>: `2.0` !! Random gives a value that must be used, so it can't be a node of its own. Use it in the Value of a Set node, like '_x = Random(...)'.") },
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_x = boss GetName()"), TEXT("Set (Generic) | Var (x): `_x` | Value: `boss GetName()`") },
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_a[F(1)] = Sleep(2.0)"), TEXT("Set (Generic) | Var (x): `_a[F(1)]` | Value: `Sleep(2.0)`") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(Format(\"%0\", 1))"), TEXT("Hint (Command) | text <string>: `Format(\"%0\", 1)`") },
@@ -80,7 +78,6 @@ static const FBangoLayoutTestCase GBangoLayoutTestCases[] =
 	{ EBangoGraphNodeKind::Call, false, TEXT("Sleep(1.0, 2.0)"), TEXT("Sleep (Command) | seconds <float>: `1.0` | Value 1 <any>: `2.0`? !! Sleep takes 1 argument(s), but 2 are given.") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("@john Sleep(1.0)"), TEXT("Sleep (Command) | Target: `@john` | seconds <float>: `1.0` !! Sleep doesn't take a target.") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("Foo(1)"), TEXT("Foo (Generic) | Call: `Foo(1)` !! Unknown command or function 'Foo'.") },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("int _x = Foo()"), TEXT("Declare Int (Generic) | Name (x int): `_x` | Value <int>: `Foo()`?") },
 
 	// Expressions around a call are generic nodes
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_x = Random(1.0, 2.0) * 2"), TEXT("Set (Generic) | Var (x): `_x` | Value: `Random(1.0, 2.0) * 2`") },
@@ -88,13 +85,11 @@ static const FBangoLayoutTestCase GBangoLayoutTestCases[] =
 
 	// ---- Script functions (Twice is defined in the test document) ----
 	{ EBangoGraphNodeKind::Call, false, TEXT("Twice(2, [])"), TEXT("Twice (ScriptFunction) | _n <int>: `2` | _s <string[]>: `[]`") },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("int _r = Twice(2, [\"x\"])"), TEXT("Declare Int (Generic) | Name (x int): `_r` | Value <int>: `Twice(2, [\"x\"])`?") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("Greet()"), TEXT("Greet (ScriptFunction)") },
 
 	// ---- Array commands ----
 	{ EBangoGraphNodeKind::Call, false, TEXT("_a Push(3)"), TEXT("Push (ArrayCommand) | Target (x array) <array>: `_a` | Value <element>: `3`") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("_g[1] InsertAt(4, 0)"), TEXT("InsertAt (ArrayCommand) | Target (x array) <array>: `_g[1]` | Value <element>: `4` | Index <int>: `0`") },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("int _c = Count(_a)"), TEXT("Declare Int (Generic) | Name (x int): `_c` | Value <int>: `Count(_a)`?") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("_a Pop()"), TEXT("Pop (ArrayCommand) | Target (x array) <array>: `_a`") },
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_first = _a RemoveAt(0)"), TEXT("Set (Generic) | Var (x): `_first` | Value: `_a RemoveAt(0)`") },
 
@@ -103,21 +98,9 @@ static const FBangoLayoutTestCase GBangoLayoutTestCases[] =
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_g[1][2] *= 3"), TEXT("Multiply (Generic) | Var (x): `_g[1][2]` | By: `3`") },
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_d /= 2.0"), TEXT("Divide (Generic) | Var (x): `_d` | By: `2.0`") },
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_n -= 1"), TEXT("Subtract From (Generic) | Var (x): `_n` | Value: `1`") },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("global int[][] g = [[1], []]"), TEXT("Declare Global Int[][] (Generic) | Name (x int[][]): `g` | Value <int[][]>: `[[1], []]`?") },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("global bool playerHasGun"), TEXT("Declare Global Bool (Generic) | Name (x bool): `playerHasGun` | Value <bool>: -?") },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("global int foundThings = 0"), TEXT("Declare Global Int (Generic) | Name (x int): `foundThings` | Value <int>: `0`?") },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("global float speed = 2.5"), TEXT("Declare Global Float (Generic) | Name (x float): `speed` | Value <float>: `2.5`?") },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("global string title"), TEXT("Declare Global String (Generic) | Name (x string): `title` | Value <string>: -?") },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("global entity boss = @john"), TEXT("Declare Global Entity (Generic) | Name (x entity): `boss` | Value <entity>: `@john`?") },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("global string [ ] questLog"), TEXT("Declare Global String[] (Generic) | Name (x string[]): `questLog` | Value <string[]>: -?") },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("string _s"), TEXT("Declare String (Generic) | Name (x string): `_s` | Value <string>: -?") },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("bool _b = true"), TEXT("Declare Bool (Generic) | Name (x bool): `_b` | Value <bool>: `true`?") },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("float _d = 1.5"), TEXT("Declare Float (Generic) | Name (x float): `_d` | Value <float>: `1.5`?") },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("entity _e = @john"), TEXT("Declare Entity (Generic) | Name (x entity): `_e` | Value <entity>: `@john`?") },
-	{ EBangoGraphNodeKind::VarDecl, false, TEXT("int [ ] [ ] _g = []"), TEXT("Declare Int[][] (Generic) | Name (x int[][]): `_g` | Value <int[][]>: `[]`?") },
 	{ EBangoGraphNodeKind::IncDec, false, TEXT("_a[2]++"), TEXT("Increment (Generic) | Var (x int) <int>: `_a[2]`") },
 	{ EBangoGraphNodeKind::IncDec, false, TEXT("--_x"), TEXT("Decrement (Generic) | Var (x int) <int>: `_x`") },
-	{ EBangoGraphNodeKind::If, false, TEXT("_n > 1 && IsDefined(g)"), TEXT("If (Generic) | Condition <bool, no icon>: `_n > 1 && IsDefined(g)`") },
+	{ EBangoGraphNodeKind::If, false, TEXT("_n > 1 && !IsNil(g)"), TEXT("If (Generic) | Condition <bool, no icon>: `_n > 1 && !IsNil(g)`") },
 	{ EBangoGraphNodeKind::While, false, TEXT("true"), TEXT("While (Generic) | Condition <bool, no icon>: `true`") },
 	// Simple counting loops (<= with ++, >= with --) look like Blueprint's For Loop; anything else is one Expression row.
 	{ EBangoGraphNodeKind::For, false, TEXT("int _i = 0; _i <= 9; _i++"), TEXT("For (Generic) | Var (x int): `_i` | First <int>: `0` | Last <int>: `9`") },
@@ -149,7 +132,7 @@ static const FBangoLayoutTestCase GBangoLayoutTestCases[] =
 	{ EBangoGraphNodeKind::Entry, true, TEXT("void Greet()"), TEXT("Greet (FunctionEntry) | Returns: `void`") },
 
 	// Values that must be used: such a command can't be a node of its own. Others can.
-	{ EBangoGraphNodeKind::Call, false, TEXT("Count(_a)"), TEXT("Count (ArrayCommand) | Array <array>: `_a` !! Count gives a value that must be used, so it can't be a node of its own. Use it in the Value of a Set or Declare node, like '_x = Count(...)'.") },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Count(_a)"), TEXT("Count (ArrayCommand) | Array <array>: `_a` !! Count gives a value that must be used, so it can't be a node of its own. Use it in the Value of a Set node, like '_x = Count(...)'.") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("AskChoice(\"A\", \"B\")"), TEXT("AskChoice (Command) | a <string>: `\"A\"` | b <string>: `\"B\"`") },
 
 	// Text that doesn't lex
@@ -174,8 +157,10 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 	{
 		const TCHAR* Source =
 			TEXT("#define params (string _who, int _times = 1)\n")
-			TEXT("global int gold;              //@1(0, 0)\n")
-			TEXT("int _count = gold + _times;   //@2(0, 1)\n")
+			TEXT("global int gold;\n")
+			TEXT("global string[] names;\n")
+			TEXT("int _count = 0;\n")
+			TEXT("int _rounds;\n")
 			TEXT("forEach (_name in names)     //@3(0, 2)\n")
 			TEXT("{\n")
 			TEXT("\tLog(_name);                //@4(1, 3)\n")
@@ -186,7 +171,7 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 			TEXT("};\n")
 			TEXT("function void F(int _n)\n")
 			TEXT("{\n")
-			TEXT("\tglobal string[] names;     //@7(0, 0)\n")
+			TEXT("\tbool _done = false;\n")
 			TEXT("\tgold += _n;                //@8(0, 1)\n")
 			TEXT("};\n");
 		FBangoGraphDocument VarDoc;
@@ -202,21 +187,23 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 				FString Out;
 				for (const FBangoGraphVariable& V : Vars)
 				{
-					const TCHAR* Kind = V.Kind == FBangoGraphVariable::EKind::Param ? TEXT("param") : V.Kind == FBangoGraphVariable::EKind::Local ? TEXT("local") : TEXT("global");
-					Out += FString::Printf(TEXT("%s %s:%s @%d/%d; "), Kind, *V.Name, *V.Type, V.DeclGraph, V.DeclNode);
+					const TCHAR* Kind = V.Kind == FBangoGraphVariable::EKind::Param ? TEXT("param") : V.Kind == FBangoGraphVariable::EKind::Local ? TEXT("local")
+						: V.Kind == FBangoGraphVariable::EKind::Loop ? TEXT("loop") : TEXT("global");
+					Out += FString::Printf(TEXT("%s %s:%s @%d/%d; "), Kind, *V.Name, *V.Type, V.DeclGraph, V.Index);
 				}
 				return Out;
 			};
 			TArray<FBangoGraphVariable> Vars;
 			Bango::GetGraphVariables(VarDoc, INDEX_NONE, VarContext, Vars);
-			// `bank` is used but declared nowhere in the file; `names` is declared in function F (graph 0).
-			const FString ExpectedMain = TEXT("param _times:int @-1/0; param _who:string @-1/0; local _count:int @-1/2; local _i:int @-1/5; local _name:string @-1/3; global bank: @-1/-1; global gold:int @-1/1; global names:string[] @0/1; ");
+			// Parameters and locals in order, loop variables by node, the file's globals in order, then `bank`, which
+			// is used but declared nowhere in the file.
+			const FString ExpectedMain = TEXT("param _who:string @-1/0; param _times:int @-1/1; local _count:int @-1/0; local _rounds:int @-1/1; loop _name:string @-1/1; loop _i:int @-1/3; global gold:int @-1/0; global names:string[] @-1/1; global bank: @-1/-1; ");
 			if (Describe(Vars) != ExpectedMain)
 			{
 				OutFailures.Add(TEXT("variables (main): expected ") + ExpectedMain + TEXT("\n got ") + Describe(Vars));
 			}
 			Bango::GetGraphVariables(VarDoc, 0, VarContext, Vars);
-			const FString ExpectedF = TEXT("param _n:int @0/0; global gold:int @-1/1; global names:string[] @0/1; ");
+			const FString ExpectedF = TEXT("param _n:int @0/0; local _done:bool @0/0; global gold:int @-1/0; global names:string[] @-1/1; ");
 			if (Describe(Vars) != ExpectedF)
 			{
 				OutFailures.Add(TEXT("variables (F): expected ") + ExpectedF + TEXT("\n got ") + Describe(Vars));
@@ -315,6 +302,41 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 			{
 				OutFailures.Add(FString::Printf(TEXT("rename variable: `%s` should become `%s`, got `%s`"), Case.Text, *Expected, *Text));
 			}
+		}
+	}
+
+	// A local's starting value, from the Locals list: it must read and be a fixed value.
+	{
+		struct FValueCase { const TCHAR* Type; const TCHAR* Value; bool bOk; };
+		static const FValueCase Cases[] =
+		{
+			{ TEXT("int"), TEXT("5"), true },
+			{ TEXT("float"), TEXT("-2.5"), true },
+			{ TEXT("string"), TEXT("\"a = b\""), true },
+			{ TEXT("int[][]"), TEXT("[[1, -2], []]"), true },
+			{ TEXT("vector3"), TEXT("[0, 0, 100]"), true },
+			{ TEXT("entity"), TEXT("@john"), true },
+			{ TEXT("bool"), TEXT("nil"), true },
+			{ TEXT("text"), TEXT("LOCTEXT(\"K\", \"Hi\")"), true },
+			{ TEXT("int"), TEXT("1 + 2"), false },
+			{ TEXT("float"), TEXT("Random(1.0, 2.0)"), false },
+			{ TEXT("int"), TEXT("_other"), false },
+			{ TEXT("int"), TEXT(""), false },
+			{ TEXT("int"), TEXT("5; Hint(\"x\")"), false },
+		};
+		for (const FValueCase& Case : Cases)
+		{
+			FString Problem;
+			if (Bango::CheckDeclValue(Case.Type, Case.Value, Problem) != Case.bOk)
+			{
+				OutFailures.Add(FString::Printf(TEXT("decl value: `%s %s` should be %s (%s)"), Case.Type, Case.Value, Case.bOk ? TEXT("fine") : TEXT("refused"), *Problem));
+			}
+		}
+		FString Renamed = TEXT("gold = gold(1) + gold");
+		Bango::RenameVariableInText(Renamed, TEXT("gold"), TEXT("coins"));
+		if (Renamed != FString(TEXT("coins = gold(1) + coins")))
+		{
+			OutFailures.Add(FString(TEXT("rename variable: a call with the same name stays: ")) + Renamed);
 		}
 	}
 
@@ -530,27 +552,26 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 		}
 	}
 
-	// Variable types: each node sees the params, the file's globals, and the locals declared before it in its own chain
-	// and the chains around it. Set nodes and the like show the variable's type, and their value takes it too.
+	// Variable types: each node sees the params, the file's globals, the graph's locals, and the variables of the loops
+	// it's inside. Set nodes and the like show the variable's type, and their value takes it too.
 	{
 		const TCHAR* Source =
 			TEXT("#define params (int _count, string[] _names = [])\n")
-			TEXT("global float speed = 1.0;    //@1(0, 0)\n")
-			TEXT("string _title = \"x\";    //@2(0, 1)\n")
+			TEXT("global float speed;\n")
+			TEXT("string _title = \"x\";\n")
+			TEXT("int _n = 1;\n")
+			TEXT("vector3 _pos = [1, 2, 3];\n")
 			TEXT("_title = \"y\";    //@3(0, 2)\n")
 			TEXT("speed *= 2;    //@4(0, 3)\n")
 			TEXT("if (_count > 0)    //@5(0, 4)\n{\n")
-			TEXT("\tint _n = 1;    //@6(1, 5)\n")
 			TEXT("\t_n += 2;    //@7(1, 6)\n}\nelse\n{\n")
-			TEXT("\tstring _n = \"a\";    //@8(2, 5)\n")
-			TEXT("\t_n = \"b\";    //@9(2, 6)\n};\n")
-			TEXT("_n = 3;    //@10(0, 7)\n")
+			TEXT("\t_n = 4;    //@9(2, 6)\n};\n")
 			TEXT("for (int _i = 0; _i < 3; _i++)    //@11(0, 8)\n{\n")
 			TEXT("\t_names[_i] = \"z\";    //@12(1, 9)\n};\n")
 			TEXT("forEach (_name in _names)    //@13(0, 10)\n{\n")
 			TEXT("\t_name = \"q\";    //@14(1, 11)\n};\n")
+			TEXT("_name = 3;    //@10(0, 7)\n")
 			TEXT("other = 1;    //@16(0, 12)\n")
-			TEXT("vector3 _pos = [1, 2, 3];    //@17(0, 13)\n")
 			TEXT("_pos.z = 5;    //@18(0, 14)\n")
 			TEXT("_pos += [0, 0, 1];    //@19(0, 15)\n")
 			TEXT("//~ _count = 5;    //@30(5, 5)\n")
@@ -564,13 +585,12 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 			{ 3,  TEXT("Set (Generic) | Var (x string): `_title` | Value <string>: `\"y\"`") },
 			{ 4,  TEXT("Multiply (Generic) | Var (x float): `speed` | By <float>: `2`") },
 			{ 7,  TEXT("Add To (Generic) | Var (x int): `_n` | Value <int>: `2`") },
-			{ 9,  TEXT("Set (Generic) | Var (x string): `_n` | Value <string>: `\"b\"`") },
-			{ 10, TEXT("Set (Generic) | Var (x): `_n` | Value: `3`") },
+			{ 9,  TEXT("Set (Generic) | Var (x int): `_n` | Value <int>: `4`") },
+			{ 10, TEXT("Set (Generic) | Var (x): `_name` | Value: `3`") },
 			{ 12, TEXT("Set (Generic) | Var (x string): `_names[_i]` | Value <string>: `\"z\"`") },
 			{ 13, TEXT("For Each (Generic) | Variable (x string): `_name` | Array <array>: `_names`") },
 			{ 14, TEXT("Set (Generic) | Var (x string): `_name` | Value <string>: `\"q\"`") },
 			{ 16, TEXT("Set (Generic) | Var (x): `other` | Value: `1`") },
-			{ 17, TEXT("Declare Vector3 (Generic) | Name (x vector3): `_pos` | Value <vector3>: `[1, 2, 3]`?") },
 			{ 18, TEXT("Set (Generic) | Var (x float): `_pos.z` | Value <float>: `5`") },
 			{ 19, TEXT("Add To (Generic) | Var (x vector3): `_pos` | Value <vector3>: `[0, 0, 1]`") },
 			{ 30, TEXT("Set (Generic) | Var (x int): `_count` | Value <int>: `5`") },
@@ -617,11 +637,12 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 			OutFailures.Add(TEXT("variable types: the same document should give matching contexts"));
 		}
 		FBangoGraphDocument Renamed = VarDoc;
-		for (FBangoGraphNode& Node : Renamed.Main.Nodes)
+		for (FBangoGraphDecl& Local : Renamed.Main.Locals)
 		{
-			if (Node.NodeID == 2)
+			if (Local.Name == FString(TEXT("_title")))
 			{
-				Node.Text = TEXT("int _title = 1");
+				Local.Type = TEXT("int"); // as the Locals list does
+				Local.Value = TEXT("1");
 			}
 		}
 		const FBangoNodeLayoutContext RenamedContext = Bango::MakeNodeLayoutContext(Renamed, &Commands);

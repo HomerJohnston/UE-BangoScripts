@@ -65,7 +65,7 @@ enum class EBangoExprKind : uint8
 	Unary,
 	Binary,
 	Call,
-	IsDefined,
+	IsNil,
 	Member,
 	/** A value left empty, like the condition of `if ()`. It parses, so the graph editor can save it, but never compiles. */
 	Empty,
@@ -229,11 +229,11 @@ struct FBangoEmptyExpr : FBangoExpr
 	FBangoEmptyExpr() : FBangoExpr(StaticKind) {}
 };
 
-/** IsDefined(x). Operand is always a Name or an Index chain rooted at a Name. */
-struct FBangoIsDefinedExpr : FBangoExpr
+/** IsNil(x). Operand is always a Name or an Index chain rooted at a Name. */
+struct FBangoIsNilExpr : FBangoExpr
 {
-	static constexpr EBangoExprKind StaticKind = EBangoExprKind::IsDefined;
-	FBangoIsDefinedExpr() : FBangoExpr(StaticKind) {}
+	static constexpr EBangoExprKind StaticKind = EBangoExprKind::IsNil;
+	FBangoIsNilExpr() : FBangoExpr(StaticKind) {}
 
 	FBangoExprPtr Operand;
 };

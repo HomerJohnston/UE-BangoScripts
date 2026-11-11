@@ -473,7 +473,7 @@ namespace BangoGraphLayoutPrivate
 		// A command whose value must be used is never a node of its own: it goes in a Value, like `_s = Format(...)`.
 		if (Callee.bMustUseResult)
 		{
-			Out.Error = FString::Printf(TEXT("%s gives a value that must be used, so it can't be a node of its own. Use it in the Value of a Set or Declare node, like '_x = %s(...)'."), *Call->Name, *Call->Name);
+			Out.Error = FString::Printf(TEXT("%s gives a value that must be used, so it can't be a node of its own. Use it in the Value of a Set node, like '_x = %s(...)'."), *Call->Name, *Call->Name);
 		}
 		return true;
 	}
@@ -708,17 +708,6 @@ namespace BangoGraphLayoutPrivate
 				}
 				switch (Node.Kind)
 				{
-				case EBangoGraphNodeKind::VarDecl:
-				{
-					bool bGlobal = false;
-					FString Type;
-					FString Name;
-					if (ReadDeclaration(Node.Text, bGlobal, Type, Name) && !bGlobal)
-					{
-						DeclareVariable(Scope, Name, Type);
-					}
-					break;
-				}
 				case EBangoGraphNodeKind::If:
 					Chain(Node.Branches[0], Scope);
 					Chain(Node.Branches[1], Scope);
@@ -828,8 +817,12 @@ namespace BangoGraphLayoutPrivate
 
 	static void AddVisibleVariables(const FBangoGraphDocument& Document, TMap<int64, FVarScope>& Out)
 	{
-		// Globals declared anywhere in the file are visible everywhere in it.
+		// The file's globals are visible everywhere in it, and a graph's parameters and locals everywhere in it.
 		FVarScope Globals;
+		for (const FBangoGraphDecl& Global : Document.Globals)
+		{
+			DeclareVariable(Globals, Global.Name, Global.Type);
+		}
 		TArray<const FBangoGraph*> Graphs;
 		Graphs.Add(&Document.Main);
 		for (const FBangoGraph& Function : Document.Functions)
@@ -838,21 +831,12 @@ namespace BangoGraphLayoutPrivate
 		}
 		for (const FBangoGraph* Graph : Graphs)
 		{
-			for (const FBangoGraphNode& Node : Graph->Nodes)
-			{
-				bool bGlobal = false;
-				FString Type;
-				FString Name;
-				if (Node.Kind == EBangoGraphNodeKind::VarDecl && ReadDeclaration(Node.Text, bGlobal, Type, Name) && bGlobal)
-				{
-					DeclareVariable(Globals, Name, Type);
-				}
-			}
-		}
-		for (const FBangoGraph* Graph : Graphs)
-		{
 			FVarScope Base = Globals;
 			AddEntryParams(*Graph, Base);
+			for (const FBangoGraphDecl& Local : Graph->Locals)
+			{
+				DeclareVariable(Base, Local.Name, Local.Type);
+			}
 			FScopeWalker(*Graph, Out).Run(Base);
 		}
 	}
@@ -939,52 +923,6 @@ namespace BangoGraphLayoutPrivate
 
 		switch (Node.Kind)
 		{
-		case EBangoGraphNodeKind::VarDecl:
-		{
-			int32 i = 0;
-			const bool bGlobal = Tok.Is(0, EBangoTokenKind::KwGlobal);
-			if (bGlobal)
-			{
-				++i;
-			}
-			const int32 TypeBegin = i;
-			++i; // the type keyword
-			while (Tok.Is(i, EBangoTokenKind::LBracket) && Tok.Is(i + 1, EBangoTokenKind::RBracket))
-			{
-				i += 2;
-			}
-			if (!Tok.Is(i, EBangoTokenKind::Identifier))
-			{
-				break;
-			}
-			const FBangoNodeField TypeField = Tok.Field(TEXT("Type"), FString(), TypeBegin, i);
-			const FString TypeText = CompactTypeText(TypeField.Text);
-			// One node per type, like "Declare Int", "Declare String[]" or "Declare Global Int": the type is part of
-			// what the node is, not a field.
-			if (bGlobal)
-			{
-				Out.Title = FString::Printf(TEXT("Declare Global %s"), *CapitalizeFirst(TypeText));
-				Out.CategoryName = TEXT("Globals");
-				Out.Description = FString::Printf(TEXT("Declares a global %s, shared by every script. It holds nil until it's given a value; a Value here is assigned when this node runs."), *TypeText);
-			}
-			else
-			{
-				Out.Title = FString::Printf(TEXT("Declare %s"), *CapitalizeFirst(TypeText));
-				Out.CategoryName = TEXT("Variables");
-				Out.Description = FString::Printf(TEXT("Declares a local %s, which exists in the block it's declared in. It holds nil until it's given a value."), *TypeText);
-			}
-			FBangoNodeField Name = Tok.Field(TEXT("Name"), FString(), i, i + 1);
-			Name.bVariable = true;
-			Name.VariableType = TypeText;
-			Out.Fields.Add(Name);
-			FBangoNodeField Value = Tok.Is(i + 1, EBangoTokenKind::Assign) ? Tok.Field(TEXT("Value"), TypeText, i + 2, N) : Tok.Field(TEXT("Value"), TypeText, N, N);
-			Value.bOptional = true;
-			Value.OuterBegin = Tok.EndOf(i); // with the ` = `
-			Value.InsertPrefix = TEXT(" = ");
-			Out.Fields.Add(Value);
-			return;
-		}
-
 		case EBangoGraphNodeKind::Assign:
 		{
 			const int32 Op = Tok.FindTopLevel(0, N, IsAssignOp);
@@ -1155,7 +1093,7 @@ namespace Bango
 		TArray<FBangoGraphVariable> Locals;
 		TArray<FBangoGraphVariable> Globals;
 		TSet<FString> Seen;
-		auto Add = [&Seen](TArray<FBangoGraphVariable>& To, const FString& Name, const FString& Type, FBangoGraphVariable::EKind Kind, int32 DeclGraph, int32 DeclNode)
+		auto Add = [&Seen](TArray<FBangoGraphVariable>& To, const FString& Name, const FString& Type, FBangoGraphVariable::EKind Kind, int32 DeclGraph, int32 DeclIndex)
 		{
 			if (Name.IsEmpty() || Seen.Contains(Name))
 			{
@@ -1167,28 +1105,34 @@ namespace Bango
 			Variable.Type = Type;
 			Variable.Kind = Kind;
 			Variable.DeclGraph = DeclGraph;
-			Variable.DeclNode = DeclNode;
+			Variable.Index = DeclIndex;
 		};
 
-		// Parameters, on the entry node.
-		FVarScope EntryScope;
-		AddEntryParams(*Graph, EntryScope);
-		for (const TPair<FString, FString>& Param : EntryScope)
+		// Parameters, on the entry node, in order.
+		TArray<FBangoEntryParam> EntryParams;
+		Bango::ReadEntryParams(Graph->Nodes[0].Text, Graph->bIsFunction, EntryParams);
+		for (int32 i = 0; i < EntryParams.Num(); ++i)
 		{
-			Add(Params, Param.Key, Param.Value, FBangoGraphVariable::EKind::Param, GraphIndex, 0);
+			Add(Params, EntryParams[i].Name, EntryParams[i].Type, FBangoGraphVariable::EKind::Param, GraphIndex, i);
 		}
 
-		// Locals this graph declares.
+		// The locals declared at the top of the graph, in order.
+		for (int32 i = 0; i < Graph->Locals.Num(); ++i)
+		{
+			Add(Locals, Graph->Locals[i].Name, Graph->Locals[i].Type, FBangoGraphVariable::EKind::Local, GraphIndex, i);
+		}
+
+		// Loop variables, in node order (a name used by two loops is listed once, for the first).
+		TArray<FBangoGraphVariable> Loops;
 		for (int32 i = 1; i < Graph->Nodes.Num(); ++i)
 		{
 			const FBangoGraphNode& Node = Graph->Nodes[i];
 			bool bGlobal = false;
 			FString Type;
 			FString Name;
-			if ((Node.Kind == EBangoGraphNodeKind::VarDecl || Node.Kind == EBangoGraphNodeKind::For)
-				&& ReadDeclaration(Node.Text, bGlobal, Type, Name) && !bGlobal)
+			if (Node.Kind == EBangoGraphNodeKind::For && ReadDeclaration(Node.Text, bGlobal, Type, Name) && !bGlobal)
 			{
-				Add(Locals, Name, Type, FBangoGraphVariable::EKind::Local, GraphIndex, i);
+				Add(Loops, Name, Type, FBangoGraphVariable::EKind::Loop, GraphIndex, i);
 			}
 			else if (Node.Kind == EBangoGraphNodeKind::ForEach)
 			{
@@ -1197,32 +1141,20 @@ namespace Bango
 				{
 					const TMap<FString, FString>* Visible = Context.VisibleVariables.Find(Node.NodeID);
 					const FString ArrayText = Tok.Field(TEXT("Array"), FString(), 2, Tok.Num()).Text;
-					Add(Locals, Tok.T[0].Text, Visible ? ElementTypeOf(ResolveVariableType(ArrayText, *Visible)) : FString(),
-						FBangoGraphVariable::EKind::Local, GraphIndex, i);
+					Add(Loops, Tok.T[0].Text, Visible ? ElementTypeOf(ResolveVariableType(ArrayText, *Visible)) : FString(),
+						FBangoGraphVariable::EKind::Loop, GraphIndex, i);
 				}
 			}
 		}
 
-		// Where each global is declared in the file (the first declaration), and its type.
-		struct FGlobalDecl { FString Type; int32 InGraph; int32 AtNode; };
-		TMap<FString, FGlobalDecl> Declared;
-		for (int32 g = INDEX_NONE; g < Document.Functions.Num(); ++g)
+		// The file's globals, in order, then the ones this graph uses but the file doesn't declare: names that
+		// aren't locals (no `_`), calls (followed by `(`), vector parts (after `.`), or labels (Label and Go To
+		// nodes hold only a label's name).
+		for (int32 i = 0; i < Document.Globals.Num(); ++i)
 		{
-			const FBangoGraph& Each = g == INDEX_NONE ? Document.Main : Document.Functions[g];
-			for (int32 i = 1; i < Each.Nodes.Num(); ++i)
-			{
-				bool bGlobal = false;
-				FString Type;
-				FString Name;
-				if (Each.Nodes[i].Kind == EBangoGraphNodeKind::VarDecl && ReadDeclaration(Each.Nodes[i].Text, bGlobal, Type, Name) && bGlobal && !Declared.Contains(Name))
-				{
-					Declared.Add(Name, FGlobalDecl{ Type, g, i });
-				}
-			}
+			Add(Globals, Document.Globals[i].Name, Document.Globals[i].Type, FBangoGraphVariable::EKind::Global, INDEX_NONE, i);
 		}
-
-		// Globals this graph uses: names that aren't locals (no `_`), calls (followed by `(`), vector parts (after `.`),
-		// or labels (Label and Go To nodes hold only a label's name).
+		TArray<FBangoGraphVariable> Undeclared;
 		for (int32 i = 1; i < Graph->Nodes.Num(); ++i)
 		{
 			const FBangoGraphNode& Node = Graph->Nodes[i];
@@ -1238,19 +1170,17 @@ namespace Bango
 				{
 					continue;
 				}
-				const FGlobalDecl* Decl = Declared.Find(Name);
-				Add(Globals, Name, Decl ? Decl->Type : FString(), FBangoGraphVariable::EKind::Global,
-					Decl ? Decl->InGraph : INDEX_NONE, Decl ? Decl->AtNode : INDEX_NONE);
+				Add(Undeclared, Name, FString(), FBangoGraphVariable::EKind::Global, INDEX_NONE, INDEX_NONE);
 			}
 		}
-
 		auto ByName = [](const FBangoGraphVariable& A, const FBangoGraphVariable& B) { return A.Name.Compare(B.Name, ESearchCase::IgnoreCase) < 0; };
-		Params.StableSort(ByName);
-		Locals.StableSort(ByName);
-		Globals.StableSort(ByName);
+		Undeclared.StableSort(ByName);
+
 		OutVariables.Append(Params);
 		OutVariables.Append(Locals);
+		OutVariables.Append(Loops);
 		OutVariables.Append(Globals);
+		OutVariables.Append(Undeclared);
 	}
 
 	FBangoNodeLayoutContext MakeNodeLayoutContext(const FBangoGraphDocument& Document, const IBangoCommandLookup* Commands)

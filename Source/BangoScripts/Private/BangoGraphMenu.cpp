@@ -7,9 +7,13 @@
 
 namespace BangoGraphMenuPrivate
 {
-	/** Every name written in the document's nodes, so made-up names don't clash with anything. */
+	/** Every name written in the graph's nodes and declared at its top, so made-up names don't clash with anything. */
 	static void AddNamesInGraph(const FBangoGraph& Graph, TSet<FString>& Used)
 	{
+		for (const FBangoGraphDecl& Local : Graph.Locals)
+		{
+			Used.Add(Local.Name);
+		}
 		for (const FBangoGraphNode& Node : Graph.Nodes)
 		{
 			FBangoLexResult Lexed;
@@ -141,6 +145,10 @@ namespace Bango
 
 		OutEntries.Reset();
 		TSet<FString> Used;
+		for (const FBangoGraphDecl& Global : Document.Globals)
+		{
+			Used.Add(Global.Name);
+		}
 		AddNamesInGraph(Document.Main, Used);
 		for (const FBangoGraph& Function : Document.Functions)
 		{
@@ -180,24 +188,7 @@ namespace Bango
 		Menu.Add(Flow, EBangoGraphNodeKind::Reroute, FString(), TEXT("knot wire"))
 			.Description = TEXT("A bend in a wire, to tidy the graph. It does nothing when the script runs.");
 
-		// ---- Variables and globals: a Declare node per type ----
-		static const EBangoBaseType Types[] =
-		{
-			EBangoBaseType::Bool, EBangoBaseType::Int, EBangoBaseType::Double, EBangoBaseType::String,
-			EBangoBaseType::Text, EBangoBaseType::Entity, EBangoBaseType::Vector2, EBangoBaseType::Vector3,
-		};
-		for (const EBangoBaseType Base : Types)
-		{
-			for (int32 Depth = 0; Depth <= 1; ++Depth)
-			{
-				const FBangoType Type = Depth == 0 ? FBangoType(Base) : FBangoType::ArrayOf(Base);
-				const FString BaseName = CapitalizeFirst(FBangoType(Base).ToString()) + (Depth > 0 ? TEXT("List") : TEXT(""));
-				const FString Local = MakeUniqueName(TEXT("_new") + BaseName, Used);
-				const FString Global = MakeUniqueName(TEXT("new") + BaseName, Used);
-				Menu.Add(TEXT("Variables"), EBangoGraphNodeKind::VarDecl, FString::Printf(TEXT("%s %s"), *Type.ToString(), *Local), TEXT("declare local variable"));
-				Menu.Add(TEXT("Globals"), EBangoGraphNodeKind::VarDecl, FString::Printf(TEXT("global %s %s"), *Type.ToString(), *Global), TEXT("declare global variable"));
-			}
-		}
+		// ---- Variables (declared in the editor's Globals and Locals lists, not by nodes) ----
 		const FString Vars = TEXT("Variables");
 		Menu.Add(Vars, EBangoGraphNodeKind::Assign, TEXT("="), TEXT("set assign =")).Description = TEXT("Gives a variable a new value.");
 		Menu.Add(Vars, EBangoGraphNodeKind::Assign, TEXT("+="), TEXT("add plus +=")).Description = TEXT("Adds a value to a variable.");

@@ -314,8 +314,8 @@ namespace Bango
 			Result += TEXT(")");
 			return Result;
 		}
-		case EBangoExprKind::IsDefined:
-			return FString::Printf(TEXT("(isdefined %s)"), *DumpExpr(*Expr.As<FBangoIsDefinedExpr>()->Operand));
+		case EBangoExprKind::IsNil:
+			return FString::Printf(TEXT("(isnil %s)"), *DumpExpr(*Expr.As<FBangoIsNilExpr>()->Operand));
 		case EBangoExprKind::Member:
 		{
 			const FBangoMemberExpr& E = *Expr.As<FBangoMemberExpr>();

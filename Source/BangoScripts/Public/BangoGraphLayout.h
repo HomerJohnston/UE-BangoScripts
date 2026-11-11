@@ -159,16 +159,18 @@ struct BANGOSCRIPTS_API FBangoNodeLayoutContext
 	const FBangoCommandSignature* FindFunction(const FString& Name) const;
 };
 
-/** A variable the editor's VARIABLES list shows for a graph (see Bango::GetGraphVariables). */
+/** A variable of a graph, for the editor's Inputs, Locals and Globals lists (see Bango::GetGraphVariables). */
 struct BANGOSCRIPTS_API FBangoGraphVariable
 {
 	enum class EKind : uint8
 	{
-		/** A parameter of the script (main graph) or of the function. */
+		/** A parameter of the script (main graph) or of the function. Index: its position. */
 		Param,
-		/** A local declared in the graph: a Declare node, a For's counter, or a For Each's variable. */
+		/** A local declared at the top of the graph. Index: into the graph's Locals. */
 		Local,
-		/** A global the graph declares or uses. */
+		/** A For's counter or a For Each's variable. Index: the loop's node. */
+		Loop,
+		/** One of the file's globals (Index: into the document's Globals), or one the graph uses that the file doesn't declare (Index: INDEX_NONE). */
 		Global,
 	};
 
@@ -176,10 +178,10 @@ struct BANGOSCRIPTS_API FBangoGraphVariable
 	/** "int", "string[]", ...; empty if it can't be told (like a global declared only by another script). */
 	FString Type;
 	EKind Kind = EKind::Local;
-	/** Where it's declared: a graph (INDEX_NONE for the main graph, else a function's index) and a node in it. */
+	/** The graph it belongs to: INDEX_NONE for the main graph (and for globals), else a function's index. */
 	int32 DeclGraph = INDEX_NONE;
-	/** INDEX_NONE if it isn't declared anywhere in the file (a global from another script, or a typo). */
-	int32 DeclNode = INDEX_NONE;
+	/** See EKind. INDEX_NONE for a global the file doesn't declare (another script's, or a typo). */
+	int32 Index = INDEX_NONE;
 };
 
 /** A text literal as written: `LOCTEXT("Key", "Source")` and its NS / NOTE forms (spec section 3). */
@@ -205,9 +207,10 @@ namespace Bango
 	BANGOSCRIPTS_API bool LayoutContextsMatch(const FBangoNodeLayoutContext& A, const FBangoNodeLayoutContext& B);
 
 	/**
-	 * The variables of one graph (INDEX_NONE for the main graph, else a function's index): its parameters, the locals
-	 * it declares, and the globals it declares or uses, each once (the first declaration wins), in that order and
-	 * sorted by name within each kind. Context gives the types (from MakeNodeLayoutContext for the same document).
+	 * The variables of one graph (INDEX_NONE for the main graph, else a function's index), each name once: its
+	 * parameters and its locals in order, its loop variables in node order, the file's globals in order, then the
+	 * globals the graph uses that the file doesn't declare, sorted by name. Context gives the loop variables' types
+	 * (from MakeNodeLayoutContext for the same document).
 	 */
 	BANGOSCRIPTS_API void GetGraphVariables(const FBangoGraphDocument& Document, int32 Graph, const FBangoNodeLayoutContext& Context, TArray<FBangoGraphVariable>& OutVariables);
 

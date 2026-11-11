@@ -9,6 +9,7 @@
 #include "BangoParser.h"
 #include "BangoProgram.h"
 #include "BangoSettings.h"
+#include "BangoTypes.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphUtilities.h"
@@ -176,7 +177,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 				.Orientation(Orient_Vertical)
 
 				+ SSplitter::Slot()
-				.Value(0.33f)
+				.Value(0.25f)
 				[
 					SNew(SVerticalBox)
 					+ SVerticalBox::Slot()
@@ -214,7 +215,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 				]
 
 				+ SSplitter::Slot()
-				.Value(0.33f)
+				.Value(0.25f)
 				[
 					SNew(SVerticalBox)
 					+ SVerticalBox::Slot()
@@ -255,23 +256,76 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 				]
 
 				+ SSplitter::Slot()
-				.Value(0.34f)
+				.Value(0.25f)
 				[
 					SNew(SVerticalBox)
 					+ SVerticalBox::Slot()
 					.AutoHeight()
 					.Padding(6.0f, 4.0f)
 					[
-						SectionHeader(LOCTEXT("VariablesHeading", "VARIABLES"), SNullWidget::NullWidget)
+						SectionHeader(LOCTEXT("GlobalsHeading", "GLOBALS"),
+							SNew(SButton)
+							.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+							.ContentPadding(FMargin(4.0f, 0.0f))
+							.ToolTipText(LOCTEXT("GlobalsHeadingAddTooltip", "Declare a global: a variable shared by every script, which keeps its value between levels. It starts as nil until something sets it."))
+							.IsEnabled_Lambda([this]() { return GetShownEntryNode() != nullptr; })
+							.OnClicked_Lambda([this]() { return OnAddDeclClicked(true); })
+							[
+								SNew(STextBlock).Text(LOCTEXT("GlobalsHeadingAdd", "+ Add"))
+							])
 					]
 					+ SVerticalBox::Slot()
 					.FillHeight(1.0f)
 					[
-						SAssignNew(VariableList, SListView<TSharedPtr<FBangoGraphVariable>>)
-						.ListItemsSource(&VariableItems)
+						SAssignNew(GlobalList, SListView<TSharedPtr<FDeclEntry>>)
+						.ListItemsSource(&GlobalItems)
 						.SelectionMode(ESelectionMode::Single)
-						.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateVariableRow)
-						.OnMouseButtonClick(this, &SBangoScriptEditor::OnVariableClicked)
+						.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateDeclRow)
+						.OnMouseButtonClick(this, &SBangoScriptEditor::OnDeclClicked)
+						.OnMouseButtonDoubleClick_Lambda([](TSharedPtr<FDeclEntry> Item)
+						{
+							if (TSharedPtr<SInlineEditableTextBlock> Name = Item.IsValid() ? Item->NameWidget.Pin() : nullptr)
+							{
+								Name->EnterEditingMode(); // double-click renames
+							}
+						})
+					]
+				]
+
+				+ SSplitter::Slot()
+				.Value(0.25f)
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(6.0f, 4.0f)
+					[
+						SectionHeader(LOCTEXT("LocalsHeading", "LOCALS"),
+							SNew(SButton)
+							.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+							.ContentPadding(FMargin(4.0f, 0.0f))
+							.ToolTipText(LOCTEXT("LocalsHeadingAddTooltip", "Add a local to this graph, with the value it starts with."))
+							.IsEnabled_Lambda([this]() { return GetShownEntryNode() != nullptr; })
+							.OnClicked_Lambda([this]() { return OnAddDeclClicked(false); })
+							[
+								SNew(STextBlock).Text(LOCTEXT("LocalsHeadingAdd", "+ Add"))
+							])
+					]
+					+ SVerticalBox::Slot()
+					.FillHeight(1.0f)
+					[
+						SAssignNew(LocalList, SListView<TSharedPtr<FDeclEntry>>)
+						.ListItemsSource(&LocalItems)
+						.SelectionMode(ESelectionMode::Single)
+						.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateDeclRow)
+						.OnMouseButtonClick(this, &SBangoScriptEditor::OnDeclClicked)
+						.OnMouseButtonDoubleClick_Lambda([](TSharedPtr<FDeclEntry> Item)
+						{
+							if (TSharedPtr<SInlineEditableTextBlock> Name = Item.IsValid() ? Item->NameWidget.Pin() : nullptr)
+							{
+								Name->EnterEditingMode(); // double-click renames
+							}
+						})
 					]
 				]
 			]
@@ -759,14 +813,17 @@ namespace BangoScriptEditorPrivate
 	public:
 		DRAG_DROP_OPERATOR_TYPE(FBangoInputDragDrop, FDecoratedDragDropOp)
 
-		/** The script editor it came from: inputs only move within their own list. */
+		/** The script editor it came from: rows only move within their own list. */
 		TWeakPtr<SWidget> Editor;
+		/** Which list: 0 Inputs, 1 Globals, 2 Locals. */
+		int32 List = 0;
 		int32 Index = INDEX_NONE;
 
-		static TSharedRef<FBangoInputDragDrop> New(const TSharedRef<SWidget>& InEditor, int32 InIndex, const FString& Name)
+		static TSharedRef<FBangoInputDragDrop> New(const TSharedRef<SWidget>& InEditor, int32 InList, int32 InIndex, const FString& Name)
 		{
 			TSharedRef<FBangoInputDragDrop> Op = MakeShared<FBangoInputDragDrop>();
 			Op->Editor = InEditor;
+			Op->List = InList;
 			Op->Index = InIndex;
 			Op->MouseCursor = EMouseCursor::GrabHandClosed;
 			Op->CurrentHoverText = FText::FromString(Name);
@@ -946,7 +1003,7 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateInputRow(TSharedPtr<FInputEn
 		.OnCanAcceptDrop_Lambda([this, Index, GetDropZone](const FDragDropEvent& Event, EItemDropZone Zone, TSharedPtr<FInputEntry>) -> TOptional<EItemDropZone>
 		{
 			TSharedPtr<FBangoInputDragDrop> Op = Event.GetOperationAs<FBangoInputDragDrop>();
-			if (!Op.IsValid() || Op->Editor.Pin().Get() != this)
+			if (!Op.IsValid() || Op->Editor.Pin().Get() != this || Op->List != 0)
 			{
 				return TOptional<EItemDropZone>();
 			}
@@ -961,7 +1018,7 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateInputRow(TSharedPtr<FInputEn
 		.OnAcceptDrop_Lambda([this, Index, GetDropZone](const FDragDropEvent& Event, EItemDropZone Zone, TSharedPtr<FInputEntry>)
 		{
 			TSharedPtr<FBangoInputDragDrop> Op = Event.GetOperationAs<FBangoInputDragDrop>();
-			if (!Op.IsValid() || Op->Editor.Pin().Get() != this)
+			if (!Op.IsValid() || Op->Editor.Pin().Get() != this || Op->List != 0)
 			{
 				return FReply::Unhandled();
 			}
@@ -1024,7 +1081,7 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateInputRow(TSharedPtr<FInputEn
 				{
 					return FReply::Unhandled();
 				}
-				return FReply::Handled().BeginDragDrop(FBangoInputDragDrop::New(AsShared(), Index, ParamName));
+				return FReply::Handled().BeginDragDrop(FBangoInputDragDrop::New(AsShared(), 0, Index, ParamName));
 			})
 		]
 		// The type's icon is a button: its menu changes the type.
@@ -1122,14 +1179,19 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateInputRow(TSharedPtr<FInputEn
 TSharedRef<SWidget> SBangoScriptEditor::MakeInputTypeMenu(int32 Index)
 {
 	const FString Current = InputItems.IsValidIndex(Index) ? InputItems[Index]->Param.Type : FString();
+	return MakeTypeMenu(Current, [this, Index](const FString& Type) { SetInputType(Index, Type); });
+}
+
+TSharedRef<SWidget> SBangoScriptEditor::MakeTypeMenu(const FString& Current, TFunction<void(const FString&)> OnPick)
+{
 	FMenuBuilder Menu(/*bShouldCloseWindowAfterMenuSelection*/ true, nullptr);
-	auto AddType = [this, Index, &Menu, &Current](const FString& Type)
+	auto AddType = [&Menu, &Current, &OnPick](const FString& Type)
 	{
 		FLinearColor Tint = FLinearColor::White;
 		const FSlateBrush* TypeIcon = BangoScriptEditorPrivate::GetTypeIcon(Type, Tint);
 		Menu.AddMenuEntry(
 			FUIAction(
-				FExecuteAction::CreateLambda([this, Index, Type]() { SetInputType(Index, Type); }),
+				FExecuteAction::CreateLambda([OnPick, Type]() { OnPick(Type); }),
 				FCanExecuteAction(),
 				FIsActionChecked::CreateLambda([Current, Type]() { return Current == Type; })),
 			SNew(SHorizontalBox)
@@ -1309,9 +1371,9 @@ FString SBangoScriptEditor::CheckInputName(int32 Index, const FString& NewName) 
 	}
 	for (const TSharedPtr<FBangoGraphVariable>& Variable : VariableItems)
 	{
-		if (Variable->Kind == FBangoGraphVariable::EKind::Local && Variable->Name.Equals(NewName, ESearchCase::CaseSensitive))
+		if ((Variable->Kind == FBangoGraphVariable::EKind::Local || Variable->Kind == FBangoGraphVariable::EKind::Loop) && Variable->Name.Equals(NewName, ESearchCase::CaseSensitive))
 		{
-			return FString::Printf(TEXT("This graph already declares a local called %s."), *NewName);
+			return FString::Printf(TEXT("This graph already has a local called %s."), *NewName);
 		}
 	}
 	return FString();
@@ -1378,7 +1440,7 @@ bool SBangoScriptEditor::ApplyInputs(const TArray<FBangoEntryParam>& Params, con
 	return true;
 }
 
-// ---- VARIABLES ----
+// ---- GLOBALS and LOCALS ----
 
 void SBangoScriptEditor::UpdateVariablesNow()
 {
@@ -1396,119 +1458,631 @@ void SBangoScriptEditor::UpdateVariables(const FBangoGraphDocument& Document, co
 	if (EdGraphs.IsValidIndex(ShownGraph))
 	{
 		Bango::GetGraphVariables(Document, ShownGraph == 0 ? INDEX_NONE : ShownGraph - 1, Context, Variables);
-		// Parameters are listed in INPUTS, so VARIABLES leaves them out.
-		Variables.RemoveAll([](const FBangoGraphVariable& Each) { return Each.Kind == FBangoGraphVariable::EKind::Param; });
-	}
-	// Only rebuild the rows when something changed, so the list doesn't flicker or lose its scroll position.
-	bool bSame = Variables.Num() == VariableItems.Num();
-	for (int32 i = 0; bSame && i < Variables.Num(); ++i)
-	{
-		const FBangoGraphVariable& A = Variables[i];
-		const FBangoGraphVariable& B = *VariableItems[i];
-		bSame = A.Name == B.Name && A.Type == B.Type && A.Kind == B.Kind && A.DeclGraph == B.DeclGraph && A.DeclNode == B.DeclNode;
-	}
-	if (bSame)
-	{
-		return;
 	}
 	VariableItems.Reset();
 	for (const FBangoGraphVariable& Variable : Variables)
 	{
 		VariableItems.Add(MakeShared<FBangoGraphVariable>(Variable));
 	}
-	VariableList->RequestListRefresh();
-}
 
-TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateVariableRow(TSharedPtr<FBangoGraphVariable> Item, const TSharedRef<STableViewBase>& Owner)
-{
-	const FBangoGraphVariable Variable = Item.IsValid() ? *Item : FBangoGraphVariable();
-	FLinearColor Tint = FLinearColor::White;
-	const FSlateBrush* Icon = BangoScriptEditorPrivate::GetTypeIcon(Variable.Type, Tint);
-
-	FText Where;
-	switch (Variable.Kind)
+	// The rows: the file's globals, then (greyed) the ones the graph uses that the file doesn't declare; the graph's
+	// locals, then (greyed) its loop variables.
+	TArray<TSharedPtr<FDeclEntry>> Globals;
+	TArray<TSharedPtr<FDeclEntry>> Locals;
+	const FBangoGraph* Shown = !EdGraphs.IsValidIndex(ShownGraph) ? nullptr : ShownGraph == 0 ? &Document.Main
+		: Document.Functions.IsValidIndex(ShownGraph - 1) ? &Document.Functions[ShownGraph - 1] : nullptr;
+	if (Shown)
 	{
-	case FBangoGraphVariable::EKind::Param:
-		Where = ShownGraph == 0 ? LOCTEXT("ScriptParam", "A parameter of the script.") : LOCTEXT("FunctionParam", "A parameter of the function.");
-		break;
-	case FBangoGraphVariable::EKind::Local:
-		Where = LOCTEXT("Local", "A local, declared in this graph.");
-		break;
-	default:
-		Where = Variable.DeclNode == INDEX_NONE
-			? LOCTEXT("ForeignGlobal", "A global this script doesn't declare (another script or a Blueprint may; or it's a typo).")
-			: LOCTEXT("Global", "A global, declared in this script.");
-		break;
-	}
-	const FText Tooltip = FText::Format(LOCTEXT("VariableTooltip", "{0} ({1})\n{2}{3}"),
-		FText::FromString(Variable.Name), FText::FromString(Variable.Type.IsEmpty() ? TEXT("type unknown") : Variable.Type), Where,
-		Variable.DeclNode == INDEX_NONE ? LOCTEXT("DragOnly", "\nDrag it onto the graph to add a node that uses it.") : LOCTEXT("ClickToJump", "\nClick to show where it's declared, or drag it onto the graph to add a node that uses it."));
-
-	return SNew(STableRow<TSharedPtr<FBangoGraphVariable>>, Owner)
-		.Padding(FMargin(6.0f, 2.0f))
-		.ToolTipText(Tooltip)
-		// Dragged onto the graph, a variable offers the nodes that work on it.
-		.OnDragDetected_Lambda([this, Variable](const FGeometry&, const FPointerEvent& MouseEvent)
+		for (int32 i = 0; i < Document.Globals.Num(); ++i)
 		{
-			if (!MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+			TSharedPtr<FDeclEntry> Item = MakeShared<FDeclEntry>();
+			Item->bGlobal = true;
+			Item->Index = i;
+			Item->Decl = Document.Globals[i];
+			Globals.Add(Item);
+		}
+		for (int32 i = 0; i < Shown->Locals.Num(); ++i)
+		{
+			TSharedPtr<FDeclEntry> Item = MakeShared<FDeclEntry>();
+			Item->Index = i;
+			Item->Decl = Shown->Locals[i];
+			Locals.Add(Item);
+		}
+		for (const FBangoGraphVariable& Variable : Variables)
+		{
+			const bool bUndeclared = Variable.Kind == FBangoGraphVariable::EKind::Global && Variable.Index == INDEX_NONE;
+			if (!bUndeclared && Variable.Kind != FBangoGraphVariable::EKind::Loop)
 			{
-				return FReply::Unhandled();
+				continue;
 			}
-			return FReply::Handled().BeginDragDrop(BangoScriptEditorPrivate::FBangoVariableDragDrop::New(AsShared(), Variable.Name, Variable.Type, GetShownGraphNames()));
-		})
-		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			.Padding(0.0f, 0.0f, 6.0f, 0.0f)
-			[
-				SNew(SImage)
-				.Image(Icon)
-				.ColorAndOpacity(Tint)
-			]
-			+ SHorizontalBox::Slot()
-			.FillWidth(1.0f)
-			.VAlign(VAlign_Center)
-			[
-				SNew(STextBlock)
-				.Text(FText::FromString(Variable.Name))
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			.Padding(6.0f, 0.0f, 0.0f, 0.0f)
-			[
-				SNew(STextBlock)
-				.Text(FText::FromString(Variable.Kind == FBangoGraphVariable::EKind::Global ? FString(TEXT("global ")) + Variable.Type : Variable.Type))
-				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-			]
-		];
+			TSharedPtr<FDeclEntry> Item = MakeShared<FDeclEntry>();
+			Item->bGlobal = bUndeclared;
+			Item->bReadOnly = true;
+			Item->Decl.Name = Variable.Name;
+			Item->Decl.Type = Variable.Type;
+			Item->LoopNode = bUndeclared ? INDEX_NONE : Variable.Index;
+			(bUndeclared ? Globals : Locals).Add(Item);
+		}
+	}
+
+	// Only make the rows again when something changed, so the lists don't flicker or lose their scroll position.
+	FString Shape = FString::Printf(TEXT("%d|"), ShownGraph);
+	for (const TArray<TSharedPtr<FDeclEntry>>* List : { &Globals, &Locals })
+	{
+		for (const TSharedPtr<FDeclEntry>& Item : *List)
+		{
+			Shape += FString::Printf(TEXT("%d %d %d %s %s %d %s %s|"), Item->bGlobal ? 1 : 0, Item->Index, Item->bReadOnly ? 1 : 0, *Item->Decl.Type, *Item->Decl.Name,
+				Item->Decl.bHasValue ? 1 : 0, *Item->Decl.Value, *Item->Decl.Comment);
+		}
+		Shape += TEXT("#");
+	}
+	if (Shape == DeclsShown)
+	{
+		return;
+	}
+	DeclsShown = Shape;
+	GlobalItems = Globals;
+	LocalItems = Locals;
+	GlobalList->RequestListRefresh();
+	LocalList->RequestListRefresh();
+
+	// A new declaration is renamed straight away, once its row exists (next frame).
+	const TArray<TSharedPtr<FDeclEntry>>& PendingIn = bPendingDeclGlobal ? GlobalItems : LocalItems;
+	if (PendingIn.IsValidIndex(PendingDeclRename) && !PendingIn[PendingDeclRename]->bReadOnly)
+	{
+		TWeakPtr<FDeclEntry> WeakItem = PendingIn[PendingDeclRename];
+		RegisterActiveTimer(0.0f, FWidgetActiveTimerDelegate::CreateLambda([WeakItem](double, float)
+		{
+			TSharedPtr<FDeclEntry> Pinned = WeakItem.Pin();
+			if (TSharedPtr<SInlineEditableTextBlock> NameWidget = Pinned.IsValid() ? Pinned->NameWidget.Pin() : nullptr)
+			{
+				NameWidget->EnterEditingMode();
+			}
+			return EActiveTimerReturnType::Stop;
+		}));
+	}
+	PendingDeclRename = INDEX_NONE;
 }
 
-void SBangoScriptEditor::OnVariableClicked(TSharedPtr<FBangoGraphVariable> Item)
+TArray<FBangoGraphDecl> SBangoScriptEditor::GetDecls(bool bGlobal) const
 {
-	if (!Item.IsValid() || Item->DeclNode == INDEX_NONE)
+	TArray<FBangoGraphDecl> Decls;
+	const UBangoEdGraphNode* Entry = bGlobal ? (EdGraphs.Num() > 0 ? BangoScriptEditor::FindEntryNode(EdGraphs[0].Get()) : nullptr) : GetShownEntryNode();
+	if (Entry)
+	{
+		for (const FBangoEdDecl& Decl : bGlobal ? Entry->Globals : Entry->Locals)
+		{
+			Decls.Add(Decl.ToGraphDecl());
+		}
+	}
+	return Decls;
+}
+
+bool SBangoScriptEditor::ApplyDecls(bool bGlobal, const TArray<FBangoGraphDecl>& Decls, const FText& Description, const FString& RenamedFrom, const FString& RenamedTo)
+{
+	const int32 TargetGraph = bGlobal ? 0 : ShownGraph;
+	UBangoEdGraphNode* Entry = EdGraphs.IsValidIndex(TargetGraph) ? BangoScriptEditor::FindEntryNode(EdGraphs[TargetGraph].Get()) : nullptr;
+	if (!Entry)
+	{
+		return false;
+	}
+	const FScopedTransaction Transaction(Description);
+	Entry->Modify();
+	TArray<FBangoEdDecl>& Target = bGlobal ? Entry->Globals : Entry->Locals;
+	Target.Reset();
+	for (const FBangoGraphDecl& Decl : Decls)
+	{
+		Target.Add(FBangoEdDecl::From(Decl));
+	}
+
+	if (!RenamedFrom.IsEmpty())
+	{
+		// A global is visible in every graph; a local only in its own.
+		for (int32 g = 0; g < EdGraphs.Num(); ++g)
+		{
+			if (!bGlobal && g != ShownGraph)
+			{
+				continue;
+			}
+			UEdGraph* Graph = EdGraphs[g].Get();
+			for (UEdGraphNode* Node : Graph->Nodes)
+			{
+				UBangoEdGraphNode* BangoNode = Cast<UBangoEdGraphNode>(Node);
+				if (!BangoNode || BangoNode->IsEntry() || BangoNode->GetKind() == EBangoGraphNodeKind::Label || BangoNode->GetKind() == EBangoGraphNodeKind::Goto)
+				{
+					continue; // a label's name isn't a variable
+				}
+				FString NodeText = BangoNode->Text;
+				FString Problem;
+				if (Bango::RenameVariableInText(NodeText, RenamedFrom, RenamedTo) && Bango::ValidateNodeText(BangoNode->GetKind(), g > 0, NodeText, Problem))
+				{
+					BangoNode->Modify();
+					BangoNode->Text = NodeText;
+					BangoNode->UpdateLayout();
+					Graph->NotifyNodeChanged(BangoNode);
+				}
+			}
+		}
+	}
+	UpdateVariablesNow();
+	return true;
+}
+
+FReply SBangoScriptEditor::OnAddDeclClicked(bool bGlobal)
+{
+	if (!GetShownEntryNode())
+	{
+		return FReply::Handled();
+	}
+	TArray<FBangoGraphDecl> Decls = GetDecls(bGlobal);
+	TSet<FString> Used = GetShownGraphNames();
+	for (const FBangoGraphDecl& Global : GetDecls(true))
+	{
+		Used.Add(Global.Name);
+	}
+	for (const TSharedPtr<FGraphEntry>& Function : FunctionItems)
+	{
+		Used.Add(Function->Label);
+	}
+	FBangoGraphDecl& Added = Decls.AddDefaulted_GetRef();
+	Added.Type = TEXT("bool");
+	Added.Name = Bango::MakeUniqueName(bGlobal ? TEXT("newGlobal") : TEXT("_newLocal"), Used);
+	bPendingDeclGlobal = bGlobal;
+	PendingDeclRename = Decls.Num() - 1;
+	if (!ApplyDecls(bGlobal, Decls, bGlobal ? LOCTEXT("AddGlobalTransaction", "Add Bango Global") : LOCTEXT("AddLocalTransaction", "Add Bango Local")))
+	{
+		PendingDeclRename = INDEX_NONE;
+	}
+	return FReply::Handled();
+}
+
+void SBangoScriptEditor::DeclareGlobal(const FString& Name, const FString& Type)
+{
+	TArray<FBangoGraphDecl> Decls = GetDecls(true);
+	FBangoGraphDecl& Added = Decls.AddDefaulted_GetRef();
+	Added.Type = Type;
+	Added.Name = Name;
+	ApplyDecls(true, Decls, LOCTEXT("DeclareGlobalTransaction", "Declare Bango Global"));
+}
+
+bool SBangoScriptEditor::IsGlobalUsed(const FString& Name) const
+{
+	for (const TStrongObjectPtr<UEdGraph>& Graph : EdGraphs)
+	{
+		for (const UEdGraphNode* Node : Graph->Nodes)
+		{
+			const UBangoEdGraphNode* BangoNode = Cast<UBangoEdGraphNode>(Node);
+			FString Text = BangoNode && !BangoNode->IsEntry() ? BangoNode->Text : FString();
+			if (BangoNode && BangoNode->GetKind() != EBangoGraphNodeKind::Label && BangoNode->GetKind() != EBangoGraphNodeKind::Goto
+				&& Bango::RenameVariableInText(Text, Name, Name + TEXT("_")))
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+void SBangoScriptEditor::DeleteDecl(bool bGlobal, int32 Index)
+{
+	TArray<FBangoGraphDecl> Decls = GetDecls(bGlobal);
+	if (!Decls.IsValidIndex(Index))
+	{
+		return;
+	}
+	if (bGlobal && IsGlobalUsed(Decls[Index].Name))
+	{
+		const EAppReturnType::Type Answer = FMessageDialog::Open(EAppMsgType::YesNo, FText::Format(
+			LOCTEXT("DeleteGlobalConfirm", "This script uses the global {0}. Remove its declaration anyway?\n\nIts uses are left alone, and won't compile until it's declared again (or they're changed)."),
+			FText::FromString(Decls[Index].Name)));
+		if (Answer != EAppReturnType::Yes)
+		{
+			return;
+		}
+	}
+	Decls.RemoveAt(Index);
+	ApplyDecls(bGlobal, Decls, bGlobal ? LOCTEXT("DeleteGlobalTransaction", "Remove Bango Global") : LOCTEXT("DeleteLocalTransaction", "Remove Bango Local"));
+}
+
+void SBangoScriptEditor::SetDeclType(bool bGlobal, int32 Index, const FString& Type)
+{
+	TArray<FBangoGraphDecl> Decls = GetDecls(bGlobal);
+	if (!Decls.IsValidIndex(Index) || Decls[Index].Type == Type)
+	{
+		return;
+	}
+	Decls[Index].Type = Type;
+	// A starting value made for the old type rarely fits the new one (nil fits any type).
+	if (Decls[Index].bHasValue && Decls[Index].Value != TEXT("nil"))
+	{
+		Decls[Index].bHasValue = false;
+		Decls[Index].Value.Reset();
+	}
+	ApplyDecls(bGlobal, Decls, bGlobal ? LOCTEXT("SetGlobalTypeTransaction", "Change Bango Global Type") : LOCTEXT("SetLocalTypeTransaction", "Change Bango Local Type"));
+}
+
+void SBangoScriptEditor::SetDeclValue(int32 Index, const FString& Typed)
+{
+	TArray<FBangoGraphDecl> Decls = GetDecls(false);
+	if (!Decls.IsValidIndex(Index))
+	{
+		return;
+	}
+	FBangoGraphDecl& Decl = Decls[Index];
+	// Typed like a node's field: a string or a text as plain text (or =expression), anything else as code.
+	FBangoNodeField Field;
+	Field.bHasValue = true;
+	Field.bOptional = true;
+	Field.bPresent = Decl.bHasValue;
+	Field.TypeHint = Decl.Type;
+	Field.Text = Decl.Value;
+	const FString Value = Bango::GetFieldValueFromTyped(Field, Typed).TrimStartAndEnd();
+	const bool bHasValue = !Value.IsEmpty();
+	if (bHasValue == Decl.bHasValue && (!bHasValue || Value == Decl.Value))
+	{
+		return;
+	}
+	FString Problem;
+	if (bHasValue && !Bango::CheckDeclValue(Decl.Type, Value, Problem))
+	{
+		Notify(FText::Format(LOCTEXT("LocalValueFailed", "Couldn't set {0}'s starting value: {1}"), FText::FromString(Decl.Name), FText::FromString(Problem)), false);
+		DeclsShown.Reset(); // the box goes back to what's declared
+		UpdateVariablesNow();
+		return;
+	}
+	Decl.bHasValue = bHasValue;
+	Decl.Value = bHasValue ? Value : FString();
+	ApplyDecls(false, Decls, LOCTEXT("SetLocalValueTransaction", "Change Bango Local Value"));
+}
+
+void SBangoScriptEditor::MoveDecl(bool bGlobal, int32 From, int32 To)
+{
+	TArray<FBangoGraphDecl> Decls = GetDecls(bGlobal);
+	if (!Decls.IsValidIndex(From) || To < 0 || To > Decls.Num())
+	{
+		return;
+	}
+	const FBangoGraphDecl Moved = Decls[From];
+	Decls.RemoveAt(From);
+	const int32 Insert = From < To ? To - 1 : To;
+	if (Insert == From)
+	{
+		return;
+	}
+	Decls.Insert(Moved, Insert);
+	ApplyDecls(bGlobal, Decls, bGlobal ? LOCTEXT("MoveGlobalTransaction", "Reorder Bango Globals") : LOCTEXT("MoveLocalTransaction", "Reorder Bango Locals"));
+}
+
+FString SBangoScriptEditor::CheckDeclName(bool bGlobal, int32 Index, const FString& NewName) const
+{
+	const TArray<FBangoGraphDecl> Decls = GetDecls(bGlobal);
+	if (!Decls.IsValidIndex(Index) || NewName.Equals(Decls[Index].Name, ESearchCase::CaseSensitive))
+	{
+		return FString();
+	}
+	if (bGlobal)
+	{
+		if (!Bango::IsValidGlobalName(NewName))
+		{
+			return TEXT("A global's name has letters, digits and _, doesn't start with _ or a digit, and isn't a keyword (like gold or questLog).");
+		}
+	}
+	else if (!Bango::IsValidIdentifier(NewName) || !Bango::IsLocalName(NewName) || NewName.Len() < 2)
+	{
+		return TEXT("A local's name starts with _ and has only letters, digits and _ (like _count).");
+	}
+	for (int32 i = 0; i < Decls.Num(); ++i)
+	{
+		if (i != Index && Decls[i].Name.Equals(NewName, ESearchCase::CaseSensitive))
+		{
+			return FString::Printf(TEXT("There's already a %s called %s."), bGlobal ? TEXT("global") : TEXT("local"), *NewName);
+		}
+	}
+	if (!bGlobal)
+	{
+		for (const TSharedPtr<FBangoGraphVariable>& Variable : VariableItems)
+		{
+			if ((Variable->Kind == FBangoGraphVariable::EKind::Param || Variable->Kind == FBangoGraphVariable::EKind::Loop) && Variable->Name.Equals(NewName, ESearchCase::CaseSensitive))
+			{
+				return FString::Printf(TEXT("%s is already a %s of this graph."), *NewName,
+					Variable->Kind == FBangoGraphVariable::EKind::Param ? TEXT("parameter") : TEXT("loop's variable"));
+			}
+		}
+	}
+	return FString();
+}
+
+void SBangoScriptEditor::RenameDecl(bool bGlobal, int32 Index, const FString& NewName)
+{
+	TArray<FBangoGraphDecl> Decls = GetDecls(bGlobal);
+	if (!Decls.IsValidIndex(Index) || NewName.Equals(Decls[Index].Name, ESearchCase::CaseSensitive) || !CheckDeclName(bGlobal, Index, NewName).IsEmpty())
+	{
+		return;
+	}
+	const FString OldName = Decls[Index].Name;
+	Decls[Index].Name = NewName;
+	ApplyDecls(bGlobal, Decls, bGlobal ? LOCTEXT("RenameGlobalTransaction", "Rename Bango Global") : LOCTEXT("RenameLocalTransaction", "Rename Bango Local"), OldName, NewName);
+}
+
+void SBangoScriptEditor::OnDeclClicked(TSharedPtr<FDeclEntry> Item)
+{
+	if (!Item.IsValid() || Item->LoopNode == INDEX_NONE || FSlateApplication::Get().IsDragDropping())
 	{
 		return;
 	}
 	FBangoGraphDocument Current;
 	TArray<TArray<UBangoEdGraphNode*>> Nodes;
 	FString Error;
-	const int32 GraphIndex = Item->DeclGraph == INDEX_NONE ? 0 : Item->DeclGraph + 1;
-	if (!BuildCurrentDocument(Current, &Nodes, Error) || !Nodes.IsValidIndex(GraphIndex) || !Nodes[GraphIndex].IsValidIndex(Item->DeclNode))
+	if (BuildCurrentDocument(Current, &Nodes, Error) && Nodes.IsValidIndex(ShownGraph) && Nodes[ShownGraph].IsValidIndex(Item->LoopNode) && GraphEditor.IsValid())
 	{
-		return;
+		GraphEditor->JumpToNode(Nodes[ShownGraph][Item->LoopNode], /*bRequestRename*/ false, /*bSelectNode*/ true);
 	}
-	UBangoEdGraphNode* Node = Nodes[GraphIndex][Item->DeclNode];
-	if (GraphIndex != ShownGraph)
+}
+
+TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateDeclRow(TSharedPtr<FDeclEntry> Item, const TSharedRef<STableViewBase>& Owner)
+{
+	using namespace BangoScriptEditorPrivate;
+	const FDeclEntry Entry = Item.IsValid() ? *Item : FDeclEntry();
+	const bool bGlobal = Entry.bGlobal;
+	const int32 Index = Entry.Index;
+	const int32 ListId = bGlobal ? 1 : 2;
+	FLinearColor Tint = FLinearColor::White;
+	const FSlateBrush* Icon = GetTypeIcon(Entry.Decl.Type, Tint);
+
+	typedef STableRow<TSharedPtr<FDeclEntry>> FDeclRow;
+	TSharedRef<TWeakPtr<FDeclRow>> RowHolder = MakeShared<TWeakPtr<FDeclRow>>();
+	auto GetDropZone = [RowHolder](const FDragDropEvent& Event, EItemDropZone Zone)
 	{
-		ShowGraph(GraphIndex);
-	}
-	if (GraphEditor.IsValid())
+		if (TSharedPtr<FDeclRow> Pinned = RowHolder->Pin())
+		{
+			const FGeometry& Geometry = Pinned->GetTickSpaceGeometry();
+			return Geometry.AbsoluteToLocal(Event.GetScreenSpacePosition()).Y < Geometry.GetLocalSize().Y * 0.5f ? EItemDropZone::AboveItem : EItemDropZone::BelowItem;
+		}
+		return Zone == EItemDropZone::AboveItem ? EItemDropZone::AboveItem : EItemDropZone::BelowItem;
+	};
+	TSharedRef<FDeclRow> Row = SNew(FDeclRow, Owner)
+		.Padding(FMargin(2.0f, 2.0f, 6.0f, 2.0f))
+		.ToolTipText(Entry.bReadOnly
+			? (bGlobal
+				? LOCTEXT("UndeclaredGlobalTooltip", "Used here, but this script doesn't declare it: another script or a Blueprint may (or it's a typo). Click + to declare it here. Drag it onto the graph to use it.")
+				: LOCTEXT("LoopVariableTooltip", "A loop's variable, declared by its For or For Each node. Click to show the loop. Drag it onto the graph to use it."))
+			: FText::FromString(Entry.Decl.Comment))
+		// Dragged by anything but its handle, a variable goes onto the graph.
+		.OnDragDetected_Lambda([this, Entry](const FGeometry&, const FPointerEvent& MouseEvent)
+		{
+			if (!MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+			{
+				return FReply::Unhandled();
+			}
+			return FReply::Handled().BeginDragDrop(FBangoVariableDragDrop::New(AsShared(), Entry.Decl.Name, Entry.Decl.Type, GetShownGraphNames()));
+		})
+		.OnCanAcceptDrop_Lambda([this, Index, ListId, GetDropZone](const FDragDropEvent& Event, EItemDropZone Zone, TSharedPtr<FDeclEntry>) -> TOptional<EItemDropZone>
+		{
+			TSharedPtr<FBangoInputDragDrop> Op = Event.GetOperationAs<FBangoInputDragDrop>();
+			if (!Op.IsValid() || Op->Editor.Pin().Get() != this || Op->List != ListId || Index == INDEX_NONE)
+			{
+				return TOptional<EItemDropZone>();
+			}
+			const EItemDropZone Half = GetDropZone(Event, Zone);
+			const int32 To = Half == EItemDropZone::AboveItem ? Index : Index + 1;
+			if (To == Op->Index || To == Op->Index + 1)
+			{
+				return TOptional<EItemDropZone>();
+			}
+			return Half;
+		})
+		.OnAcceptDrop_Lambda([this, bGlobal, Index, ListId, GetDropZone](const FDragDropEvent& Event, EItemDropZone Zone, TSharedPtr<FDeclEntry>)
+		{
+			TSharedPtr<FBangoInputDragDrop> Op = Event.GetOperationAs<FBangoInputDragDrop>();
+			if (!Op.IsValid() || Op->Editor.Pin().Get() != this || Op->List != ListId || Index == INDEX_NONE)
+			{
+				return FReply::Unhandled();
+			}
+			MoveDecl(bGlobal, Op->Index, GetDropZone(Event, Zone) == EItemDropZone::AboveItem ? Index : Index + 1);
+			return FReply::Handled();
+		});
+	*RowHolder = Row;
+
+	if (Entry.bReadOnly)
 	{
-		GraphEditor->JumpToNode(Node, /*bRequestRename*/ false, /*bSelectNode*/ true);
+		// A loop variable, or a global declared elsewhere: shown greyed, with a + to declare the global here.
+		TSharedRef<SWidget> Action = SNullWidget::NullWidget;
+		if (bGlobal)
+		{
+			const FString Name = Entry.Decl.Name;
+			Action = SNew(SComboButton)
+				.ComboButtonStyle(FAppStyle::Get(), "SimpleComboButton")
+				.HasDownArrow(false)
+				.ContentPadding(FMargin(3.0f, 0.0f))
+				.ToolTipText(LOCTEXT("DeclareGlobalTooltip", "Declare it in this script, as a global of the type you pick."))
+				.OnGetMenuContent_Lambda([this, Name]() { return MakeTypeMenu(FString(), [this, Name](const FString& Type) { DeclareGlobal(Name, Type); }); })
+				.ButtonContent()
+				[
+					SNew(STextBlock).Text(FText::FromString(TEXT("+")))
+				];
+		}
+		Row->SetContent(
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(18.0f, 0.0f, 6.0f, 0.0f)
+			[
+				SNew(SImage)
+				.Image(Icon)
+				.ColorAndOpacity(Tint * FLinearColor(1.0f, 1.0f, 1.0f, 0.6f))
+			]
+			+ SHorizontalBox::Slot()
+			.FillWidth(1.0f)
+			.VAlign(VAlign_Center)
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(Entry.Decl.Name))
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(6.0f, 0.0f, 6.0f, 0.0f)
+			[
+				SNew(SBox)
+				.WidthOverride(bGlobal ? 64.0f : 160.0f)
+				[
+					SNew(STextBlock)
+					.Text(bGlobal ? LOCTEXT("DeclaredElsewhere", "elsewhere")
+						: FText::Format(LOCTEXT("LoopVariableType", "{0} (loop)"), FText::FromString(Entry.Decl.Type.IsEmpty() ? FString(TEXT("?")) : Entry.Decl.Type)))
+					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+					.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+				]
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			[
+				Action
+			]);
+		return Row;
 	}
+
+	// A local's starting value, typed like a node's field (a string without quotes). Globals have none.
+	TSharedRef<SWidget> ValueBox = SNullWidget::NullWidget;
+	if (!bGlobal)
+	{
+		FBangoNodeField Field;
+		Field.bHasValue = true;
+		Field.bOptional = true;
+		Field.bPresent = Entry.Decl.bHasValue;
+		Field.TypeHint = Entry.Decl.Type;
+		Field.Text = Entry.Decl.Value;
+		ValueBox = SNew(SEditableTextBox)
+			.Text(FText::FromString(Bango::GetFieldEditText(Field)))
+			.HintText(LOCTEXT("LocalNilHint", "nil"))
+			.ToolTipText(LOCTEXT("LocalValueTooltip", "The value it starts with, each time the graph starts. A fixed value only (a number, a string, true, false, nil, a Bango ID, a text, or an array of those); empty starts it as nil. Set anything else in the code."))
+			.Font(FCoreStyle::GetDefaultFontStyle("Mono", 9))
+			.SelectAllTextWhenFocused(true)
+			.RevertTextOnEscape(true)
+			.OnTextCommitted_Lambda([this, Index](const FText& NewText, ETextCommit::Type CommitType)
+			{
+				SetDeclValue(Index, NewText.ToString());
+			});
+	}
+
+	TSharedPtr<SInlineEditableTextBlock> Name;
+	const FString DeclName = Entry.Decl.Name;
+	const FString DeclType = Entry.Decl.Type;
+	Row->SetContent(
+		SNew(SHorizontalBox)
+		// The grab handle: drag it up or down to reorder.
+		+ SHorizontalBox::Slot()
+		.AutoWidth()
+		.VAlign(VAlign_Center)
+		.Padding(0.0f, 0.0f, 2.0f, 0.0f)
+		[
+			SNew(SBangoInputHandle)
+			.ToolTipText(LOCTEXT("DeclHandleTooltip", "Drag up or down to reorder."))
+			.OnDragDetected_Lambda([this, ListId, Index, DeclName](const FGeometry&, const FPointerEvent& MouseEvent)
+			{
+				if (!MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+				{
+					return FReply::Unhandled();
+				}
+				return FReply::Handled().BeginDragDrop(FBangoInputDragDrop::New(AsShared(), ListId, Index, DeclName));
+			})
+		]
+		// The type's icon is a button: its menu changes the type.
+		+ SHorizontalBox::Slot()
+		.AutoWidth()
+		.VAlign(VAlign_Center)
+		.Padding(0.0f, 0.0f, 4.0f, 0.0f)
+		[
+			SNew(SComboButton)
+			.ComboButtonStyle(FAppStyle::Get(), "SimpleComboButton")
+			.HasDownArrow(false)
+			.ContentPadding(FMargin(2.0f, 1.0f))
+			.ToolTipText(FText::Format(LOCTEXT("DeclTypeTooltip", "{0}. Click to change the type."), FText::FromString(DeclType)))
+			.OnGetMenuContent_Lambda([this, bGlobal, Index, DeclType]() { return MakeTypeMenu(DeclType, [this, bGlobal, Index](const FString& Type) { SetDeclType(bGlobal, Index, Type); }); })
+			.ButtonContent()
+			[
+				SNew(SImage)
+				.Image(Icon)
+				.ColorAndOpacity(Tint)
+			]
+		]
+		+ SHorizontalBox::Slot()
+		.FillWidth(1.0f)
+		.VAlign(VAlign_Center)
+		[
+			SAssignNew(Name, SInlineEditableTextBlock)
+			.Text(FText::FromString(DeclName))
+			.ToolTipText(bGlobal
+				? LOCTEXT("GlobalNameTooltip", "Double-click (or click it again) to rename it; its uses everywhere in the script are renamed too.")
+				: LOCTEXT("LocalNameTooltip", "Double-click (or click it again) to rename it; its uses in this graph are renamed too."))
+			.IsSelected(Row, &FDeclRow::IsSelectedExclusively)
+			.OnVerifyTextChanged_Lambda([this, bGlobal, Index](const FText& NewText, FText& OutError)
+			{
+				const FString Problem = CheckDeclName(bGlobal, Index, NewText.ToString().TrimStartAndEnd());
+				OutError = FText::FromString(Problem);
+				return Problem.IsEmpty();
+			})
+			.OnTextCommitted_Lambda([this, bGlobal, Index](const FText& NewText, ETextCommit::Type CommitType)
+			{
+				if (CommitType != ETextCommit::OnCleared)
+				{
+					RenameDecl(bGlobal, Index, NewText.ToString().TrimStartAndEnd());
+				}
+			})
+		]
+		// The type and value columns have fixed widths, so they line up from row to row.
+		+ SHorizontalBox::Slot()
+		.AutoWidth()
+		.VAlign(VAlign_Center)
+		.Padding(6.0f, 0.0f, 6.0f, 0.0f)
+		[
+			SNew(SBox)
+			.WidthOverride(64.0f)
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(DeclType))
+				.ToolTipText(FText::FromString(DeclType))
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+			]
+		]
+		+ SHorizontalBox::Slot()
+		.AutoWidth()
+		.VAlign(VAlign_Center)
+		[
+			SNew(SBox)
+			.WidthOverride(bGlobal ? 0.0f : 96.0f)
+			[
+				ValueBox
+			]
+		]
+		+ SHorizontalBox::Slot()
+		.AutoWidth()
+		.VAlign(VAlign_Center)
+		.Padding(2.0f, 0.0f, 0.0f, 0.0f)
+		[
+			SNew(SButton)
+			.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+			.ContentPadding(FMargin(3.0f, 0.0f))
+			.ToolTipText(bGlobal
+				? LOCTEXT("DeleteGlobalTooltip", "Remove this declaration (asks first if the script uses it). Its uses are left as they are.")
+				: LOCTEXT("DeleteLocalTooltip", "Remove this local. Its uses in the graph are left as they are."))
+			.OnClicked_Lambda([this, bGlobal, Index]()
+			{
+				DeleteDecl(bGlobal, Index);
+				return FReply::Handled();
+			})
+			[
+				SNew(STextBlock).Text(FText::FromString(TEXT("×")))
+			]
+		]);
+	if (Item.IsValid())
+	{
+		Item->NameWidget = Name;
+	}
+	return Row;
 }
 
 void SBangoScriptEditor::CloseScript()
@@ -1519,7 +2093,11 @@ void SBangoScriptEditor::CloseScript()
 	GraphItems.Reset();
 	RebuildFunctionItems();
 	VariableItems.Reset();
-	VariableList->RequestListRefresh();
+	GlobalItems.Reset();
+	LocalItems.Reset();
+	DeclsShown.Reset();
+	GlobalList->RequestListRefresh();
+	LocalList->RequestListRefresh();
 	ShownGraph = INDEX_NONE;
 	UpdateInputs();
 	SavedDocument = FBangoGraphDocument();
@@ -1561,6 +2139,7 @@ void SBangoScriptEditor::LoadScript(const FString& Script)
 	LayoutContext = MakeShared<FBangoNodeLayoutContext>(Bango::MakeNodeLayoutContext(Document, &FBangoModule::Get().GetCommands()));
 	EdGraphs.Add(TStrongObjectPtr<UEdGraph>(BangoScriptEditor::CreateEdGraph(Document.Main, LayoutContext)));
 	BangoScriptEditor::SetLocNamespace(EdGraphs[0].Get(), Document.bHasLocNamespace, Document.LocNamespace);
+	BangoScriptEditor::SetGlobals(EdGraphs[0].Get(), Document.Globals);
 	TSharedPtr<FGraphEntry> Main = MakeShared<FGraphEntry>();
 	Main->Label = TEXT("Script");
 	GraphItems.Add(Main);
@@ -1769,7 +2348,7 @@ EActiveTimerReturnType SBangoScriptEditor::OnPoll(double CurrentTime, float Delt
 	bDirty = Current != SavedDocument;
 
 	// A function's signature changed (calls to it need new fields, and the graph list a new name), or what some
-	// node's variables are (a Set node shows its variable's type, so renaming its Var or changing a Declare matters).
+	// node's variables are (a Set node shows its variable's type, so renaming its Var or changing a declaration matters).
 	const FBangoNodeLayoutContext Fresh = Bango::MakeNodeLayoutContext(Current, &FBangoModule::Get().GetCommands());
 	if (LayoutContext.IsValid() && !Bango::LayoutContextsMatch(Fresh, *LayoutContext))
 	{

@@ -71,10 +71,18 @@ namespace Bango
 	BANGOSCRIPTS_API bool FindErrorPlace(const FBangoGraphDocument& Document, const FString& WrittenText, const FBangoCompileError& Error, FBangoErrorPlace& OutPlace);
 
 	/**
-	 * Renames a local variable (or parameter) in a node's text: every identifier OldName becomes NewName, except a
-	 * vector part after a `.`. Returns true if anything changed. Text that doesn't lex is left alone.
+	 * Renames a variable (a local, a parameter or a global) in a node's text: every identifier OldName becomes
+	 * NewName, except a vector part after a `.` and a call (followed by `(`). Returns true if anything changed.
+	 * Text that doesn't lex is left alone.
 	 */
 	BANGOSCRIPTS_API bool RenameVariableInText(FString& Text, const FString& OldName, const FString& NewName);
+
+	/**
+	 * Checks a local's starting value, as the Locals list writes it after `Type _name = `: it must read, and be a
+	 * fixed value (a literal, a negated number, `nil`, a text literal, or an array of those). Its type is checked
+	 * when compiling. False, with OutError saying why, if it isn't.
+	 */
+	BANGOSCRIPTS_API bool CheckDeclValue(const FString& Type, const FString& Value, FString& OutError);
 
 	/**
 	 * Reads the parameters of an entry node's text: `void Name(int _a, string _b)` in a function graph, or the

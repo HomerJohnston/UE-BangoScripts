@@ -90,6 +90,15 @@ FBangoCommandSignature& FBangoCommandSignature::Returns(const FBangoType& Type)
 	return *this;
 }
 
+FBangoCommandSignature& FBangoCommandSignature::MayBeNil()
+{
+	if (Params.Num() > 0)
+	{
+		Params.Last().bMayBeNil = true;
+	}
+	return *this;
+}
+
 FBangoCommandSignature& FBangoCommandSignature::Discardable()
 {
 	bDiscardable = true;

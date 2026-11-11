@@ -7,7 +7,7 @@
 /**
  * Text -> graph -> text must keep the script's meaning (same syntax tree), and doing it again
  * must change nothing: the same graph, and the same text. Returns an empty string on success.
- * Sources that don't parse are skipped.
+ * Sources that don't parse are skipped, and so are sources whose declarations the graph can't hold.
  */
 static FString BangoCheckGraphRoundTrip(const TCHAR* Name, const FString& Source)
 {
@@ -21,6 +21,10 @@ static FString BangoCheckGraphRoundTrip(const TCHAR* Name, const FString& Source
 	FBangoGraphDocument Doc1;
 	if (!Bango::BuildGraph(Source, TEXT("test.bango"), Doc1, Error))
 	{
+		if (Error.Message.Contains(TEXT("declaration")))
+		{
+			return FString(); // declarations the graph can't hold (not at the top, or a global with a value): fixed in the text
+		}
 		return FString::Printf(TEXT("[%s] BuildGraph failed: %s"), Name, *Error.ToString());
 	}
 	FString Text1;
@@ -108,13 +112,13 @@ static const TCHAR* const GBangoGraphRoundTripSources[] =
 	TEXT("\tAwaitSpeak();                  //@21(0, 1)\n")
 	TEXT("};\n")
 	TEXT("\n")
-	TEXT("if (IsDefined(foundThings) && foundThings >= 10)   //@4(0, 3)\n")
+	TEXT("if (!IsNil(foundThings) && foundThings >= 10)   //@4(0, 3)\n")
 	TEXT("{\n")
 	TEXT("\tHint(\"You found at least 10 things!\");         //@5(1, 4)\n")
 	TEXT("\tquestLog Push(\"Found 10 things\");              //@6(1, 5)\n")
 	TEXT("};\n")
 	TEXT("label Check;                       //@10(0, 9)\n")
-	TEXT("if (!IsDefined(playerHasGun))      //@11(0, 10)\n")
+	TEXT("if (IsNil(playerHasGun))      //@11(0, 10)\n")
 	TEXT("{\n")
 	TEXT("\treturn;                        //@14(1, 13)\n")
 	TEXT("}\n")
@@ -128,7 +132,7 @@ static const TCHAR* const GBangoGraphRoundTripSources[] =
 	TEXT("};\n")
 	TEXT("forEach (_entry in questLog)       //@19(0, 15)\n")
 	TEXT("{\n")
-	TEXT("\tif (IsDefined(_entry))         //@22(1, 16)\n")
+	TEXT("\tif (!IsNil(_entry))         //@22(1, 16)\n")
 	TEXT("\t{\n")
 	TEXT("\t\tHint(_entry);              //@23(2, 17)\n")
 	TEXT("\t};\n")
@@ -329,11 +333,12 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		// control, and above a statement with a comment.
 		{
 			const TCHAR* GroupSource =
-				TEXT("int _a = 1; //@1(0,0)\nglobal int b; //@2(0,1)\n_a = 2; //@3(0,2)\n_a++; //@4(0,3)\nHint(\"x\"); //@5(0,4)\nLog(\"y\"); //@6(0,5)\n")
+				TEXT("global int b;\nint _a = 1;\n_a = 2; //@3(0,2)\n_a++; //@4(0,3)\nHint(\"x\"); //@5(0,4)\nLog(\"y\"); //@6(0,5)\n")
 				TEXT("// about z\nLog(\"z\"); //@7(0,6)\nif (true) //@8(0,7)\n{\nLog(\"in\"); //@9(1,8)\nbreak; //@10(1,9)\n};\nreturn; //@11(0,10)\n");
 			const TCHAR* GroupExpected =
-				TEXT("int _a = 1;       //@1(0, 0)\n")
-				TEXT("global int b;     //@2(0, 1)\n")
+				TEXT("global int b;\n")
+				TEXT("\n")
+				TEXT("int _a = 1;\n")
 				TEXT("\n")
 				TEXT("_a = 2;           //@3(0, 2)\n")
 				TEXT("_a++;             //@4(0, 3)\n")
@@ -356,6 +361,72 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			FString GroupText;
 			Expect(Bango::BuildGraph(GroupSource, TEXT("groups.bango"), GroupDoc, Error) && Bango::WriteGraphText(GroupDoc, GroupText, WriteError)
 				&& GroupText == FString(GroupExpected), FString(TEXT("spacing groups: unexpected text:\n")) + GroupText + Error.ToString() + WriteError);
+		}
+
+		// Declarations aren't nodes: the file's globals and each graph's locals, with their comments, written at the
+		// top in a fixed layout.
+		{
+			const TCHAR* DeclSource =
+				TEXT("#define params (int _a)\n")
+				TEXT("#define LOCTEXT_NAMESPACE \"Decls\"\n")
+				TEXT("\n")
+				TEXT("// the gold\n")
+				TEXT("global int gold;\n")
+				TEXT("global string[] names;\n")
+				TEXT("\n")
+				TEXT("// how many\n")
+				TEXT("int _count = 0;\n")
+				TEXT("text _t = LOCTEXT(\"k\", \"a = b\");\n")
+				TEXT("vector3 _p = [0, -1, 2.5];\n")
+				TEXT("\n")
+				TEXT("Hint(\"x\");        //@1(0, 0)\n")
+				TEXT("\n")
+				TEXT("function void F()\n")
+				TEXT("{\n")
+				TEXT("\tbool _done = true;\n")
+				TEXT("\n")
+				TEXT("\tHint(\"y\");    //@2(0, 0)\n")
+				TEXT("};\n")
+				TEXT("\n")
+				TEXT("function void G()\n")
+				TEXT("{\n")
+				TEXT("\tint _unused;\n")
+				TEXT("};\n")
+				TEXT("\n")
+				TEXT("#undef LOCTEXT_NAMESPACE\n");
+			FBangoGraphDocument DeclDoc;
+			FString DeclText;
+			const bool bDeclBuilt = Bango::BuildGraph(DeclSource, TEXT("decls.bango"), DeclDoc, Error);
+			Expect(bDeclBuilt, FString(TEXT("declarations: build: ")) + Error.ToString());
+			if (bDeclBuilt)
+			{
+				Expect(DeclDoc.Globals.Num() == 2 && DeclDoc.Globals[0].Name == FString(TEXT("gold")) && DeclDoc.Globals[0].Comment == FString(TEXT("the gold"))
+					&& DeclDoc.Globals[1].Type == FString(TEXT("string[]")), TEXT("declarations: globals, with their comments"));
+				Expect(DeclDoc.Main.Locals.Num() == 3 && DeclDoc.Main.Locals[0].Value == FString(TEXT("0")) && DeclDoc.Main.Locals[0].Comment == FString(TEXT("how many"))
+					&& DeclDoc.Main.Locals[1].Value == FString(TEXT("LOCTEXT(\"k\", \"a = b\")")) && DeclDoc.Main.Locals[2].Value == FString(TEXT("[0, -1, 2.5]")),
+					TEXT("declarations: the main graph's locals and their values"));
+				Expect(DeclDoc.Main.Nodes.Num() == 2 && DeclDoc.Functions.Num() == 2 && DeclDoc.Functions[0].Locals.Num() == 1 && DeclDoc.Functions[0].Locals[0].Value == FString(TEXT("true"))
+					&& DeclDoc.Functions[1].Locals.Num() == 1 && !DeclDoc.Functions[1].Locals[0].bHasValue, TEXT("declarations: no nodes for them; functions have their own locals"));
+				Expect(Bango::WriteGraphText(DeclDoc, DeclText, WriteError) && DeclText == FString(DeclSource),
+					FString(TEXT("declarations: written back the same:\n")) + DeclText + WriteError);
+			}
+
+			// What the graph can't hold is refused, with a message saying how to fix the text.
+			const TCHAR* const Refused[] =
+			{
+				TEXT("Hint(\"x\");\nint _late;\n"),
+				TEXT("if (true)\n{\n\tint _inner;\n};\n"),
+				TEXT("global int gold = 1;\n"),
+				TEXT("int _x;\nglobal int gold;\n"),
+				TEXT("function void F()\n{\n\tglobal int g;\n};\n"),
+				TEXT("Hint(\"a\");\n//~ int _gone;\n"),
+			};
+			for (const TCHAR* Bad : Refused)
+			{
+				FBangoGraphDocument BadDoc;
+				Expect(!Bango::BuildGraph(Bad, TEXT("bad.bango"), BadDoc, Error) && Error.Message.Contains(TEXT("declaration")),
+					FString(TEXT("declarations: should be refused: ")) + Bad + TEXT(" -> ") + Error.ToString());
+			}
 		}
 
 		// Reroutes in a row share one line; one with a comment starts a new line under its comment.
@@ -408,17 +479,16 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		if (bBuilt)
 		{
 			const TArray<FBangoGraphNode>& N = Doc.Main.Nodes;
-			Expect(N.Num() == 8, FString::Printf(TEXT("build: expected 8 nodes, got %d"), N.Num()));
-			if (N.Num() == 8)
+			Expect(N.Num() == 7, FString::Printf(TEXT("build: expected 7 nodes, got %d"), N.Num()));
+			Expect(Doc.Globals.Num() == 1 && Doc.Globals[0].Name == FString(TEXT("count")) && Doc.Globals[0].Type == FString(TEXT("int")) && !Doc.Globals[0].bHasValue,
+				TEXT("build: the global declaration is in Globals, not a node"));
+			if (N.Num() == 7)
 			{
 				Expect(N[0].Kind == EBangoGraphNodeKind::Entry && N[0].NodeID == 0 && N[0].X == 0 && N[0].Y == 0, TEXT("build: entry is node 0 at (0,0)"));
 				Expect(N[0].Text == FString(TEXT("entity _who, int _n = 2")), FString(TEXT("build: entry text: ")) + N[0].Text);
 				Expect(N[0].Comment == FString(TEXT("Header comment")), FString(TEXT("build: entry comment: ")) + N[0].Comment);
 
-				const FBangoGraphNode& Decl = N[N[0].Next];
-				Expect(Decl.Kind == EBangoGraphNodeKind::VarDecl && Decl.Text == FString(TEXT("global int count")) && Decl.NodeID == 5 && Decl.X == 10, TEXT("build: global declaration node"));
-
-				const FBangoGraphNode& If = N[Decl.Next];
+				const FBangoGraphNode& If = N[N[0].Next];
 				Expect(If.Kind == EBangoGraphNodeKind::If && If.Text == FString(TEXT("_n > 1")) && If.NodeID == 6, TEXT("build: if node"));
 				Expect(N[If.Branches[0]].Text == FString(TEXT("Hint(\"big\")")), TEXT("build: True branch"));
 
@@ -441,7 +511,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				TEXT("// Header comment\n")
 				TEXT("#define params (entity _who, int _n = 2)\n")
 				TEXT("\n")
-				TEXT("global int count;    //@5(10, 0)\n")
+				TEXT("global int count;\n")
 				TEXT("\n")
 				TEXT("if (_n > 1)          //@6(20, 0)\n")
 				TEXT("{\n")
@@ -607,7 +677,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		{
 			FBangoGraphDocument LooseDoc;
 			FBangoCompileError LooseError;
-			const FString Source = TEXT("Hint(\"a\"); //@1(0, 0)\n\n//~ Hint(\"b\"); //@2(0, 1)\n//~ int _c; //@3(0, 2)\n");
+			const FString Source = TEXT("Hint(\"a\"); //@1(0, 0)\n\n//~ Hint(\"b\"); //@2(0, 1)\n//~ _c = 1; //@3(0, 2)\n");
 			FString LooseText;
 			FBangoGraphDocument Back;
 			const bool bBuilt = Bango::BuildGraph(Source, TEXT("loose.bango"), LooseDoc, LooseError);
@@ -616,7 +686,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			Expect(bReadBack, FString(TEXT("loose chain: build, write and read back: ")) + LooseError.ToString() + WriteError);
 			if (bReadBack)
 			{
-				Expect(LooseText.Contains(TEXT("//~ Hint(\"b\");")) && LooseText.Contains(TEXT("\n//~\n//~ int _c;")), FString(TEXT("loose chain: expected a bare //~ between its nodes:\n")) + LooseText);
+				Expect(LooseText.Contains(TEXT("//~ Hint(\"b\");")) && LooseText.Contains(TEXT("\n//~\n//~ _c = 1;")), FString(TEXT("loose chain: expected a bare //~ between its nodes:\n")) + LooseText);
 				int32 B = INDEX_NONE;
 				int32 C = INDEX_NONE;
 				for (int32 i = 0; i < Back.Main.Nodes.Num(); ++i)

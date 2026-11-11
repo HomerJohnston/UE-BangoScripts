@@ -161,7 +161,7 @@ public:
 
 	/**
 	 * Reads a nested element. Returns nullptr if any level is out of range or an inner array is nil.
-	 * The returned element itself may be nil. Use for reads and IsDefined; never grows anything.
+	 * The returned element itself may be nil. Use for reads and IsNil; never grows anything.
 	 */
 	const FBangoValue* GetElementAtPath(TConstArrayView<int64> Indices) const;
 

@@ -423,5 +423,21 @@ namespace Bango
 			};
 			Add(Commands, Command);
 		}
+
+		// IsNull(entity) -> bool: true if the entity is nil, or no actor has its Bango ID name (never registered, or since
+		// destroyed). MayBeNil: a nil variable doesn't stop the script, and a missing actor isn't an error here.
+		{
+			FBangoCommand Command;
+			Command.Signature = FBangoCommandSignature::Make(TEXT("IsNull")).Param(TEXT("Entity"), Entity).MayBeNil().Returns(Bool).InCategory(TEXT("Actors"))
+				.Describe(TEXT("True if the entity is nil, or no actor in the level has its Bango ID (it was never there, or it's been destroyed)."));
+			Command.Start = [](FBangoCommandCall& Call)
+			{
+				UBangoActorRegistry* Registry = UBangoActorRegistry::Get(Call.WorldContext);
+				const AActor* Actor = Registry && Call.Args.Num() > 0 && !Call.Args[0].IsNil() ? Registry->FindActor(Call.Args[0].GetEntityName()) : nullptr;
+				Call.Result = FBangoValue::MakeBool(!IsValid(Actor));
+				return EBangoCommandResult::Done;
+			};
+			Add(Commands, Command);
+		}
 	}
 }

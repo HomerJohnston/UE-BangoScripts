@@ -651,7 +651,7 @@ namespace BangoParserPrivate
 		{
 			if (!Check(EBangoTokenKind::Identifier))
 			{
-				if (Cur().Kind != EBangoTokenKind::EndOfFile && Cur().Kind >= EBangoTokenKind::KwIf && Cur().Kind <= EBangoTokenKind::KwIsDefined)
+				if (Cur().Kind != EBangoTokenKind::EndOfFile && Cur().Kind >= EBangoTokenKind::KwIf && Cur().Kind <= EBangoTokenKind::KwIsNil)
 				{
 					return Fail(Cur().Loc, FString::Printf(TEXT("Expected a name %s, but found the keyword %s, which can't be used as a name."),
 						Context, *Bango::DescribeToken(Cur())));
@@ -1086,7 +1086,7 @@ namespace BangoParserPrivate
 						}
 						if (const FBangoExpr* TextLit = FindTextLiteral(*Param.Default))
 						{
-							Fail(TextLit->Loc, FString::Printf(TEXT("A text default can't be translated: Unreal's localization tools skip #define lines. Give '%s' the default nil, and set it in the script: if (!IsDefined(%s)) { %s = LOCTEXT(...); }"),
+							Fail(TextLit->Loc, FString::Printf(TEXT("A text default can't be translated: Unreal's localization tools skip #define lines. Give '%s' the default nil, and set it in the script: if (IsNil(%s)) { %s = LOCTEXT(...); }"),
 								*Param.Name, *Param.Name, *Param.Name));
 							return nullptr;
 						}
@@ -1738,10 +1738,10 @@ namespace BangoParserPrivate
 				}
 				return MoveTemp(ArrayExpr);
 			}
-			case EBangoTokenKind::KwIsDefined:
+			case EBangoTokenKind::KwIsNil:
 			{
 				Advance();
-				if (!Expect(EBangoTokenKind::LParen, TEXT("after 'IsDefined'")))
+				if (!Expect(EBangoTokenKind::LParen, TEXT("after 'IsNil'")))
 				{
 					return nullptr;
 				}
@@ -1752,19 +1752,19 @@ namespace BangoParserPrivate
 				}
 				if (const FBangoMemberExpr* Member = Operand->As<FBangoMemberExpr>())
 				{
-					Fail(Member->MemberLoc, FString::Printf(TEXT("A vector's parts are never nil on their own. Check the whole vector instead: IsDefined(%s)."), *Bango::DumpExpr(*Member->Object)));
+					Fail(Member->MemberLoc, FString::Printf(TEXT("A vector's parts are never nil on their own. Check the whole vector instead: IsNil(%s)."), *Bango::DumpExpr(*Member->Object)));
 					return nullptr;
 				}
 				if (!IsPlace(*Operand))
 				{
-					Fail(Operand->Loc, TEXT("IsDefined needs a variable, a global or an array element, like IsDefined(_x) or IsDefined(_a[2])."));
+					Fail(Operand->Loc, TEXT("IsNil needs a variable, a global or an array element, like IsNil(_x) or IsNil(_a[2])."));
 					return nullptr;
 				}
-				if (!Expect(EBangoTokenKind::RParen, TEXT("after the IsDefined argument")))
+				if (!Expect(EBangoTokenKind::RParen, TEXT("after the IsNil argument")))
 				{
 					return nullptr;
 				}
-				TUniquePtr<FBangoIsDefinedExpr> Expr = MakeUnique<FBangoIsDefinedExpr>();
+				TUniquePtr<FBangoIsNilExpr> Expr = MakeUnique<FBangoIsNilExpr>();
 				Expr->Loc = Token.Loc;
 				Expr->Operand = MoveTemp(Operand);
 				return MoveTemp(Expr);

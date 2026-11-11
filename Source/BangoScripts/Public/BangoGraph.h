@@ -30,7 +30,6 @@ enum class EBangoGraphNodeKind : uint8
 	/** Nodes[0] of every graph. Text: the inside of params (...) for the main graph, the signature for a function. */
 	Entry,
 
-	VarDecl,
 	Assign,
 	IncDec,
 	Call,
@@ -59,7 +58,7 @@ struct BANGOSCRIPTS_API FBangoGraphNode
 	/**
 	 * The text the user edits, without keywords, brackets or ';':
 	 * - Entry: `int _a, string _b = "x"` (main graph) or `int AddScore(int _amount)` (function)
-	 * - VarDecl, Assign, IncDec, Call: the statement, like `int _x = 5`, `_x += 2`, `_x++`, `john Speak("Hi")`
+	 * - Assign, IncDec, Call: the statement, like `_x += 2`, `_x++`, `john Speak("Hi")`
 	 * - If, While: the condition. For: `int _i = 0; _i < 3; _i++`. ForEach: `_x in _array`
 	 * - Return: the value, or empty. Label, Goto: the label name. Break, Continue, Reroute: empty.
 	 */
@@ -78,6 +77,25 @@ struct BANGOSCRIPTS_API FBangoGraphNode
 	bool operator!=(const FBangoGraphNode& Other) const { return !(*this == Other); }
 };
 
+/**
+ * A declaration: one of the file's globals (`global int gold;`), or a local at the top of a graph
+ * (`int _count = 0;`). Declarations aren't nodes; the editor lists them beside the graph.
+ */
+struct BANGOSCRIPTS_API FBangoGraphDecl
+{
+	/** As written: `int`, `string[]`. */
+	FString Type;
+	FString Name;
+	/** Locals only: the starting value as written (a fixed value, like `0`, `"hi"` or `[1, 2]`). Globals never have one. */
+	bool bHasValue = false;
+	FString Value;
+	/** From `//` lines above the declaration. Lines are separated by '\n'. */
+	FString Comment;
+
+	bool operator==(const FBangoGraphDecl& Other) const;
+	bool operator!=(const FBangoGraphDecl& Other) const { return !(*this == Other); }
+};
+
 struct BANGOSCRIPTS_API FBangoGraph
 {
 	/** True for a function's graph. */
@@ -89,6 +107,9 @@ struct BANGOSCRIPTS_API FBangoGraph
 	/** Nodes[0] is the entry node. */
 	TArray<FBangoGraphNode> Nodes;
 
+	/** The locals declared at the top of the graph, in order. */
+	TArray<FBangoGraphDecl> Locals;
+
 	bool operator==(const FBangoGraph& Other) const;
 	bool operator!=(const FBangoGraph& Other) const { return !(*this == Other); }
 };
@@ -98,6 +119,9 @@ struct BANGOSCRIPTS_API FBangoGraphDocument
 	/** The script's `#define LOCTEXT_NAMESPACE "..."` line (see FBangoScript::LocNamespace). Saved right after the params line, with `#undef LOCTEXT_NAMESPACE` at the end. */
 	bool bHasLocNamespace = false;
 	FString LocNamespace;
+
+	/** The file's global declarations, in order (written after the #define lines). */
+	TArray<FBangoGraphDecl> Globals;
 
 	FBangoGraph Main;
 	/** In file order. */
@@ -132,8 +156,10 @@ namespace Bango
 
 	/**
 	 * Parses Source and builds its graph. Statements without //@ metadata get new NodeIDs and positions
-	 * near the node before them. Fails with a syntax error, or if the `//~` lines of disconnected nodes
-	 * can't be read.
+	 * near the node before them. The declarations at the top of the file and of each function become
+	 * Globals and Locals (any //@ metadata on them is dropped). Fails with a syntax error, if the `//~`
+	 * lines of disconnected nodes can't be read, if a declaration isn't at the top of its graph (so it
+	 * would need a node), or if a global declaration has a value.
 	 */
 	BANGOSCRIPTS_API bool BuildGraph(const FString& Source, const FString& FileName, FBangoGraphDocument& OutDocument, FBangoCompileError& OutError);
 
