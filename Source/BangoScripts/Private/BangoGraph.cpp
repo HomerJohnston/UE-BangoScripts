@@ -51,7 +51,8 @@ bool FBangoGraph::operator==(const FBangoGraph& Other) const
 
 bool FBangoGraphDocument::operator==(const FBangoGraphDocument& Other) const
 {
-	if (bHasLocNamespace != Other.bHasLocNamespace || !LocNamespace.Equals(Other.LocNamespace, ESearchCase::CaseSensitive)
+	if (!Description.Equals(Other.Description, ESearchCase::CaseSensitive)
+		|| bHasLocNamespace != Other.bHasLocNamespace || !LocNamespace.Equals(Other.LocNamespace, ESearchCase::CaseSensitive)
 		|| Main != Other.Main || Functions.Num() != Other.Functions.Num() || Globals.Num() != Other.Globals.Num())
 	{
 		return false;
@@ -408,8 +409,27 @@ namespace BangoGraphPrivate
 			// Comments and disconnected (//~) nodes
 			TArray<const FBangoSourceComment*> Comments;
 			TArray<TArray<const FBangoSourceComment*>> DetachedRuns;
-			for (const FBangoSourceComment& Comment : Script.Comments)
+			// The description: the comment lines the file starts with, from line 1 on, until a line that isn't one
+			// (a blank line, code, a disconnected-node line or a // ==== heading).
+			int32 NumDescriptionLines = 0;
+			while (Script.Comments.IsValidIndex(NumDescriptionLines))
 			{
+				const FBangoSourceComment& Line = Script.Comments[NumDescriptionLines];
+				if (Line.Line != NumDescriptionLines + 1 || !Line.bOwnLine || Line.Text.StartsWith(TEXT("~"), ESearchCase::CaseSensitive)
+					|| Bango::IsSectionHeadingComment(Line.Text))
+				{
+					break;
+				}
+				if (NumDescriptionLines > 0)
+				{
+					Doc.Description += TEXT("\n");
+				}
+				Doc.Description += Line.Text.StartsWith(TEXT(" "), ESearchCase::CaseSensitive) ? Line.Text.Mid(1, Line.Text.Len() - 1) : Line.Text;
+				++NumDescriptionLines;
+			}
+			for (int32 CommentIndex = NumDescriptionLines; CommentIndex < Script.Comments.Num(); ++CommentIndex)
+			{
+				const FBangoSourceComment& Comment = Script.Comments[CommentIndex];
 				if (Comment.bOwnLine && Comment.Text.StartsWith(TEXT("~"), ESearchCase::CaseSensitive))
 				{
 					if (DetachedRuns.Num() == 0 || DetachedRuns.Last().Last()->Line != Comment.Line - 1)
@@ -417,6 +437,11 @@ namespace BangoGraphPrivate
 						DetachedRuns.AddDefaulted();
 					}
 					DetachedRuns.Last().Add(&Comment);
+				}
+				else if (Comment.bOwnLine && (Bango::IsSectionHeadingComment(Comment.Text)
+					|| (GraphForLine(Comment.Line) < 0 && Bango::IsFunctionSeparatorComment(Comment.Text))))
+				{
+					// A section heading (// ==== ...) or the line between functions: written again on save, so not a comment bubble.
 				}
 				else
 				{
@@ -953,5 +978,48 @@ namespace Bango
 		}
 		OutDocument.Functions = MoveTemp(Sorted);
 		return true;
+	}
+}
+
+namespace Bango
+{
+	const TCHAR* GetScriptInputHeadingComment()
+	{
+		return TEXT(" ============ SCRIPT INPUT ====================");
+	}
+
+	const TCHAR* GetGlobalVarsHeadingComment()
+	{
+		return TEXT(" ============ GLOBAL VARS =====================");
+	}
+
+	const TCHAR* GetScriptVarsHeadingComment()
+	{
+		return TEXT(" ============ SCRIPT VARS =====================");
+	}
+
+	const TCHAR* GetScriptBodyHeadingComment()
+	{
+		return TEXT(" ============ SCRIPT BODY =====================");
+	}
+
+	const TCHAR* GetFunctionsHeadingComment()
+	{
+		return TEXT(" ============ FUNCTIONS =======================");
+	}
+
+	const TCHAR* GetFunctionSeparatorComment()
+	{
+		return TEXT(" ----------------------------------------------");
+	}
+
+	bool IsSectionHeadingComment(const FString& CommentText)
+	{
+		return CommentText.TrimStart().StartsWith(TEXT("===="), ESearchCase::CaseSensitive);
+	}
+
+	bool IsFunctionSeparatorComment(const FString& CommentText)
+	{
+		return CommentText.TrimStartAndEnd().Equals(FString(GetFunctionSeparatorComment()).TrimStartAndEnd(), ESearchCase::CaseSensitive);
 	}
 }

@@ -116,6 +116,13 @@ struct BANGOSCRIPTS_API FBangoGraph
 
 struct BANGOSCRIPTS_API FBangoGraphDocument
 {
+	/**
+	 * The script's description: the `//` lines the file starts with, from line 1 up to the first line that isn't one
+	 * (a blank line, code, or a `// ====` heading). Lines are separated by '\n', without the `//` and one space after
+	 * it. Not shown in the graph; empty if the file doesn't start with a comment. Saved first, then a blank line.
+	 */
+	FString Description;
+
 	/** The script's `#define LOCTEXT_NAMESPACE "..."` line (see FBangoScript::LocNamespace). Saved right after the params line, with `#undef LOCTEXT_NAMESPACE` at the end. */
 	bool bHasLocNamespace = false;
 	FString LocNamespace;
@@ -150,6 +157,26 @@ namespace Bango
 	 * Returns indices into Document.Functions. BuildGraph already stores functions in this order.
 	 */
 	BANGOSCRIPTS_API TArray<int32> GetFunctionWriteOrder(const FBangoGraphDocument& Document);
+
+	/**
+	 * The section headings the writer puts in a file (the text after the //): SCRIPT INPUT above the #define lines,
+	 * GLOBAL VARS and SCRIPT VARS above the declarations, SCRIPT BODY above the main graph's code, and FUNCTIONS
+	 * above the first function. Every heading starts with "====".
+	 */
+	BANGOSCRIPTS_API const TCHAR* GetScriptInputHeadingComment();
+	BANGOSCRIPTS_API const TCHAR* GetGlobalVarsHeadingComment();
+	BANGOSCRIPTS_API const TCHAR* GetScriptVarsHeadingComment();
+	BANGOSCRIPTS_API const TCHAR* GetScriptBodyHeadingComment();
+	BANGOSCRIPTS_API const TCHAR* GetFunctionsHeadingComment();
+	/** The line the writer puts between functions. */
+	BANGOSCRIPTS_API const TCHAR* GetFunctionSeparatorComment();
+	/**
+	 * True if a comment's text (after the //) is a section heading: it starts with "====" (after any spaces).
+	 * Reading a file skips these on lines of their own, anywhere, so they never become comment bubbles.
+	 */
+	BANGOSCRIPTS_API bool IsSectionHeadingComment(const FString& CommentText);
+	/** True if a comment's text is the line between functions (ignoring spaces around it). Reading skips it outside function bodies. */
+	BANGOSCRIPTS_API bool IsFunctionSeparatorComment(const FString& CommentText);
 
 	/** "Hint", "If", "Set", ... a short title for the node. */
 	BANGOSCRIPTS_API FString GetGraphNodeKindName(EBangoGraphNodeKind Kind);

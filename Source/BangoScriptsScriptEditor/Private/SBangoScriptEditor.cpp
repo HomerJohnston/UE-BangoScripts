@@ -34,11 +34,15 @@
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSplitter.h"
+#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Notifications/SNotificationList.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SOverlay.h"
 #include "Widgets/Input/SComboButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
+#include "Widgets/Input/SMultiLineEditableTextBox.h"
+#include "Framework/Text/TextLayout.h"
+#include "Styling/StyleColors.h"
 #include "DragAndDrop/DecoratedDragDropOp.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "BangoGraphMenu.h"
@@ -54,6 +58,19 @@
 #define LOCTEXT_NAMESPACE "SBangoScriptEditor"
 
 DEFINE_LOG_CATEGORY_STATIC(LogBangoScriptEditor, Log, All);
+
+namespace BangoScriptEditorPrivate
+{
+	/** The height of a FUNCTIONS, INPUTS, GLOBALS or LOCALS row's content, and the padding the row adds above and below it. */
+	static constexpr float VariableRowContentHeight = 24.0f;
+	static constexpr float VariableRowPadding = 4.0f;
+}
+
+FOptionalSize SBangoScriptEditor::VariableListHeight(int32 NumRows) const
+{
+	// The lists don't scroll on their own: the pane they're in does.
+	return NumRows * (BangoScriptEditorPrivate::VariableRowContentHeight + BangoScriptEditorPrivate::VariableRowPadding);
+}
 
 void SBangoScriptEditor::Construct(const FArguments& InArgs)
 {
@@ -138,8 +155,8 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 				[
 					SNew(SButton)
 					.Text(LOCTEXT("Compile", "Compile"))
-					.ToolTipText(LOCTEXT("CompileTooltip", "Check the script for errors. The first error is shown on its node."))
-					.IsEnabled_Lambda([this]() { return EdGraphs.Num() > 0; })
+					.ToolTipText(LOCTEXT("CompileTooltip", "Check the script for errors. The first error is shown on its node. Text typed in the script text pane is applied first."))
+					.IsEnabled_Lambda([this]() { return EdGraphs.Num() > 0 || bTextEdited; })
 					.OnClicked(this, &SBangoScriptEditor::OnCompileClicked)
 				]
 				+ SHorizontalBox::Slot()
@@ -148,8 +165,8 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 				[
 					SNew(SButton)
 					.Text(LOCTEXT("Save", "Save"))
-					.ToolTipText(LOCTEXT("SaveTooltip", "Write the script to its .bango file (Ctrl+S)."))
-					.IsEnabled_Lambda([this]() { return EdGraphs.Num() > 0; })
+					.ToolTipText(LOCTEXT("SaveTooltip", "Write the script to its .bango file (Ctrl+S). Text typed in the script text pane is applied first."))
+					.IsEnabled_Lambda([this]() { return EdGraphs.Num() > 0 || bTextEdited; })
 					.OnClicked(this, &SBangoScriptEditor::OnSaveClicked)
 				]
 				+ SHorizontalBox::Slot()
@@ -173,16 +190,39 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 			+ SSplitter::Slot()
 			.Value(0.18f)
 			[
-				SNew(SSplitter)
-				.Orientation(Orient_Vertical)
-
-				+ SSplitter::Slot()
-				.Value(0.25f)
+				// FUNCTIONS, INPUTS, GLOBALS and LOCALS, one after another in a single scrolling pane. Each list is as
+				// tall as its rows, so only the pane scrolls.
+				SNew(SScrollBox)
+				+ SScrollBox::Slot()
 				[
 					SNew(SVerticalBox)
+
+					// SCRIPT DESCRIPTION: the comment lines at the top of the file. Not shown in the graph.
 					+ SVerticalBox::Slot()
 					.AutoHeight()
 					.Padding(6.0f, 4.0f)
+					[
+						Heading(LOCTEXT("DescriptionHeading", "SCRIPT DESCRIPTION"))
+					]
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(6.0f, 0.0f, 6.0f, 4.0f)
+					[
+						SAssignNew(DescriptionBox, SMultiLineEditableTextBox)
+						.AutoWrapText(true)
+						.HintText(LOCTEXT("DescriptionHint", "Describe what this script does."))
+						.ToolTipText(LOCTEXT("DescriptionTooltip", "A description of the script, for designers. It's saved as the comment lines at the very top of the file, and isn't shown in the graph. Enter starts a new line; clicking elsewhere applies it. (A line starting with ==== would be read as a section heading, and lost.)"))
+						.IsReadOnly_Lambda([this]() { return EdGraphs.Num() == 0; })
+						.OnTextCommitted_Lambda([this](const FText& NewText, ETextCommit::Type CommitType)
+						{
+							SetScriptDescription(NewText.ToString());
+						})
+					]
+
+					// FUNCTIONS
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(6.0f, 10.0f, 6.0f, 4.0f)
 					[
 						SectionHeader(LOCTEXT("FunctionsHeading", "FUNCTIONS"),
 							SNew(SButton)
@@ -196,31 +236,34 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 							])
 					]
 					+ SVerticalBox::Slot()
-					.FillHeight(1.0f)
+					.AutoHeight()
 					[
-						SAssignNew(FunctionList, SListView<TSharedPtr<FGraphEntry>>)
-						.ListItemsSource(&FunctionItems)
-						.SelectionMode(ESelectionMode::Single)
-						.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateFunctionRow)
-						.OnSelectionChanged(this, &SBangoScriptEditor::OnFunctionSelected)
-						.OnMouseButtonClick(this, &SBangoScriptEditor::OnFunctionClicked)
-						.OnMouseButtonDoubleClick_Lambda([](TSharedPtr<FGraphEntry> Item)
-						{
-							if (TSharedPtr<SInlineEditableTextBlock> Name = Item.IsValid() ? Item->NameWidget.Pin() : nullptr)
+						SNew(SBox)
+						.HeightOverride_Lambda([this]() { return VariableListHeight(FunctionItems.Num()); })
+						[
+							SAssignNew(FunctionList, SListView<TSharedPtr<FGraphEntry>>)
+							.ListItemsSource(&FunctionItems)
+							.SelectionMode(ESelectionMode::Single)
+							.ScrollbarVisibility(EVisibility::Collapsed)
+							.ConsumeMouseWheel(EConsumeMouseWheel::Never)
+							.AllowOverscroll(EAllowOverscroll::No)
+							.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateFunctionRow)
+							.OnSelectionChanged(this, &SBangoScriptEditor::OnFunctionSelected)
+							.OnMouseButtonClick(this, &SBangoScriptEditor::OnFunctionClicked)
+							.OnMouseButtonDoubleClick_Lambda([](TSharedPtr<FGraphEntry> Item)
 							{
-								Name->EnterEditingMode(); // double-click renames
-							}
-						})
+								if (TSharedPtr<SInlineEditableTextBlock> Name = Item.IsValid() ? Item->NameWidget.Pin() : nullptr)
+								{
+									Name->EnterEditingMode(); // double-click renames
+								}
+							})
+						]
 					]
-				]
 
-				+ SSplitter::Slot()
-				.Value(0.25f)
-				[
-					SNew(SVerticalBox)
+					// INPUTS
 					+ SVerticalBox::Slot()
 					.AutoHeight()
-					.Padding(6.0f, 4.0f)
+					.Padding(6.0f, 10.0f, 6.0f, 4.0f)
 					[
 						SectionHeader(LOCTEXT("InputsHeading", "INPUTS"),
 							SNew(SButton)
@@ -239,29 +282,32 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 							])
 					]
 					+ SVerticalBox::Slot()
-					.FillHeight(1.0f)
+					.AutoHeight()
 					[
-						SAssignNew(InputList, SListView<TSharedPtr<FInputEntry>>)
-						.ListItemsSource(&InputItems)
-						.SelectionMode(ESelectionMode::Single)
-						.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateInputRow)
-						.OnMouseButtonDoubleClick_Lambda([](TSharedPtr<FInputEntry> Item)
-						{
-							if (TSharedPtr<SInlineEditableTextBlock> Name = Item.IsValid() ? Item->NameWidget.Pin() : nullptr)
+						SNew(SBox)
+						.HeightOverride_Lambda([this]() { return VariableListHeight(InputItems.Num()); })
+						[
+							SAssignNew(InputList, SListView<TSharedPtr<FInputEntry>>)
+							.ListItemsSource(&InputItems)
+							.SelectionMode(ESelectionMode::Single)
+							.ScrollbarVisibility(EVisibility::Collapsed)
+							.ConsumeMouseWheel(EConsumeMouseWheel::Never)
+							.AllowOverscroll(EAllowOverscroll::No)
+							.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateInputRow)
+							.OnMouseButtonDoubleClick_Lambda([](TSharedPtr<FInputEntry> Item)
 							{
-								Name->EnterEditingMode(); // double-click renames
-							}
-						})
+								if (TSharedPtr<SInlineEditableTextBlock> Name = Item.IsValid() ? Item->NameWidget.Pin() : nullptr)
+								{
+									Name->EnterEditingMode(); // double-click renames
+								}
+							})
+						]
 					]
-				]
 
-				+ SSplitter::Slot()
-				.Value(0.25f)
-				[
-					SNew(SVerticalBox)
+					// GLOBALS
 					+ SVerticalBox::Slot()
 					.AutoHeight()
-					.Padding(6.0f, 4.0f)
+					.Padding(6.0f, 10.0f, 6.0f, 4.0f)
 					[
 						SectionHeader(LOCTEXT("GlobalsHeading", "GLOBALS"),
 							SNew(SButton)
@@ -275,30 +321,33 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 							])
 					]
 					+ SVerticalBox::Slot()
-					.FillHeight(1.0f)
+					.AutoHeight()
 					[
-						SAssignNew(GlobalList, SListView<TSharedPtr<FDeclEntry>>)
-						.ListItemsSource(&GlobalItems)
-						.SelectionMode(ESelectionMode::Single)
-						.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateDeclRow)
-						.OnMouseButtonClick(this, &SBangoScriptEditor::OnDeclClicked)
-						.OnMouseButtonDoubleClick_Lambda([](TSharedPtr<FDeclEntry> Item)
-						{
-							if (TSharedPtr<SInlineEditableTextBlock> Name = Item.IsValid() ? Item->NameWidget.Pin() : nullptr)
+						SNew(SBox)
+						.HeightOverride_Lambda([this]() { return VariableListHeight(GlobalItems.Num()); })
+						[
+							SAssignNew(GlobalList, SListView<TSharedPtr<FDeclEntry>>)
+							.ListItemsSource(&GlobalItems)
+							.SelectionMode(ESelectionMode::Single)
+							.ScrollbarVisibility(EVisibility::Collapsed)
+							.ConsumeMouseWheel(EConsumeMouseWheel::Never)
+							.AllowOverscroll(EAllowOverscroll::No)
+							.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateDeclRow)
+							.OnMouseButtonClick(this, &SBangoScriptEditor::OnDeclClicked)
+							.OnMouseButtonDoubleClick_Lambda([](TSharedPtr<FDeclEntry> Item)
 							{
-								Name->EnterEditingMode(); // double-click renames
-							}
-						})
+								if (TSharedPtr<SInlineEditableTextBlock> Name = Item.IsValid() ? Item->NameWidget.Pin() : nullptr)
+								{
+									Name->EnterEditingMode(); // double-click renames
+								}
+							})
+						]
 					]
-				]
 
-				+ SSplitter::Slot()
-				.Value(0.25f)
-				[
-					SNew(SVerticalBox)
+					// LOCALS
 					+ SVerticalBox::Slot()
 					.AutoHeight()
-					.Padding(6.0f, 4.0f)
+					.Padding(6.0f, 10.0f, 6.0f, 4.0f)
 					[
 						SectionHeader(LOCTEXT("LocalsHeading", "LOCALS"),
 							SNew(SButton)
@@ -312,20 +361,28 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 							])
 					]
 					+ SVerticalBox::Slot()
-					.FillHeight(1.0f)
+					.AutoHeight()
+					.Padding(0.0f, 0.0f, 0.0f, 6.0f)
 					[
-						SAssignNew(LocalList, SListView<TSharedPtr<FDeclEntry>>)
-						.ListItemsSource(&LocalItems)
-						.SelectionMode(ESelectionMode::Single)
-						.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateDeclRow)
-						.OnMouseButtonClick(this, &SBangoScriptEditor::OnDeclClicked)
-						.OnMouseButtonDoubleClick_Lambda([](TSharedPtr<FDeclEntry> Item)
-						{
-							if (TSharedPtr<SInlineEditableTextBlock> Name = Item.IsValid() ? Item->NameWidget.Pin() : nullptr)
+						SNew(SBox)
+						.HeightOverride_Lambda([this]() { return VariableListHeight(LocalItems.Num()); })
+						[
+							SAssignNew(LocalList, SListView<TSharedPtr<FDeclEntry>>)
+							.ListItemsSource(&LocalItems)
+							.SelectionMode(ESelectionMode::Single)
+							.ScrollbarVisibility(EVisibility::Collapsed)
+							.ConsumeMouseWheel(EConsumeMouseWheel::Never)
+							.AllowOverscroll(EAllowOverscroll::No)
+							.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateDeclRow)
+							.OnMouseButtonClick(this, &SBangoScriptEditor::OnDeclClicked)
+							.OnMouseButtonDoubleClick_Lambda([](TSharedPtr<FDeclEntry> Item)
 							{
-								Name->EnterEditingMode(); // double-click renames
-							}
-						})
+								if (TSharedPtr<SInlineEditableTextBlock> Name = Item.IsValid() ? Item->NameWidget.Pin() : nullptr)
+								{
+									Name->EnterEditingMode(); // double-click renames
+								}
+							})
+						]
 					]
 				]
 			]
@@ -333,62 +390,132 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 			+ SSplitter::Slot()
 			.Value(0.82f)
 			[
-				SNew(SVerticalBox)
-				// Shown when the file changed outside the editor while there are unsaved changes here.
-				+ SVerticalBox::Slot()
-				.AutoHeight()
+				SNew(SHorizontalBox)
+
+				// The tab on the left edge that shows or hides the script text pane.
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
 				[
 					SNew(SBorder)
-					.Visibility_Lambda([this]() { return bChangedOnDisk ? EVisibility::Visible : EVisibility::Collapsed; })
 					.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-					.BorderBackgroundColor(FLinearColor(1.0f, 0.75f, 0.2f))
-					.Padding(FMargin(8.0f, 4.0f))
+					.Padding(0.0f)
 					[
-						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot()
-						.FillWidth(1.0f)
-						.VAlign(VAlign_Center)
-						[
-							SNew(STextBlock)
-							.Text_Lambda([this]()
-							{
-								return FText::Format(LOCTEXT("ChangedOnDiskBar", "{0} was changed outside the graph editor, and you have unsaved changes here."),
-									FText::FromString(OpenScript + TEXT(".bango")));
-							})
-							.AutoWrapText(true)
-						]
-						+ SHorizontalBox::Slot()
-						.AutoWidth()
-						.Padding(8.0f, 0.0f, 4.0f, 0.0f)
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(0.0f, 8.0f, 0.0f, 0.0f)
 						[
 							SNew(SButton)
-							.Text(LOCTEXT("ReloadFromDisk", "Reload"))
-							.ToolTipText(LOCTEXT("ReloadFromDiskTooltip", "Read the changed file, throwing away your unsaved changes here."))
+							.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+							.ContentPadding(FMargin(4.0f, 8.0f))
+							.ToolTipText_Lambda([this]()
+							{
+								return bTextPaneOpen
+									? LOCTEXT("HideTextTooltip", "Hide the script's text.")
+									: LOCTEXT("ShowTextTooltip", "Show the script's text beside the graph, where it can be edited too.");
+							})
 							.OnClicked_Lambda([this]()
 							{
-								ReloadKeepingView();
+								bTextPaneOpen = !bTextPaneOpen;
+								if (bTextPaneOpen)
+								{
+									UpdateScriptText(nullptr);
+								}
 								return FReply::Handled();
 							})
-						]
-						+ SHorizontalBox::Slot()
-						.AutoWidth()
-						[
-							SNew(SButton)
-							.Text(LOCTEXT("KeepMine", "Keep Mine"))
-							.ToolTipText(LOCTEXT("KeepMineTooltip", "Keep your changes. Saving will then overwrite the changed file."))
-							.OnClicked_Lambda([this]()
-							{
-								bChangedOnDisk = false;
-								KeptFileTime = IFileManager::Get().GetTimeStamp(*OpenPath);
-								return FReply::Handled();
-							})
+							[
+								// Written down the tab, a letter a line.
+								SNew(STextBlock)
+								.Text(LOCTEXT("TextTab", "T\nE\nX\nT"))
+								.Justification(ETextJustify::Center)
+								.Font(FAppStyle::GetFontStyle("BoldFont"))
+								.ColorAndOpacity_Lambda([this]()
+								{
+									return bTextPaneOpen ? FSlateColor(FStyleColors::Primary) : FSlateColor::UseForeground();
+								})
+							]
 						]
 					]
 				]
-				+ SVerticalBox::Slot()
-				.FillHeight(1.0f)
+
+				+ SHorizontalBox::Slot()
+				.FillWidth(1.0f)
 				[
-					SAssignNew(GraphHost, SBox)
+					SNew(SSplitter)
+					.Orientation(Orient_Horizontal)
+
+					// The script text pane. While it's hidden, the graph has the whole width.
+					+ SSplitter::Slot()
+					.Value(0.35f)
+					[
+						SNew(SBox)
+						.Visibility_Lambda([this]() { return bTextPaneOpen ? EVisibility::Visible : EVisibility::Collapsed; })
+						[
+							MakeTextPane()
+						]
+					]
+
+					+ SSplitter::Slot()
+					.Value(0.65f)
+					[
+						SNew(SVerticalBox)
+						// Shown when the file changed outside the editor while there are unsaved changes here.
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						[
+							SNew(SBorder)
+							.Visibility_Lambda([this]() { return bChangedOnDisk ? EVisibility::Visible : EVisibility::Collapsed; })
+							.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+							.BorderBackgroundColor(FLinearColor(1.0f, 0.75f, 0.2f))
+							.Padding(FMargin(8.0f, 4.0f))
+							[
+								SNew(SHorizontalBox)
+								+ SHorizontalBox::Slot()
+								.FillWidth(1.0f)
+								.VAlign(VAlign_Center)
+								[
+									SNew(STextBlock)
+									.Text_Lambda([this]()
+									{
+										return FText::Format(LOCTEXT("ChangedOnDiskBar", "{0} was changed outside the graph editor, and you have unsaved changes here."),
+											FText::FromString(OpenScript + TEXT(".bango")));
+									})
+									.AutoWrapText(true)
+								]
+								+ SHorizontalBox::Slot()
+								.AutoWidth()
+								.Padding(8.0f, 0.0f, 4.0f, 0.0f)
+								[
+									SNew(SButton)
+									.Text(LOCTEXT("ReloadFromDisk", "Reload"))
+									.ToolTipText(LOCTEXT("ReloadFromDiskTooltip", "Read the changed file, throwing away your unsaved changes here."))
+									.OnClicked_Lambda([this]()
+									{
+										ReloadKeepingView();
+										return FReply::Handled();
+									})
+								]
+								+ SHorizontalBox::Slot()
+								.AutoWidth()
+								[
+									SNew(SButton)
+									.Text(LOCTEXT("KeepMine", "Keep Mine"))
+									.ToolTipText(LOCTEXT("KeepMineTooltip", "Keep your changes. Saving will then overwrite the changed file."))
+									.OnClicked_Lambda([this]()
+									{
+										bChangedOnDisk = false;
+										KeptFileTime = IFileManager::Get().GetTimeStamp(*OpenPath);
+										return FReply::Handled();
+									})
+								]
+							]
+						]
+						+ SVerticalBox::Slot()
+						.FillHeight(1.0f)
+						[
+							SAssignNew(GraphHost, SBox)
+						]
+					]
 				]
 			]
 		]
@@ -407,7 +534,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 
 SBangoScriptEditor::~SBangoScriptEditor()
 {
-	if (bDirty)
+	if (bDirty || bTextEdited)
 	{
 		WriteRecoveryCopy();
 	}
@@ -417,7 +544,7 @@ FReply SBangoScriptEditor::OnKeyDown(const FGeometry& MyGeometry, const FKeyEven
 {
 	if (InKeyEvent.GetKey() == EKeys::S && InKeyEvent.IsControlDown() && !InKeyEvent.IsAltDown() && !InKeyEvent.IsShiftDown())
 	{
-		if (EdGraphs.Num() > 0)
+		if (EdGraphs.Num() > 0 || bTextEdited)
 		{
 			Save();
 		}
@@ -472,46 +599,51 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateFunctionRow(TSharedPtr<FGrap
 		});
 	TSharedPtr<SInlineEditableTextBlock> Name;
 	Row->SetContent(
-		SNew(SHorizontalBox)
-		+ SHorizontalBox::Slot()
-		.FillWidth(1.0f)
+		SNew(SBox)
+		.HeightOverride(BangoScriptEditorPrivate::VariableRowContentHeight) // a fixed height, so the list can be as tall as its rows
 		.VAlign(VAlign_Center)
 		[
-			SAssignNew(Name, SInlineEditableTextBlock)
-			.Text_Lambda([WeakItem]() { TSharedPtr<FGraphEntry> Entry = WeakItem.Pin(); return FText::FromString(Entry.IsValid() ? Entry->Label : FString()); })
-			.ToolTipText(LOCTEXT("FunctionRowTooltip", "Click to show this function. Double-click (or click it again) to rename it; calls to it are renamed too. Drag it onto a graph to add a call to it."))
-			// Clicking the selected row again renames, as in Blueprint's My Blueprint panel.
-			.IsSelected(Row, &STableRow<TSharedPtr<FGraphEntry>>::IsSelectedExclusively)
-			.OnVerifyTextChanged_Lambda([this, WeakItem](const FText& NewText, FText& OutError)
-			{
-				TSharedPtr<FGraphEntry> Entry = WeakItem.Pin();
-				const FString Problem = Entry.IsValid() ? CheckFunctionName(Entry->Label, NewText.ToString().TrimStartAndEnd()) : FString();
-				OutError = FText::FromString(Problem);
-				return Problem.IsEmpty();
-			})
-			.OnTextCommitted_Lambda([this, WeakItem](const FText& NewText, ETextCommit::Type CommitType)
-			{
-				if (CommitType != ETextCommit::OnCleared)
-				{
-					RenameFunction(WeakItem.Pin(), NewText.ToString().TrimStartAndEnd());
-				}
-			})
-		]
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.VAlign(VAlign_Center)
-		[
-			SNew(SButton)
-			.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-			.ContentPadding(FMargin(3.0f, 0.0f))
-			.ToolTipText(LOCTEXT("DeleteFunctionTooltip", "Delete this function (asks first)."))
-			.OnClicked_Lambda([this, WeakItem]()
-			{
-				DeleteFunction(WeakItem.Pin());
-				return FReply::Handled();
-			})
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot()
+			.FillWidth(1.0f)
+			.VAlign(VAlign_Center)
 			[
-				SNew(STextBlock).Text(FText::FromString(TEXT("×")))
+				SAssignNew(Name, SInlineEditableTextBlock)
+				.Text_Lambda([WeakItem]() { TSharedPtr<FGraphEntry> Entry = WeakItem.Pin(); return FText::FromString(Entry.IsValid() ? Entry->Label : FString()); })
+				.ToolTipText(LOCTEXT("FunctionRowTooltip", "Click to show this function. Double-click (or click it again) to rename it; calls to it are renamed too. Drag it onto a graph to add a call to it."))
+				// Clicking the selected row again renames, as in Blueprint's My Blueprint panel.
+				.IsSelected(Row, &STableRow<TSharedPtr<FGraphEntry>>::IsSelectedExclusively)
+				.OnVerifyTextChanged_Lambda([this, WeakItem](const FText& NewText, FText& OutError)
+				{
+					TSharedPtr<FGraphEntry> Entry = WeakItem.Pin();
+					const FString Problem = Entry.IsValid() ? CheckFunctionName(Entry->Label, NewText.ToString().TrimStartAndEnd()) : FString();
+					OutError = FText::FromString(Problem);
+					return Problem.IsEmpty();
+				})
+				.OnTextCommitted_Lambda([this, WeakItem](const FText& NewText, ETextCommit::Type CommitType)
+				{
+					if (CommitType != ETextCommit::OnCleared)
+					{
+						RenameFunction(WeakItem.Pin(), NewText.ToString().TrimStartAndEnd());
+					}
+				})
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			[
+				SNew(SButton)
+				.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+				.ContentPadding(FMargin(3.0f, 0.0f))
+				.ToolTipText(LOCTEXT("DeleteFunctionTooltip", "Delete this function (asks first)."))
+				.OnClicked_Lambda([this, WeakItem]()
+				{
+					DeleteFunction(WeakItem.Pin());
+					return FReply::Handled();
+				})
+				[
+					SNew(STextBlock).Text(FText::FromString(TEXT("×")))
+				]
 			]
 		]);
 	if (Item.IsValid())
@@ -1066,107 +1198,112 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateInputRow(TSharedPtr<FInputEn
 
 	TSharedPtr<SInlineEditableTextBlock> Name;
 	Row->SetContent(
-		SNew(SHorizontalBox)
-		// The grab handle: drag it up or down to reorder.
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
+		SNew(SBox)
+		.HeightOverride(VariableRowContentHeight) // a fixed height, so the list can be as tall as its rows
 		.VAlign(VAlign_Center)
-		.Padding(0.0f, 0.0f, 2.0f, 0.0f)
 		[
-			SNew(SBangoInputHandle)
-			.ToolTipText(LOCTEXT("InputHandleTooltip", "Drag up or down to reorder."))
-			.OnDragDetected_Lambda([this, Index, ParamName = Param.Name](const FGeometry&, const FPointerEvent& MouseEvent)
-			{
-				if (!MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+			SNew(SHorizontalBox)
+			// The grab handle: drag it up or down to reorder.
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(0.0f, 0.0f, 2.0f, 0.0f)
+			[
+				SNew(SBangoInputHandle)
+				.ToolTipText(LOCTEXT("InputHandleTooltip", "Drag up or down to reorder."))
+				.OnDragDetected_Lambda([this, Index, ParamName = Param.Name](const FGeometry&, const FPointerEvent& MouseEvent)
 				{
-					return FReply::Unhandled();
-				}
-				return FReply::Handled().BeginDragDrop(FBangoInputDragDrop::New(AsShared(), 0, Index, ParamName));
-			})
-		]
-		// The type's icon is a button: its menu changes the type.
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.VAlign(VAlign_Center)
-		.Padding(0.0f, 0.0f, 4.0f, 0.0f)
-		[
-			SNew(SComboButton)
-			.ComboButtonStyle(FAppStyle::Get(), "SimpleComboButton")
-			.HasDownArrow(false)
-			.ContentPadding(FMargin(2.0f, 1.0f))
-			.ToolTipText(FText::Format(LOCTEXT("InputTypeTooltip", "{0}. Click to change the type."), FText::FromString(Param.Type)))
-			.OnGetMenuContent_Lambda([this, Index]() { return MakeInputTypeMenu(Index); })
-			.ButtonContent()
-			[
-				SNew(SImage)
-				.Image(Icon)
-				.ColorAndOpacity(Tint)
+					if (!MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+					{
+						return FReply::Unhandled();
+					}
+					return FReply::Handled().BeginDragDrop(FBangoInputDragDrop::New(AsShared(), 0, Index, ParamName));
+				})
 			]
-		]
-		+ SHorizontalBox::Slot()
-		.FillWidth(1.0f)
-		.VAlign(VAlign_Center)
-		[
-			SAssignNew(Name, SInlineEditableTextBlock)
-			.Text(FText::FromString(Param.Name))
-			.ToolTipText(LOCTEXT("InputNameTooltip", "Double-click (or click it again) to rename it; its uses in this graph are renamed too."))
-			.IsSelected(Row, &FInputRow::IsSelectedExclusively)
-			.OnVerifyTextChanged_Lambda([this, Index](const FText& NewText, FText& OutError)
-			{
-				const FString Problem = CheckInputName(Index, NewText.ToString().TrimStartAndEnd());
-				OutError = FText::FromString(Problem);
-				return Problem.IsEmpty();
-			})
-			.OnTextCommitted_Lambda([this, Index](const FText& NewText, ETextCommit::Type CommitType)
-			{
-				if (CommitType != ETextCommit::OnCleared)
+			// The type's icon is a button: its menu changes the type.
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(0.0f, 0.0f, 4.0f, 0.0f)
+			[
+				SNew(SComboButton)
+				.ComboButtonStyle(FAppStyle::Get(), "SimpleComboButton")
+				.HasDownArrow(false)
+				.ContentPadding(FMargin(2.0f, 1.0f))
+				.ToolTipText(FText::Format(LOCTEXT("InputTypeTooltip", "{0}. Click to change the type."), FText::FromString(Param.Type)))
+				.OnGetMenuContent_Lambda([this, Index]() { return MakeInputTypeMenu(Index); })
+				.ButtonContent()
+				[
+					SNew(SImage)
+					.Image(Icon)
+					.ColorAndOpacity(Tint)
+				]
+			]
+			+ SHorizontalBox::Slot()
+			.FillWidth(1.0f)
+			.VAlign(VAlign_Center)
+			[
+				SAssignNew(Name, SInlineEditableTextBlock)
+				.Text(FText::FromString(Param.Name))
+				.ToolTipText(LOCTEXT("InputNameTooltip", "Double-click (or click it again) to rename it; its uses in this graph are renamed too."))
+				.IsSelected(Row, &FInputRow::IsSelectedExclusively)
+				.OnVerifyTextChanged_Lambda([this, Index](const FText& NewText, FText& OutError)
 				{
-					RenameInput(Index, NewText.ToString().TrimStartAndEnd());
-				}
-			})
-		]
-		// The type and default columns have fixed widths, so they line up from row to row.
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.VAlign(VAlign_Center)
-		.Padding(6.0f, 0.0f, 6.0f, 0.0f)
-		[
-			SNew(SBox)
-			.WidthOverride(64.0f)
-			[
-				SNew(STextBlock)
-				.Text(FText::FromString(Param.Type))
-				.ToolTipText(FText::FromString(Param.Type))
-				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-				.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+					const FString Problem = CheckInputName(Index, NewText.ToString().TrimStartAndEnd());
+					OutError = FText::FromString(Problem);
+					return Problem.IsEmpty();
+				})
+				.OnTextCommitted_Lambda([this, Index](const FText& NewText, ETextCommit::Type CommitType)
+				{
+					if (CommitType != ETextCommit::OnCleared)
+					{
+						RenameInput(Index, NewText.ToString().TrimStartAndEnd());
+					}
+				})
 			]
-		]
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.VAlign(VAlign_Center)
-		[
-			SNew(SBox)
-			.WidthOverride(ShownGraph == 0 ? 96.0f : 0.0f)
+			// The type and default columns have fixed widths, so they line up from row to row.
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(6.0f, 0.0f, 6.0f, 0.0f)
 			[
-				DefaultBox
+				SNew(SBox)
+				.WidthOverride(64.0f)
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(Param.Type))
+					.ToolTipText(FText::FromString(Param.Type))
+					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+					.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+				]
 			]
-		]
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.VAlign(VAlign_Center)
-		.Padding(2.0f, 0.0f, 0.0f, 0.0f)
-		[
-			SNew(SButton)
-			.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-			.ContentPadding(FMargin(3.0f, 0.0f))
-			.ToolTipText(LOCTEXT("DeleteInputTooltip", "Remove this parameter. Its uses in the graph are left as they are."))
-			.OnClicked_Lambda([this, Index]()
-			{
-				DeleteInput(Index);
-				return FReply::Handled();
-			})
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
 			[
-				SNew(STextBlock).Text(FText::FromString(TEXT("×")))
+				SNew(SBox)
+				.WidthOverride(ShownGraph == 0 ? 96.0f : 0.0f)
+				[
+					DefaultBox
+				]
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(2.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(SButton)
+				.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+				.ContentPadding(FMargin(3.0f, 0.0f))
+				.ToolTipText(LOCTEXT("DeleteInputTooltip", "Remove this parameter. Its uses in the graph are left as they are."))
+				.OnClicked_Lambda([this, Index]()
+				{
+					DeleteInput(Index);
+					return FReply::Handled();
+				})
+				[
+					SNew(STextBlock).Text(FText::FromString(TEXT("×")))
+				]
 			]
 		]);
 	if (Item.IsValid())
@@ -1902,44 +2039,49 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateDeclRow(TSharedPtr<FDeclEntr
 				];
 		}
 		Row->SetContent(
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			.Padding(18.0f, 0.0f, 6.0f, 0.0f)
-			[
-				SNew(SImage)
-				.Image(Icon)
-				.ColorAndOpacity(Tint * FLinearColor(1.0f, 1.0f, 1.0f, 0.6f))
-			]
-			+ SHorizontalBox::Slot()
-			.FillWidth(1.0f)
+			SNew(SBox)
+			.HeightOverride(VariableRowContentHeight) // a fixed height, so the list can be as tall as its rows
 			.VAlign(VAlign_Center)
 			[
-				SNew(STextBlock)
-				.Text(FText::FromString(Entry.Decl.Name))
-				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			.Padding(6.0f, 0.0f, 6.0f, 0.0f)
-			[
-				SNew(SBox)
-				.WidthOverride(bGlobal ? 64.0f : 160.0f)
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(18.0f, 0.0f, 6.0f, 0.0f)
+				[
+					SNew(SImage)
+					.Image(Icon)
+					.ColorAndOpacity(Tint * FLinearColor(1.0f, 1.0f, 1.0f, 0.6f))
+				]
+				+ SHorizontalBox::Slot()
+				.FillWidth(1.0f)
+				.VAlign(VAlign_Center)
 				[
 					SNew(STextBlock)
-					.Text(bGlobal ? LOCTEXT("DeclaredElsewhere", "elsewhere")
-						: FText::Format(LOCTEXT("LoopVariableType", "{0} (loop)"), FText::FromString(Entry.Decl.Type.IsEmpty() ? FString(TEXT("?")) : Entry.Decl.Type)))
+					.Text(FText::FromString(Entry.Decl.Name))
 					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-					.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
 				]
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			[
-				Action
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(6.0f, 0.0f, 6.0f, 0.0f)
+				[
+					SNew(SBox)
+					.WidthOverride(bGlobal ? 64.0f : 160.0f)
+					[
+						SNew(STextBlock)
+						.Text(bGlobal ? LOCTEXT("DeclaredElsewhere", "elsewhere")
+							: FText::Format(LOCTEXT("LoopVariableType", "{0} (loop)"), FText::FromString(Entry.Decl.Type.IsEmpty() ? FString(TEXT("?")) : Entry.Decl.Type)))
+						.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+						.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+					]
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				[
+					Action
+				]
 			]);
 		return Row;
 	}
@@ -1971,111 +2113,116 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateDeclRow(TSharedPtr<FDeclEntr
 	const FString DeclName = Entry.Decl.Name;
 	const FString DeclType = Entry.Decl.Type;
 	Row->SetContent(
-		SNew(SHorizontalBox)
-		// The grab handle: drag it up or down to reorder.
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
+		SNew(SBox)
+		.HeightOverride(VariableRowContentHeight) // a fixed height, so the list can be as tall as its rows
 		.VAlign(VAlign_Center)
-		.Padding(0.0f, 0.0f, 2.0f, 0.0f)
 		[
-			SNew(SBangoInputHandle)
-			.ToolTipText(LOCTEXT("DeclHandleTooltip", "Drag up or down to reorder."))
-			.OnDragDetected_Lambda([this, ListId, Index, DeclName](const FGeometry&, const FPointerEvent& MouseEvent)
-			{
-				if (!MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+			SNew(SHorizontalBox)
+			// The grab handle: drag it up or down to reorder.
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(0.0f, 0.0f, 2.0f, 0.0f)
+			[
+				SNew(SBangoInputHandle)
+				.ToolTipText(LOCTEXT("DeclHandleTooltip", "Drag up or down to reorder."))
+				.OnDragDetected_Lambda([this, ListId, Index, DeclName](const FGeometry&, const FPointerEvent& MouseEvent)
 				{
-					return FReply::Unhandled();
-				}
-				return FReply::Handled().BeginDragDrop(FBangoInputDragDrop::New(AsShared(), ListId, Index, DeclName));
-			})
-		]
-		// The type's icon is a button: its menu changes the type.
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.VAlign(VAlign_Center)
-		.Padding(0.0f, 0.0f, 4.0f, 0.0f)
-		[
-			SNew(SComboButton)
-			.ComboButtonStyle(FAppStyle::Get(), "SimpleComboButton")
-			.HasDownArrow(false)
-			.ContentPadding(FMargin(2.0f, 1.0f))
-			.ToolTipText(FText::Format(LOCTEXT("DeclTypeTooltip", "{0}. Click to change the type."), FText::FromString(DeclType)))
-			.OnGetMenuContent_Lambda([this, bGlobal, Index, DeclType]() { return MakeTypeMenu(DeclType, [this, bGlobal, Index](const FString& Type) { SetDeclType(bGlobal, Index, Type); }); })
-			.ButtonContent()
-			[
-				SNew(SImage)
-				.Image(Icon)
-				.ColorAndOpacity(Tint)
+					if (!MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+					{
+						return FReply::Unhandled();
+					}
+					return FReply::Handled().BeginDragDrop(FBangoInputDragDrop::New(AsShared(), ListId, Index, DeclName));
+				})
 			]
-		]
-		+ SHorizontalBox::Slot()
-		.FillWidth(1.0f)
-		.VAlign(VAlign_Center)
-		[
-			SAssignNew(Name, SInlineEditableTextBlock)
-			.Text(FText::FromString(DeclName))
-			.ToolTipText(bGlobal
-				? LOCTEXT("GlobalNameTooltip", "Double-click (or click it again) to rename it; its uses everywhere in the script are renamed too.")
-				: LOCTEXT("LocalNameTooltip", "Double-click (or click it again) to rename it; its uses in this graph are renamed too."))
-			.IsSelected(Row, &FDeclRow::IsSelectedExclusively)
-			.OnVerifyTextChanged_Lambda([this, bGlobal, Index](const FText& NewText, FText& OutError)
-			{
-				const FString Problem = CheckDeclName(bGlobal, Index, NewText.ToString().TrimStartAndEnd());
-				OutError = FText::FromString(Problem);
-				return Problem.IsEmpty();
-			})
-			.OnTextCommitted_Lambda([this, bGlobal, Index](const FText& NewText, ETextCommit::Type CommitType)
-			{
-				if (CommitType != ETextCommit::OnCleared)
+			// The type's icon is a button: its menu changes the type.
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(0.0f, 0.0f, 4.0f, 0.0f)
+			[
+				SNew(SComboButton)
+				.ComboButtonStyle(FAppStyle::Get(), "SimpleComboButton")
+				.HasDownArrow(false)
+				.ContentPadding(FMargin(2.0f, 1.0f))
+				.ToolTipText(FText::Format(LOCTEXT("DeclTypeTooltip", "{0}. Click to change the type."), FText::FromString(DeclType)))
+				.OnGetMenuContent_Lambda([this, bGlobal, Index, DeclType]() { return MakeTypeMenu(DeclType, [this, bGlobal, Index](const FString& Type) { SetDeclType(bGlobal, Index, Type); }); })
+				.ButtonContent()
+				[
+					SNew(SImage)
+					.Image(Icon)
+					.ColorAndOpacity(Tint)
+				]
+			]
+			+ SHorizontalBox::Slot()
+			.FillWidth(1.0f)
+			.VAlign(VAlign_Center)
+			[
+				SAssignNew(Name, SInlineEditableTextBlock)
+				.Text(FText::FromString(DeclName))
+				.ToolTipText(bGlobal
+					? LOCTEXT("GlobalNameTooltip", "Double-click (or click it again) to rename it; its uses everywhere in the script are renamed too.")
+					: LOCTEXT("LocalNameTooltip", "Double-click (or click it again) to rename it; its uses in this graph are renamed too."))
+				.IsSelected(Row, &FDeclRow::IsSelectedExclusively)
+				.OnVerifyTextChanged_Lambda([this, bGlobal, Index](const FText& NewText, FText& OutError)
 				{
-					RenameDecl(bGlobal, Index, NewText.ToString().TrimStartAndEnd());
-				}
-			})
-		]
-		// The type and value columns have fixed widths, so they line up from row to row.
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.VAlign(VAlign_Center)
-		.Padding(6.0f, 0.0f, 6.0f, 0.0f)
-		[
-			SNew(SBox)
-			.WidthOverride(64.0f)
-			[
-				SNew(STextBlock)
-				.Text(FText::FromString(DeclType))
-				.ToolTipText(FText::FromString(DeclType))
-				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-				.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+					const FString Problem = CheckDeclName(bGlobal, Index, NewText.ToString().TrimStartAndEnd());
+					OutError = FText::FromString(Problem);
+					return Problem.IsEmpty();
+				})
+				.OnTextCommitted_Lambda([this, bGlobal, Index](const FText& NewText, ETextCommit::Type CommitType)
+				{
+					if (CommitType != ETextCommit::OnCleared)
+					{
+						RenameDecl(bGlobal, Index, NewText.ToString().TrimStartAndEnd());
+					}
+				})
 			]
-		]
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.VAlign(VAlign_Center)
-		[
-			SNew(SBox)
-			.WidthOverride(bGlobal ? 0.0f : 96.0f)
+			// The type and value columns have fixed widths, so they line up from row to row.
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(6.0f, 0.0f, 6.0f, 0.0f)
 			[
-				ValueBox
+				SNew(SBox)
+				.WidthOverride(64.0f)
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(DeclType))
+					.ToolTipText(FText::FromString(DeclType))
+					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+					.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+				]
 			]
-		]
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.VAlign(VAlign_Center)
-		.Padding(2.0f, 0.0f, 0.0f, 0.0f)
-		[
-			SNew(SButton)
-			.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-			.ContentPadding(FMargin(3.0f, 0.0f))
-			.ToolTipText(bGlobal
-				? LOCTEXT("DeleteGlobalTooltip", "Remove this declaration (asks first if the script uses it). Its uses are left as they are.")
-				: LOCTEXT("DeleteLocalTooltip", "Remove this local. Its uses in the graph are left as they are."))
-			.OnClicked_Lambda([this, bGlobal, Index]()
-			{
-				DeleteDecl(bGlobal, Index);
-				return FReply::Handled();
-			})
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
 			[
-				SNew(STextBlock).Text(FText::FromString(TEXT("×")))
+				SNew(SBox)
+				.WidthOverride(bGlobal ? 0.0f : 96.0f)
+				[
+					ValueBox
+				]
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(2.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(SButton)
+				.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+				.ContentPadding(FMargin(3.0f, 0.0f))
+				.ToolTipText(bGlobal
+					? LOCTEXT("DeleteGlobalTooltip", "Remove this declaration (asks first if the script uses it). Its uses are left as they are.")
+					: LOCTEXT("DeleteLocalTooltip", "Remove this local. Its uses in the graph are left as they are."))
+				.OnClicked_Lambda([this, bGlobal, Index]()
+				{
+					DeleteDecl(bGlobal, Index);
+					return FReply::Handled();
+				})
+				[
+					SNew(STextBlock).Text(FText::FromString(TEXT("×")))
+				]
 			]
 		]);
 	if (Item.IsValid())
@@ -2104,6 +2251,9 @@ void SBangoScriptEditor::CloseScript()
 	bDirty = false;
 	bChangedOnDisk = false;
 	KeptFileTime = FDateTime::MinValue();
+	SetScriptText(FString());
+	TextError.Reset();
+	UpdateDescriptionBox(); // empty, with no graphs
 }
 
 void SBangoScriptEditor::ReloadScript()
@@ -2132,14 +2282,38 @@ void SBangoScriptEditor::LoadScript(const FString& Script)
 	FBangoCompileError Error;
 	if (!Bango::BuildGraph(Source, Script + TEXT(".bango"), Document, Error))
 	{
-		ShowMessage(FText::Format(LOCTEXT("CantOpen", "This script can't be shown as a graph until its text is fixed:\n\n{0}"), FText::FromString(Error.ToString())));
+		// The text pane shows the file, so it can be fixed there (and applied), or elsewhere and reloaded.
+		ShowMessage(FText::Format(LOCTEXT("CantOpen", "This script can't be shown as a graph until its text is fixed. Fix it in the script text pane (the TEXT tab on the left) and Apply, or elsewhere and Reload:\n\n{0}"), FText::FromString(Error.ToString())));
+		SetScriptText(Source);
+		bTextPaneOpen = true;
+		// The error again, from the text as the pane shows it (tabs as spaces), so its column matches what's seen there.
+		FBangoGraphDocument Unused;
+		FBangoCompileError ShownError;
+		const bool bShownReads = Bango::BuildGraph(TextShown, Script + TEXT(".bango"), Unused, ShownError);
+		TextError = bShownReads ? Error.ToString() : ShownError.ToString();
+		if (!bShownReads && ShownError.Line > 0)
+		{
+			TextBox->GoTo(FTextLocation(ShownError.Line - 1, FMath::Max(ShownError.Column - 1, 0)));
+		}
 		return;
 	}
 
+	ShowDocument(Document);
+
+	// What's on disk, as the editor graphs read it back (so an untouched script isn't "changed").
+	FString BuildError;
+	BuildCurrentDocument(SavedDocument, nullptr, BuildError);
+	bDirty = false;
+	UpdateScriptText(&SavedDocument);
+}
+
+void SBangoScriptEditor::ShowDocument(const FBangoGraphDocument& Document)
+{
 	LayoutContext = MakeShared<FBangoNodeLayoutContext>(Bango::MakeNodeLayoutContext(Document, &FBangoModule::Get().GetCommands()));
 	EdGraphs.Add(TStrongObjectPtr<UEdGraph>(BangoScriptEditor::CreateEdGraph(Document.Main, LayoutContext)));
 	BangoScriptEditor::SetLocNamespace(EdGraphs[0].Get(), Document.bHasLocNamespace, Document.LocNamespace);
 	BangoScriptEditor::SetGlobals(EdGraphs[0].Get(), Document.Globals);
+	BangoScriptEditor::SetDescription(EdGraphs[0].Get(), Document.Description);
 	TSharedPtr<FGraphEntry> Main = MakeShared<FGraphEntry>();
 	Main->Label = TEXT("Script");
 	GraphItems.Add(Main);
@@ -2153,13 +2327,9 @@ void SBangoScriptEditor::LoadScript(const FString& Script)
 		GraphItems.Add(Entry);
 	}
 
-	// What's on disk, as the editor graphs read it back (so an untouched script isn't "changed").
-	FString BuildError;
-	BuildCurrentDocument(SavedDocument, nullptr, BuildError);
-	bDirty = false;
-
 	RebuildFunctionItems();
 	ShowGraph(0);
+	UpdateDescriptionBox();
 }
 
 void SBangoScriptEditor::ShowGraph(int32 GraphIndex, bool bZoomToFit)
@@ -2231,6 +2401,241 @@ void SBangoScriptEditor::ShowMessage(const FText& Message)
 		]);
 }
 
+// ---- SCRIPT DESCRIPTION ----
+
+FString SBangoScriptEditor::GetScriptDescription() const
+{
+	const UBangoEdGraphNode* Entry = EdGraphs.Num() > 0 ? BangoScriptEditor::FindEntryNode(EdGraphs[0].Get()) : nullptr;
+	return Entry ? Entry->Description : FString();
+}
+
+void SBangoScriptEditor::SetScriptDescription(const FString& Typed)
+{
+	UBangoEdGraphNode* Entry = EdGraphs.Num() > 0 ? BangoScriptEditor::FindEntryNode(EdGraphs[0].Get()) : nullptr;
+	if (!Entry)
+	{
+		return;
+	}
+	// One comment line per line: no trailing spaces, and no empty lines at the end (they'd be lost when read back).
+	TArray<FString> Lines;
+	Typed.Replace(TEXT("\r"), TEXT("")).ParseIntoArray(Lines, TEXT("\n"), /*InCullEmpty*/ false);
+	for (FString& Line : Lines)
+	{
+		Line = Line.Replace(TEXT("\t"), TEXT("    ")).TrimEnd();
+	}
+	while (Lines.Num() > 0 && Lines.Last().IsEmpty())
+	{
+		Lines.Pop();
+	}
+	const FString Description = FString::Join(Lines, TEXT("\n"));
+	if (Description.Equals(Entry->Description, ESearchCase::CaseSensitive))
+	{
+		UpdateDescriptionBox();
+		return;
+	}
+	const FScopedTransaction Transaction(LOCTEXT("SetDescriptionTransaction", "Change Bango Script Description"));
+	Entry->Modify();
+	Entry->Description = Description;
+	UpdateDescriptionBox();
+}
+
+void SBangoScriptEditor::UpdateDescriptionBox()
+{
+	if (!DescriptionBox.IsValid() || DescriptionBox->HasAnyUserFocusOrFocusedDescendants())
+	{
+		return;
+	}
+	const FString Description = GetScriptDescription();
+	if (!DescriptionBox->GetText().ToString().Equals(Description, ESearchCase::CaseSensitive))
+	{
+		DescriptionBox->SetText(FText::FromString(Description));
+	}
+}
+
+// ---- Script text pane ----
+
+TSharedRef<SWidget> SBangoScriptEditor::MakeTextPane()
+{
+	return SNew(SBorder)
+		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+		.Padding(FMargin(4.0f))
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(2.0f, 0.0f, 2.0f, 4.0f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.FillWidth(1.0f)
+				.VAlign(VAlign_Center)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("TextPaneHeading", "SCRIPT TEXT"))
+					.Font(FAppStyle::GetFontStyle("BoldFont"))
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.Padding(4.0f, 0.0f, 0.0f, 0.0f)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("ApplyText", "Apply"))
+					.ToolTipText(LOCTEXT("ApplyTextTooltip", "Make the graphs again from this text (Ctrl+Enter), keeping the view. It can't be undone with Undo, like Reload. If the text doesn't read, the graphs are left as they are."))
+					.IsEnabled_Lambda([this]() { return !OpenScript.IsEmpty() && (bTextEdited || EdGraphs.Num() == 0); })
+					.OnClicked_Lambda([this]()
+					{
+						ApplyScriptText();
+						return FReply::Handled();
+					})
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.Padding(4.0f, 0.0f, 0.0f, 0.0f)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("RevertText", "Revert"))
+					.ToolTipText(LOCTEXT("RevertTextTooltip", "Throw away what was typed here, and show the graphs' text again."))
+					.IsEnabled_Lambda([this]() { return bTextEdited; })
+					.OnClicked_Lambda([this]()
+					{
+						RevertScriptText();
+						return FReply::Handled();
+					})
+				]
+			]
+			// Why the text doesn't read, or that it's been typed in and isn't applied yet.
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(2.0f, 0.0f, 2.0f, 4.0f)
+			[
+				SNew(STextBlock)
+				.AutoWrapText(true)
+				.Visibility_Lambda([this]() { return !TextError.IsEmpty() || bTextEdited ? EVisibility::Visible : EVisibility::Collapsed; })
+				.Text_Lambda([this]()
+				{
+					return !TextError.IsEmpty() ? FText::FromString(TextError)
+						: LOCTEXT("TextEditedNote", "Edited. Apply (Ctrl+Enter) to update the graph; until then, changes made in the graph don't show here.");
+				})
+				.ColorAndOpacity_Lambda([this]()
+				{
+					return !TextError.IsEmpty() ? FSlateColor(FLinearColor(1.0f, 0.4f, 0.35f)) : FSlateColor::UseSubduedForeground();
+				})
+			]
+			+ SVerticalBox::Slot()
+			.FillHeight(1.0f)
+			[
+				SAssignNew(TextBox, SMultiLineEditableTextBox)
+				.Text(FText::FromString(TextShown))
+				.Font(FCoreStyle::GetDefaultFontStyle("Mono", 9))
+				.IsReadOnly_Lambda([this]() { return OpenScript.IsEmpty(); })
+				.OnTextChanged_Lambda([this](const FText& NewText)
+				{
+					bTextEdited = !NewText.ToString().Equals(TextShown, ESearchCase::CaseSensitive);
+				})
+				.OnKeyDownHandler_Lambda([this](const FGeometry&, const FKeyEvent& KeyEvent)
+				{
+					if ((KeyEvent.GetKey() == EKeys::Enter || KeyEvent.GetKey() == EKeys::Virtual_Accept) && KeyEvent.IsControlDown())
+					{
+						if (!OpenScript.IsEmpty())
+						{
+							ApplyScriptText();
+						}
+						return FReply::Handled();
+					}
+					return FReply::Unhandled();
+				})
+			]
+		];
+}
+
+void SBangoScriptEditor::SetScriptText(const FString& Text)
+{
+	// Tabs as four spaces: Slate's text box doesn't line tabs up. The text reads the same either way.
+	TextShown = Text.Replace(TEXT("\t"), TEXT("    "));
+	bTextEdited = false;
+	if (TextBox.IsValid())
+	{
+		TextBox->SetText(FText::FromString(TextShown));
+	}
+}
+
+void SBangoScriptEditor::UpdateScriptText(const FBangoGraphDocument* Document)
+{
+	if (!bTextPaneOpen || bTextEdited || EdGraphs.Num() == 0)
+	{
+		return;
+	}
+	FBangoGraphDocument Built;
+	FString Error;
+	if (!Document)
+	{
+		if (!BuildCurrentDocument(Built, nullptr, Error))
+		{
+			return;
+		}
+		Document = &Built;
+	}
+	FString Text;
+	if (!Bango::WriteGraphText(*Document, Text, Error))
+	{
+		return;
+	}
+	if (!Text.Replace(TEXT("\t"), TEXT("    ")).Equals(TextShown, ESearchCase::CaseSensitive))
+	{
+		SetScriptText(Text);
+	}
+}
+
+bool SBangoScriptEditor::ApplyScriptText()
+{
+	if (!TextBox.IsValid() || OpenScript.IsEmpty())
+	{
+		return false;
+	}
+	const FString Text = TextBox->GetText().ToString();
+	FBangoGraphDocument Document;
+	FBangoCompileError Error;
+	if (!Bango::BuildGraph(Text, OpenScript + TEXT(".bango"), Document, Error))
+	{
+		TextError = Error.ToString();
+		if (Error.Line > 0)
+		{
+			TextBox->GoTo(FTextLocation(Error.Line - 1, FMath::Max(Error.Column - 1, 0)));
+		}
+		return false;
+	}
+
+	// The same file, changed: what it was last saved as, and the changed-on-disk state, stay as they are.
+	const FBangoGraphDocument Saved = SavedDocument;
+	const bool bWasChangedOnDisk = bChangedOnDisk;
+	const FDateTime Kept = KeptFileTime;
+	KeepingView([this, &Document]()
+	{
+		CloseScript();
+		ShowDocument(Document);
+	});
+	SavedDocument = Saved;
+	bChangedOnDisk = bWasChangedOnDisk;
+	KeptFileTime = Kept;
+	TextError.Reset();
+	RefreshDirty();
+	UpdateScriptText(nullptr); // as it'll be saved
+	return true;
+}
+
+void SBangoScriptEditor::RevertScriptText()
+{
+	if (EdGraphs.Num() == 0)
+	{
+		SetScriptText(TextShown); // the file's text, which didn't read
+		return;
+	}
+	bTextEdited = false;
+	TextError.Reset();
+	TextShown.Reset(); // so it's put in the box again
+	UpdateScriptText(nullptr);
+}
+
 FText SBangoScriptEditor::GetTitle() const
 {
 	if (OpenScript.IsEmpty())
@@ -2238,7 +2643,7 @@ FText SBangoScriptEditor::GetTitle() const
 		return FText::GetEmpty();
 	}
 	FString Title = OpenScript + TEXT(".bango");
-	if (bDirty)
+	if (bDirty || bTextEdited)
 	{
 		Title += TEXT(" *");
 	}
@@ -2281,7 +2686,7 @@ void SBangoScriptEditor::CheckFileOnDisk()
 		return;
 	}
 	RefreshDirty();
-	if (bDirty)
+	if (bDirty || bTextEdited)
 	{
 		bChangedOnDisk = true; // the bar asks
 	}
@@ -2293,6 +2698,11 @@ void SBangoScriptEditor::CheckFileOnDisk()
 
 void SBangoScriptEditor::ReloadKeepingView()
 {
+	KeepingView([this]() { LoadScript(FString(OpenScript)); }); // a copy: LoadScript replaces OpenScript
+}
+
+void SBangoScriptEditor::KeepingView(TFunctionRef<void()> Rebuild)
+{
 	const FString ShownLabel = GraphItems.IsValidIndex(ShownGraph) ? GraphItems[ShownGraph]->Label : FString();
 	FVector2f ViewLocation(0.0f, 0.0f);
 	float ViewZoom = 1.0f;
@@ -2302,7 +2712,7 @@ void SBangoScriptEditor::ReloadKeepingView()
 		GraphEditor->GetViewLocation(ViewLocation, ViewZoom);
 	}
 
-	LoadScript(FString(OpenScript)); // a copy: LoadScript replaces OpenScript
+	Rebuild();
 
 	// Back to the same graph (found by name: functions may have been added or removed), seen from the same place.
 	// If it's gone, or the text no longer reads, LoadScript's view stays.
@@ -2361,6 +2771,8 @@ EActiveTimerReturnType SBangoScriptEditor::OnPoll(double CurrentTime, float Delt
 	}
 	UpdateInputs();
 	UpdateVariables(Current, Fresh);
+	UpdateScriptText(&Current);
+	UpdateDescriptionBox();
 	return EActiveTimerReturnType::Continue;
 }
 
@@ -2490,6 +2902,11 @@ void SBangoScriptEditor::RebuildAllNodes()
 
 FReply SBangoScriptEditor::OnCompileClicked()
 {
+	if (bTextEdited && !ApplyScriptText())
+	{
+		Notify(FText::Format(LOCTEXT("CantCompileText", "The script text doesn't read: {0}"), FText::FromString(TextError)), false);
+		return FReply::Handled();
+	}
 	FBangoGraphDocument Document;
 	TArray<TArray<UBangoEdGraphNode*>> Nodes;
 	FString Error;
@@ -2591,6 +3008,15 @@ FReply SBangoScriptEditor::OnSaveClicked()
 
 bool SBangoScriptEditor::Save()
 {
+	if (DescriptionBox.IsValid() && DescriptionBox->HasAnyUserFocusOrFocusedDescendants())
+	{
+		SetScriptDescription(DescriptionBox->GetText().ToString()); // Ctrl+S while typing it: what's typed is saved
+	}
+	if (bTextEdited && !ApplyScriptText())
+	{
+		Notify(FText::Format(LOCTEXT("CantSaveText", "Can't save: the script text doesn't read. Fix it, or Revert it. {0}"), FText::FromString(TextError)), false);
+		return false;
+	}
 	FBangoGraphDocument Document;
 	FString Error;
 	FString Text;
@@ -2633,7 +3059,7 @@ bool SBangoScriptEditor::ConfirmCloseScript()
 {
 	// A script in a tab that isn't shown isn't polled, so check now.
 	RefreshDirty();
-	if (!bDirty || EdGraphs.Num() == 0)
+	if (!bTextEdited && (!bDirty || EdGraphs.Num() == 0))
 	{
 		return true;
 	}
@@ -2646,6 +3072,7 @@ bool SBangoScriptEditor::ConfirmCloseScript()
 	if (Answer == EAppReturnType::No)
 	{
 		bDirty = false; // thrown away on purpose: no recovery copy when the editor closes
+		bTextEdited = false;
 		return true;
 	}
 	return false;
@@ -2656,7 +3083,15 @@ void SBangoScriptEditor::WriteRecoveryCopy() const
 	FBangoGraphDocument Document;
 	FString Error;
 	FString Text;
-	if (OpenScript.IsEmpty() || !BuildCurrentDocument(Document, nullptr, Error) || !Bango::WriteGraphText(Document, Text, Error))
+	if (bTextEdited && TextBox.IsValid())
+	{
+		Text = TextBox->GetText().ToString(); // what was typed, even if it doesn't read
+	}
+	else if (OpenScript.IsEmpty() || !BuildCurrentDocument(Document, nullptr, Error) || !Bango::WriteGraphText(Document, Text, Error))
+	{
+		return;
+	}
+	if (OpenScript.IsEmpty())
 	{
 		return;
 	}

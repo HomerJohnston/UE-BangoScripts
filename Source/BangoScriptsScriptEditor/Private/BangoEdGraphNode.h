@@ -100,6 +100,13 @@ public:
 	UPROPERTY()
 	TArray<FBangoEdDecl> Globals;
 
+	/**
+	 * The main Script Start node only: the script's description, the comment lines the file starts with
+	 * (FBangoGraphDocument::Description). Not shown on the node; edited in the Script Description box.
+	 */
+	UPROPERTY()
+	FString Description;
+
 	/** Text fields whose Key, Namespace and Notes rows are shown (see SBangoGraphNode). Not saved. */
 	TSet<int32> ExpandedTextFields;
 

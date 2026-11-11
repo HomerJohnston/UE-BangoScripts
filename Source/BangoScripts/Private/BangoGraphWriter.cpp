@@ -59,10 +59,18 @@ namespace BangoGraphWriterPrivate
 				}
 			}
 
-			// Main graph
+			// The description comes first: nothing may come before it. The heading after it gives it its blank line.
+			AddComment(Doc.Description, 0, -1);
+
+			// Main graph. Each part gets a section heading (// ==== ...) above it, if it has anything.
 			const FBangoGraphNode& MainEntry = Doc.Main.Nodes[0];
+			const bool bWriteParams = !MainEntry.Text.IsEmpty() || (!MainEntry.Comment.IsEmpty() && !Doc.bHasLocNamespace);
+			if (bWriteParams || Doc.bHasLocNamespace)
+			{
+				AddHeading(Bango::GetScriptInputHeadingComment());
+			}
 			AddComment(MainEntry.Comment, 0, -1);
-			if (!MainEntry.Text.IsEmpty() || (!MainEntry.Comment.IsEmpty() && !Doc.bHasLocNamespace))
+			if (bWriteParams)
 			{
 				// An empty params line still anchors the entry node's comment (the namespace line does too).
 				AddCode(0, -1, FString(TEXT("#define params (")) + MainEntry.Text + TEXT(")"), nullptr);
@@ -71,37 +79,51 @@ namespace BangoGraphWriterPrivate
 			{
 				AddCode(0, -1, FString(TEXT("#define LOCTEXT_NAMESPACE ")) + Bango::MakeStringLiteral(Doc.LocNamespace), nullptr);
 			}
-			// The declarations: globals, then the main graph's locals, each group after a blank line.
+			// The declarations: globals, then the main graph's locals.
 			if (Doc.Globals.Num() > 0)
 			{
-				if (Out.Num() > 0)
-				{
-					AddBlank();
-				}
+				AddHeading(Bango::GetGlobalVarsHeadingComment());
 				WriteDecls(Doc.Globals, true, 0);
 			}
 			if (Doc.Main.Locals.Num() > 0)
 			{
-				if (Out.Num() > 0)
-				{
-					AddBlank();
-				}
+				AddHeading(Bango::GetScriptVarsHeadingComment());
 				WriteDecls(Doc.Main.Locals, false, 0);
 			}
-			if (Out.Num() > 0 && MainEntry.Next != INDEX_NONE)
-			{
-				AddBlank(); // a blank line between nodes, here between the #define lines (or declarations) and the first statement
-			}
+
+			// The main graph's code and disconnected chains, under their heading if there are any.
+			const int32 BodyStart = Out.Num();
 			if (!WriteGraphBody(Doc.Main, 0))
 			{
 				return false;
 			}
+			if (Out.Num() > BodyStart)
+			{
+				TArray<FOutLine> Body;
+				for (int32 i = BodyStart; i < Out.Num(); ++i)
+				{
+					if (Body.Num() > 0 || !IsBlankLine(Out[i]))
+					{
+						Body.Add(Out[i]); // without the blank lines it starts with: the heading has its own
+					}
+				}
+				Out.SetNum(BodyStart);
+				if (Body.Num() > 0)
+				{
+					AddHeading(Bango::GetScriptBodyHeadingComment());
+					Out.Append(Body);
+				}
+			}
 
-			// Functions, depth-first by first use
+			// Functions, depth-first by first use: a FUNCTIONS heading before the first, and a line between the others.
+			bool bFirstFunction = true;
 			for (int32 FunctionIndex : Bango::GetFunctionWriteOrder(Doc))
 			{
 				const FBangoGraph& Function = Doc.Functions[FunctionIndex];
 				AddBlank();
+				AddCode(0, -1, FString(TEXT("//")) + (bFirstFunction ? Bango::GetFunctionsHeadingComment() : Bango::GetFunctionSeparatorComment()), nullptr);
+				AddBlank();
+				bFirstFunction = false;
 				const FBangoGraphNode& Entry = Function.Nodes[0];
 				AddComment(Entry.Comment, 0, -1);
 				AddCode(0, -1, FString(TEXT("function ")) + Entry.Text, nullptr);
@@ -517,6 +539,22 @@ namespace BangoGraphWriterPrivate
 					Current.AppendChar(Comment[i]);
 				}
 			}
+		}
+
+		/** A section heading: a blank line (unless it's the first line), `//` and the heading, then a blank line. */
+		void AddHeading(const TCHAR* Heading)
+		{
+			if (Out.Num() > 0)
+			{
+				AddBlank();
+			}
+			AddCode(0, -1, FString(TEXT("//")) + Heading, nullptr);
+			AddBlank();
+		}
+
+		static bool IsBlankLine(const FOutLine& Line)
+		{
+			return Line.Code.IsEmpty() && !Line.bDetachedSpacer && !Line.bHasMetadata && Line.DetachedIndent < 0 && Line.MoreReroutes.Num() == 0;
 		}
 
 		void AddBlank()

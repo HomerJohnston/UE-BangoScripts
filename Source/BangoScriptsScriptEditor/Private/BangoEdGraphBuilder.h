@@ -23,6 +23,9 @@ namespace BangoScriptEditor
 	/** Puts the file's global declarations on the main graph's Script Start node (CreateEdGraph puts each graph's locals on its entry). */
 	void SetGlobals(UEdGraph* MainGraph, const TArray<FBangoGraphDecl>& Globals);
 
+	/** Puts the script's description on the main graph's Script Start node. */
+	void SetDescription(UEdGraph* MainGraph, const FString& Description);
+
 	/** A graph's entry node, or null. */
 	UBangoEdGraphNode* FindEntryNode(const UEdGraph* Graph);
 

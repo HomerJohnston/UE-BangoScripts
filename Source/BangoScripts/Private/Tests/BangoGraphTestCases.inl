@@ -251,6 +251,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 	// ---- LOCTEXT_NAMESPACE and text: #define after the params line, #undef at the end, text literals kept as written ----
 	{
 		const TCHAR* Source =
+			TEXT("\n") // so the comment below isn't the script's description (that's only on line 1)
 			TEXT("// About the script\n")
 			TEXT("#define params (text _line = nil)\n")
 			TEXT("#define LOCTEXT_NAMESPACE \"Bango.Intro\"\n")
@@ -259,12 +260,18 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			TEXT("function void F()\n{\n\tSay(LOCTEXT(\"F\", \"In F\")); //@2(0, 0)\n};\n")
 			TEXT("#undef LOCTEXT_NAMESPACE // the end\n");
 		const TCHAR* Expected =
+			TEXT("// ============ SCRIPT INPUT ====================\n")
+			TEXT("\n")
 			TEXT("// About the script\n")
 			TEXT("#define params (text _line = nil)\n")
 			TEXT("#define LOCTEXT_NAMESPACE \"Bango.Intro\"\n")
 			TEXT("\n")
+			TEXT("// ============ SCRIPT BODY =====================\n")
+			TEXT("\n")
 			TEXT("// About the hint\n")
 			TEXT("Say(NSNOTELOCTEXT(\"Other\", \"K\", \"Hello {0}\", \"Said slowly\"), 1);    //@1(10, 0)\n")
+			TEXT("\n")
+			TEXT("// ============ FUNCTIONS =======================\n")
 			TEXT("\n")
 			TEXT("// the end\n")
 			TEXT("function void F()\n")
@@ -281,12 +288,83 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		Expect(bBuilt && Doc.bHasLocNamespace && Doc.LocNamespace == FString(TEXT("Bango.Intro")), FString(TEXT("LOCTEXT_NAMESPACE: read into the document: ")) + Error.ToString());
 		Expect(bBuilt && Bango::WriteGraphText(Doc, Text, WriteError) && Text == FString(Expected), FString(TEXT("LOCTEXT_NAMESPACE: saved after params, #undef at the end:\n")) + Text);
 
+		// The FUNCTIONS heading and the lines between functions: written on save, skipped when read (outside function
+		// bodies), so they don't pile up or turn into comment bubbles. A function's own comment, and the same line
+		// inside a function body, are kept.
+		{
+			const TCHAR* Separated =
+				TEXT("// ============ SCRIPT BODY =====================\n")
+				TEXT("\n")
+				TEXT("Hint(\"x\");        //@1(0, 0)\n")
+				TEXT("\n")
+				TEXT("// ============ FUNCTIONS =======================\n")
+				TEXT("\n")
+				TEXT("// What F does\n")
+				TEXT("function void F()\n")
+				TEXT("{\n")
+				TEXT("\t// ----------------------------------------------\n")
+				TEXT("\tHint(\"f\");    //@2(0, 0)\n")
+				TEXT("};\n")
+				TEXT("\n")
+				TEXT("// ----------------------------------------------\n")
+				TEXT("\n")
+				TEXT("function void G()\n")
+				TEXT("{\n")
+				TEXT("};\n");
+			FBangoGraphDocument SepDoc;
+			FString SepText;
+			const bool bSepBuilt = Bango::BuildGraph(Separated, TEXT("sep.bango"), SepDoc, Error);
+			Expect(bSepBuilt && SepDoc.Functions.Num() == 2 && SepDoc.Main.Nodes[1].Comment.IsEmpty()
+				&& SepDoc.Functions[0].Nodes[0].Comment == FString(TEXT("What F does")) && SepDoc.Functions[1].Nodes[0].Comment.IsEmpty()
+				&& SepDoc.Functions[0].Nodes[1].Comment == FString(TEXT("----------------------------------------------")),
+				FString(TEXT("function separators: not read as comments: ")) + Error.ToString());
+			Expect(bSepBuilt && Bango::WriteGraphText(SepDoc, SepText, WriteError) && SepText == FString(Separated),
+				FString(TEXT("function separators: written back the same:\n")) + SepText + WriteError);
+		}
+
+		// The description: the // lines from line 1 on, until a line that isn't one. Not a node's comment; saved
+		// first, then a blank line. A bare // in it is an empty line of it.
+		{
+			const TCHAR* Described =
+				TEXT("// Opens the gate.\n")
+				TEXT("//\n")
+				TEXT("//   Needs the key.\n")
+				TEXT("\n")
+				TEXT("// ============ SCRIPT INPUT ====================\n")
+				TEXT("\n")
+				TEXT("// Start's own comment\n")
+				TEXT("#define params (int _a)\n")
+				TEXT("\n")
+				TEXT("// ============ SCRIPT BODY =====================\n")
+				TEXT("\n")
+				TEXT("Hint(\"x\");    //@1(0, 0)\n");
+			FBangoGraphDocument DescDoc;
+			FString DescText;
+			const bool bDescBuilt = Bango::BuildGraph(Described, TEXT("desc.bango"), DescDoc, Error);
+			Expect(bDescBuilt && DescDoc.Description == FString(TEXT("Opens the gate.\n\n  Needs the key.")) && DescDoc.Main.Nodes[0].Comment == FString(TEXT("Start's own comment"))
+				&& DescDoc.Main.Nodes[1].Comment.IsEmpty(), FString(TEXT("description: read from the top: ")) + DescDoc.Description + Error.ToString());
+			Expect(bDescBuilt && Bango::WriteGraphText(DescDoc, DescText, WriteError) && DescText == FString(Described),
+				FString(TEXT("description: written back the same:\n")) + DescText + WriteError);
+
+			// Ends at code with no blank line too; a comment that isn't on line 1 isn't one.
+			FBangoGraphDocument Short;
+			Expect(Bango::BuildGraph(TEXT("// Just this\nHint(\"x\");\n"), TEXT("desc.bango"), Short, Error) && Short.Description == FString(TEXT("Just this"))
+				&& Short.Main.Nodes.Num() == 2 && Short.Main.Nodes[1].Comment.IsEmpty() && Bango::WriteGraphText(Short, Text, WriteError)
+				&& Text.StartsWith(TEXT("// Just this\n\n// ============ SCRIPT BODY"), ESearchCase::CaseSensitive), FString(TEXT("description: then code: ")) + Text);
+			FBangoGraphDocument NotFirst;
+			Expect(Bango::BuildGraph(TEXT("\n// About Hint\nHint(\"x\");\n"), TEXT("desc.bango"), NotFirst, Error) && NotFirst.Description.IsEmpty()
+				&& NotFirst.Main.Nodes[1].Comment == FString(TEXT("About Hint")), TEXT("description: not after a blank first line"));
+			FBangoGraphDocument Heading;
+			Expect(Bango::BuildGraph(TEXT("// ============ SCRIPT BODY =====================\n\nHint(\"x\");\n"), TEXT("desc.bango"), Heading, Error) && Heading.Description.IsEmpty(),
+				TEXT("description: a heading on line 1 isn't one"));
+		}
+
 		FBangoGraphDocument NoParams;
 		Expect(Bango::BuildGraph(TEXT("#define LOCTEXT_NAMESPACE \"A\"\n#undef LOCTEXT_NAMESPACE\n"), TEXT("ns.bango"), NoParams, Error) && Bango::WriteGraphText(NoParams, Text, WriteError)
-			&& Text == FString(TEXT("#define LOCTEXT_NAMESPACE \"A\"\n\n#undef LOCTEXT_NAMESPACE\n")), FString(TEXT("LOCTEXT_NAMESPACE: without params or statements:\n")) + Text);
+			&& Text == FString(TEXT("// ============ SCRIPT INPUT ====================\n\n#define LOCTEXT_NAMESPACE \"A\"\n\n#undef LOCTEXT_NAMESPACE\n")), FString(TEXT("LOCTEXT_NAMESPACE: without params or statements:\n")) + Text);
 		FBangoGraphDocument Commented;
-		Expect(Bango::BuildGraph(TEXT("// Hi\n#define LOCTEXT_NAMESPACE \"A\"\n#undef LOCTEXT_NAMESPACE\n"), TEXT("ns.bango"), Commented, Error) && Bango::WriteGraphText(Commented, Text, WriteError)
-			&& Text == FString(TEXT("// Hi\n#define LOCTEXT_NAMESPACE \"A\"\n\n#undef LOCTEXT_NAMESPACE\n")), FString(TEXT("LOCTEXT_NAMESPACE: anchors the entry comment without a params line:\n")) + Text);
+		Expect(Bango::BuildGraph(TEXT("\n// Hi\n#define LOCTEXT_NAMESPACE \"A\"\n#undef LOCTEXT_NAMESPACE\n"), TEXT("ns.bango"), Commented, Error) && Bango::WriteGraphText(Commented, Text, WriteError)
+			&& Text == FString(TEXT("// ============ SCRIPT INPUT ====================\n\n// Hi\n#define LOCTEXT_NAMESPACE \"A\"\n\n#undef LOCTEXT_NAMESPACE\n")), FString(TEXT("LOCTEXT_NAMESPACE: anchors the entry comment without a params line:\n")) + Text);
 		FBangoGraphDocument Changed = NoParams;
 		Changed.LocNamespace = TEXT("B");
 		Expect(Changed != NoParams, TEXT("LOCTEXT_NAMESPACE: part of what makes two documents different"));
@@ -302,6 +380,8 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			TEXT("//@4(30, 4)\n")
 			TEXT("};\n");
 		const TCHAR* Expected =
+			TEXT("// ============ SCRIPT BODY =====================\n")
+			TEXT("\n")
 			TEXT("Hint(\"a\");    //@1(0, 0)\n")
 			TEXT("              //@2(10, 0)\n")
 			TEXT("\n")
@@ -336,9 +416,15 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				TEXT("global int b;\nint _a = 1;\n_a = 2; //@3(0,2)\n_a++; //@4(0,3)\nHint(\"x\"); //@5(0,4)\nLog(\"y\"); //@6(0,5)\n")
 				TEXT("// about z\nLog(\"z\"); //@7(0,6)\nif (true) //@8(0,7)\n{\nLog(\"in\"); //@9(1,8)\nbreak; //@10(1,9)\n};\nreturn; //@11(0,10)\n");
 			const TCHAR* GroupExpected =
+				TEXT("// ============ GLOBAL VARS =====================\n")
+				TEXT("\n")
 				TEXT("global int b;\n")
 				TEXT("\n")
+				TEXT("// ============ SCRIPT VARS =====================\n")
+				TEXT("\n")
 				TEXT("int _a = 1;\n")
+				TEXT("\n")
+				TEXT("// ============ SCRIPT BODY =====================\n")
 				TEXT("\n")
 				TEXT("_a = 2;           //@3(0, 2)\n")
 				TEXT("_a++;             //@4(0, 3)\n")
@@ -367,19 +453,29 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		// top in a fixed layout.
 		{
 			const TCHAR* DeclSource =
+				TEXT("// ============ SCRIPT INPUT ====================\n")
+				TEXT("\n")
 				TEXT("#define params (int _a)\n")
 				TEXT("#define LOCTEXT_NAMESPACE \"Decls\"\n")
+				TEXT("\n")
+				TEXT("// ============ GLOBAL VARS =====================\n")
 				TEXT("\n")
 				TEXT("// the gold\n")
 				TEXT("global int gold;\n")
 				TEXT("global string[] names;\n")
+				TEXT("\n")
+				TEXT("// ============ SCRIPT VARS =====================\n")
 				TEXT("\n")
 				TEXT("// how many\n")
 				TEXT("int _count = 0;\n")
 				TEXT("text _t = LOCTEXT(\"k\", \"a = b\");\n")
 				TEXT("vector3 _p = [0, -1, 2.5];\n")
 				TEXT("\n")
+				TEXT("// ============ SCRIPT BODY =====================\n")
+				TEXT("\n")
 				TEXT("Hint(\"x\");        //@1(0, 0)\n")
+				TEXT("\n")
+				TEXT("// ============ FUNCTIONS =======================\n")
 				TEXT("\n")
 				TEXT("function void F()\n")
 				TEXT("{\n")
@@ -387,6 +483,8 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				TEXT("\n")
 				TEXT("\tHint(\"y\");    //@2(0, 0)\n")
 				TEXT("};\n")
+				TEXT("\n")
+				TEXT("// ----------------------------------------------\n")
 				TEXT("\n")
 				TEXT("function void G()\n")
 				TEXT("{\n")
@@ -433,11 +531,13 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		const TCHAR* RunSource =
 			TEXT("Hint(\"a\"); //@1(0,0)\n//@2(4,0)\n//@3(8,0)\n// note\n//@4(12,0)\n//@5(16,0)\nHint(\"b\"); //@6(20,0)\n//@7(24,0) @8( 28 , 0 )\n");
 		const TCHAR* RunExpected =
+			TEXT("// ============ SCRIPT BODY =====================\n")
+			TEXT("\n")
 			TEXT("Hint(\"a\");    //@1(0, 0)\n")
 			TEXT("              //@2(4, 0) @3(8, 0)\n")
 			TEXT("// note\n")
 			TEXT("              //@4(12, 0) @5(16, 0)\n")
-			TEXT("Hint(\"b\");    //@6(20, 0)\n")   // two calls in a row: no blank line between them
+			TEXT("Hint(\"b\");    //@6(20, 0)\n")
 			TEXT("              //@7(24, 0) @8(28, 0)\n");
 		FBangoGraphDocument RunDoc;
 		const bool bRunBuilt = Bango::BuildGraph(RunSource, TEXT("runs.bango"), RunDoc, Error);
@@ -455,6 +555,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 	// ---- Building: structure, text, metadata, comments, automatic IDs and positions ----
 	{
 		const TCHAR* Source =
+			TEXT("\n") // so the comment below is Script Start's, not the script's description (that's only on line 1)
 			TEXT("// Header comment\n")
 			TEXT("#define params (entity _who, int _n = 2)\n")
 			TEXT("global int count;            //@5(10, 0)\n")
@@ -508,10 +609,16 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			FString WriteError;
 			Expect(Bango::WriteGraphText(Doc, Text, WriteError), FString(TEXT("write: ")) + WriteError);
 			const FString Expected =
+				TEXT("// ============ SCRIPT INPUT ====================\n")
+				TEXT("\n")
 				TEXT("// Header comment\n")
 				TEXT("#define params (entity _who, int _n = 2)\n")
 				TEXT("\n")
+				TEXT("// ============ GLOBAL VARS =====================\n")
+				TEXT("\n")
 				TEXT("global int count;\n")
+				TEXT("\n")
+				TEXT("// ============ SCRIPT BODY =====================\n")
 				TEXT("\n")
 				TEXT("if (_n > 1)          //@6(20, 0)\n")
 				TEXT("{\n")
@@ -660,6 +767,8 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		FString WriteError;
 		Expect(Bango::WriteGraphText(Doc, Text, WriteError), FString(TEXT("editor graph: ")) + WriteError);
 		const FString Expected =
+			TEXT("// ============ SCRIPT BODY =====================\n")
+			TEXT("\n")
 			TEXT("Hint(\"a\");          //@1(1, 0)\n")
 			TEXT("\n")
 			TEXT("while (true)        //@2(2, 0)\n")
@@ -726,7 +835,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		// An entry with a comment but no params still writes an (empty) params line to hold the comment.
 		FBangoGraphDocument Commented = Doc;
 		Commented.Main.Nodes[0].Comment = TEXT("Hello");
-		Expect(Bango::WriteGraphText(Commented, Text, WriteError) && Text.StartsWith(TEXT("// Hello\n#define params ()\n"), ESearchCase::CaseSensitive),
+		Expect(Bango::WriteGraphText(Commented, Text, WriteError) && Text.StartsWith(TEXT("// ============ SCRIPT INPUT ====================\n\n// Hello\n#define params ()\n"), ESearchCase::CaseSensitive),
 			FString(TEXT("entry comment without params: ")) + Text);
 	}
 }

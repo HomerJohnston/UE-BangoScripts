@@ -109,6 +109,14 @@ namespace BangoScriptEditor
 		}
 	}
 
+	void SetDescription(UEdGraph* MainGraph, const FString& Description)
+	{
+		if (UBangoEdGraphNode* Entry = FindEntryNode(MainGraph))
+		{
+			Entry->Description = Description;
+		}
+	}
+
 	/** The index of the node a pin's wire leads to, or INDEX_NONE. */
 	static int32 Target(const UEdGraphPin* Pin, const TMap<const UEdGraphNode*, int32>& Index)
 	{
@@ -215,6 +223,7 @@ namespace BangoScriptEditor
 			}
 			else
 			{
+				OutDocument.Description = Nodes[0]->Description;
 				OutDocument.bHasLocNamespace = Nodes[0]->bHasLocNamespace;
 				OutDocument.LocNamespace = Nodes[0]->bHasLocNamespace ? Nodes[0]->LocNamespace : FString();
 				for (const FBangoEdDecl& Global : Nodes[0]->Globals)

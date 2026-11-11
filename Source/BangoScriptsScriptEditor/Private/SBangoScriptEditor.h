@@ -5,6 +5,7 @@
 #include "BangoGraphEdit.h"
 #include "BangoGraphLayout.h"
 #include "EditorUndoClient.h"
+#include "Types/SlateStructs.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Widgets/DeclarativeSyntaxSupport.h"
 #include "Widgets/SCompoundWidget.h"
@@ -14,6 +15,7 @@ class FUICommandList;
 class SBox;
 class SGraphEditor;
 class SInlineEditableTextBlock;
+class SMultiLineEditableTextBox;
 class STextBlock;
 class ITableRow;
 class STableViewBase;
@@ -62,7 +64,7 @@ public:
 	/** The open script ("Examples/Hello"), or empty. */
 	const FString& GetOpenScript() const { return OpenScript; }
 	/** As of the last check: checked every quarter second while the editor is shown, after undo, and before closing. */
-	bool HasUnsavedChanges() const { return bDirty; }
+	bool HasUnsavedChanges() const { return bDirty || bTextEdited; }
 
 	//~ Begin SWidget
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
@@ -133,6 +135,20 @@ private:
 	int32 PendingDeclRename = INDEX_NONE;
 
 	TSharedPtr<STextBlock> TitleText;
+
+	/** SCRIPT DESCRIPTION: the box for the script's description (kept on the main Script Start node). */
+	TSharedPtr<SMultiLineEditableTextBox> DescriptionBox;
+
+	// The script text pane, left of the graph: the script as it would be saved, which can be edited and applied.
+	TSharedPtr<SMultiLineEditableTextBox> TextBox;
+	/** Shown or hidden with the tab on the graph area's left edge. Hidden to start with. */
+	bool bTextPaneOpen = false;
+	/** The text as last put in the box (from the graphs, or the file if it didn't read), so typing in it can be told apart. */
+	FString TextShown;
+	/** The box has been typed in since TextShown: the graphs don't change it until the typing is applied or reverted. */
+	bool bTextEdited = false;
+	/** Why the text in the box couldn't be shown as a graph (from Apply, or opening a file that doesn't read). Empty if it can. */
+	FString TextError;
 	TSharedPtr<SBox> GraphHost;
 	TSharedPtr<SGraphEditor> GraphEditor;
 	TSharedPtr<FUICommandList> GraphCommands;
@@ -182,6 +198,9 @@ private:
 	FString CheckFunctionName(const FString& OldName, const FString& NewName) const;
 	/** Renames a function, and every call to it in the script, as one undoable edit. */
 	void RenameFunction(TSharedPtr<FGraphEntry> Item, const FString& NewName);
+
+	/** How tall a FUNCTIONS, INPUTS, GLOBALS or LOCALS list is with NumRows rows: as tall as its rows, since the pane around them scrolls. */
+	FOptionalSize VariableListHeight(int32 NumRows) const;
 
 	// INPUTS
 	/** The names of the shown graph's parameters and variables. */
@@ -264,6 +283,32 @@ private:
 	void CheckFileOnDisk();
 	/** Reads the script again from its file, keeping the shown graph and its view where they can be. */
 	void ReloadKeepingView();
+	/** Runs Rebuild (which makes the editor graphs again), then shows the same graph from the same place, where it still exists. */
+	void KeepingView(TFunctionRef<void()> Rebuild);
+	/** Makes the editor graphs, the graph list and the variable lists for a document, and shows the main graph. */
+	void ShowDocument(const FBangoGraphDocument& Document);
+
+	// SCRIPT DESCRIPTION
+	/** The script's description, from the main Script Start node (empty if no script is open). */
+	FString GetScriptDescription() const;
+	/** Sets the description from what was typed (trailing spaces and empty lines at the end dropped), as one undoable edit. */
+	void SetScriptDescription(const FString& Typed);
+	/** Puts the description in its box again if it changed (after an undo, a reload, Apply), unless the box is being typed in. */
+	void UpdateDescriptionBox();
+
+	// Script text pane
+	TSharedRef<SWidget> MakeTextPane();
+	/** Puts Text in the box (tabs as four spaces), as the new TextShown: not typed in. */
+	void SetScriptText(const FString& Text);
+	/** Unless the box has been typed in: shows Document (the graphs as they are now; null to read them) as text. */
+	void UpdateScriptText(const FBangoGraphDocument* Document);
+	/**
+	 * Makes the graphs again from the text in the box, as an edit that can't be undone with Undo (like Reload). If it
+	 * doesn't read, sets TextError, leaves the graphs alone and returns false.
+	 */
+	bool ApplyScriptText();
+	/** Throws away what was typed in the box: it shows the graphs again. */
+	void RevertScriptText();
 
 	/** Compares the graphs with the file as last opened or saved, and updates bDirty. */
 	void RefreshDirty();

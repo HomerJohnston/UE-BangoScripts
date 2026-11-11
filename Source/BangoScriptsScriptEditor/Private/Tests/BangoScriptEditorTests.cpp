@@ -25,6 +25,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoEdGraphBuilderTest, "Bango.ScriptEditor.E
 bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 {
 	const TCHAR* Source =
+		TEXT("// About this script\n")
+		TEXT("\n")
 		TEXT("// Start here\n")
 		TEXT("#define params (int _n = 1)\n")
 		TEXT("if (_n > 0)    //@1(10, 0)\n")
@@ -45,6 +47,7 @@ bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 
 	const TSharedPtr<FBangoNodeLayoutContext> Context = MakeShared<FBangoNodeLayoutContext>(Bango::MakeNodeLayoutContext(Doc, &FBangoModule::Get().GetCommands()));
 	TStrongObjectPtr<UEdGraph> Graph(BangoScriptEditor::CreateEdGraph(Doc.Main, Context));
+	BangoScriptEditor::SetDescription(Graph.Get(), Doc.Description);
 	TestEqual(TEXT("node count"), Graph->Nodes.Num(), 4);
 	if (Graph->Nodes.Num() != 4)
 	{
@@ -62,6 +65,7 @@ bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 
 	TestTrue(TEXT("entry has no input"), Entry->IsEntry() && Entry->GetInputPin() == nullptr);
 	TestEqual(TEXT("entry comment"), Entry->NodeComment, FString(TEXT("Start here")));
+	TestEqual(TEXT("the script's description is kept on Script Start, not shown"), Entry->Description, FString(TEXT("About this script")));
 	TestTrue(TEXT("entry comment bubble shown"), Entry->bCommentBubbleVisible);
 	TestEqual(TEXT("if position X (grid units * 16)"), If->NodePosX, 10 * BangoGraphGridSize);
 	TestEqual(TEXT("hint position Y"), SleepNode->NodePosY, 5 * BangoGraphGridSize);
@@ -102,6 +106,7 @@ bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 		TArray<UEdGraph*> Graphs = { Graph.Get() };
 		TestTrue(TEXT("build document"), BangoScriptEditor::BuildDocument(Graphs, Back, nullptr, BuildError));
 		TestTrue(TEXT("the editor graph reads back as the same document"), Back.Main == Doc.Main);
+		TestEqual(TEXT("and with the same description"), Back.Description, Doc.Description);
 	}
 
 	// Double-clicking a wire puts a reroute on it; reading the graph back gives the reroute a new NodeID.
