@@ -818,7 +818,7 @@ namespace Bango
 
 	bool IsValidGlobalName(const FString& Name)
 	{
-		return IsValidIdentifier(Name) && !IsLocalName(Name) && !IsReservedWord(Name);
+		return IsValidIdentifier(Name) && !IsReservedWord(Name);
 	}
 
 	bool IsValidBangoIDName(const FString& Name)

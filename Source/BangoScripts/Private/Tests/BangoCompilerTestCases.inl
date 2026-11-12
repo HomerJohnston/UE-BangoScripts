@@ -276,7 +276,7 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 		TEXT("  6 Halt\n"), nullptr, nullptr },
 
 	// ---- Errors ----
-	{ TEXT("undeclared local"), TEXT("_x = 1;"), nullptr, TEXT("(1:1)"), TEXT("'_x' is not declared") },
+	{ TEXT("undeclared local"), TEXT("_x = 1;"), nullptr, TEXT("(1:1)"), TEXT("'_x' isn't declared in this script") },
 	{ TEXT("float into int"), TEXT("int _x = 2.5;"), nullptr, TEXT("(1:10)"), TEXT("needs an int, but this is a float") },
 	{ TEXT("string plus int"), TEXT("string _s;\n_s = \"a\" + 1;"), nullptr, TEXT("(2:10)"), TEXT("join two strings") },
 	{ TEXT("condition not bool"), TEXT("if (1)\n{\n};"), nullptr, TEXT("(1:5)"), TEXT("condition must be a bool") },
@@ -317,11 +317,11 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 	{ TEXT("function named like a command"), TEXT("function void Hint()\n{\n};"), nullptr, TEXT("(1:1)"), TEXT("already a command") },
 	{ TEXT("function named like a built-in"), TEXT("function void Push()\n{\n};"), nullptr, TEXT("(1:1)"), TEXT("built-in") },
 	{ TEXT("duplicate parameter"), TEXT("function void F(int _a, int _a)\n{\n};"), nullptr, TEXT("(1:29)"), TEXT("Two parameters") },
-	{ TEXT("top-level local inside function"), TEXT("int _x = 1;\nfunction void F()\n{\n\t_x = 2;\n};"), nullptr, TEXT("(4:2)"), TEXT("'_x' is not declared") },
+	{ TEXT("top-level local inside function"), TEXT("int _x = 1;\nfunction void F()\n{\n\t_x = 2;\n};"), nullptr, TEXT("(4:2)"), TEXT("'_x' isn't declared in this script") },
 	{ TEXT("loop variable with a local's name"), TEXT("int _x = 1;\nfor (int _x = 0; _x < 2; _x++)\n{\n\tHint(\"x\");\n};"), nullptr, TEXT("(2:6)"), TEXT("already declared") },
 	{ TEXT("computed starting value"), TEXT("int _a = 1;\nint _x = _a + 1;"), nullptr, TEXT("(2:13)"), TEXT("must be a fixed value") },
 	{ TEXT("forEach variable shadows"), TEXT("int _x = 1;\nint[] _a = [];\nforEach (_x in _a)\n{\n};"), nullptr, TEXT("(3:1)"), TEXT("already declared") },
-	{ TEXT("loop variable after its loop"), TEXT("for (int _i = 0; _i < 2; _i++)\n{\n\tHint(\"x\");\n};\n_i = 2;"), nullptr, TEXT("(5:1)"), TEXT("'_i' is not declared") },
+	{ TEXT("loop variable after its loop"), TEXT("for (int _i = 0; _i < 2; _i++)\n{\n\tHint(\"x\");\n};\n_i = 2;"), nullptr, TEXT("(5:1)"), TEXT("'_i' isn't declared in this script") },
 	{ TEXT("global with a value"), TEXT("global int a = 1;"), nullptr, TEXT("(1:16)"), TEXT("A global declaration can't have a value") },
 	{ TEXT("global in a function"), TEXT("function void F()\n{\n\tglobal int g;\n};"), nullptr, TEXT("(3:2)"), TEXT("not in a function") },
 	{ TEXT("global after a statement"), TEXT("Hint(\"x\");\nglobal int g;"), nullptr, TEXT("(2:1)"), TEXT("Globals are declared at the top of the file") },
@@ -362,7 +362,7 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 	{ TEXT("params array default for a scalar"), TEXT("#define params (int _a = [1])"), nullptr, TEXT("(1:26)"), TEXT("but it is an array") },
 	{ TEXT("params duplicate name"), TEXT("#define params (int _a, string _a)"), nullptr, TEXT("(1:32)"), TEXT("Two parameters are named '_a'") },
 	{ TEXT("params shadowed by a local"), TEXT("#define params (int _a)\nint _a = 1;"), nullptr, TEXT("(2:1)"), TEXT("already declared") },
-	{ TEXT("params not visible in functions"), TEXT("#define params (int _a)\nfunction void F()\n{\n\tHint(\"%0\", _a);\n};"), nullptr, TEXT("(4:13)"), TEXT("'_a' is not declared") },
+	{ TEXT("params not visible in functions"), TEXT("#define params (int _a)\nfunction void F()\n{\n\t_a = 1;\n};"), nullptr, TEXT("(4:2)"), TEXT("'_a' isn't declared in this script") },   // (a read there is of a global _a),
 	{ TEXT("error carries node id"), TEXT("int _x;\n_x = \"no\"; //@42(0, 0)"), nullptr, TEXT("[node 42]"), TEXT("needs an int") },
 	{ TEXT("fixed starting values"), TEXT("int[] _a = [1, -2];\nvector3 _v = [0, 0, 1];\nentity _e = @john;\nbool _b = true;\nstring _s = nil;\nfloat _f = -2.5;\nHint(\"%0 %1 %2 %3 %4\", _a, _v, _e, _b, _f);"), TEXT("*"), nullptr, nullptr },
 

@@ -1148,8 +1148,8 @@ namespace Bango
 		}
 
 		// The file's globals, in order, then the ones this graph uses but the file doesn't declare: names that
-		// aren't locals (no `_`), calls (followed by `(`), vector parts (after `.`), or labels (Label and Go To
-		// nodes hold only a label's name).
+		// aren't the graph's parameters, locals or loop variables (already seen), calls (followed by `(`), vector parts
+		// (after `.`), or labels (Label and Go To nodes hold only a label's name).
 		for (int32 i = 0; i < Document.Globals.Num(); ++i)
 		{
 			Add(Globals, Document.Globals[i].Name, Document.Globals[i].Type, FBangoGraphVariable::EKind::Global, INDEX_NONE, i);
@@ -1166,7 +1166,7 @@ namespace Bango
 			for (int32 t = 0; Tok.bOk && t < Tok.Num(); ++t)
 			{
 				const FString& Name = Tok.T[t].Text;
-				if (!Tok.Is(t, EBangoTokenKind::Identifier) || (Name.Len() > 0 && Name[0] == TEXT('_')) || Tok.Is(t + 1, EBangoTokenKind::LParen) || Tok.Is(t - 1, EBangoTokenKind::Dot))
+				if (!Tok.Is(t, EBangoTokenKind::Identifier) || Tok.Is(t + 1, EBangoTokenKind::LParen) || Tok.Is(t - 1, EBangoTokenKind::Dot))
 				{
 					continue;
 				}

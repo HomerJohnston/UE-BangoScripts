@@ -16,6 +16,9 @@ class SBox;
 class SGraphEditor;
 class SInlineEditableTextBlock;
 class SMultiLineEditableTextBox;
+class SBangoTextEditor;
+class SScrollBox;
+class SScrollBar;
 class STextBlock;
 class ITableRow;
 class STableViewBase;
@@ -140,7 +143,13 @@ private:
 	TSharedPtr<SMultiLineEditableTextBox> DescriptionBox;
 
 	// The script text pane, left of the graph: the script as it would be saved, which can be edited and applied.
-	TSharedPtr<SMultiLineEditableTextBox> TextBox;
+	TSharedPtr<SBangoTextEditor> TextBox;
+	/** The text box's vertical scrollbar, which says how far it's scrolled, for the line numbers beside it. */
+	TSharedPtr<SScrollBar> TextVScrollBar;
+	TSharedPtr<SScrollBox> LineNumberScroll;
+	TSharedPtr<STextBlock> LineNumbers;
+	/** How many line numbers LineNumbers shows. */
+	int32 LineNumberCount = 0;
 	/** Shown or hidden with the tab on the graph area's left edge. Hidden to start with. */
 	bool bTextPaneOpen = false;
 	/** The text as last put in the box (from the graphs, or the file if it didn't read), so typing in it can be told apart. */
@@ -298,7 +307,11 @@ private:
 
 	// Script text pane
 	TSharedRef<SWidget> MakeTextPane();
-	/** Puts Text in the box (tabs as four spaces), as the new TextShown: not typed in. */
+	/** Shows a number for each line of Text beside the script text. */
+	void UpdateLineNumbers(const FString& Text);
+	/** Every frame while the pane is shown: scrolls the line numbers to where the text is scrolled. */
+	EActiveTimerReturnType SyncLineNumbers(double InCurrentTime, float InDeltaTime);
+	/** Puts Text in the box, as the new TextShown: not typed in. */
 	void SetScriptText(const FString& Text);
 	/** Unless the box has been typed in: shows Document (the graphs as they are now; null to read them) as text. */
 	void UpdateScriptText(const FBangoGraphDocument* Document);

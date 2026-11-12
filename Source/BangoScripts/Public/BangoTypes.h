@@ -233,10 +233,10 @@ namespace Bango
 	/** Keywords and type names that can't be used as names. */
 	BANGOSCRIPTS_API bool IsReservedWord(const FString& Name);
 
-	/** Local names start with '_'. */
+	/** True if the name starts with '_'. Command names can't; variable names (locals and globals alike) may. */
 	BANGOSCRIPTS_API bool IsLocalName(const FString& Name);
 
-	/** A valid identifier, not reserved, not starting with '_'. */
+	/** A valid identifier that isn't a reserved word. (A leading '_' is allowed.) */
 	BANGOSCRIPTS_API bool IsValidGlobalName(const FString& Name);
 
 	/** A name a Bango ID can have, written `@name` in scripts: any identifier. Keywords and a leading '_' are fine, since the '@' sets it apart. */

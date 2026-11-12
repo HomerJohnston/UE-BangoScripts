@@ -11,7 +11,7 @@ bool FBangoGlobalStore::Declare(const FString& Name, const FBangoType& Type, FSt
 {
 	if (!Bango::IsValidGlobalName(Name))
 	{
-		OutError = FString::Printf(TEXT("'%s' is not a valid global name. Globals must be identifiers, must not start with '_', and must not be reserved words."), *Name);
+		OutError = FString::Printf(TEXT("'%s' is not a valid global name. Globals must be identifiers (letters, digits and '_', not starting with a digit), and must not be reserved words."), *Name);
 		return false;
 	}
 

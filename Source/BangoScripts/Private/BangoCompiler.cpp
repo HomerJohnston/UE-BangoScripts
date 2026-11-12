@@ -1677,12 +1677,9 @@ namespace BangoCompilerPrivate
 				Index = Local->Slot;
 				RootType = FExprType::MakeKnown(Local->Type);
 			}
-			else if (Bango::IsLocalName(Root->Name))
-			{
-				return Fail(Root->Loc, FString::Printf(TEXT("'%s' is not declared. Declare it at the top of the script, like 'int %s;'."), *Root->Name, *Root->Name));
-			}
 			else
 			{
+				// Not a local, parameter or loop variable here: a global (declared in this file or not), with or without a leading '_'.
 				Kind = EBangoPlaceKind::Global;
 				Index = AddName(Root->Name);
 				if (const FBangoType* Declared = DeclaredGlobals.Find(Root->Name))
@@ -1691,8 +1688,8 @@ namespace BangoCompilerPrivate
 				}
 				else if (Use == EPlaceUse::Write)
 				{
-					return Fail(Root->Loc, FString::Printf(TEXT("Global '%s' isn't declared in this script, so it can't be changed here. Declare it at the top of the file, like 'global int %s;'."),
-						*Root->Name, *Root->Name));
+					return Fail(Root->Loc, FString::Printf(TEXT("'%s' isn't declared in this script, so it can't be changed here. Declare it at the top: as a local, like 'int %s;', or as a global, like 'global int %s;'."),
+						*Root->Name, *Root->Name, *Root->Name));
 				}
 				else
 				{

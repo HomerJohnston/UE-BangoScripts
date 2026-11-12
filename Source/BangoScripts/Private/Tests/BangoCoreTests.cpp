@@ -41,7 +41,7 @@ bool FBangoTypeTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("vector3 is reserved"), Bango::IsValidGlobalName(TEXT("vector3")));
 
 	TestTrue(TEXT("global name"), Bango::IsValidGlobalName(TEXT("john")));
-	TestFalse(TEXT("local name is not global"), Bango::IsValidGlobalName(TEXT("_john")));
+	TestTrue(TEXT("a global may start with '_'"), Bango::IsValidGlobalName(TEXT("_john")));
 	TestFalse(TEXT("reserved word"), Bango::IsValidGlobalName(TEXT("forEach")));
 	TestFalse(TEXT("starts with digit"), Bango::IsValidGlobalName(TEXT("17door")));
 	TestTrue(TEXT("digits later"), Bango::IsValidGlobalName(TEXT("door17")));
@@ -287,7 +287,10 @@ bool FBangoGlobalsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("stored as float"), Globals->Find(TEXT("speed"))->GetType() == FBangoType::Double());
 
 	TestFalse(TEXT("names are case-sensitive"), Globals->Find(TEXT("Speed")) != nullptr);
-	TestFalse(TEXT("local name rejected"), Globals->Declare(TEXT("_x"), FBangoType::Int(), Error));
+	{
+		FBangoGlobalStore Spare; // not the store being saved below
+		TestTrue(TEXT("a name starting with '_' is a valid global"), Spare.Declare(TEXT("_x"), FBangoType::Int(), Error));
+	}
 
 	// Save, reset, load.
 	TArray<uint8> Bytes;

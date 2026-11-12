@@ -1,0 +1,220 @@
+// Automation tests for the Bango text editor's line tokenizer.
+// Run from Session Frontend > Automation: Bango.ScriptEditor.TextEditor.LineTokenizer
+
+#include "Misc/AutomationTest.h"
+#include "BangoLineTokenizer.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+namespace BangoLineTokenizerTests
+{
+	static const TCHAR* KindName(EBangoSyntaxKind Kind)
+	{
+		static const TCHAR* const Names[] =
+		{
+			TEXT("Default"), TEXT("Keyword"), TEXT("JumpKeyword"), TEXT("LabelKeyword"), TEXT("LabelName"), TEXT("DeclKeyword"),
+			TEXT("Type"), TEXT("Constant"), TEXT("Nil"), TEXT("Preprocessor"), TEXT("Local"), TEXT("Global"), TEXT("Entity"),
+			TEXT("Number"), TEXT("String"), TEXT("StringEscape"), TEXT("Placeholder"), TEXT("LocMacro"), TEXT("LocKey"),
+			TEXT("LocNotes"), TEXT("VectorPart"), TEXT("Call"), TEXT("Builtin"), TEXT("Comment"), TEXT("Metadata"),
+			TEXT("DisconnectedMarker"), TEXT("Structure"), TEXT("Operator"), TEXT("Punctuation"), TEXT("Error"),
+			TEXT("Command"), TEXT("Function"), TEXT("Parameter"), TEXT("UndeclaredGlobal"),
+		};
+		static_assert(UE_ARRAY_COUNT(Names) == static_cast<int32>(EBangoSyntaxKind::Count), "Update the names");
+		return Names[static_cast<int32>(Kind)];
+	}
+
+	/** "Kind[text] Kind~[text] ..." where ~ marks a disconnected token. */
+	static FString Describe(const FString& Line)
+	{
+		TArray<FBangoSyntaxToken> Tokens;
+		FBangoLineTokenizer::TokenizeLine(FStringView(Line), Tokens);
+
+		FString Result;
+		int32 PreviousEnd = 0;
+		for (const FBangoSyntaxToken& Token : Tokens)
+		{
+			if (Token.Start < PreviousEnd)
+			{
+				Result += TEXT("!!OVERLAP ");
+			}
+			PreviousEnd = Token.Start + Token.Len;
+			Result += FString::Printf(TEXT("%s%s[%s] "), KindName(Token.Kind), Token.bDisconnected ? TEXT("~") : TEXT(""), *Line.Mid(Token.Start, Token.Len));
+		}
+		return Result;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoLineTokenizerTest, "Bango.ScriptEditor.TextEditor.LineTokenizer",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FBangoLineTokenizerTest::RunTest(const FString& Parameters)
+{
+	// Each line's description must contain the expected run of tokens.
+	auto Check = [this](const TCHAR* Line, const TCHAR* Expected)
+	{
+		const FString Got = BangoLineTokenizerTests::Describe(Line);
+		if (!Got.Contains(Expected, ESearchCase::CaseSensitive))
+		{
+			AddError(FString::Printf(TEXT("Line: %s\n  want: %s\n  got:  %s"), Line, Expected, *Got));
+		}
+	};
+
+	Check(TEXT("global int foundThings = 0;      //@1(0, 0)"), TEXT("DeclKeyword[global] Type[int] Global[foundThings] Operator[=] Number[0] Punctuation[;] Metadata[//@1(0, 0)]"));
+	Check(TEXT("if (IsDefined(foundThings) && foundThings >= 10)"), TEXT("Keyword[if] Punctuation[(] Builtin[IsDefined] Punctuation[(] Global[foundThings] Punctuation[)] Operator[&&] Global[foundThings] Operator[>=] Number[10]"));
+	Check(TEXT("\tHint(LOCTEXT(\"Countdown\", \"Countdown: {0}\"), 3 - _i);"), TEXT("Call[Hint] Punctuation[(] LocMacro[LOCTEXT] Punctuation[(] LocKey[\"Countdown\"] Punctuation[,] String[\"Countdown: ] Placeholder[{0}] String[\"] Punctuation[)] Punctuation[,] Number[3] Operator[-] Local[_i]"));
+	Check(TEXT("Hint(NSNOTELOCTEXT(\"Ns\", \"K\", \"Hi {Name} `{\", \"note\"));"), TEXT("LocKey[\"Ns\"] Punctuation[,] LocKey[\"K\"] Punctuation[,] String[\"Hi ] Error[{Name}] String[ ] StringEscape[`{] String[\"] Punctuation[,] LocNotes[\"note\"]"));
+	Check(TEXT("Log(\"%0 and %% \\n \\q\", _a);"), TEXT("String[\"] Placeholder[%0] String[ and ] Placeholder[%%] String[ ] StringEscape[\\n] String[ ] Error[\\q] String[\"]"));
+	Check(TEXT("@john Speak(\"Hi\");"), TEXT("Entity[@john] Call[Speak]"));
+	Check(TEXT("label Check;"), TEXT("LabelKeyword[label] LabelName[Check] Punctuation[;]"));
+	Check(TEXT("goto Hub;"), TEXT("LabelKeyword[goto] LabelName[Hub]"));
+	Check(TEXT("return;"), TEXT("JumpKeyword[return]"));
+	Check(TEXT("float _h = _who GetPos().z;"), TEXT("Type[float] Local[_h] Operator[=] Local[_who] Call[GetPos] Punctuation[(] Punctuation[)] Punctuation[.] VectorPart[z]"));
+	Check(TEXT("_pos.X = 1;"), TEXT("Local[_pos] Punctuation[.] Error[X]"));
+	Check(TEXT("int[][] _grid = [[1, 2], [3]];"), TEXT("Type[int[][]] Local[_grid]"));
+	Check(TEXT("double _d = 1. + .5 + 12abc + 2.5e-3;"), TEXT("Error[double] Local[_d] Operator[=] Error[1.] Operator[+] Error[.5] Operator[+] Error[12abc] Operator[+] Number[2.5e-3]"));
+	Check(TEXT("#define params (entity _speaker, int _n = 1, entity _l = nil)"), TEXT("Preprocessor[#define] Preprocessor[params] Punctuation[(] Type[entity] Local[_speaker]"));
+	Check(TEXT("#define params (entity _speaker, int _n = 1, entity _l = nil)"), TEXT("Nil[nil] Punctuation[)]"));
+	Check(TEXT("#define LOCTEXT_NAMESPACE \"Quest.Intro\""), TEXT("Preprocessor[#define] Preprocessor[LOCTEXT_NAMESPACE] String[\"Quest.Intro\"]"));
+	Check(TEXT("#undef LOCTEXT_NAMESPACE"), TEXT("Preprocessor[#undef] Preprocessor[LOCTEXT_NAMESPACE]"));
+	Check(TEXT("//~ if (true)               //@3(20, 20)"), TEXT("DisconnectedMarker[//~] Keyword~[if] Punctuation~[(] Constant~[true] Punctuation~[)] Metadata~[//@3(20, 20)]"));
+	Check(TEXT("//~"), TEXT("DisconnectedMarker[//~]"));
+	Check(TEXT("                //@7(4, 9) @8(8, 13)"), TEXT("Metadata[//@7(4, 9) @8(8, 13)]"));
+	Check(TEXT("// just a comment"), TEXT("Comment[// just a comment]"));
+	Check(TEXT("} else if (b) {"), TEXT("Structure[}] Keyword[else] Keyword[if] Punctuation[(] Global[b] Punctuation[)] Structure[{]"));
+	Check(TEXT("};"), TEXT("Structure[}] Punctuation[;]"));
+	Check(TEXT("forEach (_e in questLog)"), TEXT("Keyword[forEach] Punctuation[(] Local[_e] Keyword[in] Global[questLog]"));
+	Check(TEXT("questLog Push(\"x\");"), TEXT("Global[questLog] Builtin[Push]"));
+	Check(TEXT("function int AddScore(int _amount)"), TEXT("DeclKeyword[function] Type[int] Call[AddScore] Punctuation[(] Type[int] Local[_amount]"));
+	Check(TEXT("if (a & b | c)"), TEXT("Error[&] Global[b] Error[|]"));
+	Check(TEXT("Log(\"unterminated);"), TEXT("Call[Log] Punctuation[(] Error[\"unterminated);]"));
+	Check(TEXT("_x++; _y -= 2; _z *= 3;"), TEXT("Local[_x] Operator[++] Punctuation[;] Local[_y] Operator[-=]"));
+	Check(TEXT("@ john"), TEXT("Error[@] Global[john]"));
+	Check(TEXT("Hint(LOCTEXT(\"K\", Format(\"%0\", 1)), \"%1\");"), TEXT("LocKey[\"K\"] Punctuation[,] Call[Format] Punctuation[(] String[\"] Placeholder[%0]"));
+	Check(TEXT("Hint(LOCTEXT(\"K\", \"s\"), \"%1\");"), TEXT("Punctuation[)] Punctuation[,] String[\"] Placeholder[%1] String[\"]"));
+	Check(TEXT("vector3 _p = [1, 2, 3];"), TEXT("Type[vector3] Local[_p]"));
+	Check(TEXT("bool _b = !_c != false;"), TEXT("Operator[!] Local[_c] Operator[!=] Constant[false]"));
+	Check(TEXT(""), TEXT(""));
+
+	return true;
+}
+
+// ---- Hidden metadata (FBangoMetadataTracker) ----
+
+#include "BangoTextMetadata.h"
+
+namespace BangoTextMetadataTests
+{
+	/** Test text: '|' is a line break and '>' a tab. */
+	static FString UV(const TCHAR* Text)
+	{
+		FString Result(Text);
+		Result.ReplaceCharInline(TEXT('|'), TEXT('\n'), ESearchCase::CaseSensitive);
+		Result.ReplaceCharInline(TEXT('>'), TEXT('\t'), ESearchCase::CaseSensitive);
+		return Result;
+	}
+
+	/** The other way: line breaks as '|', tabs as '>'. */
+	static FString N(const FString& Text)
+	{
+		FString Result = Text;
+		Result.ReplaceCharInline(TEXT('\n'), TEXT('|'), ESearchCase::CaseSensitive);
+		Result.ReplaceCharInline(TEXT('\t'), TEXT('>'), ESearchCase::CaseSensitive);
+		Result.ReplaceInline(TEXT("\r"), TEXT(""), ESearchCase::CaseSensitive);
+		return Result;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoTextMetadataTest, "Bango.ScriptEditor.TextEditor.HiddenMetadata",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FBangoTextMetadataTest::RunTest(const FString& Parameters)
+{
+	using namespace BangoTextMetadataTests;
+
+	auto U = [](const TCHAR* Text) { return FString(Text); };
+	auto Eq = [this](const TCHAR* What, const FString& Got, const TCHAR* Want)
+	{
+		if (!N(Got).Equals(Want, ESearchCase::CaseSensitive))
+		{
+			AddError(FString::Printf(TEXT("%s\n  want: %s\n  got:  %s"), What, Want, *N(Got)));
+		}
+	};
+
+	// A tracker, edited step by step: Edit gives the box's new text and the cursor's line, and checks the whole text after.
+	struct T
+	{
+		TFunction<void(const TCHAR*, const FString&, const TCHAR*)> Eq;
+		FBangoMetadataTracker K;
+		void Start(const TCHAR* Full, const TCHAR* WantVisible, bool bRound = true)
+		{
+			Eq(TEXT("reset visible"), K.Reset(Full), WantVisible);
+			if (bRound)
+			{
+				Eq(TEXT("roundtrip"), K.GetFullText(), *N(Full));
+			}
+		}
+		void Edit(const TCHAR* What, const TCHAR* Visible, int32 Cursor, const TCHAR* WantFull)
+		{
+			K.OnVisibleTextChanged(UV(Visible), Cursor);
+			Eq(What, K.GetFullText(), WantFull);
+		}
+	};
+
+	// Split/join
+	{ FBangoLineMetadata M; Eq(TEXT("split"), FBangoMetadataTracker::SplitLine(U(TEXT("Log(\"x\");    //@12(4, 7)")), M), TEXT("Log(\"x\");")); Eq(TEXT("meta"), M.Metadata, TEXT("//@12(4, 7)")); Eq(TEXT("spacing"), M.Spacing, TEXT("    ")); }
+	{ FBangoLineMetadata M; Eq(TEXT("string with //@"), FBangoMetadataTracker::SplitLine(U(TEXT("Log(\"//@1(0,0)\");")), M), TEXT("Log(\"//@1(0,0)\");")); Eq(TEXT("no meta"), M.Metadata, TEXT("")); }
+	{ FBangoLineMetadata M; Eq(TEXT("reroute visible"), FBangoMetadataTracker::SplitLine(U(TEXT("\t                //@7(4, 9) @8(8, 13)")), M), TEXT("")); Eq(TEXT("reroute meta"), M.Metadata, TEXT("//@7(4, 9) @8(8, 13)")); }
+	{ FBangoLineMetadata M; Eq(TEXT("disconnected"), FBangoMetadataTracker::SplitLine(U(TEXT("//~ Log(\"d\");    //@2(0, 20)")), M), TEXT("//~ Log(\"d\");")); }
+	{ FBangoLineMetadata M; Eq(TEXT("disc reroute"), FBangoMetadataTracker::SplitLine(U(TEXT("//~             //@9(1, 1)")), M), TEXT("//~")); }
+	{ FBangoLineMetadata M; Eq(TEXT("comment only"), FBangoMetadataTracker::SplitLine(U(TEXT("// hi //@1(0,0)")), M), TEXT("// hi //@1(0,0)")); }
+	{ FBangoLineMetadata M; M.Metadata=U(TEXT("//@1(0, 0)")); Eq(TEXT("join no spacing"), FBangoMetadataTracker::JoinLine(U(TEXT("a/")), M), TEXT("a/    //@1(0, 0)")); }
+
+	T t; t.Eq = Eq;
+	t.Start(TEXT("if (x)    //@1(0, 0)\n{\n\tLog(\"a\");    //@2(1, 1)\n};\nLog(\"b\");    //@3(0, 2)\n"), TEXT("if (x)|{|>Log(\"a\");|};|Log(\"b\");|"));
+	Eq(TEXT("gutter"), t.K.GetGutterText(), TEXT("//@1(0, 0)||//@2(1, 1)||//@3(0, 2)|"));
+	// Typing within a line keeps it.
+	t.Edit(TEXT("type"), TEXT("if (x)|{|>Log(\"ab\");|};|Log(\"b\");|"), 2, TEXT("if (x)    //@1(0, 0)|{|>Log(\"ab\");    //@2(1, 1)|};|Log(\"b\");    //@3(0, 2)|"));
+	// Enter at the right end of line 2: metadata stays, blank line below.
+	t.Edit(TEXT("enter right"), TEXT("if (x)|{|>Log(\"ab\");||};|Log(\"b\");|"), 3, TEXT("if (x)    //@1(0, 0)|{|>Log(\"ab\");    //@2(1, 1)||};|Log(\"b\");    //@3(0, 2)|"));
+	// Undo of that
+	t.Edit(TEXT("undo enter"), TEXT("if (x)|{|>Log(\"ab\");|};|Log(\"b\");|"), 2, TEXT("if (x)    //@1(0, 0)|{|>Log(\"ab\");    //@2(1, 1)|};|Log(\"b\");    //@3(0, 2)|"));
+	// Enter at the left of line 4's code: moves down with it.
+	t.Edit(TEXT("enter left"), TEXT("if (x)|{|>Log(\"ab\");|};||Log(\"b\");|"), 5, TEXT("if (x)    //@1(0, 0)|{|>Log(\"ab\");    //@2(1, 1)|};||Log(\"b\");    //@3(0, 2)|"));
+	// Enter after the indent of line 2 (left of the code): moves down with the code.
+	T u; u.Eq = Eq; u.Start(TEXT("{\n\tLog(\"a\");    //@2(1, 1)\n};"), TEXT("{|>Log(\"a\");|};"));
+	u.Edit(TEXT("enter after indent"), TEXT("{|>|Log(\"a\");|};"), 2, TEXT("{|>|Log(\"a\");    //@2(1, 1)|};"));
+	// Enter in the middle: left half keeps it.
+	T v; v.Eq = Eq; v.Start(TEXT("Log(\"a\"); Log(\"b\");    //@5(0, 0)\nX();    //@6(0, 1)"), TEXT("Log(\"a\"); Log(\"b\");|X();"));
+	v.Edit(TEXT("split"), TEXT("Log(\"a\"); |Log(\"b\");|X();"), 1, TEXT("Log(\"a\");     //@5(0, 0)|Log(\"b\");|X();    //@6(0, 1)"));
+	// Undo restores exactly
+	v.Edit(TEXT("undo split"), TEXT("Log(\"a\"); Log(\"b\");|X();"), 0, TEXT("Log(\"a\"); Log(\"b\");    //@5(0, 0)|X();    //@6(0, 1)"));
+	// Join (backspace at start of X): upper keeps, lower's dropped.
+	v.Edit(TEXT("join"), TEXT("Log(\"a\"); Log(\"b\");X();"), 0, TEXT("Log(\"a\"); Log(\"b\");X();    //@5(0, 0)"));
+	// Join where upper has none: lower's kept.
+	T w; w.Eq = Eq; w.Start(TEXT("A();\nB();    //@9(0, 0)"), TEXT("A();|B();"));
+	w.Edit(TEXT("join lower"), TEXT("A();B();"), 0, TEXT("A();B();    //@9(0, 0)"));
+	// Delete a line: its metadata goes.
+	T x; x.Eq = Eq; x.Start(TEXT("A();    //@1(0, 0)\nB();    //@2(0, 1)\nC();    //@3(0, 2)"), TEXT("A();|B();|C();"));
+	x.Edit(TEXT("delete line"), TEXT("A();|C();"), 1, TEXT("A();    //@1(0, 0)|C();    //@3(0, 2)"));
+	// Paste-replace: matching text keeps, others drop.
+	T y; y.Eq = Eq; y.Start(TEXT("A();    //@1(0, 0)\nB();    //@2(0, 1)\nC();    //@3(0, 2)"), TEXT("A();|B();|C();"));
+	y.Edit(TEXT("paste"), TEXT("Z();|Q();|B();|R();|C();"), 3, TEXT("Z();|Q();|B();    //@2(0, 1)|R();|C();    //@3(0, 2)"));
+	// Trailing comment drops metadata.
+	T z; z.Eq = Eq; z.Start(TEXT("A();    //@1(0, 0)"), TEXT("A();"));
+	z.Edit(TEXT("comment"), TEXT("A(); // hi"), 0, TEXT("A(); // hi"));
+	// Blank lines with reroutes: Enter at end of statement before a reroute line.
+	T r; r.Eq = Eq; r.Start(TEXT("x();    //@1(0, 0)\n        //@4(2, 0)\ny();    //@2(4, 0)"), TEXT("x();||y();"));
+	r.Edit(TEXT("enter before reroute"), TEXT("x();|||y();"), 1, TEXT("x();    //@1(0, 0)||        //@4(2, 0)|y();    //@2(4, 0)"));
+	// Windows line endings are read too.
+	T c; c.Eq = Eq; c.Start(TEXT("A();    //@1(0, 0)\r\nB();"), TEXT("A();|B();"), false); Eq(TEXT("crlf"), c.K.GetFullText(), TEXT("A();    //@1(0, 0)|B();"));
+	T d; d.Eq = Eq; d.Start(TEXT("A();    //@1(0, 0)\nA();    //@2(0, 1)"), TEXT("A();|A();"));
+	d.Edit(TEXT("same lines, enter at start of 2nd"), TEXT("A();||A();"), 2, TEXT("A();    //@1(0, 0)||A();    //@2(0, 1)"));
+	T e; e.Eq = Eq; e.Start(TEXT("A();    //@1(0, 0)\nA();    //@2(0, 1)"), TEXT("A();|A();"));
+	e.Edit(TEXT("same lines, enter at start of 1st"), TEXT("|A();|A();"), 1, TEXT("|A();    //@1(0, 0)|A();    //@2(0, 1)"));
+	T f; f.Eq = Eq; f.Start(TEXT("A();    //@1(0, 0)\nB();    //@2(0, 1)\nC();    //@3(0, 2)\nD();    //@4(0, 3)"), TEXT("A();|B();|C();|D();"));
+	f.Edit(TEXT("select B..C delete"), TEXT("A();|D();"), 1, TEXT("A();    //@1(0, 0)|D();    //@4(0, 3)"));
+
+	return true;
+}
+
+#endif // WITH_DEV_AUTOMATION_TESTS

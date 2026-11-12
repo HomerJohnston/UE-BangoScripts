@@ -35,12 +35,14 @@
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/Layout/SScrollBox.h"
+#include "Widgets/Layout/SScrollBar.h"
 #include "Widgets/Notifications/SNotificationList.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SOverlay.h"
 #include "Widgets/Input/SComboButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
+#include "SBangoTextEditor.h"
 #include "Framework/Text/TextLayout.h"
 #include "Styling/StyleColors.h"
 #include "DragAndDrop/DecoratedDragDropOp.h"
@@ -64,6 +66,8 @@ namespace BangoScriptEditorPrivate
 	/** The height of a FUNCTIONS, INPUTS, GLOBALS or LOCALS row's content, and the padding the row adds above and below it. */
 	static constexpr float VariableRowContentHeight = 24.0f;
 	static constexpr float VariableRowPadding = 4.0f;
+	/** The space above the script text pane's first line, the same for the text and its line numbers. */
+	static constexpr float ScriptTextTopPadding = 2.0f;
 }
 
 FOptionalSize SBangoScriptEditor::VariableListHeight(int32 NumRows) const
@@ -530,6 +534,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 		LoadScript(InArgs._Script);
 	}
 	RegisterActiveTimer(0.25f, FWidgetActiveTimerDelegate::CreateSP(this, &SBangoScriptEditor::OnPoll));
+	RegisterActiveTimer(0.0f, FWidgetActiveTimerDelegate::CreateSP(this, &SBangoScriptEditor::SyncLineNumbers)); // every frame
 }
 
 SBangoScriptEditor::~SBangoScriptEditor()
@@ -1006,21 +1011,10 @@ namespace BangoScriptEditorPrivate
 		FOnDragDetected DragDetected;
 	};
 
-	/** A local's name: `_` then letters, digits and `_`. */
-	static bool IsLocalName(const FString& Name)
+	/** A variable's name (a parameter, local or global): letters, digits and `_`, not starting with a digit, and not a keyword. A leading `_` is allowed, not needed. */
+	static bool IsVariableName(const FString& Name)
 	{
-		if (Name.Len() < 2 || Name[0] != TEXT('_'))
-		{
-			return false;
-		}
-		for (int32 i = 1; i < Name.Len(); ++i)
-		{
-			if (!FChar::IsAlnum(Name[i]) && Name[i] != TEXT('_'))
-			{
-				return false;
-			}
-		}
-		return true;
+		return Bango::IsValidIdentifier(Name) && !Bango::IsReservedWord(Name);
 	}
 }
 
@@ -1495,9 +1489,9 @@ FString SBangoScriptEditor::CheckInputName(int32 Index, const FString& NewName) 
 	{
 		return FString();
 	}
-	if (!BangoScriptEditorPrivate::IsLocalName(NewName))
+	if (!BangoScriptEditorPrivate::IsVariableName(NewName))
 	{
-		return TEXT("A parameter's name starts with _ and has only letters, digits and _ (like _who).");
+		return TEXT("A parameter's name has only letters, digits and _, doesn't start with a digit, and isn't a keyword (like who or _who).");
 	}
 	for (const TSharedPtr<FInputEntry>& Item : InputItems)
 	{
@@ -1714,7 +1708,7 @@ bool SBangoScriptEditor::ApplyDecls(bool bGlobal, const TArray<FBangoGraphDecl>&
 
 	if (!RenamedFrom.IsEmpty())
 	{
-		// A global is visible in every graph; a local only in its own.
+		// A global is visible in every graph (except where a local or parameter has its name); a local only in its own.
 		for (int32 g = 0; g < EdGraphs.Num(); ++g)
 		{
 			if (!bGlobal && g != ShownGraph)
@@ -1722,6 +1716,22 @@ bool SBangoScriptEditor::ApplyDecls(bool bGlobal, const TArray<FBangoGraphDecl>&
 				continue;
 			}
 			UEdGraph* Graph = EdGraphs[g].Get();
+			if (bGlobal)
+			{
+				const UBangoEdGraphNode* GraphEntry = BangoScriptEditor::FindEntryNode(Graph);
+				TArray<FBangoEntryParam> GraphParams;
+				if (GraphEntry)
+				{
+					Bango::ReadEntryParams(GraphEntry->Text, g > 0, GraphParams);
+				}
+				const bool bHidden = GraphEntry
+					&& (GraphEntry->Locals.ContainsByPredicate([&RenamedFrom](const FBangoEdDecl& Decl) { return Decl.Name.Equals(RenamedFrom, ESearchCase::CaseSensitive); })
+						|| GraphParams.ContainsByPredicate([&RenamedFrom](const FBangoEntryParam& Param) { return Param.Name.Equals(RenamedFrom, ESearchCase::CaseSensitive); }));
+				if (bHidden)
+				{
+					continue; // its uses there are of the local or parameter, not the global
+				}
+			}
 			for (UEdGraphNode* Node : Graph->Nodes)
 			{
 				UBangoEdGraphNode* BangoNode = Cast<UBangoEdGraphNode>(Node);
@@ -1897,16 +1907,10 @@ FString SBangoScriptEditor::CheckDeclName(bool bGlobal, int32 Index, const FStri
 	{
 		return FString();
 	}
-	if (bGlobal)
+	if (!BangoScriptEditorPrivate::IsVariableName(NewName))
 	{
-		if (!Bango::IsValidGlobalName(NewName))
-		{
-			return TEXT("A global's name has letters, digits and _, doesn't start with _ or a digit, and isn't a keyword (like gold or questLog).");
-		}
-	}
-	else if (!Bango::IsValidIdentifier(NewName) || !Bango::IsLocalName(NewName) || NewName.Len() < 2)
-	{
-		return TEXT("A local's name starts with _ and has only letters, digits and _ (like _count).");
+		return FString::Printf(TEXT("A %s's name has only letters, digits and _, doesn't start with a digit, and isn't a keyword (like %s)."),
+			bGlobal ? TEXT("global") : TEXT("local"), bGlobal ? TEXT("gold or questLog") : TEXT("count or _count"));
 	}
 	for (int32 i = 0; i < Decls.Num(); ++i)
 	{
@@ -2286,14 +2290,10 @@ void SBangoScriptEditor::LoadScript(const FString& Script)
 		ShowMessage(FText::Format(LOCTEXT("CantOpen", "This script can't be shown as a graph until its text is fixed. Fix it in the script text pane (the TEXT tab on the left) and Apply, or elsewhere and Reload:\n\n{0}"), FText::FromString(Error.ToString())));
 		SetScriptText(Source);
 		bTextPaneOpen = true;
-		// The error again, from the text as the pane shows it (tabs as spaces), so its column matches what's seen there.
-		FBangoGraphDocument Unused;
-		FBangoCompileError ShownError;
-		const bool bShownReads = Bango::BuildGraph(TextShown, Script + TEXT(".bango"), Unused, ShownError);
-		TextError = bShownReads ? Error.ToString() : ShownError.ToString();
-		if (!bShownReads && ShownError.Line > 0)
+		TextError = Error.ToString();
+		if (Error.Line > 0)
 		{
-			TextBox->GoTo(FTextLocation(ShownError.Line - 1, FMath::Max(ShownError.Column - 1, 0)));
+			TextBox->GoTo(FTextLocation(Error.Line - 1, FMath::Max(Error.Column - 1, 0))); // the pane shows the file as it is
 		}
 		return;
 	}
@@ -2456,6 +2456,34 @@ void SBangoScriptEditor::UpdateDescriptionBox()
 
 TSharedRef<SWidget> SBangoScriptEditor::MakeTextPane()
 {
+	// Made first, so the text editor can be given it.
+	TextVScrollBar = SNew(SScrollBar).Orientation(Orient_Vertical);
+
+	// The script's text, with Bango syntax highlighting (Bango Text Editor Spec). Made before the layout, so the line
+	// numbers can be in its font.
+	TextBox = SNew(SBangoTextEditor)
+		.Padding(FMargin(4.0f, BangoScriptEditorPrivate::ScriptTextTopPadding))
+		.VScrollBar(TextVScrollBar) // its scroll position is read back for the line numbers
+		.Text(FText::FromString(TextShown))
+		.IsReadOnly_Lambda([this]() { return OpenScript.IsEmpty(); })
+		.OnTextChanged_Lambda([this](const FText& NewText)
+		{
+			bTextEdited = !NewText.ToString().Equals(TextShown, ESearchCase::CaseSensitive);
+			UpdateLineNumbers(NewText.ToString());
+		})
+		.OnKeyDownHandler_Lambda([this](const FGeometry&, const FKeyEvent& KeyEvent)
+		{
+			if ((KeyEvent.GetKey() == EKeys::Enter || KeyEvent.GetKey() == EKeys::Virtual_Accept) && KeyEvent.IsControlDown())
+			{
+				if (!OpenScript.IsEmpty())
+				{
+					ApplyScriptText();
+				}
+				return FReply::Handled();
+			}
+			return FReply::Unhandled();
+		});
+
 	return SNew(SBorder)
 		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
 		.Padding(FMargin(4.0f))
@@ -2524,39 +2552,93 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeTextPane()
 			+ SVerticalBox::Slot()
 			.FillHeight(1.0f)
 			[
-				SAssignNew(TextBox, SMultiLineEditableTextBox)
-				.Text(FText::FromString(TextShown))
-				.Font(FCoreStyle::GetDefaultFontStyle("Mono", 9))
-				.IsReadOnly_Lambda([this]() { return OpenScript.IsEmpty(); })
-				.OnTextChanged_Lambda([this](const FText& NewText)
-				{
-					bTextEdited = !NewText.ToString().Equals(TextShown, ESearchCase::CaseSensitive);
-				})
-				.OnKeyDownHandler_Lambda([this](const FGeometry&, const FKeyEvent& KeyEvent)
-				{
-					if ((KeyEvent.GetKey() == EKeys::Enter || KeyEvent.GetKey() == EKeys::Virtual_Accept) && KeyEvent.IsControlDown())
-					{
-						if (!OpenScript.IsEmpty())
-						{
-							ApplyScriptText();
-						}
-						return FReply::Handled();
-					}
-					return FReply::Unhandled();
-				})
+				SNew(SHorizontalBox)
+
+				// Line numbers, scrolled along with the text (SyncLineNumbers).
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				[
+					SAssignNew(LineNumberScroll, SScrollBox)
+					.ScrollBarVisibility(EVisibility::Collapsed)
+					.ConsumeMouseWheel(EConsumeMouseWheel::Never)
+					.AllowOverscroll(EAllowOverscroll::No)
+					.AnimateWheelScrolling(false)
+					+ SScrollBox::Slot()
+					// The same top padding as the text; room below for the text's horizontal scrollbar, so the last lines line up.
+					.Padding(FMargin(2.0f, BangoScriptEditorPrivate::ScriptTextTopPadding, 6.0f, 24.0f))
+					[
+						SAssignNew(LineNumbers, STextBlock)
+						.Font(TextBox->GetFont()) // the text's own font, so each number is level with its line
+						.Justification(ETextJustify::Right)
+						.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+						.Text(FText::FromString(TEXT("1")))
+					]
+				]
+
+				+ SHorizontalBox::Slot()
+				.FillWidth(1.0f)
+				[
+					TextBox.ToSharedRef()
+				]
+
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				[
+					TextVScrollBar.ToSharedRef()
+				]
 			]
 		];
 }
 
 void SBangoScriptEditor::SetScriptText(const FString& Text)
 {
-	// Tabs as four spaces: Slate's text box doesn't line tabs up. The text reads the same either way.
-	TextShown = Text.Replace(TEXT("\t"), TEXT("    "));
+	// The text as it is, tabs included: the text editor types and shows tabs (one per block level).
+	TextShown = Text;
 	bTextEdited = false;
 	if (TextBox.IsValid())
 	{
 		TextBox->SetText(FText::FromString(TextShown));
+	}	UpdateLineNumbers(TextShown);
+}
+
+void SBangoScriptEditor::UpdateLineNumbers(const FString& Text)
+{
+	int32 NumLines = 1;
+	for (const TCHAR Char : Text)
+	{
+		NumLines += Char == TEXT('\n') ? 1 : 0;
 	}
+	if (NumLines == LineNumberCount || !LineNumbers.IsValid())
+	{
+		return;
+	}
+	LineNumberCount = NumLines;
+	FString Numbers;
+	Numbers.Reserve(NumLines * 5);
+	for (int32 Line = 1; Line <= NumLines; ++Line)
+	{
+		Numbers += FString::FromInt(Line);
+		if (Line < NumLines)
+		{
+			Numbers += TEXT("\n");
+		}
+	}
+	LineNumbers->SetText(FText::FromString(Numbers));
+}
+
+EActiveTimerReturnType SBangoScriptEditor::SyncLineNumbers(double, float)
+{
+	if (bTextPaneOpen && TextVScrollBar.IsValid() && LineNumberScroll.IsValid() && LineNumbers.IsValid())
+	{
+		// The text box puts its scroll position on the scrollbar as a fraction of its text's height. The numbers have one
+		// line per line of text in the same font, so their height is the text's: the same fraction of it, in pixels.
+		const float Offset = TextVScrollBar->DistanceFromTop() * LineNumbers->GetDesiredSize().Y;
+		if (!FMath::IsNearlyEqual(LineNumberScroll->GetScrollOffset(), Offset))
+		{
+			LineNumberScroll->SetScrollOffset(Offset);
+		}
+	}
+	return EActiveTimerReturnType::Continue;
 }
 
 void SBangoScriptEditor::UpdateScriptText(const FBangoGraphDocument* Document)
@@ -2580,7 +2662,7 @@ void SBangoScriptEditor::UpdateScriptText(const FBangoGraphDocument* Document)
 	{
 		return;
 	}
-	if (!Text.Replace(TEXT("\t"), TEXT("    ")).Equals(TextShown, ESearchCase::CaseSensitive))
+	if (!Text.Equals(TextShown, ESearchCase::CaseSensitive))
 	{
 		SetScriptText(Text);
 	}

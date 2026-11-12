@@ -62,11 +62,6 @@ namespace BangoParserPrivate
 		}
 	}
 
-	static bool StartsWithUnderscore(const FString& Name)
-	{
-		return Name.Len() > 0 && Name[0] == TEXT('_');
-	}
-
 	/** A fixed value allowed as a params default: a literal, a negated number, or an array of those. */
 	static bool IsConstantExpr(const FBangoExpr& Expr)
 	{
@@ -663,17 +658,10 @@ namespace BangoParserPrivate
 			return true;
 		}
 
-		bool ExpectLocalName(FString& OutName, FBangoSourceLocation& OutLoc, const TCHAR* Context, const TCHAR* What)
+		bool ExpectLocalName(FString& OutName, FBangoSourceLocation& OutLoc, const TCHAR* Context, const TCHAR* /*What*/)
 		{
-			if (!ExpectName(OutName, OutLoc, Context))
-			{
-				return false;
-			}
-			if (!StartsWithUnderscore(OutName))
-			{
-				return Fail(OutLoc, FString::Printf(TEXT("'%s' is %s, so its name must start with '_' (for example '_%s')."), *OutName, What, *OutName));
-			}
-			return true;
+			// Any name will do: a leading '_' is allowed but not needed.
+			return ExpectName(OutName, OutLoc, Context);
 		}
 
 		// ---- Functions ----
@@ -916,17 +904,6 @@ namespace BangoParserPrivate
 			FBangoSourceLocation NameLoc;
 			if (!ExpectName(Decl->Name, NameLoc, TEXT("after the type")))
 			{
-				return nullptr;
-			}
-			if (bGlobal && StartsWithUnderscore(Decl->Name))
-			{
-				Fail(NameLoc, FString::Printf(TEXT("'%s' is declared global, so its name must not start with '_'. Names starting with '_' are locals."), *Decl->Name));
-				return nullptr;
-			}
-			if (!bGlobal && !StartsWithUnderscore(Decl->Name))
-			{
-				Fail(NameLoc, FString::Printf(TEXT("'%s' is a local variable, so its name must start with '_'. To declare a global, write 'global %s %s;'."),
-					*Decl->Name, *Decl->Type.ToString(), *Decl->Name));
 				return nullptr;
 			}
 
