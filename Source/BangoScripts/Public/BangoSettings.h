@@ -21,6 +21,14 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Scripts")
 	FString ScriptDirectory = TEXT("Bango");
 
+	/**
+	 * In the editor (Play in Editor), when a running script's file is saved, its running copies switch to the new
+	 * version where they are, without starting over (hot reload). A copy that can't switch carries on with the version
+	 * it has, and the output log says why. Without this, only scripts spawned after the save use the new version.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Scripts")
+	bool bReloadRunningScripts = true;
+
 	/** A script that runs more instructions than this in one frame without pausing is stopped as an infinite loop. */
 	UPROPERTY(Config, EditAnywhere, Category = "Limits", meta = (ClampMin = "1000"))
 	int32 MaxInstructionsPerFrame = 1000000;

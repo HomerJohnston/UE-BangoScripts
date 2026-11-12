@@ -184,9 +184,11 @@ struct BANGOSCRIPTS_API FBangoGraphVariable
 	int32 Index = INDEX_NONE;
 };
 
-/** A text literal as written: `LOCTEXT("Key", "Source")` and its NS / NOTE forms (spec section 3). */
+/** A text literal as written: `LOCTEXT("Key", "Source")` and its NS / NOTE forms, or `INVTEXT("Source")` (spec section 3). */
 struct BANGOSCRIPTS_API FBangoTextLiteral
 {
+	/** INVTEXT: never translated. Only Source is written; the namespace, key and notes are left out. */
+	bool bInvariant = false;
 	/** NSLOCTEXT / NSNOTELOCTEXT: has its own namespace. Otherwise the script's LOCTEXT_NAMESPACE is used. */
 	bool bHasNamespace = false;
 	FString Namespace;
@@ -228,7 +230,7 @@ namespace Bango
 
 	/**
 	 * Writes a text literal: LOCTEXT, NSLOCTEXT, NOTELOCTEXT or NSNOTELOCTEXT, whichever fits what it has (notes
-	 * are written only if there are some, so clearing them gives LOCTEXT).
+	 * are written only if there are some, so clearing them gives LOCTEXT), or INVTEXT for an invariant one.
 	 */
 	BANGOSCRIPTS_API FString MakeTextLiteral(const FBangoTextLiteral& Literal);
 

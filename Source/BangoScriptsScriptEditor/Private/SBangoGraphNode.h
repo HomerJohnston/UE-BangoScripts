@@ -7,6 +7,7 @@
 class SEditableTextBox;
 class UBangoEdGraphNode;
 struct FBangoNodeField;
+struct FBangoTextLiteral;
 
 /**
  * A Bango node: the title, then a body in three parts: the input pin on the left, the fields in the middle and the
@@ -16,8 +17,9 @@ struct FBangoNodeField;
  * Clicking a value edits it in place. Enter or clicking elsewhere applies the change (if it's valid; otherwise
  * a notification says why and the value stays as it was); Escape cancels.
  *
- * A localized text field (type text, written as LOCTEXT(...)) shows its source text, plus an arrow that opens
- * Key, Namespace and Notes rows under it, like an FText property's advanced options.
+ * A localized text field (type text, written as LOCTEXT(...) or INVTEXT(...)) shows its source text, plus an arrow
+ * that opens a Translated checkbox and, for a translated text, Key, Namespace and Notes rows under it, like an FText
+ * property's advanced options.
  *
  * A For node has a (Simple) / (Complex) toggle right after its title: lit, as (Complex), while the whole header is shown as one row.
  * A simple counting loop can switch between that and Var / First / Last; any other header always shows it.
@@ -39,6 +41,10 @@ protected:
 	virtual void MoveTo(const FVector2f& NewPosition, FNodeSet& NodeFilter, bool bMarkDirty = true) override;
 	//~ End SGraphNode
 
+	/** Draws the debugger's outline (see EBangoNodeDebugState) behind the node. */
+	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect,
+		FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
+
 private:
 	UBangoEdGraphNode* BangoNode = nullptr;
 
@@ -53,9 +59,16 @@ private:
 	/** The fields, for the middle of the body (an empty widget for a node with no fields). */
 	TSharedRef<SWidget> MakeFieldsArea();
 
-	/** Adds the Key, Namespace and Notes rows of an expanded text field, from row Row on; returns the next free row. */
+	/**
+	 * Adds the rows of an expanded text field, from row Row on: Translated (LOCTEXT or INVTEXT), then, for a translated
+	 * one, Key, Namespace and Notes. Returns the next free row.
+	 */
 	int32 AddTextPartRows(const TSharedRef<class SGridPanel>& Grid, int32 Row, int32 LabelColumn, int32 ValueColumn, int32 FieldIndex);
 	void OnTextPartCommitted(const FText& NewText, ETextCommit::Type CommitType, int32 FieldIndex, ETextPart Part);
+	/** The Translated checkbox: makes the text a LOCTEXT (with a new key) or an INVTEXT. */
+	void OnTextTranslatedChanged(ECheckBoxState NewState, int32 FieldIndex);
+	/** Sets a text field to Literal, or shows why it can't be. */
+	void SetTextLiteral(int32 FieldIndex, const FBangoTextLiteral& Literal, FString Error);
 	FReply OnToggleTextExpanded(int32 FieldIndex);
 	/** A For node's Simple / Complex toggle, shown after its title. */
 	TSharedRef<SWidget> MakeExpressionToggle();

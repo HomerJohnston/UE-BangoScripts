@@ -799,7 +799,7 @@ namespace Bango
 			TEXT("function"), TEXT("global"), TEXT("true"), TEXT("false"), TEXT("nil"),
 			TEXT("bool"), TEXT("int"), TEXT("float"), TEXT("double"), TEXT("string"), TEXT("entity"), TEXT("void"),
 			TEXT("text"), TEXT("vector2"), TEXT("vector3"), TEXT("params"), TEXT("IsNil"),
-			TEXT("LOCTEXT"), TEXT("NSLOCTEXT"), TEXT("NOTELOCTEXT"), TEXT("NSNOTELOCTEXT"),
+			TEXT("LOCTEXT"), TEXT("NSLOCTEXT"), TEXT("NOTELOCTEXT"), TEXT("NSNOTELOCTEXT"), TEXT("INVTEXT"),
 		};
 		for (const TCHAR* Word : Words)
 		{

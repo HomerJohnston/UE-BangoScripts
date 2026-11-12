@@ -251,7 +251,11 @@ namespace Bango
 			case EBangoLiteralKind::Entity: return TEXT("@") + E.StringValue;
 			case EBangoLiteralKind::Text:
 			{
-				// (text "Key" "Source"), with the namespace first and the notes last when they're given
+				// (text "Key" "Source"), with the namespace first and the notes last when they're given; (invtext "Source")
+				if (E.bTextInvariant)
+				{
+					return TEXT("(invtext ") + QuoteString(E.StringValue) + TEXT(")");
+				}
 				FString Result = TEXT("(text");
 				if (E.bTextHasNamespace)
 				{

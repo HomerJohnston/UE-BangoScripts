@@ -17,6 +17,27 @@ struct BANGOSCRIPTS_API FBangoScriptHandle
 	bool IsValid() const { return Id != 0; }
 };
 
+/** A script instance as the editor's debugger sees it (UBangoScriptSubsystem::GetDebugInfo). */
+struct FBangoScriptDebugInfo
+{
+	int64 Id = 0;
+	/** The script, like "Quest/Intro.bango". */
+	FString Path;
+	EBangoInstanceStatus Status = EBangoInstanceStatus::None;
+	/** The calls in progress, the main graph first and the innermost (where it is) last. Empty once it has ended. */
+	TArray<FBangoCallFrameInfo> CallStack;
+	/** The command it's waiting on, like "Sleep", or empty. */
+	FString WaitingOn;
+	/** Failed only: the error, with the node it happened at. */
+	FBangoRuntimeError Error;
+	/**
+	 * Failed only: the last nodes it ran, up to the error (at most FBangoInstance::TrailSize, oldest first), and how
+	 * many it ran in all (see FBangoInstance::GetTrail). A running script's trail comes from GetScriptTrail instead.
+	 */
+	TArray<int64> Trail;
+	uint64 TrailCount = 0;
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FBangoHintEvent, const FText&, Text);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FBangoScriptFailedEvent, FBangoScriptHandle, Handle, const FString&, Error);
 
@@ -53,6 +74,21 @@ public:
 
 	void TerminateAll();
 	int32 GetNumRunning() const { return Scripts.Num(); }
+
+	/**
+	 * For the editor's debugger: every running script, in the order they were spawned, then (in editor builds) the
+	 * ones that recently stopped with an error, so the error can be looked at. See ForgetEndedScripts.
+	 */
+	void GetDebugInfo(TArray<FBangoScriptDebugInfo>& OutScripts) const;
+
+	/**
+	 * For the debugger's trail: the nodes script Id ran after the first After of them (see FBangoInstance::GetTrail).
+	 * Returns how many it has run in all, or 0 if it isn't running.
+	 */
+	uint64 GetScriptTrail(int64 Id, uint64 After, TArray<int64>& OutNodeIDs) const;
+
+	/** Forgets the scripts that stopped with an error (they're no longer listed by GetDebugInfo). */
+	void ForgetEndedScripts() { EndedScripts.Reset(); }
 
 	/**
 	 * Saves every running script and every global variable. Restore with LoadState, typically into a
@@ -94,12 +130,27 @@ private:
 	{
 		FString Path;
 		FBangoInstance Instance;
+		/** The newest version it's been asked to switch to (hot reload), so each version is asked for once. */
+		TSharedPtr<const FBangoProgram> ReloadTarget;
 	};
 
 	bool MakeContext(float DeltaSeconds, FBangoExecContext& OutContext);
 	/** Resumes one script. Returns false once it has ended (for any reason). */
 	bool ResumeScript(FRunningScript& Script, float DeltaSeconds);
 	void ReportFailure(const FRunningScript& Script);
+
+	/** Hot reload, in the editor: asks the running copies of every script whose file changed to switch to its new version. */
+	void ReloadChangedScripts();
+	/** Reports what became of a script's reload, if anything did. */
+	void ReportReload(FRunningScript& Script);
+	/** Seconds until the next check for changed script files. */
+	float ReloadCheckCountdown = 0.0f;
+	/** The last compile error reported for each changed script, so each error is reported once. */
+	TMap<FString, FString> ReloadErrors;
+
+	/** Editor builds: scripts that stopped with an error, newest last, for the debugger (at most MaxEndedScripts). */
+	TArray<FBangoScriptDebugInfo> EndedScripts;
+	static constexpr int32 MaxEndedScripts = 32;
 
 	TMap<int64, TSharedPtr<FRunningScript>> Scripts;
 	int64 NextId = 1;

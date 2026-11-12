@@ -392,11 +392,16 @@ namespace BangoParserPrivate
 			return true;
 		}
 
-		/** LOCTEXT, NSLOCTEXT, NOTELOCTEXT or NSNOTELOCTEXT, at the name: the number of strings it takes, or 0. */
-		static int32 TextLiteralArgCount(const FString& Name, bool& bOutHasNamespace, bool& bOutHasNotes)
+		/** LOCTEXT, NSLOCTEXT, NOTELOCTEXT, NSNOTELOCTEXT or INVTEXT, at the name: the number of strings it takes, or 0. */
+		static int32 TextLiteralArgCount(const FString& Name, bool& bOutHasNamespace, bool& bOutHasNotes, bool& bOutInvariant)
 		{
-			bOutHasNamespace = Name.StartsWith(TEXT("NS"), ESearchCase::CaseSensitive);
-			bOutHasNotes = Name.Contains(TEXT("NOTE"), ESearchCase::CaseSensitive);
+			bOutInvariant = Name.Equals(TEXT("INVTEXT"), ESearchCase::CaseSensitive);
+			bOutHasNamespace = !bOutInvariant && Name.StartsWith(TEXT("NS"), ESearchCase::CaseSensitive);
+			bOutHasNotes = !bOutInvariant && Name.Contains(TEXT("NOTE"), ESearchCase::CaseSensitive);
+			if (bOutInvariant)
+			{
+				return 1;
+			}
 			if (Name.Equals(TEXT("LOCTEXT"), ESearchCase::CaseSensitive) || Name.Equals(TEXT("NSLOCTEXT"), ESearchCase::CaseSensitive)
 				|| Name.Equals(TEXT("NOTELOCTEXT"), ESearchCase::CaseSensitive) || Name.Equals(TEXT("NSNOTELOCTEXT"), ESearchCase::CaseSensitive))
 			{
@@ -406,12 +411,13 @@ namespace BangoParserPrivate
 		}
 
 		/** A text literal like `LOCTEXT("Key", "Source")`, at its name. */
-		FBangoExprPtr ParseTextLiteral(int32 NumArgs, bool bHasNamespace, bool bHasNotes)
+		FBangoExprPtr ParseTextLiteral(int32 NumArgs, bool bHasNamespace, bool bHasNotes, bool bInvariant)
 		{
 			const FBangoToken& Name = Cur();
 			Advance(); // the name
 			Advance(); // (
-			const TCHAR* Usage = bHasNamespace
+			const TCHAR* Usage = bInvariant ? TEXT("INVTEXT(\"Text\")")
+				: bHasNamespace
 				? (bHasNotes ? TEXT("NSNOTELOCTEXT(\"Namespace\", \"Key\", \"Text\", \"Notes for translators\")") : TEXT("NSLOCTEXT(\"Namespace\", \"Key\", \"Text\")"))
 				: (bHasNotes ? TEXT("NOTELOCTEXT(\"Key\", \"Text\", \"Notes for translators\")") : TEXT("LOCTEXT(\"Key\", \"Text\")"));
 			TArray<FString> Strings;
@@ -422,7 +428,7 @@ namespace BangoParserPrivate
 			{
 				if (i > 0 && !Check(EBangoTokenKind::Comma))
 				{
-					Fail(Cur().Loc, FString::Printf(TEXT("%s takes %d strings: %s"), *Name.Text, NumArgs, Usage));
+					Fail(Cur().Loc, FString::Printf(TEXT("%s takes %d string%s: %s"), *Name.Text, NumArgs, NumArgs == 1 ? TEXT("") : TEXT("s"), Usage));
 					return nullptr;
 				}
 				if (i > 0)
@@ -441,11 +447,18 @@ namespace BangoParserPrivate
 			}
 			if (!Check(EBangoTokenKind::RParen))
 			{
-				Fail(Cur().Loc, FString::Printf(TEXT("%s takes %d strings: %s"), *Name.Text, NumArgs, Usage));
+				Fail(Cur().Loc, FString::Printf(TEXT("%s takes %d string%s: %s"), *Name.Text, NumArgs, NumArgs == 1 ? TEXT("") : TEXT("s"), Usage));
 				return nullptr;
 			}
 			Advance();
 
+			if (bInvariant)
+			{
+				// Never translated: no namespace, key or notes.
+				Lit->bTextInvariant = true;
+				Lit->StringValue = Strings[0];
+				return MoveTemp(Lit);
+			}
 			int32 Next = 0;
 			Lit->bTextHasNamespace = bHasNamespace;
 			if (bHasNamespace)
@@ -652,6 +665,11 @@ namespace BangoParserPrivate
 						Context, *Bango::DescribeToken(Cur())));
 				}
 				return Fail(Cur().Loc, FString::Printf(TEXT("Expected a name %s, but found %s."), Context, *Bango::DescribeToken(Cur())));
+			}
+			if (Bango::IsReservedWord(Cur().Text))
+			{
+				// Words like LOCTEXT, INVTEXT and IsNil that aren't keyword tokens, but still mean something.
+				return Fail(Cur().Loc, FString::Printf(TEXT("Expected a name %s, but found '%s', which is a word Bango uses and can't be a name."), Context, *Cur().Text));
 			}
 			OutLoc = Cur().Loc;
 			OutName = Advance().Text;
@@ -1660,11 +1678,12 @@ namespace BangoParserPrivate
 			case EBangoTokenKind::Identifier:
 			{
 				bool bTextHasNamespace = false;
+				bool bTextInvariant = false;
 				bool bTextHasNotes = false;
-				const int32 TextArgs = TextLiteralArgCount(Token.Text, bTextHasNamespace, bTextHasNotes);
+				const int32 TextArgs = TextLiteralArgCount(Token.Text, bTextHasNamespace, bTextHasNotes, bTextInvariant);
 				if (TextArgs > 0 && Ahead(1).Kind == EBangoTokenKind::LParen)
 				{
-					return ParseTextLiteral(TextArgs, bTextHasNamespace, bTextHasNotes);
+					return ParseTextLiteral(TextArgs, bTextHasNamespace, bTextHasNotes, bTextInvariant);
 				}
 				if (Ahead(1).Kind == EBangoTokenKind::LParen)
 				{

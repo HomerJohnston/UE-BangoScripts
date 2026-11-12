@@ -1,10 +1,16 @@
-# Bango Language Spec (draft v0.31)
+# Bango Language Spec (draft v0.34)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
 
-**Changes in v0.31:** **number commands**. A command can take a **number**, an `int` or a `float`, and give back a number whose type follows what it was given, like `+`: an `int` if every number passed in is an `int`, a `float` if any is a `float`. New math commands work this way: `Min`, `Max`, `Abs` and `Clamp`. Also new: `Sin`, `Cos`, `SinDegrees` and `CosDegrees` (section 7).
+**Changes in v0.34:** **debugging**, first part. While playing in the editor, the script editor's **Debug** dropdown lists the running copies of the script, and the graph outlines where the one being followed is: a pulsing outline on the node it's paused on, a dim one on the calls on the way there, and a red one where a copy stopped with an error. Nodes it has just run flash and fade out. The script text pane's gutter shows the same, line by line (section 12).
+
+**Changes in v0.33:** **`INVTEXT("...")`**, a text that is never translated, like Unreal's `INVTEXT`: it needs no namespace or key, and isn't gathered for translators (section 3). In the graph, a text field's arrow has a **Translated** checkbox that switches between the two (section 12). Words Bango uses that aren't keywords (`LOCTEXT`, `INVTEXT`, `IsNil` and the like) can no longer be used as names (section 4).
+
+**Changes in v0.32:** **hot reload**. While playing in the editor, saving a script switches its running copies to the new version where they are, without starting over: a loop that moves a platform picks up its new math at its next `Sleep`, keeping its variables. A copy that can't switch carries on with the old version, and the output log says why (section 11).
+
+**Changes in v0.31:** **number commands**. A command can take a **number**, an `int` or a `float`, and give back a number whose type follows what it was given, like `+`: an `int` if every number passed in is an `int`, a `float` if any is a `float`. New math commands work this way: `Min`, `Max`, `Abs` and `Clamp`. Also new: `Sin`, `Cos`, `SinDegrees` and `CosDegrees`, and `GameTime()` is renamed `Time()` (section 7).
 
 **Changes in v0.30:** `GetPos` takes its entity as an argument, `GetPos(_who)`, not as a target (section 7).
 
@@ -213,7 +219,7 @@ _height = GetPos(_who).z;
 - Strings must end on the line they start. Any other escape than `\" \\ \n \t` is a compile error.
 - Entities: `@` followed directly by a Bango ID name, like `@john` or `@door17` (section 4). No space is allowed after the `@`. An entity literal is a fixed value with the type `entity`, so it can be a parameter default and the compiler knows its type.
 - Entity literals are never checked when the script compiles, since which actors exist depends on the level. Using one whose actor isn't in the level stops the script (see Conversions below).
-- Texts: `LOCTEXT("Key", "Source")`, `NSLOCTEXT("Namespace", "Key", "Source")`, `NOTELOCTEXT("Key", "Source", "Notes")` and `NSNOTELOCTEXT("Namespace", "Key", "Source", "Notes")`. Every part must be a string literal.
+- Texts: `LOCTEXT("Key", "Source")`, `NSLOCTEXT("Namespace", "Key", "Source")`, `NOTELOCTEXT("Key", "Source", "Notes")`, `NSNOTELOCTEXT("Namespace", "Key", "Source", "Notes")`, and `INVTEXT("Source")` for a text that isn't translated. Every part must be a string literal.
 
 ### Localized text
 `string` is for names, ids and debug output; `text` is for anything the player reads, so it can be translated. The two are separate types: a string can't be passed where a text is expected, or the other way round, without `ToText` / `ToString` (section 7).
@@ -240,6 +246,7 @@ Hint(NSLOCTEXT("Shared.UI", "Continue", "Continue"));
 - A `LOCTEXT` in a script with no `#define LOCTEXT_NAMESPACE` is a compile error that says to add one.
 - Keys and namespaces can't be empty. **The same key can't be used for two different texts** in one namespace: *"The key 'GuardHello' is already used in namespace 'Quest.Intro' for a different text, on line 2."* Writing the same text with the same key twice is fine.
 - Keys made in the graph editor are random: 32 hex digits, like Unreal's own (`9F3A...`). They can be changed to something readable, in the graph or the text.
+- **`INVTEXT("Source")`** is a text that is **never translated**: it's shown as it is in every language, like Unreal's `INVTEXT`. It has no namespace, key or notes, so it needs no `#define LOCTEXT_NAMESPACE`, and Unreal's gatherer doesn't pick it up. Use it for text the player sees that isn't words to translate, like a name, a number pattern (`INVTEXT("{0} / {1}")`) or a debug message. It works anywhere a text does, with the same `{0}` placeholders. `INVTEXT("x")` is the same as `ToText("x")`, but written as a literal, so its placeholders are checked when compiling.
 - Texts can't be joined with `+`; use `FormatText` (section 7). Texts can only be compared with `==` and `!=`, which compare what they show in the current language.
 - Text parameters can't have a text default (section 10); default them to `nil` and set the text in the script, as above.
 - `Format("{0}", _text)` shows the text in the current language.
@@ -285,7 +292,7 @@ Hint(NSLOCTEXT("Shared.UI", "Continue", "Continue"));
 - **Names are case-sensitive**: `john` and `John` are different names. This covers variables, globals, functions, labels, commands, keywords, type names and Bango ID names (`@john` and `@John` are different actors).
 - Calling a command or function with the wrong capitalisation is a compile error that suggests the right name: *"Unknown command or function 'hint'. Did you mean 'Hint'? Names are case-sensitive."*
 - A name is letters, digits and `_`, and doesn't start with a digit.
-- Keywords and type names can't be used as names: `if else while for forEach in break continue return label goto function global params true false nil bool int float double string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
+- Keywords and type names can't be used as names: `if else while for forEach in break continue return label goto function global params true false nil bool int float double string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
 
 ### Locals
 - Any name will do; a leading `_` is allowed but not needed (`count` and `_count` are both fine). The same goes for function parameters, script parameters and loop variables. Locals only exist inside the running script instance.
@@ -578,7 +585,7 @@ Every placeholder needs a value. When the text is written as a literal (`Log("{0
 | `Cos(float Rads)` → `float` | The cosine of an angle in radians. |
 | `SinDegrees(float Degrees)` → `float` | The sine of an angle in degrees. |
 | `CosDegrees(float Degrees)` → `float` | The cosine of an angle in degrees. |
-| `GameTime()` → `float` | Seconds since the level started; stops while the game is paused. |
+| `Time()` → `float` | The world's time (`GetWorld()->GetTimeSeconds()`): seconds since the level started; stops while the game is paused. |
 | `ToEntity(string Name)` → `entity` | The entity with this Bango ID name, for names that come from data (`ToEntity("john")` is the same as `@john`). A name that isn't letters, digits and `_` (or starts with a digit) is an error. |
 | `entity SetPos(vector3 Pos)` | Moves the actor. |
 | `GetPos(entity Entity)` → `vector3` | The actor's location. |
@@ -809,13 +816,38 @@ Then gather as usual.
 
 - Lines disabled with `//~` are comments, so their texts aren't gathered.
 - `#define` lines are skipped by the gatherer, which is why parameter defaults can't be texts (section 10).
-- Texts made with `ToText` aren't gathered; they're never translated.
+- Texts made with `INVTEXT` or `ToText` aren't gathered; they're never translated.
 - The gatherer doesn't compile scripts. A key used for two different texts across files is reported by the gatherer; within one file, Compile reports it first.
 
 ### Errors
 - Compile errors and runtime errors are shown on screen and logged, with the file, line, column and NodeID, and for runtime errors the function: `Quest/Intro.bango(12:5) [node 7] in Nag(): '_x' is nil.`
 - Compiling stops at the first error.
 - A runtime error stops only that instance. Other instances keep running.
+
+### Hot reload
+While playing in the editor, when a running script's file is saved (from the graph editor, the script text pane or anything else), each running copy of it **switches to the new version where it is**, instead of only scripts spawned afterwards getting it. The editor checks for saved scripts a few times a second. Packaged games don't do this.
+
+```
+float _x = 0;
+float _speed = 1;
+
+while (true)                    //@1(0, 0)
+{
+	_x += _speed * 2;           //@2(2, 0)   <- change the math and save:
+	@platform SetPos([_x, 0, 0]);   //@3(4, 0)
+	Sleep(0);                   //@4(6, 0)   <- the next frame, it carries on here, in the new version
+};
+```
+
+How a running copy switches:
+- **Where:** the next time it finishes a **simple statement**: an assignment, `++`/`--`, or a call on a line of its own. That's usually as soon as the command it's waiting on (a `Sleep`) is done. It carries on right after the **same node** (by its NodeID) in the new version, so a node keeps its place however much code around it changes. Moving nodes around in the graph doesn't change their IDs.
+- **Function calls under way:** each is matched the same way. The function is found by name, and the call goes back to the node it's in, in the new version. That node must be a call on its own line or the value of an assignment (`Step();`, `_r = Step();`); a call in the middle of a calculation (`_r = 1 + Step();`) can't be switched until it's finished.
+- **Variables:** locals, parameters and loop variables keep their values, matched by name (a `for` or `forEach` loop's variable by its loop node too). A local the new version adds starts with its declared value; one it removes is dropped. Globals are shared and keep their values; the new version's global declarations take effect when it switches, as when a script starts.
+- **What can't switch:** if, at that point, the node isn't in the new version (or isn't a simple statement any more), a local, parameter or loop variable has changed type, a function in progress has been removed or has a new parameter, or a loop under way has a new variable, it tries again at each following simple statement. If it pauses again without being able to switch, it gives up and **carries on with the version it had**; the output log (and the screen) says why. Scripts spawned from then on use the new version.
+- A new version that doesn't compile isn't switched to: the running copies keep their version, and the compile error is shown once.
+- A new version that calls a command that isn't registered isn't switched to either.
+- Switching doesn't run anything again: code above the node isn't run, so a value a new line above it would have set isn't set until the code gets there.
+- Turn it off with **Reload Running Scripts** in the project settings.
 
 ### Save and load
 A save stores:
@@ -831,6 +863,7 @@ The save data has a format version. Data from an older version (such as saves ma
 | Setting | Default |
 |---|---|
 | Script folder under Content | `Bango` |
+| Reload running scripts when their file is saved, in the editor (hot reload) | on |
 | Instructions per frame before the infinite-loop guard stops a script | 1,000,000 |
 | Nested function calls | 200 |
 | How long Hint text stays on screen when OnHint isn't bound | 5 seconds |
@@ -923,6 +956,15 @@ The graph editor is the **Bango Scripts** tab (Tools menu). It doesn't need the 
     - It shows the script as it would be saved, and follows the graph as it's edited. It's the Bango text editor (**Bango Text Editor Spec**): Bango syntax highlighting, tabs typed and shown as tabs. Line numbers are shown down its left side, and scroll with the text.
     - It can be typed in. Typed text isn't used until it's applied: **Apply** (or Ctrl+Enter) makes the graphs again from it, keeping the shown graph and its view, like Reload. Applying can't be undone with Undo. If the text doesn't read, the error is shown above the text, the cursor goes to where it is, and the graphs are left as they are. **Revert** throws the typing away. While there's typed text that isn't applied, the graph doesn't change the pane's text, a note says so, and the script counts as having unsaved changes; **Save** and **Compile** apply it first (and don't go ahead if it doesn't read).
     - A script whose text doesn't read opens with the pane shown, holding the file's text and its error, so it can be fixed there and applied.
+  - **Debug** (toolbar, after Save): while playing in the editor, which running copy of this script to follow, like Blueprint's debug object. The dropdown lists every copy running in the Play in Editor worlds, as `#3: Sleep at node 12 in Step()` (its number, the command it's waiting on, the node, and the function if it's in one), and copies that **stopped with an error** in this play session, as `#4: failed at node 7: '_x' is nil.`. Picking one follows it and shows the node it's at; **No debugging** follows none; **Show Where It Is** shows the node again; **Forget Failed Copies** takes the failed ones off the list. When nothing is followed, the only running copy is followed by itself, or, if none is running, the copy that failed last (so a script that fails as soon as it's spawned is shown too); No debugging stops this until playing stops. A copy that's followed stays followed when it fails. The followed copy is shown in the graph, updated ten times a second:
+    - the node it's running or paused on has a **pulsing yellow outline**, like Blueprint's;
+    - each call under way on the way there (the node calling the function it's in, and so on outward) has a **dim yellow outline**;
+    - a copy that failed has a **red outline** on the node where it failed;
+    - each node it **just ran** gets a pale blue outline that fades out over a second (the **trail**), so a loop's nodes light up in turn and an `if` shows which way it went. A node that runs every frame stays lit. The trail starts from when the copy is picked, and shows up to the last 256 nodes run between checks. A copy that fails keeps its last 256 nodes, so the way it came to the error flashes too, even if it failed as soon as it was spawned.
+
+    Nodes are found by their NodeID, so this works in every graph of the script, and still after the graph has been edited (or the script reloaded while running, section 11).
+
+    The **script text pane** shows the same in its gutter, on the line of each node (found by the line's `//@` metadata, in the text as it is, even while it's being typed in): a dot in a column left of the line numbers and a tint behind the number, pulsing yellow where the copy is, dim yellow along its calls and red where it failed, and a fading blue tint on the lines it just ran. A reroute line shows the strongest of its reroutes. **Show Where It Is**, and picking a copy, also moves the text's cursor to its line when the pane is open.
   - **Graph view**: a Blueprint-style graph of the selected graph.
     - A function's graph has a **Back to Script Graph** button in its top-left corner, which shows the main graph again.
     - Pins are Blueprint exec pins; wires have no arrowheads. There are no data pins: values are text in fields.
@@ -962,7 +1004,8 @@ Problems visible from the line alone show Blueprint's **ERROR!** banner on the n
 - **Fields:** click a value to edit it. Enter or clicking elsewhere applies it; Escape cancels. Every edit is checked before it's applied: the node's text must still read as code for its kind (one line, valid syntax). A refused edit leaves the node alone and a notification says why. Types and names aren't checked until Compile.
   - Clearing an optional field removes it with its separator (`, ` or ` = `). Only the last argument can be removed. An optional argument after a missing one is locked ("fill in the values above first").
   - **Text fields** (any field whose type is `string`, like Log's Msg or a string default) are typed as plain text, without quotes: typing `Say "hi"` saves `"Say \"hi\""`. The string escapes of section 3 are added when saving and removed for editing, so quotes never need escaping. Typing `\n` or `\t` gives a line break or tab, and `\\` a backslash; a backslash before anything else is just a backslash. The field shows the text itself in a normal font (line breaks and tabs as `\n` and `\t`), or *empty text* for `""`.
-  - **Localized text fields** (type `text`, like Hint's Msg) are typed the same way, and show the source text. Typing in an empty one makes a `LOCTEXT` with a new random key; retyping one keeps its key, namespace and notes. The arrow at the end of the field opens three rows under it, like an FText property's advanced options:
+  - **Localized text fields** (type `text`, like Hint's Msg) are typed the same way, and show the source text. Typing in an empty one makes a `LOCTEXT` with a new random key; retyping one keeps its key, namespace and notes (or keeps an `INVTEXT` an `INVTEXT`). The arrow at the end of the field opens rows under it, like an FText property's advanced options:
+    - **Translated**: a checkbox. Unchecking it makes the text an `INVTEXT` (its key, namespace and notes are dropped, and the rows below are hidden); checking it makes it a `LOCTEXT` again, with a new key.
     - **Key**: can't be empty.
     - **Namespace**: empty means the script's namespace, from Script Start (`LOCTEXT`); filling it in gives `NSLOCTEXT`.
     - **Notes**: for translators; filling it in gives `NOTELOCTEXT` / `NSNOTELOCTEXT`.
@@ -995,6 +1038,7 @@ Problems visible from the line alone show Blueprint's **ERROR!** banner on the n
 - Vector commands: length, distance between two vectors, normalize, dot and cross products, and maybe rotators
 - A way to check whether a Bango ID's actor is in the level before using it
 - A shorthand for giving a global a starting value only if it's `nil` (like a "Set if not defined" node)
+- Debugger: while following a copy that failed, keep a faint steady outline on the nodes that led to the error (its trail), instead of only flashing them
 - Graph editor: opening a script's editor in a window of its own, a pop-up for editing long text, updating a function's calls when its parameters change, an alphabetical-sort toggle for the function list, adding extra values to variadic commands, and asking before the tab closes with unsaved changes
 - Whether script files should be wrapped in Unreal assets (they are loose `.bango` files for now)
 

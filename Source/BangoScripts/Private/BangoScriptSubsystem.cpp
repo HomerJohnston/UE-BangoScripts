@@ -81,8 +81,49 @@ bool UBangoScriptSubsystem::MakeContext(float DeltaSeconds, FBangoExecContext& O
 	return true;
 }
 
+void UBangoScriptSubsystem::GetDebugInfo(TArray<FBangoScriptDebugInfo>& OutScripts) const
+{
+	TArray<int64> Ids;
+	Scripts.GetKeys(Ids);
+	Ids.Sort();
+	for (const int64 Id : Ids)
+	{
+		const FRunningScript& Script = *Scripts.FindChecked(Id);
+		if (!Script.Instance.IsRunning())
+		{
+			continue; // removed at the end of the tick; a failed one is in EndedScripts
+		}
+		FBangoScriptDebugInfo& Info = OutScripts.AddDefaulted_GetRef();
+		Info.Id = Id;
+		Info.Path = Script.Path;
+		Info.Status = Script.Instance.GetStatus();
+		Script.Instance.GetCallStack(Info.CallStack);
+		Info.WaitingOn = Script.Instance.GetWaitingCommandName();
+	}
+	OutScripts.Append(EndedScripts);
+}
+
+uint64 UBangoScriptSubsystem::GetScriptTrail(int64 Id, uint64 After, TArray<int64>& OutNodeIDs) const
+{
+	const TSharedPtr<FRunningScript>* Script = Scripts.Find(Id);
+	return Script ? (*Script)->Instance.GetTrail(After, OutNodeIDs) : 0;
+}
+
 void UBangoScriptSubsystem::ReportFailure(const FRunningScript& Script)
 {
+#if WITH_EDITOR
+	// Kept for the debugger, so the failed node can be shown after the script is gone.
+	FBangoScriptDebugInfo& Ended = EndedScripts.AddDefaulted_GetRef();
+	Ended.Id = Script.Instance.GetId();
+	Ended.Path = Script.Path;
+	Ended.Status = EBangoInstanceStatus::Failed;
+	Ended.Error = Script.Instance.GetError();
+	Ended.TrailCount = Script.Instance.GetTrail(0, Ended.Trail); // the way it came to the error
+	if (EndedScripts.Num() > MaxEndedScripts)
+	{
+		EndedScripts.RemoveAt(0);
+	}
+#endif
 	const FString Message = Script.Instance.GetError().ToString();
 	Bango::ReportError(Message);
 	FBangoScriptHandle Handle;
@@ -100,11 +141,79 @@ bool UBangoScriptSubsystem::ResumeScript(FRunningScript& Script, float DeltaSeco
 		return false;
 	}
 	Script.Instance.Resume(Context);
+	ReportReload(Script);
 	if (Script.Instance.GetStatus() == EBangoInstanceStatus::Failed)
 	{
 		ReportFailure(Script);
 	}
 	return Script.Instance.IsRunning();
+}
+
+void UBangoScriptSubsystem::ReportReload(FRunningScript& Script)
+{
+	FString Message;
+	switch (Script.Instance.TakeReloadResult(Message))
+	{
+	case EBangoReloadResult::Reloaded:
+		Bango::ReportNote(FString::Printf(TEXT("Reloaded %s (script %lld). %s"), *Script.Path, Script.Instance.GetId(), *Message), FColor::Green);
+		break;
+	case EBangoReloadResult::KeptOld:
+		Bango::ReportNote(FString::Printf(TEXT("Couldn't reload %s (script %lld), so it carries on with the version it had: %s Scripts spawned from now on use the new version."),
+			*Script.Path, Script.Instance.GetId(), *Message), FColor::Yellow, true);
+		break;
+	default:
+		break;
+	}
+}
+
+void UBangoScriptSubsystem::ReloadChangedScripts()
+{
+	FBangoModule& Module = FBangoModule::Get();
+	// Each script's file is checked once, however many copies of it are running.
+	TMap<FString, TSharedPtr<const FBangoProgram>> Latest;
+	for (TPair<int64, TSharedPtr<FRunningScript>>& Pair : Scripts)
+	{
+		FRunningScript& Script = *Pair.Value;
+		if (!Script.Instance.IsRunning())
+		{
+			continue;
+		}
+		TSharedPtr<const FBangoProgram>* Found = Latest.Find(Script.Path);
+		if (!Found)
+		{
+			TSharedPtr<const FBangoProgram> Program;
+			FString DisplayPath;
+			FString Error;
+			if (Module.GetScriptCache().GetProgram(Script.Path, Module.GetCommands(), Program, DisplayPath, Error))
+			{
+				ReloadErrors.Remove(Script.Path);
+			}
+			else
+			{
+				// A script being edited often doesn't compile for a moment; say so once per error.
+				FString& LastError = ReloadErrors.FindOrAdd(Script.Path);
+				if (!LastError.Equals(Error, ESearchCase::CaseSensitive))
+				{
+					LastError = Error;
+					Bango::ReportNote(FString::Printf(TEXT("%s was changed, but doesn't compile, so its running copies carry on with the version they have: %s"), *Script.Path, *Error), FColor::Yellow, true);
+				}
+				Program.Reset();
+			}
+			Found = &Latest.Add(Script.Path, Program);
+		}
+
+		const TSharedPtr<const FBangoProgram>& NewProgram = *Found;
+		if (!NewProgram.IsValid() || NewProgram == Script.Instance.GetProgram() || NewProgram == Script.ReloadTarget)
+		{
+			continue;
+		}
+		Script.ReloadTarget = NewProgram;
+		FString Error;
+		if (!Script.Instance.RequestReload(NewProgram, Module.GetCommands(), Error))
+		{
+			Bango::ReportNote(FString::Printf(TEXT("Couldn't reload %s (script %lld), so it carries on with the version it had: %s"), *Script.Path, Script.Instance.GetId(), *Error), FColor::Yellow, true);
+		}
+	}
 }
 
 FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FString& ScriptPath, const TArray<FBangoValue>& Args)
@@ -128,6 +237,9 @@ FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FString& ScriptPath, const
 
 	TSharedPtr<FRunningScript> Script = MakeShared<FRunningScript>();
 	Script->Path = DisplayPath;
+#if WITH_EDITOR
+	Script->Instance.SetRecordTrail(true); // for the editor's debugger
+#endif
 	const int64 Id = NextId++;
 	FBangoRuntimeError StartError;
 	if (!Script->Instance.Start(Program, Module.GetCommands(), Globals->GetStore(), Id, StartError, Args))
@@ -174,6 +286,16 @@ void UBangoScriptSubsystem::TerminateAll()
 void UBangoScriptSubsystem::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+
+#if WITH_EDITOR
+	// Hot reload: a few times a second, look for script files that were saved since their running copies started.
+	ReloadCheckCountdown -= DeltaTime;
+	if (ReloadCheckCountdown <= 0.0f && Scripts.Num() > 0 && GetDefault<UBangoSettings>()->bReloadRunningScripts)
+	{
+		ReloadCheckCountdown = 0.5f;
+		ReloadChangedScripts();
+	}
+#endif
 
 	// Scripts may spawn or terminate scripts while running, so work from a snapshot.
 	TArray<int64> Ids;

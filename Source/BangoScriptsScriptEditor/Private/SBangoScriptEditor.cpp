@@ -39,6 +39,7 @@
 #include "Widgets/Notifications/SNotificationList.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SOverlay.h"
+#include "Widgets/SLeafWidget.h"
 #include "Widgets/Input/SComboButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
@@ -57,6 +58,11 @@
 #include "Widgets/SNullWidget.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/STableRow.h"
+#include "BangoScriptCache.h"
+#include "BangoScriptSubsystem.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "HAL/PlatformTime.h"
 
 #define LOCTEXT_NAMESPACE "SBangoScriptEditor"
 
@@ -173,6 +179,21 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 					.ToolTipText(LOCTEXT("SaveTooltip", "Write the script to its .bango file (Ctrl+S). Text typed in the script text pane is applied first."))
 					.IsEnabled_Lambda([this]() { return EdGraphs.Num() > 0 || bTextEdited; })
 					.OnClicked(this, &SBangoScriptEditor::OnSaveClicked)
+				]
+				// Debug: which running copy of this script to follow, like Blueprint's debug object.
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				[
+					SNew(SComboButton)
+					.OnGetMenuContent(this, &SBangoScriptEditor::MakeDebugMenu)
+					.IsEnabled_Lambda([this]() { return !OpenScript.IsEmpty(); })
+					.ToolTipText(LOCTEXT("DebugTooltip", "While playing in the editor: the running copy of this script to follow. Its graph shows where it is with a pulsing outline, and the calls on the way there with a dim one; a copy that stopped with an error shows its node in red. The only running copy is followed by itself."))
+					.ButtonContent()
+					[
+						SNew(STextBlock)
+						.Text(this, &SBangoScriptEditor::GetDebugLabel)
+					]
 				]
 			]
 		]
@@ -500,6 +521,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 	}
 	RegisterActiveTimer(0.25f, FWidgetActiveTimerDelegate::CreateSP(this, &SBangoScriptEditor::OnPoll));
 	RegisterActiveTimer(0.0f, FWidgetActiveTimerDelegate::CreateSP(this, &SBangoScriptEditor::SyncLineNumbers)); // every frame
+	RegisterActiveTimer(0.1f, FWidgetActiveTimerDelegate::CreateSP(this, &SBangoScriptEditor::UpdateDebugging));
 }
 
 SBangoScriptEditor::~SBangoScriptEditor()
@@ -2424,6 +2446,87 @@ void SBangoScriptEditor::UpdateDescriptionBox()
 
 // ---- Script text pane ----
 
+/**
+ * The debugger's marks in the script text pane's gutter, one row per line of text, behind and beside the line numbers:
+ * a dot and a tint where the followed copy is (pulsing yellow), along its calls (dim yellow) and where it failed (red),
+ * and a fading blue tint on the lines it just ran (the trail).
+ */
+class SBangoLineMarkers : public SLeafWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SBangoLineMarkers) {}
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs) {}
+
+	/** Width of the dot column, left of the numbers. */
+	static constexpr float DotColumnWidth = 10.0f;
+
+	/** How many lines the text has; the widget's height is divided between them. */
+	int32 NumLines = 1;
+	/** Per line, from 0: the debug state, and when the trail last ran it (FPlatformTime::Seconds, 0 for never). */
+	TArray<EBangoNodeDebugState> LineStates;
+	TArray<double> LinePings;
+
+	virtual FVector2D ComputeDesiredSize(float) const override
+	{
+		return FVector2D(DotColumnWidth, 0.0f);
+	}
+
+	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect,
+		FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
+	{
+		static const FSlateRoundedBoxBrush DotBrush(FLinearColor::White, 3.5f);
+		const FSlateBrush* RowBrush = FAppStyle::GetBrush("WhiteBrush");
+		const FVector2D Size = FVector2D(AllottedGeometry.GetLocalSize());
+		const float RowHeight = (float)Size.Y / FMath::Max(1, NumLines);
+		const double Now = FPlatformTime::Seconds();
+		const float Pulse = 0.5f + 0.5f * FMath::Sin((float)Now * 5.0f);
+		const int32 Rows = FMath::Max(LineStates.Num(), LinePings.Num());
+		for (int32 Line = 0; Line < Rows; ++Line)
+		{
+			const FSlateLayoutTransform RowAt(FVector2D(0.0f, Line * RowHeight));
+			// The trail: a fading blue row.
+			const double SincePing = LinePings.IsValidIndex(Line) && LinePings[Line] > 0.0 ? Now - LinePings[Line] : 1.0;
+			if (SincePing < 1.0)
+			{
+				const float Fade = 1.0f - (float)SincePing;
+				FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2D(Size.X, RowHeight), RowAt),
+					RowBrush, ESlateDrawEffect::None, FLinearColor(0.55f, 0.85f, 1.0f, 0.35f * Fade * Fade));
+			}
+			const EBangoNodeDebugState State = LineStates.IsValidIndex(Line) ? LineStates[Line] : EBangoNodeDebugState::None;
+			if (State == EBangoNodeDebugState::None)
+			{
+				continue;
+			}
+			FLinearColor Color;
+			float RowAlpha = 0.0f;
+			switch (State)
+			{
+			case EBangoNodeDebugState::Paused:
+				Color = FLinearColor(1.0f, 0.85f, 0.1f, 0.6f + 0.4f * Pulse);
+				RowAlpha = 0.15f + 0.15f * Pulse;
+				break;
+			case EBangoNodeDebugState::CallStack:
+				Color = FLinearColor(1.0f, 0.85f, 0.1f, 0.45f);
+				RowAlpha = 0.08f;
+				break;
+			default:
+				Color = FLinearColor(1.0f, 0.25f, 0.2f, 1.0f);
+				RowAlpha = 0.25f;
+				break;
+			}
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2D(Size.X, RowHeight), RowAt),
+				RowBrush, ESlateDrawEffect::None, Color.CopyWithNewOpacity(RowAlpha));
+			const float Dot = FMath::Min(7.0f, RowHeight - 2.0f);
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 1,
+				AllottedGeometry.ToPaintGeometry(FVector2D(Dot, Dot), FSlateLayoutTransform(FVector2D((DotColumnWidth - Dot) * 0.5f, Line * RowHeight + (RowHeight - Dot) * 0.5f))),
+				&DotBrush, ESlateDrawEffect::None, Color);
+		}
+		return LayerId + 1;
+	}
+};
+
 namespace BangoScriptEditorPrivate
 {
 	/** Shows its content turned a quarter turn anticlockwise, so it reads from bottom to top, and takes up the turned size in
@@ -2669,11 +2772,21 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeTextPane()
 					// The same top padding as the text; room below for the text's horizontal scrollbar, so the last lines line up.
 					.Padding(FMargin(2.0f, BangoScriptEditorPrivate::ScriptTextTopPadding, 6.0f, 24.0f))
 					[
-						SAssignNew(LineNumbers, STextBlock)
-						.Font(TextBox->GetFont()) // the text's own font, so each number is level with its line
-						.Justification(ETextJustify::Right)
-						.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-						.Text(FText::FromString(TEXT("1")))
+						// The debugger's marks behind the numbers, with a column of their own on the left.
+						SNew(SOverlay)
+						+ SOverlay::Slot()
+						[
+							SAssignNew(LineMarkers, SBangoLineMarkers)
+						]
+						+ SOverlay::Slot()
+						.Padding(FMargin(SBangoLineMarkers::DotColumnWidth, 0.0f, 0.0f, 0.0f))
+						[
+							SAssignNew(LineNumbers, STextBlock)
+							.Font(TextBox->GetFont()) // the text's own font, so each number is level with its line
+							.Justification(ETextJustify::Right)
+							.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+							.Text(FText::FromString(TEXT("1")))
+						]
 					]
 				]
 
@@ -2920,6 +3033,508 @@ void SBangoScriptEditor::RefreshDirty()
 	{
 		bDirty = Current != SavedDocument;
 	}
+}
+
+// ---- Debugging ----
+
+void SBangoScriptEditor::GatherDebugEntries(TArray<FDebugEntry>& OutEntries) const
+{
+	FString Wanted;
+	FString PathError;
+	if (!GEngine || OpenScript.IsEmpty() || !Bango::NormalizeScriptPath(OpenScript, Wanted, PathError))
+	{
+		return;
+	}
+	for (const FWorldContext& Context : GEngine->GetWorldContexts())
+	{
+		UWorld* World = Context.WorldType == EWorldType::PIE ? Context.World() : nullptr;
+		const UBangoScriptSubsystem* Subsystem = World ? World->GetSubsystem<UBangoScriptSubsystem>() : nullptr;
+		if (!Subsystem)
+		{
+			continue;
+		}
+		TArray<FBangoScriptDebugInfo> Scripts;
+		Subsystem->GetDebugInfo(Scripts);
+		for (FBangoScriptDebugInfo& Info : Scripts)
+		{
+			if (Info.Path.Equals(Wanted, ESearchCase::IgnoreCase))
+			{
+				FDebugEntry& Entry = OutEntries.AddDefaulted_GetRef();
+				Entry.PIEInstance = Context.PIEInstance;
+				Entry.Info = MoveTemp(Info);
+			}
+		}
+	}
+}
+
+const SBangoScriptEditor::FDebugEntry* SBangoScriptEditor::FindDebugEntry() const
+{
+	if (DebugId == 0)
+	{
+		return nullptr;
+	}
+	for (const FDebugEntry& Entry : DebugEntries)
+	{
+		if (Entry.PIEInstance == DebugPIEInstance && Entry.Info.Id == DebugId)
+		{
+			return &Entry;
+		}
+	}
+	return nullptr;
+}
+
+EActiveTimerReturnType SBangoScriptEditor::UpdateDebugging(double CurrentTime, float DeltaTime)
+{
+	DebugEntries.Reset();
+	GatherDebugEntries(DebugEntries);
+	if (!GEditor || !GEditor->PlayWorld)
+	{
+		bDebugOff = false; // next time it plays, the only copy is followed again
+	}
+	if (!FindDebugEntry())
+	{
+		// The copy being followed has finished (or play stopped), or none was: follow the only running one, if there's
+		// just one; or, with none running, the one that failed last (it may have failed as it was spawned, before it
+		// could be followed).
+		DebugId = 0;
+		const FDebugEntry* OnlyRunning = nullptr;
+		const FDebugEntry* LastFailed = nullptr;
+		int32 NumRunning = 0;
+		for (const FDebugEntry& Entry : DebugEntries)
+		{
+			if (Entry.Info.Status == EBangoInstanceStatus::Failed)
+			{
+				LastFailed = &Entry; // GetDebugInfo lists them oldest first
+			}
+			else
+			{
+				OnlyRunning = &Entry;
+				++NumRunning;
+			}
+		}
+		const FDebugEntry* Follow = NumRunning == 1 ? OnlyRunning : (NumRunning == 0 ? LastFailed : nullptr);
+		if (!bDebugOff && Follow)
+		{
+			DebugPIEInstance = Follow->PIEInstance;
+			DebugId = Follow->Info.Id;
+		}
+	}
+	ApplyDebugStates();
+	UpdateDebugTrail();
+	// Pings that have faded are dropped.
+	const double Now = FPlatformTime::Seconds();
+	for (auto It = DebugNodePings.CreateIterator(); It; ++It)
+	{
+		if (Now - It.Value() > 1.5)
+		{
+			It.RemoveCurrent();
+		}
+	}
+	if (bTextPaneOpen)
+	{
+		UpdateLineMarkers();
+	}
+	return EActiveTimerReturnType::Continue;
+}
+
+UBangoScriptSubsystem* SBangoScriptEditor::FindDebugSubsystem(int32 PIEInstance)
+{
+	if (!GEngine)
+	{
+		return nullptr;
+	}
+	for (const FWorldContext& Context : GEngine->GetWorldContexts())
+	{
+		UWorld* World = Context.WorldType == EWorldType::PIE && Context.PIEInstance == PIEInstance ? Context.World() : nullptr;
+		if (World)
+		{
+			return World->GetSubsystem<UBangoScriptSubsystem>();
+		}
+	}
+	return nullptr;
+}
+
+void SBangoScriptEditor::UpdateDebugTrail()
+{
+	const FDebugEntry* Entry = FindDebugEntry();
+	if (!Entry)
+	{
+		TrailId = 0;
+		return;
+	}
+	const bool bNewCopy = TrailPIEInstance != Entry->PIEInstance || TrailId != Entry->Info.Id;
+	TArray<int64> Ran;
+	uint64 Count = 0;
+	if (Entry->Info.Status == EBangoInstanceStatus::Failed)
+	{
+		// It failed: its trail was kept, up to the error. Ping what wasn't seen while it was running (all of it, for a
+		// copy that wasn't followed then, like one that failed as soon as it was spawned).
+		const TArray<int64>& Kept = Entry->Info.Trail;
+		Count = Entry->Info.TrailCount;
+		const uint64 NumNew = bNewCopy ? (uint64)Kept.Num() : (Count > TrailSeen ? Count - TrailSeen : 0);
+		const int32 First = FMath::Max(0, Kept.Num() - (int32)FMath::Min(NumNew, (uint64)Kept.Num()));
+		Ran.Append(Kept.GetData() + First, Kept.Num() - First);
+	}
+	else
+	{
+		UBangoScriptSubsystem* Subsystem = FindDebugSubsystem(Entry->PIEInstance);
+		if (!Subsystem)
+		{
+			TrailId = 0;
+			return;
+		}
+		// A running copy just picked: start from what it has run so far, without pinging all of it.
+		Count = Subsystem->GetScriptTrail(Entry->Info.Id, bNewCopy ? MAX_uint64 : TrailSeen, Ran);
+	}
+	TrailPIEInstance = Entry->PIEInstance;
+	TrailId = Entry->Info.Id;
+	TrailSeen = Count;
+	if (Ran.Num() == 0)
+	{
+		return;
+	}
+	const TSet<int64> RanNodes(Ran);
+	const double Now = FPlatformTime::Seconds();
+	for (const int64 NodeID : Ran)
+	{
+		DebugNodePings.Add(NodeID, Now); // for the text pane's gutter
+	}
+	for (const TStrongObjectPtr<UEdGraph>& Graph : EdGraphs)
+	{
+		for (UEdGraphNode* GraphNode : Graph->Nodes)
+		{
+			UBangoEdGraphNode* Node = Cast<UBangoEdGraphNode>(GraphNode);
+			if (Node && RanNodes.Contains(Node->NodeID))
+			{
+				Node->DebugPingTime = Now;
+			}
+		}
+	}
+}
+
+int64 SBangoScriptEditor::GetDebugNodeID(const FDebugEntry& Entry)
+{
+	if (Entry.Info.Status == EBangoInstanceStatus::Failed)
+	{
+		return Entry.Info.Error.NodeID;
+	}
+	return Entry.Info.CallStack.Num() > 0 ? Entry.Info.CallStack.Last().Loc.NodeID : INDEX_NONE;
+}
+
+void SBangoScriptEditor::ApplyDebugStates()
+{
+	TMap<int64, EBangoNodeDebugState> States;
+	if (const FDebugEntry* Entry = FindDebugEntry())
+	{
+		if (Entry->Info.Status == EBangoInstanceStatus::Failed)
+		{
+			States.Add(Entry->Info.Error.NodeID, EBangoNodeDebugState::Failed);
+		}
+		else
+		{
+			const TArray<FBangoCallFrameInfo>& CallStack = Entry->Info.CallStack;
+			for (int32 k = 0; k < CallStack.Num(); ++k)
+			{
+				States.Add(CallStack[k].Loc.NodeID, k == CallStack.Num() - 1 ? EBangoNodeDebugState::Paused : EBangoNodeDebugState::CallStack);
+			}
+		}
+	}
+	for (const TStrongObjectPtr<UEdGraph>& Graph : EdGraphs)
+	{
+		for (UEdGraphNode* GraphNode : Graph->Nodes)
+		{
+			if (UBangoEdGraphNode* Node = Cast<UBangoEdGraphNode>(GraphNode))
+			{
+				const EBangoNodeDebugState* State = States.Find(Node->NodeID);
+				Node->DebugState = State ? *State : EBangoNodeDebugState::None;
+			}
+		}
+	}
+	DebugNodeStates = MoveTemp(States);
+}
+
+int32 SBangoScriptEditor::FindTextLineOfNode(int64 NodeID)
+{
+	UpdateLineMarkers(); // makes MarkerLineNodes from the current text
+	for (int32 Line = 0; Line < MarkerLineNodes.Num(); ++Line)
+	{
+		if (MarkerLineNodes[Line].Contains(NodeID))
+		{
+			return Line;
+		}
+	}
+	return INDEX_NONE;
+}
+
+void SBangoScriptEditor::UpdateLineMarkers()
+{
+	if (!LineMarkers.IsValid() || !TextBox.IsValid())
+	{
+		return;
+	}
+	// Which nodes are on which line: the //@ metadata, `//@12(4, 7)`, or a run of reroutes, `//@7(4, 9) @8(8, 13)`.
+	const FString Text = TextBox->GetText().ToString();
+	if (!Text.Equals(MarkerText, ESearchCase::CaseSensitive) || MarkerLineNodes.Num() == 0)
+	{
+		MarkerText = Text;
+		MarkerLineNodes.Reset();
+		MarkerLineNodes.AddDefaulted();
+		const int32 Length = Text.Len();
+		for (int32 i = 0; i < Length; ++i)
+		{
+			if (Text[i] == TEXT('\n'))
+			{
+				MarkerLineNodes.AddDefaulted();
+				continue;
+			}
+			if (Text[i] != TEXT('/') || i + 2 >= Length || Text[i + 1] != TEXT('/') || Text[i + 2] != TEXT('@'))
+			{
+				continue;
+			}
+			// Each entry: @, the NodeID, then (X, Y). Spaces are allowed anywhere.
+			int32 j = i + 2;
+			while (j < Length && Text[j] != TEXT('\n'))
+			{
+				while (j < Length && (Text[j] == TEXT(' ') || Text[j] == TEXT('\t')))
+				{
+					++j;
+				}
+				if (j >= Length || Text[j] != TEXT('@'))
+				{
+					break;
+				}
+				++j;
+				while (j < Length && Text[j] == TEXT(' '))
+				{
+					++j;
+				}
+				int64 NodeID = 0;
+				int32 Digits = 0;
+				while (j < Length && FChar::IsDigit(Text[j]))
+				{
+					NodeID = NodeID * 10 + (Text[j] - TEXT('0'));
+					++j;
+					++Digits;
+				}
+				if (Digits == 0)
+				{
+					break;
+				}
+				MarkerLineNodes.Last().Add(NodeID);
+				while (j < Length && Text[j] != TEXT(')') && Text[j] != TEXT('\n'))
+				{
+					++j;
+				}
+				if (j < Length && Text[j] == TEXT(')'))
+				{
+					++j;
+				}
+			}
+			i = j - 1; // the loop's ++i comes to this line's end (or the next character)
+		}
+	}
+
+	// Each line takes its nodes' strongest state (failed, then paused, then a call) and latest ping.
+	auto Strength = [](EBangoNodeDebugState State)
+	{
+		switch (State)
+		{
+		case EBangoNodeDebugState::Failed:    return 3;
+		case EBangoNodeDebugState::Paused:    return 2;
+		case EBangoNodeDebugState::CallStack: return 1;
+		default:                              return 0;
+		}
+	};
+	const int32 NumLines = MarkerLineNodes.Num();
+	LineMarkers->NumLines = NumLines;
+	LineMarkers->LineStates.Init(EBangoNodeDebugState::None, NumLines);
+	LineMarkers->LinePings.Init(0.0, NumLines);
+	if (DebugNodeStates.Num() == 0 && DebugNodePings.Num() == 0)
+	{
+		return;
+	}
+	for (int32 Line = 0; Line < NumLines; ++Line)
+	{
+		for (const int64 NodeID : MarkerLineNodes[Line])
+		{
+			if (const EBangoNodeDebugState* State = DebugNodeStates.Find(NodeID))
+			{
+				if (Strength(*State) > Strength(LineMarkers->LineStates[Line]))
+				{
+					LineMarkers->LineStates[Line] = *State;
+				}
+			}
+			if (const double* Ping = DebugNodePings.Find(NodeID))
+			{
+				LineMarkers->LinePings[Line] = FMath::Max(LineMarkers->LinePings[Line], *Ping);
+			}
+		}
+	}
+}
+
+void SBangoScriptEditor::SelectDebugEntry(int32 PIEInstance, int64 Id, bool bShowNode)
+{
+	DebugPIEInstance = PIEInstance;
+	DebugId = Id;
+	bDebugOff = Id == 0;
+	ApplyDebugStates();
+	const FDebugEntry* Entry = FindDebugEntry();
+	if (bShowNode && Entry)
+	{
+		ShowNodeByID(GetDebugNodeID(*Entry));
+	}
+}
+
+void SBangoScriptEditor::ShowNodeByID(int64 NodeID)
+{
+	if (NodeID < 0)
+	{
+		return;
+	}
+	for (int32 GraphIndex = 0; GraphIndex < EdGraphs.Num(); ++GraphIndex)
+	{
+		for (UEdGraphNode* GraphNode : EdGraphs[GraphIndex]->Nodes)
+		{
+			UBangoEdGraphNode* Node = Cast<UBangoEdGraphNode>(GraphNode);
+			if (Node && Node->NodeID == NodeID)
+			{
+				if (GraphIndex != ShownGraph)
+				{
+					ShowGraph(GraphIndex, /*bZoomToFit*/ false);
+				}
+				if (GraphEditor.IsValid())
+				{
+					GraphEditor->JumpToNode(Node, /*bRequestRename*/ false, /*bSelectNode*/ false);
+				}
+				// And its line in the script text, if the pane is open.
+				const int32 Line = bTextPaneOpen && TextBox.IsValid() ? FindTextLineOfNode(NodeID) : INDEX_NONE;
+				if (Line != INDEX_NONE)
+				{
+					TextBox->GoTo(FTextLocation(Line, 0));
+				}
+				return;
+			}
+		}
+	}
+}
+
+FText SBangoScriptEditor::DescribeDebugEntry(const FDebugEntry& Entry) const
+{
+	bool bSeveralWorlds = false;
+	for (const FDebugEntry& Other : DebugEntries)
+	{
+		bSeveralWorlds |= Other.PIEInstance != Entry.PIEInstance;
+	}
+	const FString World = bSeveralWorlds ? FString::Printf(TEXT(" [client %d]"), Entry.PIEInstance + 1) : FString();
+	const FBangoScriptDebugInfo& Info = Entry.Info;
+	if (Info.Status == EBangoInstanceStatus::Failed)
+	{
+		return FText::Format(LOCTEXT("DebugFailed", "#{0}{1}: failed at node {2}: {3}"),
+			FText::AsNumber(Info.Id), FText::FromString(World), FText::AsNumber(Info.Error.NodeID), FText::FromString(Info.Error.Message));
+	}
+	const FBangoCallFrameInfo* Where = Info.CallStack.Num() > 0 ? &Info.CallStack.Last() : nullptr;
+	const FString InFunction = Where && !Where->FunctionName.IsEmpty() ? FString::Printf(TEXT(" in %s()"), *Where->FunctionName) : FString();
+	const FText Node = FText::AsNumber(Where ? Where->Loc.NodeID : -1);
+	if (!Info.WaitingOn.IsEmpty())
+	{
+		return FText::Format(LOCTEXT("DebugWaiting", "#{0}{1}: {2} at node {3}{4}"),
+			FText::AsNumber(Info.Id), FText::FromString(World), FText::FromString(Info.WaitingOn), Node, FText::FromString(InFunction));
+	}
+	return FText::Format(LOCTEXT("DebugRunning", "#{0}{1}: at node {2}{3}"), FText::AsNumber(Info.Id), FText::FromString(World), Node, FText::FromString(InFunction));
+}
+
+FText SBangoScriptEditor::GetDebugLabel() const
+{
+	if (const FDebugEntry* Entry = FindDebugEntry())
+	{
+		return FText::Format(LOCTEXT("DebugLabel", "Debug: {0}"), DescribeDebugEntry(*Entry));
+	}
+	if (!GEditor || !GEditor->PlayWorld)
+	{
+		return LOCTEXT("DebugNotPlaying", "Debug: not playing");
+	}
+	int32 NumFailed = 0;
+	for (const FDebugEntry& Entry : DebugEntries)
+	{
+		NumFailed += Entry.Info.Status == EBangoInstanceStatus::Failed ? 1 : 0;
+	}
+	const int32 NumRunning = DebugEntries.Num() - NumFailed;
+	if (DebugEntries.Num() == 0)
+	{
+		return LOCTEXT("DebugNoneRunning", "Debug: none running");
+	}
+	if (NumFailed == 0)
+	{
+		return FText::Format(LOCTEXT("DebugNoneChosen", "Debug: none ({0} running)"), FText::AsNumber(NumRunning));
+	}
+	return FText::Format(LOCTEXT("DebugNoneChosenFailed", "Debug: none ({0} running, {1} failed)"), FText::AsNumber(NumRunning), FText::AsNumber(NumFailed));
+}
+
+TSharedRef<SWidget> SBangoScriptEditor::MakeDebugMenu()
+{
+	FMenuBuilder Menu(/*bInShouldCloseWindowAfterMenuSelection*/ true, nullptr);
+	Menu.BeginSection(NAME_None, LOCTEXT("DebugMenuHeading", "Running copies of this script"));
+	Menu.AddMenuEntry(
+		LOCTEXT("DebugOff", "No debugging"),
+		LOCTEXT("DebugOffTooltip", "Don't follow a running copy (until playing stops)."),
+		FSlateIcon(),
+		FUIAction(FExecuteAction::CreateSP(this, &SBangoScriptEditor::SelectDebugEntry, (int32)INDEX_NONE, (int64)0, false),
+			FCanExecuteAction(), FIsActionChecked::CreateLambda([this]() { return DebugId == 0; })),
+		NAME_None, EUserInterfaceActionType::RadioButton);
+	bool bAnyFailed = false;
+	for (const FDebugEntry& Entry : DebugEntries)
+	{
+		bAnyFailed |= Entry.Info.Status == EBangoInstanceStatus::Failed;
+		const int32 PIEInstance = Entry.PIEInstance;
+		const int64 Id = Entry.Info.Id;
+		Menu.AddMenuEntry(
+			DescribeDebugEntry(Entry),
+			LOCTEXT("DebugEntryTooltip", "Follow this copy, and show the node it's at."),
+			FSlateIcon(),
+			FUIAction(FExecuteAction::CreateSP(this, &SBangoScriptEditor::SelectDebugEntry, PIEInstance, Id, true),
+				FCanExecuteAction(), FIsActionChecked::CreateLambda([this, PIEInstance, Id]() { return DebugPIEInstance == PIEInstance && DebugId == Id; })),
+			NAME_None, EUserInterfaceActionType::RadioButton);
+	}
+	if (DebugEntries.Num() == 0)
+	{
+		Menu.AddMenuEntry(
+			GEditor && GEditor->PlayWorld ? LOCTEXT("DebugNoCopies", "(none running)") : LOCTEXT("DebugNotPlayingEntry", "(play in the editor to see running copies)"),
+			FText::GetEmpty(), FSlateIcon(), FUIAction(FExecuteAction(), FCanExecuteAction::CreateLambda([]() { return false; })));
+	}
+	Menu.EndSection();
+
+	Menu.BeginSection(NAME_None);
+	Menu.AddMenuEntry(
+		LOCTEXT("DebugShowNode", "Show Where It Is"),
+		LOCTEXT("DebugShowNodeTooltip", "Show the node the copy being followed is at (or failed at)."),
+		FSlateIcon(),
+		FUIAction(FExecuteAction::CreateLambda([this]()
+		{
+			if (const FDebugEntry* Entry = FindDebugEntry())
+			{
+				ShowNodeByID(GetDebugNodeID(*Entry));
+			}
+		}), FCanExecuteAction::CreateLambda([this]() { return FindDebugEntry() != nullptr; })));
+	if (bAnyFailed)
+	{
+		Menu.AddMenuEntry(
+			LOCTEXT("DebugForgetFailed", "Forget Failed Copies"),
+			LOCTEXT("DebugForgetFailedTooltip", "Take the copies that stopped with an error off this list (in every script)."),
+			FSlateIcon(),
+			FUIAction(FExecuteAction::CreateLambda([]()
+			{
+				for (const FWorldContext& Context : GEngine->GetWorldContexts())
+				{
+					UWorld* World = Context.WorldType == EWorldType::PIE ? Context.World() : nullptr;
+					if (UBangoScriptSubsystem* Subsystem = World ? World->GetSubsystem<UBangoScriptSubsystem>() : nullptr)
+					{
+						Subsystem->ForgetEndedScripts();
+					}
+				}
+			})));
+	}
+	Menu.EndSection();
+	return Menu.MakeWidget();
 }
 
 EActiveTimerReturnType SBangoScriptEditor::OnPoll(double CurrentTime, float DeltaTime)

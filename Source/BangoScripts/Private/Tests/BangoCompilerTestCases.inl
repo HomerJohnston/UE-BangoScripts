@@ -430,6 +430,13 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 	{ TEXT("empty goto"), TEXT("goto ;"), nullptr, TEXT("(1:6)"), TEXT("This goto doesn't say which label to jump to. Fill it in.") },
 	{ TEXT("vector default of the wrong size"), TEXT("#define params (vector3 _p = [1, 2])"), nullptr, TEXT("(1:30)"), TEXT("A vector3 needs exactly 3 numbers") },
 
+	// ---- INVTEXT ----
+	{ TEXT("INVTEXT is reserved"), TEXT("int INVTEXT = 1;"), nullptr, TEXT("(1:"), TEXT("INVTEXT") },
+	{ TEXT("LOCTEXT is reserved"), TEXT("int LOCTEXT = 1;"), nullptr, TEXT("(1:"), TEXT("LOCTEXT") },
+	{ TEXT("invariant text needs no namespace"), TEXT("text _t = INVTEXT(\"x\");\nSay(INVTEXT(\"{0} {1}\"), 1, 2);"), TEXT("*"), nullptr, nullptr },
+	{ TEXT("invariant text placeholders are checked"), TEXT("Say(INVTEXT(\"{0} {1}\"), 1);"), nullptr, TEXT("(1:13)"), TEXT("This text uses {1}, but only 1 value comes after it.") },
+	{ TEXT("invariant text with a named placeholder"), TEXT("Say(INVTEXT(\"{Name}\"));"), nullptr, TEXT("(1:13)"), TEXT("This text uses {Name}") },
+
 	// ---- Number commands (NumberParam, ReturnsNumber): an int for ints, otherwise a float ----
 	{ TEXT("number: ints give an int"), TEXT("int _a = 1;\nint _b;\n_b = Max(_a, 2);"), TEXT("*"), nullptr, nullptr },
 	{ TEXT("number: a float gives a float"), TEXT("int _a = 1;\nfloat _f;\n_f = Max(_a, 2.5);\n_f = Max(1, 2);"), TEXT("*"), nullptr, nullptr },

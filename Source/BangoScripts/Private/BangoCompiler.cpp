@@ -160,6 +160,12 @@ namespace BangoCompilerPrivate
 		/** The value of a text literal: localized text with its namespace (the script's LOCTEXT_NAMESPACE for LOCTEXT) and key. */
 		bool MakeTextValue(const FBangoLiteralExpr& Lit, FBangoValue& OutValue)
 		{
+			if (Lit.bTextInvariant)
+			{
+				// INVTEXT: never translated, so it needs no namespace or key.
+				OutValue = FBangoValue::MakeText(Bango::MakeInvariantText(Lit.StringValue));
+				return true;
+			}
 			FString Namespace;
 			if (Lit.bTextHasNamespace)
 			{
@@ -291,7 +297,18 @@ namespace BangoCompilerPrivate
 		int32 AllocSlot(const FBangoType& Type, const FString& Name)
 		{
 			Fn->SlotNames.Add(Name);
+			Fn->SlotNodeIDs.Add(LoopNodeForSlots);
+			Fn->SlotStartValues.Add(FBangoValue::MakeNil(Type));
 			return Fn->SlotTypes.Add(Type);
+		}
+
+		/** For reloading (FBangoFunctionCode::SlotNodeIDs): the loop whose slots are being made, or -1. */
+		int64 LoopNodeForSlots = -1;
+
+		/** The value AllocSlot gives slots made while compiling Stmt's loop header. */
+		static int64 LoopSlotNode(const FBangoStmt& Stmt)
+		{
+			return Stmt.Node.bHasMetadata ? Stmt.Node.NodeID : -2;
 		}
 
 		// ---- Emitting ----
@@ -1222,7 +1239,22 @@ namespace BangoCompilerPrivate
 		{
 			CurrentStmt = &Stmt;
 			CurrentLoc = Stmt.Loc;
-			return CompileStmtBody(Stmt);
+			const int32 Begin = Here();
+			if (!CompileStmtBody(Stmt))
+			{
+				return false;
+			}
+			// Where a reloaded script can carry on (FBangoStatementRange).
+			const bool bSimple = Stmt.Kind == EBangoStmtKind::Assign || Stmt.Kind == EBangoStmtKind::IncDec || Stmt.Kind == EBangoStmtKind::Call;
+			if (bSimple && Stmt.Node.bHasMetadata && Here() > Begin)
+			{
+				FBangoStatementRange Range;
+				Range.NodeID = Stmt.Node.NodeID;
+				Range.Begin = Begin;
+				Range.End = Here();
+				Fn->Statements.Add(Range);
+			}
+			return true;
 		}
 
 		/** Compiles a statement without making it the current node (for the parts of a for header). */
@@ -1302,6 +1334,16 @@ namespace BangoCompilerPrivate
 				return false;
 			}
 			Emit(EBangoOp::StorePlace, AddPlace(EBangoPlaceKind::Local, Slot, 0));
+			// A local at the top of its graph has a fixed starting value (CheckLocalDecl), kept for reloading.
+			if (Decl.Init && LoopNodeForSlots == -1 && IsFixedValue(*Decl.Init))
+			{
+				FBangoValue StartValue;
+				if (!EvaluateConstant(*Decl.Init, Decl.Type, Decl.Name, StartValue))
+				{
+					return false;
+				}
+				Fn->SlotStartValues[Slot] = StartValue;
+			}
 			return true;
 		}
 
@@ -1454,7 +1496,10 @@ namespace BangoCompilerPrivate
 		{
 			PushScope();  // holds a variable declared in the header
 
-			if (For.Init && !CompileStmtBody(*For.Init))
+			LoopNodeForSlots = LoopSlotNode(For);
+			const bool bInitOk = !For.Init || CompileStmtBody(*For.Init);
+			LoopNodeForSlots = -1;
+			if (!bInitOk)
 			{
 				return false;
 			}
@@ -1517,6 +1562,7 @@ namespace BangoCompilerPrivate
 			}
 
 			PushScope();
+			LoopNodeForSlots = LoopSlotNode(ForEach);
 			const int32 ArraySlot = AllocSlot(ArrayType.Type, TEXT("(forEach array)"));
 			const int32 PositionSlot = AllocSlot(FBangoType::Int(), TEXT("(forEach position)"));
 			check(PositionSlot == ArraySlot + 1);
@@ -1526,7 +1572,9 @@ namespace BangoCompilerPrivate
 			Emit(EBangoOp::StorePlace, AddPlace(EBangoPlaceKind::Local, PositionSlot, 0));
 
 			int32 VarSlot = 0;
-			if (!DeclareLocal(ForEach.VarName, ArrayType.Type.GetElementType(), ForEach.Loc, VarSlot))
+			const bool bDeclared = DeclareLocal(ForEach.VarName, ArrayType.Type.GetElementType(), ForEach.Loc, VarSlot);
+			LoopNodeForSlots = -1;
+			if (!bDeclared)
 			{
 				return false;
 			}
@@ -2433,7 +2481,7 @@ namespace BangoCompilerPrivate
 			const bool bText = Text->LiteralKind == EBangoLiteralKind::Text;
 			FString Named;
 			const int32 Needed = bText ? Bango::CountTextFormatValues(Text->StringValue, &Named) : Bango::CountFormatValues(Text->StringValue);
-			const FBangoSourceLocation& SourceLoc = bText && Text->TextArgLocs.Num() > 0 ? Text->TextArgLocs[Text->bTextHasNamespace ? 2 : 1] : Text->Loc;
+			const FBangoSourceLocation& SourceLoc = bText && Text->TextArgLocs.IsValidIndex(Text->GetTextSourceArgIndex()) ? Text->TextArgLocs[Text->GetTextSourceArgIndex()] : Text->Loc;
 			if (Needed < 0)
 			{
 				return Fail(SourceLoc, FString::Printf(TEXT("This text uses {%s}. Text placeholders are numbered: {0}, {1}, ... (write `{ for a brace that isn't a placeholder)."), *Named));

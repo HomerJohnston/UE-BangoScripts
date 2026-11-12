@@ -102,6 +102,19 @@ struct FBangoPlace
 	int32 Part = -1;
 };
 
+/**
+ * The code of one simple statement node (an assignment, ++/--, or a call on its own line), for reloading a running
+ * script (FBangoInstance::RequestReload): when the node's code has run, the script can carry on at the same node's
+ * End in a new version of the script.
+ */
+struct FBangoStatementRange
+{
+	int64 NodeID = -1;
+	/** The node's first instruction, and the one after its last. */
+	int32 Begin = 0;
+	int32 End = 0;
+};
+
 struct FBangoFunctionCode
 {
 	/** Empty for the script's top level. */
@@ -115,6 +128,16 @@ struct FBangoFunctionCode
 	TArray<FBangoType> SlotTypes;
 	/** Names for errors and debugging. Hidden slots (forEach bookkeeping) have names in parentheses. */
 	TArray<FString> SlotNames;
+	/**
+	 * For reloading: the NodeID of the for or forEach loop a slot belongs to (its variable and bookkeeping), so two
+	 * loops' variables of the same name are told apart. -1 for parameters and the graph's locals; -2 for a loop
+	 * without node metadata (such slots aren't carried over).
+	 */
+	TArray<int64> SlotNodeIDs;
+	/** For reloading: each slot's declared starting value (nil if it has none), given to a local a new version adds. */
+	TArray<FBangoValue> SlotStartValues;
+	/** For reloading: the simple statement nodes that have node metadata, in code order. */
+	TArray<FBangoStatementRange> Statements;
 
 	TArray<FBangoPlace> Places;
 	TArray<FBangoInstruction> Code;

@@ -98,8 +98,13 @@ FString FBangoRuntimeError::ToString() const
 
 bool FBangoInstance::BindCommands(const FBangoCommandTable& Commands, FString& OutError)
 {
-	BoundCommands.Init(nullptr, Program->Names.Num());
-	for (const FBangoFunctionCode& Function : Program->Functions)
+	return BindCommandsFor(*Program, Commands, BoundCommands, OutError);
+}
+
+bool FBangoInstance::BindCommandsFor(const FBangoProgram& InProgram, const FBangoCommandTable& Commands, TArray<const FBangoCommand*>& OutBound, FString& OutError)
+{
+	OutBound.Init(nullptr, InProgram.Names.Num());
+	for (const FBangoFunctionCode& Function : InProgram.Functions)
 	{
 		for (const FBangoInstruction& Instruction : Function.Code)
 		{
@@ -107,12 +112,12 @@ bool FBangoInstance::BindCommands(const FBangoCommandTable& Commands, FString& O
 			{
 				continue;
 			}
-			if (!Program->Names.IsValidIndex(Instruction.A))
+			if (!InProgram.Names.IsValidIndex(Instruction.A))
 			{
 				OutError = TEXT("The compiled script is damaged (bad command name).");
 				return false;
 			}
-			const FString& Name = Program->Names[Instruction.A];
+			const FString& Name = InProgram.Names[Instruction.A];
 			const FBangoCommand* Command = Commands.FindCommandImpl(Name);
 			if (!Command)
 			{
@@ -124,7 +129,7 @@ bool FBangoInstance::BindCommands(const FBangoCommandTable& Commands, FString& O
 				OutError = FString::Printf(TEXT("This script calls the command '%s', which has no implementation (only a signature was registered)."), *Name);
 				return false;
 			}
-			BoundCommands[Instruction.A] = Command;
+			OutBound[Instruction.A] = Command;
 		}
 	}
 	return true;
@@ -299,6 +304,54 @@ FBangoDebugLoc FBangoInstance::GetCurrentLocation() const
 	const FBangoFunctionCode& Function = Program->Functions[Frame.Function];
 	const int32 IP = Status == EBangoInstanceStatus::Waiting ? Frame.IP - 1 : Frame.IP;
 	return Function.Debug.IsValidIndex(IP) ? Function.Debug[IP] : FBangoDebugLoc();
+}
+
+void FBangoInstance::GetCallStack(TArray<FBangoCallFrameInfo>& OutFrames) const
+{
+	OutFrames.Reset();
+	if (!Program.IsValid())
+	{
+		return;
+	}
+	for (int32 k = 0; k < Frames.Num(); ++k)
+	{
+		const FBangoFrame& Frame = Frames[k];
+		if (!Program->Functions.IsValidIndex(Frame.Function))
+		{
+			continue;
+		}
+		const FBangoFunctionCode& Function = Program->Functions[Frame.Function];
+		FBangoCallFrameInfo Info;
+		Info.FunctionName = Function.Name;
+		// A frame further out has run its call, so its IP is past it; the innermost one is past its latent command while waiting.
+		const bool bInnermost = k == Frames.Num() - 1;
+		const int32 IP = !bInnermost || Status == EBangoInstanceStatus::Waiting ? Frame.IP - 1 : Frame.IP;
+		if (Function.Debug.IsValidIndex(IP))
+		{
+			Info.Loc = Function.Debug[IP];
+		}
+		OutFrames.Add(Info);
+	}
+}
+
+uint64 FBangoInstance::GetTrail(uint64 After, TArray<int64>& OutNodeIDs) const
+{
+	// The buffer holds the last TrailSize nodes: entry n (counting from 0) is at n % TrailSize.
+	const uint64 First = FMath::Max(After, TrailCount > (uint64)TrailSize ? TrailCount - TrailSize : (uint64)0);
+	for (uint64 n = First; n < TrailCount; ++n)
+	{
+		OutNodeIDs.Add(Trail[(int32)(n % TrailSize)]);
+	}
+	return TrailCount;
+}
+
+FString FBangoInstance::GetWaitingCommandName() const
+{
+	if (Status != EBangoInstanceStatus::Waiting || !Program.IsValid() || !Program->Names.IsValidIndex(PendingCommandName))
+	{
+		return FString();
+	}
+	return Program->Names[PendingCommandName];
 }
 
 // ---------------------------------------------------------------------------
@@ -991,6 +1044,11 @@ bool FBangoInstance::CallCommand(int32 NameIndex, int32 ArgCount, bool bHasTarge
 		PendingCall.Args.Reset();
 		PendingCall.Target = FBangoValue();
 		Status = EBangoInstanceStatus::Waiting;
+		if (ReloadProgram.IsValid() && bReloadTried)
+		{
+			// It ran from one pause to the next without reaching a point where the new version fits.
+			FinishReload(EBangoReloadResult::KeptOld, ReloadFailure);
+		}
 		return true;
 	}
 	return FinishCommand(Result);
@@ -1055,6 +1113,10 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 			Status = EBangoInstanceStatus::Finished;
 			break;
 		}
+		if (ReloadProgram.IsValid())
+		{
+			TryReload(Globals); // between statements, it may switch to the new version (so Program may change here)
+		}
 		const int32 FunctionIndex = Frames.Last().Function;
 		const FBangoFunctionCode& Function = Program->Functions[FunctionIndex];
 		const int32 IP = Frames.Last().IP;
@@ -1072,6 +1134,24 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 		}
 		const FBangoInstruction I = Function.Code[IP];
 		Frames.Last().IP = IP + 1;
+		if (bRecordTrail && Function.Debug.IsValidIndex(IP))
+		{
+			// For the debugger's trail: each node it moves on to (a node's instructions run one after another).
+			const int64 NodeID = Function.Debug[IP].NodeID;
+			if (NodeID >= 0 && NodeID != LastTrailNode)
+			{
+				if (Trail.Num() < TrailSize)
+				{
+					Trail.Add(NodeID);
+				}
+				else
+				{
+					Trail[TrailCount % TrailSize] = NodeID;
+				}
+				++TrailCount;
+				LastTrailNode = NodeID;
+			}
+		}
 
 		switch (I.Op)
 		{
@@ -1472,6 +1552,308 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 		}
 	}
 	return Status != EBangoInstanceStatus::Failed;
+}
+
+// ---------------------------------------------------------------------------
+// Hot reload
+// ---------------------------------------------------------------------------
+
+namespace BangoInstancePrivate
+{
+	/** The simple statement whose code ends at IP, or null. */
+	static const FBangoStatementRange* FindStatementEndingAt(const FBangoFunctionCode& Function, int32 IP)
+	{
+		for (const FBangoStatementRange& Range : Function.Statements)
+		{
+			if (Range.End == IP)
+			{
+				return &Range;
+			}
+		}
+		return nullptr;
+	}
+
+	static const FBangoStatementRange* FindStatement(const FBangoFunctionCode& Function, int64 NodeID)
+	{
+		for (const FBangoStatementRange& Range : Function.Statements)
+		{
+			if (Range.NodeID == NodeID)
+			{
+				return &Range;
+			}
+		}
+		return nullptr;
+	}
+
+	/** The simple statement whose code holds instruction IP, or null. */
+	static const FBangoStatementRange* FindStatementHolding(const FBangoFunctionCode& Function, int32 IP)
+	{
+		for (const FBangoStatementRange& Range : Function.Statements)
+		{
+			if (IP >= Range.Begin && IP < Range.End)
+			{
+				return &Range;
+			}
+		}
+		return nullptr;
+	}
+
+	/** The one CallFunction in Range's code, or INDEX_NONE if it has none or more than one. */
+	static int32 FindOnlyFunctionCall(const FBangoFunctionCode& Function, const FBangoStatementRange& Range)
+	{
+		int32 Found = INDEX_NONE;
+		for (int32 i = Range.Begin; i < Range.End && i < Function.Code.Num(); ++i)
+		{
+			if (Function.Code[i].Op == EBangoOp::CallFunction)
+			{
+				if (Found != INDEX_NONE)
+				{
+					return INDEX_NONE;
+				}
+				Found = i;
+			}
+		}
+		return Found;
+	}
+
+	/** The index of the function called Name in Program (the top level for an empty name), or INDEX_NONE. */
+	static int32 FindFunctionByName(const FBangoProgram& Program, const FString& Name)
+	{
+		if (Name.IsEmpty())
+		{
+			return Program.Functions.Num() > 0 ? 0 : INDEX_NONE;
+		}
+		for (int32 i = 1; i < Program.Functions.Num(); ++i)
+		{
+			if (Program.Functions[i].Name.Equals(Name, ESearchCase::CaseSensitive))
+			{
+				return i;
+			}
+		}
+		return INDEX_NONE;
+	}
+
+	static FString DescribeFunction(const FBangoFunctionCode& Function)
+	{
+		return Function.Name.IsEmpty() ? FString(TEXT("the script's main graph")) : FString::Printf(TEXT("function '%s'"), *Function.Name);
+	}
+
+	static int64 SlotNode(const FBangoFunctionCode& Function, int32 Slot)
+	{
+		return Function.SlotNodeIDs.IsValidIndex(Slot) ? Function.SlotNodeIDs[Slot] : -2;
+	}
+}
+
+bool FBangoInstance::RequestReload(const TSharedPtr<const FBangoProgram>& NewProgram, const FBangoCommandTable& Commands, FString& OutError)
+{
+	if (!NewProgram.IsValid() || NewProgram->Functions.Num() == 0)
+	{
+		OutError = TEXT("There is no compiled script to switch to.");
+		return false;
+	}
+	if (!IsRunning())
+	{
+		OutError = TEXT("The script isn't running.");
+		return false;
+	}
+	TArray<const FBangoCommand*> NewCommands;
+	if (!BindCommandsFor(*NewProgram, Commands, NewCommands, OutError))
+	{
+		return false;
+	}
+	ReloadProgram = NewProgram;
+	ReloadCommands = MoveTemp(NewCommands);
+	bReloadTried = false;
+	ReloadFailure.Reset();
+	ReloadResult = EBangoReloadResult::Pending;
+	ReloadMessage.Reset();
+	return true;
+}
+
+EBangoReloadResult FBangoInstance::TakeReloadResult(FString& OutMessage)
+{
+	const EBangoReloadResult Result = ReloadResult;
+	OutMessage = ReloadMessage;
+	if (Result != EBangoReloadResult::Pending)
+	{
+		ReloadResult = EBangoReloadResult::None;
+		ReloadMessage.Reset();
+	}
+	return Result;
+}
+
+void FBangoInstance::FinishReload(EBangoReloadResult Result, const FString& Message)
+{
+	ReloadMessage = Message; // first: Message may be ReloadFailure, which is cleared below
+	ReloadProgram.Reset();
+	ReloadCommands.Reset();
+	bReloadTried = false;
+	ReloadFailure.Reset();
+	ReloadResult = Result;
+}
+
+bool FBangoInstance::TryReload(FBangoGlobalStore& Globals)
+{
+	using namespace BangoInstancePrivate;
+	if (Frames.Num() == 0 || Status != EBangoInstanceStatus::Ready)
+	{
+		return false;
+	}
+	// Only right after a simple statement, with nothing half worked out on the stack.
+	const FBangoFrame& Top = Frames.Last();
+	if (!Program->Functions.IsValidIndex(Top.Function) || Stack.Num() != Top.StackBase
+		|| !FindStatementEndingAt(Program->Functions[Top.Function], Top.IP))
+	{
+		return false;
+	}
+
+	bReloadTried = true;
+	TArray<FBangoFrame> NewFrames;
+	FString Reason;
+	if (!MakeReloadedFrames(NewFrames, Reason))
+	{
+		ReloadFailure = Reason;
+		return false;
+	}
+
+	// The new version's globals, as when an instance starts (a global that already exists keeps its value).
+	for (const FBangoGlobalDecl& Global : ReloadProgram->Globals)
+	{
+		FString Message;
+		if (!Globals.Declare(Global.Name, Global.Type, Message))
+		{
+			FinishReload(EBangoReloadResult::KeptOld, FString::Printf(TEXT("The new version's global '%s' doesn't fit: %s"), *Global.Name, *Message));
+			return false;
+		}
+	}
+
+	const int64 NodeID = FindStatementEndingAt(Program->Functions[Top.Function], Top.IP)->NodeID;
+	Program = ReloadProgram;
+	BoundCommands = MoveTemp(ReloadCommands);
+	Frames = MoveTemp(NewFrames);
+	Error.FileName = Program->FileName;
+	CurrentFunction = Frames.Last().Function;
+	CurrentIP = Frames.Last().IP;
+	FinishReload(EBangoReloadResult::Reloaded, FString::Printf(TEXT("Switched to the new version after node %lld."), NodeID));
+	return true;
+}
+
+bool FBangoInstance::MakeReloadedFrames(TArray<FBangoFrame>& OutFrames, FString& OutReason) const
+{
+	using namespace BangoInstancePrivate;
+	const FBangoProgram& NewProgram = *ReloadProgram;
+	for (int32 k = 0; k < Frames.Num(); ++k)
+	{
+		const FBangoFrame& Old = Frames[k];
+		if (!Program->Functions.IsValidIndex(Old.Function))
+		{
+			OutReason = TEXT("Internal error: bad frame.");
+			return false;
+		}
+		const FBangoFunctionCode& OldFn = Program->Functions[Old.Function];
+		const int32 NewIndex = FindFunctionByName(NewProgram, OldFn.Name);
+		if (NewIndex == INDEX_NONE)
+		{
+			OutReason = FString::Printf(TEXT("It's running %s, which the new version doesn't have."), *DescribeFunction(OldFn));
+			return false;
+		}
+		const FBangoFunctionCode& NewFn = NewProgram.Functions[NewIndex];
+
+		FBangoFrame NewFrame;
+		NewFrame.Function = NewIndex;
+		NewFrame.StackBase = Old.StackBase;
+
+		// Where it carries on.
+		if (k == Frames.Num() - 1)
+		{
+			// The innermost call: after the statement it just finished.
+			const FBangoStatementRange* OldRange = FindStatementEndingAt(OldFn, Old.IP);
+			const FBangoStatementRange* NewRange = OldRange ? FindStatement(NewFn, OldRange->NodeID) : nullptr;
+			if (!NewRange)
+			{
+				OutReason = FString::Printf(TEXT("Node %lld, where it is in %s, isn't in the new version, or is a different kind of node."),
+					OldRange ? OldRange->NodeID : (int64)-1, *DescribeFunction(OldFn));
+				return false;
+			}
+			NewFrame.IP = NewRange->End;
+		}
+		else
+		{
+			// A call in progress: it goes back to the same call, in the same node, in the new version.
+			const int32 CallIP = Old.IP - 1;
+			const FBangoStatementRange* OldRange = FindStatementHolding(OldFn, CallIP);
+			if (!OldFn.Code.IsValidIndex(CallIP) || OldFn.Code[CallIP].Op != EBangoOp::CallFunction || !OldRange
+				|| FindOnlyFunctionCall(OldFn, *OldRange) != CallIP || Frames[k + 1].StackBase != Old.StackBase)
+			{
+				const int64 CallNode = OldFn.Debug.IsValidIndex(CallIP) ? OldFn.Debug[CallIP].NodeID : -1;
+				OutReason = FString::Printf(TEXT("In %s, the call at node %lld is part of a bigger calculation, so where it goes back to can't be found in the new version. Calls on a line of their own (or the value of an assignment) can be switched."),
+					*DescribeFunction(OldFn), CallNode);
+				return false;
+			}
+			const FString& CalleeName = Program->Functions[OldFn.Code[CallIP].A].Name;
+			const FBangoStatementRange* NewRange = FindStatement(NewFn, OldRange->NodeID);
+			const int32 NewCallIP = NewRange ? FindOnlyFunctionCall(NewFn, *NewRange) : INDEX_NONE;
+			if (NewCallIP == INDEX_NONE || !NewProgram.Functions.IsValidIndex(NewFn.Code[NewCallIP].A)
+				|| !NewProgram.Functions[NewFn.Code[NewCallIP].A].Name.Equals(CalleeName, ESearchCase::CaseSensitive))
+			{
+				OutReason = FString::Printf(TEXT("In %s, node %lld (which is calling '%s') isn't in the new version, or doesn't make that call any more."),
+					*DescribeFunction(OldFn), OldRange->NodeID, *CalleeName);
+				return false;
+			}
+			NewFrame.IP = NewCallIP + 1;
+		}
+
+		// Locals, parameters and loop variables, by name (and a loop's by its node).
+		NewFrame.Slots.SetNum(NewFn.SlotTypes.Num());
+		for (int32 i = 0; i < NewFn.SlotTypes.Num(); ++i)
+		{
+			const FString& Name = NewFn.SlotNames[i];
+			const int64 Node = SlotNode(NewFn, i);
+			int32 OldSlot = INDEX_NONE;
+			if (Node != -2)
+			{
+				for (int32 j = 0; j < OldFn.SlotTypes.Num(); ++j)
+				{
+					if (SlotNode(OldFn, j) == Node && OldFn.SlotNames[j].Equals(Name, ESearchCase::CaseSensitive))
+					{
+						OldSlot = j;
+						break;
+					}
+				}
+			}
+			if (OldSlot != INDEX_NONE)
+			{
+				if (OldFn.SlotTypes[OldSlot] != NewFn.SlotTypes[i])
+				{
+					OutReason = FString::Printf(TEXT("In %s, '%s' was %s and is %s in the new version."),
+						*DescribeFunction(OldFn), *Name, *OldFn.SlotTypes[OldSlot].ToString(), *NewFn.SlotTypes[i].ToString());
+					return false;
+				}
+				NewFrame.Slots[i] = Old.Slots.IsValidIndex(OldSlot) ? Old.Slots[OldSlot] : FBangoValue::MakeNil(NewFn.SlotTypes[i]);
+				continue;
+			}
+			if (i < NewFn.NumParams)
+			{
+				OutReason = FString::Printf(TEXT("The new version of %s has a new parameter, '%s', and there's no value for it."), *DescribeFunction(OldFn), *Name);
+				return false;
+			}
+			if (Node >= 0)
+			{
+				for (int32 j = 0; j < OldFn.SlotTypes.Num(); ++j)
+				{
+					if (SlotNode(OldFn, j) == Node)
+					{
+						// The loop is the same, but its variable changed: a loop under way can't be carried over.
+						OutReason = FString::Printf(TEXT("In %s, the loop at node %lld has a new variable, '%s'."), *DescribeFunction(OldFn), Node, *Name);
+						return false;
+					}
+				}
+			}
+			NewFrame.Slots[i] = NewFn.SlotStartValues.IsValidIndex(i) ? NewFn.SlotStartValues[i] : FBangoValue::MakeNil(NewFn.SlotTypes[i]);
+		}
+		OutFrames.Add(MoveTemp(NewFrame));
+	}
+	return true;
 }
 
 // ---------------------------------------------------------------------------

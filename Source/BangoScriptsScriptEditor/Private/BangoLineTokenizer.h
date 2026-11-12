@@ -32,7 +32,7 @@ enum class EBangoSyntaxKind : uint8
 	String,
 	StringEscape,       // \n \" \\ and `x in a localized source
 	Placeholder,        // %0 %% and {0}
-	LocMacro,           // LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT
+	LocMacro,           // LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT
 	LocKey,             // key / namespace string of a localized-text macro
 	LocNotes,           // notes string of NOTELOCTEXT / NSNOTELOCTEXT
 	VectorPart,         // .x .y .z (the part after the dot)

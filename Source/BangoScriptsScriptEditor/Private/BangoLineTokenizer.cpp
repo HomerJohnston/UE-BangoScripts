@@ -56,6 +56,7 @@ namespace BangoLineTokenizerPrivate
 		{ TEXT("NSLOCTEXT"),     3, { ELocRole::Key, ELocRole::Key, ELocRole::Source } },
 		{ TEXT("NOTELOCTEXT"),   3, { ELocRole::Key, ELocRole::Source, ELocRole::Notes } },
 		{ TEXT("NSNOTELOCTEXT"), 4, { ELocRole::Key, ELocRole::Key, ELocRole::Source, ELocRole::Notes } },
+		{ TEXT("INVTEXT"),       1, { ELocRole::Source } },
 	};
 
 	enum class EStringStyle : uint8 { Plain, LocKey, LocSource, LocNotes };

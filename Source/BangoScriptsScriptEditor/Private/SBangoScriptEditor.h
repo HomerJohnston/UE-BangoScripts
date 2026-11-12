@@ -4,6 +4,8 @@
 #include "BangoGraph.h"
 #include "BangoGraphEdit.h"
 #include "BangoGraphLayout.h"
+#include "BangoScriptSubsystem.h"
+#include "BangoEdGraphNode.h" // EBangoNodeDebugState
 #include "EditorUndoClient.h"
 #include "Types/SlateStructs.h"
 #include "UObject/StrongObjectPtr.h"
@@ -15,6 +17,7 @@ class FUICommandList;
 class SBox;
 class SButton;
 class SGraphEditor;
+class SBangoLineMarkers;
 class SInlineEditableTextBlock;
 class SMultiLineEditableTextBox;
 class SBangoTextEditor;
@@ -149,6 +152,8 @@ private:
 	TSharedPtr<SScrollBar> TextVScrollBar;
 	TSharedPtr<SScrollBox> LineNumberScroll;
 	TSharedPtr<STextBlock> LineNumbers;
+	/** The debugger's marks beside the line numbers: where the followed copy is, its calls, where it failed, its trail. */
+	TSharedPtr<SBangoLineMarkers> LineMarkers;
 	/** How many line numbers LineNumbers shows. */
 	int32 LineNumberCount = 0;
 	/** Shown or hidden with the Source Editor tab on the graph's left edge (SetTextPaneOpen). Hidden to start with. */
@@ -390,4 +395,55 @@ private:
 	void Redo();
 
 	static void Notify(const FText& Message, bool bSuccess);
+
+	// ---- Debugging (while playing in the editor) ----
+
+	/** A running copy of this script, in one of the Play in Editor worlds. */
+	struct FDebugEntry
+	{
+		/** Which Play in Editor world (FWorldContext::PIEInstance). */
+		int32 PIEInstance = INDEX_NONE;
+		FBangoScriptDebugInfo Info;
+	};
+	/** The copies of the open script running in every Play in Editor world (and those that failed), as of the last check. */
+	TArray<FDebugEntry> DebugEntries;
+	/** The copy being debugged: its world and Id. DebugId 0 means none. */
+	int32 DebugPIEInstance = INDEX_NONE;
+	int64 DebugId = 0;
+	/** True if "No debugging" was picked, so a copy isn't picked automatically until playing stops. */
+	bool bDebugOff = false;
+
+	/** Ten times a second: lists the running copies, keeps one selected (the only one, automatically), and outlines its nodes. */
+	EActiveTimerReturnType UpdateDebugging(double CurrentTime, float DeltaTime);
+	void GatherDebugEntries(TArray<FDebugEntry>& OutEntries) const;
+	const FDebugEntry* FindDebugEntry() const;
+	/** Sets every node's EBangoNodeDebugState from the selected copy. */
+	void ApplyDebugStates();
+	/** The trail: pings the nodes the followed copy has run since the last check (UBangoEdGraphNode::DebugPingTime). */
+	void UpdateDebugTrail();
+	/** The script subsystem of a Play in Editor world, or null. */
+	static class UBangoScriptSubsystem* FindDebugSubsystem(int32 PIEInstance);
+	/** Which copy the trail is from, and how many nodes it had run at the last check. */
+	int32 TrailPIEInstance = INDEX_NONE;
+	int64 TrailId = 0;
+	uint64 TrailSeen = 0;
+	/** The followed copy's node states (ApplyDebugStates) and trail pings (UpdateDebugTrail), by NodeID, for the text pane's gutter. */
+	TMap<int64, EBangoNodeDebugState> DebugNodeStates;
+	TMap<int64, double> DebugNodePings;
+	/** The script text the gutter's line-to-node map was made from, and the NodeIDs on each of its lines. */
+	FString MarkerText;
+	TArray<TArray<int64>> MarkerLineNodes;
+	/** Updates the gutter's marks from DebugNodeStates and DebugNodePings. */
+	void UpdateLineMarkers();
+	/** The line (from 0) of the text pane whose //@ metadata has this NodeID, or INDEX_NONE. */
+	int32 FindTextLineOfNode(int64 NodeID);
+	/** Picks a copy to debug (Id 0: none) and, with bShowNode, shows the node it's at. */
+	void SelectDebugEntry(int32 PIEInstance, int64 Id, bool bShowNode);
+	/** The node it's at, or failed at, or INDEX_NONE. */
+	static int64 GetDebugNodeID(const FDebugEntry& Entry);
+	/** Shows the graph that has the node with this ID, and centres it. */
+	void ShowNodeByID(int64 NodeID);
+	TSharedRef<SWidget> MakeDebugMenu();
+	FText GetDebugLabel() const;
+	FText DescribeDebugEntry(const FDebugEntry& Entry) const;
 };

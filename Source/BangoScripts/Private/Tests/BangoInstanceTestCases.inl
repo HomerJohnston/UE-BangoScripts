@@ -315,6 +315,9 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 	{ TEXT("localized text"),
 		TEXT("#define LOCTEXT_NAMESPACE \"N\"\ntext[] _all;\nSay(LOCTEXT(\"A\", \"Hello {0}, {1}\"), 3, \"you\");\nHint(\"{0}\", LOCTEXT(\"B\", \"plain\"));\nSay(FormatText(LOCTEXT(\"F\", \"{1}-{0}\"), 1, @john));\nHint(\"{0} {1}\", LOCTEXT(\"C\", \"x\") == ToText(\"x\"), LOCTEXT(\"C\", \"x\") != NSLOCTEXT(\"M\", \"C\", \"y\"));\n_all = [LOCTEXT(\"B\", \"plain\"), nil];\nHint(\"{0}\", _all);\nSay(LOCTEXT(\"E\", \"`{0`} stays\"));\n#undef LOCTEXT_NAMESPACE"),
 		TEXT("Hello 3, you|plain|john-1|true true|[plain, nil]|{0} stays"), nullptr, nullptr },
+	{ TEXT("invariant text"),
+		TEXT("text _t = INVTEXT(\"Score: {0}\");\nSay(_t, 10);\nSay(INVTEXT(\"plain\"));\nHint(\"{0}\", INVTEXT(\"x\") == ToText(\"x\"));"),
+		TEXT("Score: 10|plain|true"), nullptr, nullptr },
 	{ TEXT("a text placeholder with no value while running"), TEXT("text _t;\n_t = ToText(\"{1}\");\nSay(_t, 1);"), nullptr, TEXT("(3:1)"), TEXT("uses {1}, but only 1 value(s) were given") },
 	{ TEXT("a nil text"), TEXT("text _t;\nSay(_t);"), nullptr, TEXT("(2:5)"), TEXT("'_t' is nil") },
 	{ TEXT("floats"), TEXT("Hint(\"{0} {1} {2}\", 10 / 4.0, -2.5 * 2, 7.5 % 2);"), TEXT("2.5 -5.0 1.5"), nullptr, nullptr },
@@ -657,6 +660,166 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 		B.Start(Reader, Commands, Globals, 9, Error);
 		B.Resume(Context);
 		Expect(B.GetStatus() == EBangoInstanceStatus::Finished && Log.Num() == 1 && Log[0].Equals(TEXT("hello"), ESearchCase::CaseSensitive), TEXT("shared globals: one script reads what another wrote"));
+	}
+
+	// ---- Hot reload (RequestReload): switching a running script to a new version ----
+	{
+		auto Compile = [&](const TCHAR* ReloadSource) -> TSharedPtr<FBangoProgram>
+		{
+			TSharedPtr<FBangoProgram> Compiled = MakeShared<FBangoProgram>();
+			FBangoCompileError ReloadError;
+			if (!Bango::CompileSource(ReloadSource, TEXT("reload.bango"), Commands, *Compiled, ReloadError))
+			{
+				OutFailures.Add(FString::Printf(TEXT("reload: doesn't compile: %s"), *ReloadError.ToString()));
+			}
+			return Compiled;
+		};
+		struct FReloadRun
+		{
+			FBangoGlobalStore Globals;
+			FBangoInstance Instance;
+		};
+		auto StartRun = [&](FReloadRun& Run, const TSharedPtr<FBangoProgram>& First) -> bool
+		{
+			Log.Reset();
+			BangoMakeRuntimeTestGlobals(Run.Globals);
+			Context.Globals = &Run.Globals;
+			FBangoRuntimeError StartError;
+			return Run.Instance.Start(First, Commands, Run.Globals, 1, StartError) && Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting;
+		};
+		auto LastLog = [&Log]() { return Log.Num() > 0 ? Log.Last() : FString(); };
+
+		// A moving platform: the math in the loop changes while it runs, and a local is added.
+		const TCHAR* PlatformV1 =
+			TEXT("float _x = 0;\nfloat _speed = 1;\n")
+			TEXT("while (true)    //@1(0, 0)\n{\n")
+			TEXT("\t_x += _speed;    //@2(2, 0)\n")
+			TEXT("\tHint(\"{0}\", _x);    //@3(4, 0)\n")
+			TEXT("\tSleep(0);    //@4(6, 0)\n};");
+		const TCHAR* PlatformV2 =
+			TEXT("float _x = 0;\nfloat _speed = 1;\nfloat _extra = 5;\n")
+			TEXT("while (true)    //@1(0, 0)\n{\n")
+			TEXT("\t_x += _speed * 10;    //@2(2, 0)\n")
+			TEXT("\tHint(\"{0} {1}\", _x, _extra);    //@3(4, 0)\n")
+			TEXT("\tSleep(0);    //@4(6, 0)\n};");
+		{
+			FReloadRun Run;
+			Expect(StartRun(Run, Compile(PlatformV1)) && LastLog() == TEXT("1.0"), TEXT("reload: the platform loop runs once and waits"));
+			FString ReloadError;
+			Expect(Run.Instance.RequestReload(Compile(PlatformV2), Commands, ReloadError), TEXT("reload: the request is accepted"));
+			Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting, TEXT("reload: still running"));
+			Expect(LastLog() == TEXT("11.0 5.0"), TEXT("reload: the loop's new math runs, with the old _x, and the new local's starting value"));
+			FString Message;
+			Expect(Run.Instance.TakeReloadResult(Message) == EBangoReloadResult::Reloaded, TEXT("reload: reports that it switched"));
+			Expect(Run.Instance.TakeReloadResult(Message) == EBangoReloadResult::None, TEXT("reload: reports it once"));
+			Run.Instance.Resume(Context);
+			Expect(LastLog() == TEXT("21.0 5.0"), TEXT("reload: keeps running the new version"));
+		}
+
+		// A local that changes type can't be carried over: it keeps the old version, and says why.
+		{
+			FReloadRun Run;
+			StartRun(Run, Compile(PlatformV1));
+			FString ReloadError;
+			Run.Instance.RequestReload(Compile(TEXT("int _x = 0;\nfloat _speed = 1;\nwhile (true)    //@1(0, 0)\n{\n\t_x += 5;    //@2(2, 0)\n\tHint(\"{0}\", _x);    //@3(4, 0)\n\tSleep(0);    //@4(6, 0)\n};")), Commands, ReloadError);
+			Run.Instance.Resume(Context);
+			FString Message;
+			const EBangoReloadResult TypeResult = Run.Instance.TakeReloadResult(Message);
+			Expect(TypeResult == EBangoReloadResult::KeptOld && Message.Contains(TEXT("'_x' was float and is int")), *FString::Printf(TEXT("reload: a changed type keeps the old version (%d: %s)"), (int32)TypeResult, *Message));
+			Expect(LastLog() == TEXT("2.0") && !Run.Instance.IsReloadPending(), TEXT("reload: the old version carries on"));
+		}
+
+		// Paused inside a function: the function's new code runs, and it goes back to the same call in the main graph.
+		{
+			FReloadRun Run;
+			const TCHAR* StepV1 = TEXT("global int count;\ncount = 0;    //@1(0, 0)\nwhile (true)    //@2(2, 0)\n{\n\tStep();    //@3(4, 0)\n};\n\nfunction void Step()\n{\n\tcount += 1;    //@10(0, 0)\n\tHint(\"{0}\", count);    //@11(2, 0)\n\tSleep(0);    //@12(4, 0)\n};");
+			const TCHAR* StepV2 = TEXT("global int count;\ncount = 0;    //@1(0, 0)\nwhile (true)    //@2(2, 0)\n{\n\tStep();    //@3(4, 0)\n};\n\nfunction void Step()\n{\n\tcount += 100;    //@10(0, 0)\n\tHint(\"step {0}\", count);    //@11(2, 0)\n\tSleep(0);    //@12(4, 0)\n};");
+			Expect(StartRun(Run, Compile(StepV1)) && LastLog() == TEXT("1"), TEXT("reload: Step runs once"));
+			FString ReloadError;
+			Run.Instance.RequestReload(Compile(StepV2), Commands, ReloadError);
+			Run.Instance.Resume(Context);
+			FString Message;
+			Expect(Run.Instance.TakeReloadResult(Message) == EBangoReloadResult::Reloaded, TEXT("reload: switches inside a function"));
+			Expect(LastLog() == TEXT("step 101"), TEXT("reload: the function returns to the main graph's loop, which calls its new version"));
+		}
+
+		// For the debugger: where it is, and the calls on the way there.
+		{
+			FReloadRun Run;
+			StartRun(Run, Compile(TEXT("while (true)    //@2(2, 0)\n{\n\tStep();    //@3(4, 0)\n};\n\nfunction void Step()\n{\n\tHint(\"x\");    //@11(2, 0)\n\tSleep(0);    //@12(4, 0)\n};")));
+			TArray<FBangoCallFrameInfo> CallStack;
+			Run.Instance.GetCallStack(CallStack);
+			Expect(CallStack.Num() == 2 && CallStack[0].FunctionName.IsEmpty() && CallStack[0].Loc.NodeID == 3
+				&& CallStack[1].FunctionName == TEXT("Step") && CallStack[1].Loc.NodeID == 12, TEXT("debug: the call stack shows the call in the main graph, then the Sleep in Step"));
+			Expect(Run.Instance.GetWaitingCommandName() == TEXT("Sleep"), TEXT("debug: it says what it's waiting on"));
+		}
+
+		// For the debugger's trail: the nodes it runs, in order.
+		{
+			FReloadRun Run;
+			Run.Instance.SetRecordTrail(true);
+			auto TrailText = [](const TArray<int64>& TrailNodes)
+			{
+				FString Text;
+				for (const int64 Node : TrailNodes)
+				{
+					Text += FString::Printf(TEXT("%lld "), Node);
+				}
+				return Text;
+			};
+			StartRun(Run, Compile(TEXT("int _n = 0;\nwhile (true)    //@1(0, 0)\n{\n\t_n++;    //@2(2, 0)\n\tif (_n > 1)    //@3(4, 0)\n\t{\n\t\tHint(\"x\");    //@4(6, 0)\n\t};\n\n\tSleep(0);    //@5(8, 0)\n};")));
+			TArray<int64> Nodes;
+			uint64 Seen = Run.Instance.GetTrail(0, Nodes);
+			Expect(Nodes == TArray<int64>({ 1, 2, 3, 5 }), *FString::Printf(TEXT("trail: the first time round, the if's Do isn't run (%s)"), *TrailText(Nodes)));
+			Run.Instance.Resume(Context);
+			Nodes.Reset();
+			Seen = Run.Instance.GetTrail(Seen, Nodes);
+			Expect(Nodes == TArray<int64>({ 1, 2, 3, 4, 5 }) && Seen == 9, *FString::Printf(TEXT("trail: the second time round it is, and only the new nodes are given (%s)"), *TrailText(Nodes)));
+		}
+
+		// A call in the middle of a calculation can't be switched while it's under way, so the switch waits until the
+		// statement it's in has finished.
+		{
+			FReloadRun Run;
+			const TCHAR* MidV1 = TEXT("int _r;\nwhile (true)    //@1(0, 0)\n{\n\t_r = 1 + Wait();    //@2(2, 0)\n\tHint(\"{0}\", _r);    //@3(4, 0)\n};\n\nfunction int Wait()\n{\n\tSleep(0);    //@10(0, 0)\n\treturn 1;    //@11(2, 0)\n};");
+			const TCHAR* MidV2 = TEXT("int _r;\nwhile (true)    //@1(0, 0)\n{\n\t_r = 1 + Wait();    //@2(2, 0)\n\tHint(\"new {0}\", _r);    //@3(4, 0)\n};\n\nfunction int Wait()\n{\n\tSleep(0);    //@10(0, 0)\n\treturn 1;    //@11(2, 0)\n};");
+			Expect(StartRun(Run, Compile(MidV1)), TEXT("reload: waits inside Wait()"));
+			FString ReloadError;
+			Run.Instance.RequestReload(Compile(MidV2), Commands, ReloadError);
+			Run.Instance.Resume(Context);
+			FString Message;
+			const EBangoReloadResult MidResult = Run.Instance.TakeReloadResult(Message);
+			Expect(MidResult == EBangoReloadResult::Reloaded && Message.Contains(TEXT("after node 2")), *FString::Printf(TEXT("reload: a call mid-calculation switches after its statement (%d: %s)"), (int32)MidResult, *Message));
+			Expect(LastLog() == TEXT("new 2"), *FString::Printf(TEXT("reload: and carries on in the new version (%s)"), *LastLog()));
+		}
+
+		// If it pauses again before reaching a point where the new version fits, it gives up and says why.
+		{
+			FReloadRun Run;
+			const TCHAR* PauseV1 = TEXT("int _r;\nwhile (true)    //@1(0, 0)\n{\n\t_r = 1 + Wait();    //@2(2, 0)\n};\n\nfunction int Wait()\n{\n\tSleep(0);    //@10(0, 0)\n\tSleep(0);    //@12(2, 0)\n\treturn 1;    //@11(4, 0)\n};");
+			const TCHAR* PauseV2 = TEXT("int _r;\nwhile (true)    //@1(0, 0)\n{\n\t_r = 2 + Wait();    //@2(2, 0)\n};\n\nfunction int Wait()\n{\n\tSleep(0);    //@10(0, 0)\n\tSleep(0);    //@12(2, 0)\n\treturn 1;    //@11(4, 0)\n};");
+			StartRun(Run, Compile(PauseV1));
+			FString ReloadError;
+			Run.Instance.RequestReload(Compile(PauseV2), Commands, ReloadError);
+			Run.Instance.Resume(Context);
+			FString Message;
+			const EBangoReloadResult PauseResult = Run.Instance.TakeReloadResult(Message);
+			Expect(PauseResult == EBangoReloadResult::KeptOld && Message.Contains(TEXT("part of a bigger calculation")), *FString::Printf(TEXT("reload: gives up at the next pause (%d: %s)"), (int32)PauseResult, *Message));
+		}
+
+		// A command the new version calls must exist.
+		{
+			FReloadRun Run;
+			StartRun(Run, Compile(PlatformV1));
+			TSharedPtr<FBangoProgram> Unknown = MakeShared<FBangoProgram>();
+			FBangoCommandTable SignatureOnly;
+			SignatureOnly.Add(FBangoCommandSignature::Make(TEXT("Nothing")), CompileError.Message);
+			FBangoCompileError UnknownError;
+			Bango::CompileSource(TEXT("Nothing();    //@1(0, 0)"), TEXT("unknown.bango"), SignatureOnly, *Unknown, UnknownError);
+			FString ReloadError;
+			Expect(!Run.Instance.RequestReload(Unknown, Commands, ReloadError) && ReloadError.Contains(TEXT("'Nothing'")) && !Run.Instance.IsReloadPending(),
+				TEXT("reload: refused if a command isn't registered"));
+		}
 	}
 }
 

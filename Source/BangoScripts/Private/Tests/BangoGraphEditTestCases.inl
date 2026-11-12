@@ -234,6 +234,22 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 		{
 			OutFailures.Add(FString::Printf(TEXT("text: literals written as %s, %s, %s"), *WithNotes, *WithoutNotes, *WithNamespace));
 		}
+		// INVTEXT: only the source.
+		FBangoTextLiteral Invariant;
+		if (!Bango::ParseTextLiteral(TEXT("INVTEXT(\"Hi \\\"you\\\"\")"), Invariant) || !Invariant.bInvariant || Invariant.Source != TEXT("Hi \"you\"")
+			|| Bango::MakeTextLiteral(Invariant) != TEXT("INVTEXT(\"Hi \\\"you\\\"\")"))
+		{
+			OutFailures.Add(TEXT("text: INVTEXT is read and written with only its source"));
+		}
+		FBangoNodeField InvariantField;
+		InvariantField.TypeHint = TEXT("text");
+		InvariantField.bPresent = true;
+		InvariantField.Text = TEXT("INVTEXT(\"Old\")");
+		if (Bango::GetFieldValueFromTyped(InvariantField, TEXT("New")) != TEXT("INVTEXT(\"New\")") || Bango::GetFieldDisplayText(InvariantField) != TEXT("Old"))
+		{
+			OutFailures.Add(TEXT("text: retyping an INVTEXT keeps it invariant, and it shows its source"));
+		}
+
 		FBangoTextLiteral Bad;
 		if (Bango::ParseTextLiteral(TEXT("LOCTEXT(\"K\")"), Bad) || Bango::ParseTextLiteral(TEXT("LOCTEXT(\"K\", _s)"), Bad) || Bango::ParseTextLiteral(TEXT("Hint(\"K\", \"S\")"), Bad))
 		{

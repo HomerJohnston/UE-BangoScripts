@@ -98,7 +98,8 @@ enum class EBangoLiteralKind : uint8
 	Entity,
 	/**
 	 * Localized text: `LOCTEXT("Key", "Source")`, `NSLOCTEXT("Namespace", "Key", "Source")`, and NOTELOCTEXT /
-	 * NSNOTELOCTEXT with translator notes last. StringValue holds the source text.
+	 * NSNOTELOCTEXT with translator notes last; or `INVTEXT("Source")`, a text that is never translated
+	 * (bTextInvariant). StringValue holds the source text.
 	 */
 	Text,
 };
@@ -117,6 +118,8 @@ struct FBangoLiteralExpr : FBangoExpr
 	FString StringValue;
 
 	// Text literals only:
+	/** INVTEXT: a text that is never translated, so it has no namespace, key or notes, and TextArgLocs holds only the source. */
+	bool bTextInvariant = false;
 	/** NSLOCTEXT / NSNOTELOCTEXT: the namespace given. LOCTEXT / NOTELOCTEXT use the script's LOCTEXT_NAMESPACE. */
 	bool bTextHasNamespace = false;
 	FString TextNamespace;
@@ -125,6 +128,9 @@ struct FBangoLiteralExpr : FBangoExpr
 	FString TextNotes;
 	/** Where each of the literal's strings is: namespace (if given), key, source, notes (if given). */
 	TArray<FBangoSourceLocation> TextArgLocs;
+
+	/** Where the source text is in TextArgLocs. */
+	int32 GetTextSourceArgIndex() const { return bTextInvariant ? 0 : (bTextHasNamespace ? 2 : 1); }
 };
 
 /** [a, b, c] */

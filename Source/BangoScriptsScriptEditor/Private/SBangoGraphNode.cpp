@@ -5,6 +5,9 @@
 #include "BangoGraphEdit.h"
 #include "BangoGraph.h"
 #include "BangoGraphLayout.h"
+#include "BangoText.h"
+#include "Brushes/SlateRoundedBoxBrush.h"
+#include "HAL/PlatformTime.h"
 #include "GraphEditorSettings.h"
 #include "SBangoGraphPin.h"
 #include "SBangoRerouteNode.h"
@@ -482,6 +485,39 @@ int32 SBangoGraphNode::AddTextPartRows(const TSharedRef<SGridPanel>& Grid, int32
 		return Row; // no longer a literal (like after typing =expression); nothing to show
 	}
 
+	// Translated: a LOCTEXT (and the like) is gathered for translators; an INVTEXT is shown as it is in every language.
+	{
+		const FText TranslatedTip = LOCTEXT("TranslatedTip", "Checked: translators translate this text (LOCTEXT), and it has a key, a namespace and notes.\nUnchecked: it's shown as it is in every language (INVTEXT), like a name or a debug message.");
+		Grid->AddSlot(LabelColumn, Row)
+			.VAlign(VAlign_Fill)
+			.Padding(10.0f, 1.0f, 8.0f, 1.0f)
+			[
+				SNew(SBox)
+				.VAlign(VAlign_Center)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("TranslatedLabel", "Translated"))
+					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+					.ColorAndOpacity(FSlateColor(LabelColor))
+					.ToolTipText(TranslatedTip)
+				]
+			];
+		Grid->AddSlot(ValueColumn, Row)
+			.VAlign(VAlign_Center)
+			.Padding(0.0f, 1.0f)
+			[
+				SNew(SCheckBox)
+				.IsChecked(Literal.bInvariant ? ECheckBoxState::Unchecked : ECheckBoxState::Checked)
+				.ToolTipText(TranslatedTip)
+				.OnCheckStateChanged(this, &SBangoGraphNode::OnTextTranslatedChanged, FieldIndex)
+			];
+		++Row;
+	}
+	if (Literal.bInvariant)
+	{
+		return Row; // no key, namespace or notes
+	}
+
 	struct FPartRow
 	{
 		ETextPart Part;
@@ -536,6 +572,48 @@ int32 SBangoGraphNode::AddTextPartRows(const TSharedRef<SGridPanel>& Grid, int32
 		++Row;
 	}
 	return Row;
+}
+
+int32 SBangoGraphNode::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect,
+	FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
+{
+	const EBangoNodeDebugState DebugState = BangoNode ? BangoNode->DebugState : EBangoNodeDebugState::None;
+	static const FSlateRoundedBoxBrush OutlineBrush(FLinearColor::Transparent, 10.0f, FLinearColor::White, 3.0f);
+
+	// The trail: a node the script just ran gets a pale blue outline that fades out over a second.
+	constexpr double PingSeconds = 1.0;
+	const double SincePing = BangoNode && BangoNode->DebugPingTime > 0.0 ? FPlatformTime::Seconds() - BangoNode->DebugPingTime : PingSeconds;
+	if (SincePing < PingSeconds)
+	{
+		const float Fade = 1.0f - (float)(SincePing / PingSeconds);
+		FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToInflatedPaintGeometry(FVector2D(5.0f, 5.0f)), &OutlineBrush,
+			ESlateDrawEffect::None, FLinearColor(0.55f, 0.85f, 1.0f, 0.9f * Fade * Fade));
+	}
+	if (DebugState == EBangoNodeDebugState::None)
+	{
+		return SGraphNode::OnPaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId + 1, InWidgetStyle, bParentEnabled);
+	}
+
+	// An outline a little outside the node: pulsing yellow where it is (like Blueprint's), a dim one along the calls on
+	// the way there, red where it failed.
+	FLinearColor Color;
+	switch (DebugState)
+	{
+	case EBangoNodeDebugState::Paused:
+	{
+		const float Pulse = 0.5f + 0.5f * FMath::Sin((float)FPlatformTime::Seconds() * 5.0f);
+		Color = FLinearColor(1.0f, 0.85f, 0.1f, 0.55f + 0.45f * Pulse);
+		break;
+	}
+	case EBangoNodeDebugState::CallStack:
+		Color = FLinearColor(1.0f, 0.85f, 0.1f, 0.4f);
+		break;
+	default:
+		Color = FLinearColor(1.0f, 0.2f, 0.15f, 1.0f);
+		break;
+	}
+	FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToInflatedPaintGeometry(FVector2D(5.0f, 5.0f)), &OutlineBrush, ESlateDrawEffect::None, Color);
+	return SGraphNode::OnPaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId + 1, InWidgetStyle, bParentEnabled);
 }
 
 void SBangoGraphNode::MoveTo(const FVector2f& NewPosition, FNodeSet& NodeFilter, bool bMarkDirty)
@@ -647,6 +725,33 @@ void SBangoGraphNode::OnTextPartCommitted(const FText& NewText, ETextCommit::Typ
 		break;
 	}
 
+	SetTextLiteral(FieldIndex, Literal, Error);
+}
+
+void SBangoGraphNode::OnTextTranslatedChanged(ECheckBoxState NewState, int32 FieldIndex)
+{
+	FBangoTextLiteral Literal;
+	if (!BangoNode || !BangoNode->Layout.Fields.IsValidIndex(FieldIndex) || !Bango::ParseTextLiteral(BangoNode->Layout.Fields[FieldIndex].Text, Literal))
+	{
+		return;
+	}
+	const bool bTranslated = NewState == ECheckBoxState::Checked;
+	if (bTranslated == !Literal.bInvariant)
+	{
+		return;
+	}
+	FBangoTextLiteral NewLiteral;
+	NewLiteral.Source = Literal.Source;
+	NewLiteral.bInvariant = !bTranslated;
+	if (bTranslated)
+	{
+		NewLiteral.Key = Bango::MakeTextKey(); // a text that's newly translated needs a key of its own
+	}
+	SetTextLiteral(FieldIndex, NewLiteral, FString());
+}
+
+void SBangoGraphNode::SetTextLiteral(int32 FieldIndex, const FBangoTextLiteral& Literal, FString Error)
+{
 	const FString Value = Bango::MakeTextLiteral(Literal);
 	if (Error.IsEmpty() && Value.Equals(BangoNode->Layout.Fields[FieldIndex].Text, ESearchCase::CaseSensitive))
 	{

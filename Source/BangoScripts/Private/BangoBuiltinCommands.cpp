@@ -443,16 +443,16 @@ namespace Bango
 			}
 		}
 
-		// GameTime() -> double: seconds since the level started (pauses with the game).
+		// Time() -> float: the world's time, GetWorld()->GetTimeSeconds() (seconds since the level started; pauses with the game).
 		{
 			FBangoCommand Command;
-			Command.Signature = FBangoCommandSignature::Make(TEXT("GameTime")).Returns(Double).InCategory(TEXT("Time")).Describe(TEXT("Seconds since the level started."));
+			Command.Signature = FBangoCommandSignature::Make(TEXT("Time")).Returns(Double).InCategory(TEXT("Time")).Describe(TEXT("Seconds since the level started."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{
 				const UWorld* World = Call.WorldContext ? Call.WorldContext->GetWorld() : nullptr;
 				if (!World)
 				{
-					return Call.Fail(TEXT("GameTime needs a game world."));
+					return Call.Fail(TEXT("Time needs a game world."));
 				}
 				Call.Result = FBangoValue::MakeDouble(World->GetTimeSeconds());
 				return EBangoCommandResult::Done;

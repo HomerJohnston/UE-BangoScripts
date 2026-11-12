@@ -7,6 +7,18 @@
 #include "BangoGraphLayout.h"
 #include "BangoEdGraphNode.generated.h"
 
+/** How the script instance being debugged is using a node (SBangoScriptEditor's Debug dropdown). Drawn as an outline. */
+enum class EBangoNodeDebugState : uint8
+{
+	None,
+	/** It's running or paused on this node. */
+	Paused,
+	/** A call under way on the way there (a call to the function it's in, or further out). */
+	CallStack,
+	/** It stopped with an error here. */
+	Failed,
+};
+
 /** A declaration (FBangoGraphDecl), kept on an entry node so that editing it can be undone. */
 USTRUCT()
 struct FBangoEdDecl
@@ -106,6 +118,11 @@ public:
 	 */
 	UPROPERTY()
 	FString Description;
+
+	/** For the debugger: how the script instance being debugged is using this node. Set by the script editor; not saved. */
+	EBangoNodeDebugState DebugState = EBangoNodeDebugState::None;
+	/** For the debugger's trail: when the script being debugged last ran this node (FPlatformTime::Seconds), or 0. Fades out. */
+	double DebugPingTime = 0.0;
 
 	/** Text fields whose Key, Namespace and Notes rows are shown (see SBangoGraphNode). Not saved. */
 	TSet<int32> ExpandedTextFields;

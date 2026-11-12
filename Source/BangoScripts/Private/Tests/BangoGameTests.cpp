@@ -73,7 +73,7 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 	FBangoCommandTable Commands;
 	Bango::RegisterBuiltinCommands(Commands);
 	for (const TCHAR* Name : { TEXT("Hint"), TEXT("Log"), TEXT("Format"), TEXT("FormatText"), TEXT("ToText"), TEXT("ToString"), TEXT("Sleep"), TEXT("Random"), TEXT("RandomInt"), TEXT("Floor"), TEXT("Round"),
-		TEXT("Min"), TEXT("Max"), TEXT("Abs"), TEXT("Clamp"), TEXT("Sin"), TEXT("Cos"), TEXT("SinDegrees"), TEXT("CosDegrees"), TEXT("GameTime"), TEXT("ToEntity"), TEXT("SetPos"), TEXT("GetPos"), TEXT("SetHidden"), TEXT("DistanceTo"), TEXT("IsNull") })
+		TEXT("Min"), TEXT("Max"), TEXT("Abs"), TEXT("Clamp"), TEXT("Sin"), TEXT("Cos"), TEXT("SinDegrees"), TEXT("CosDegrees"), TEXT("Time"), TEXT("ToEntity"), TEXT("SetPos"), TEXT("GetPos"), TEXT("SetHidden"), TEXT("DistanceTo"), TEXT("IsNull") })
 	{
 		TestNotNull(FString::Printf(TEXT("registered: %s"), Name), Commands.FindCommandImpl(Name));
 	}
@@ -156,7 +156,7 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 		{ TEXT("int _x;\n_x = RandomInt(5, 1);"), TEXT("Min (5) is greater than Max (1)") },
 		{ TEXT("float _x;\n_x = Random(2.0, 1.0);"), TEXT("Min (2.0) is greater than Max (1.0)") },
 		{ TEXT("Sleep(-1.0);"), TEXT("negative time") },
-		{ TEXT("float _t;\n_t = GameTime();"), TEXT("needs a game world") },
+		{ TEXT("float _t;\n_t = Time();"), TEXT("needs a game world") },
 		{ TEXT("int _x;\n_x = Floor(1e300);"), TEXT("too large to convert") },
 		{ TEXT("int _x;\n_x = Abs(-2147483647 - 1);"), TEXT("has no positive int") },
 		{ TEXT("int _x;\n_x = Clamp(5, 10, 1);"), TEXT("Min (10) is greater than Max (1)") },

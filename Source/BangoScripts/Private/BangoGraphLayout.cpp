@@ -1285,12 +1285,24 @@ namespace Bango
 	{
 		using namespace BangoGraphLayoutPrivate;
 		const FTokens Tok(Text);
-		if (!Tok.bOk || Tok.Num() < 6 || !Tok.Is(0, EBangoTokenKind::Identifier) || !Tok.Is(1, EBangoTokenKind::LParen) || !Tok.Is(Tok.Num() - 1, EBangoTokenKind::RParen))
+		if (!Tok.bOk || Tok.Num() < 4 || !Tok.Is(0, EBangoTokenKind::Identifier) || !Tok.Is(1, EBangoTokenKind::LParen) || !Tok.Is(Tok.Num() - 1, EBangoTokenKind::RParen))
 		{
 			return false;
 		}
 		const FString& Name = Tok.T[0].Text;
 		FBangoTextLiteral Literal;
+		if (Name.Equals(TEXT("INVTEXT"), ESearchCase::CaseSensitive))
+		{
+			// INVTEXT("Source"): never translated.
+			if (Tok.Num() != 4 || !Tok.Is(2, EBangoTokenKind::StringLiteral))
+			{
+				return false;
+			}
+			Literal.bInvariant = true;
+			Literal.Source = Tok.T[2].Text;
+			OutLiteral = Literal;
+			return true;
+		}
 		Literal.bHasNamespace = Name.StartsWith(TEXT("NS"), ESearchCase::CaseSensitive);
 		Literal.bHasNotes = Name.Contains(TEXT("NOTE"), ESearchCase::CaseSensitive);
 		const bool bKnown = Name.Equals(TEXT("LOCTEXT"), ESearchCase::CaseSensitive) || Name.Equals(TEXT("NSLOCTEXT"), ESearchCase::CaseSensitive)
@@ -1327,6 +1339,10 @@ namespace Bango
 
 	FString MakeTextLiteral(const FBangoTextLiteral& Literal)
 	{
+		if (Literal.bInvariant)
+		{
+			return TEXT("INVTEXT(") + MakeStringLiteral(Literal.Source) + TEXT(")");
+		}
 		const bool bNotes = !Literal.Notes.IsEmpty();
 		FString Result = Literal.bHasNamespace ? (bNotes ? TEXT("NSNOTELOCTEXT(") : TEXT("NSLOCTEXT(")) : (bNotes ? TEXT("NOTELOCTEXT(") : TEXT("LOCTEXT("));
 		if (Literal.bHasNamespace)

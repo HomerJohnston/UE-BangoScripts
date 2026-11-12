@@ -63,6 +63,7 @@ bool FBangoLineTokenizerTest::RunTest(const FString& Parameters)
 	Check(TEXT("if (IsNil(foundThings) && foundThings >= 10)"), TEXT("Keyword[if] Punctuation[(] Builtin[IsNil] Punctuation[(] Global[foundThings] Punctuation[)] Operator[&&] Global[foundThings] Operator[>=] Number[10]"));
 	Check(TEXT("\tHint(LOCTEXT(\"Countdown\", \"Countdown: {0}\"), 3 - _i);"), TEXT("Call[Hint] Punctuation[(] LocMacro[LOCTEXT] Punctuation[(] LocKey[\"Countdown\"] Punctuation[,] String[\"Countdown: ] Placeholder[{0}] String[\"] Punctuation[)] Punctuation[,] Number[3] Operator[-] Global[_i]"));
 	Check(TEXT("Hint(NSNOTELOCTEXT(\"Ns\", \"K\", \"Hi {Name} `{\", \"note\"));"), TEXT("LocKey[\"Ns\"] Punctuation[,] LocKey[\"K\"] Punctuation[,] String[\"Hi ] Error[{Name}] String[ ] StringEscape[`{] String[\"] Punctuation[,] LocNotes[\"note\"]"));
+	Check(TEXT("Hint(INVTEXT(\"Score {0}\"), 1);"), TEXT("Call[Hint] Punctuation[(] LocMacro[INVTEXT] Punctuation[(] String[\"Score ] Placeholder[{0}] String[\"] Punctuation[)] Punctuation[,] Number[1]"));
 	Check(TEXT("Log(\"{0} and `{ \\n \\q {Name}\", _a);"), TEXT("String[\"] Placeholder[{0}] String[ and ] StringEscape[`{] String[ ] StringEscape[\\n] String[ ] Error[\\q] String[ {Name}\"]"));
 	Check(TEXT("@john Speak(\"Hi\");"), TEXT("Entity[@john] Call[Speak]"));
 	Check(TEXT("label Check;"), TEXT("LabelKeyword[label] LabelName[Check] Punctuation[;]"));
