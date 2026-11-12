@@ -36,7 +36,7 @@ namespace BangoLineTokenizerPrivate
 	static const TCHAR* const Constants[]      = { TEXT("true"), TEXT("false") };
 	static const TCHAR* const NilWord[]        = { TEXT("nil") };
 	static const TCHAR* const PreprocWords[]   = { TEXT("params"), TEXT("LOCTEXT_NAMESPACE") };
-	static const TCHAR* const Builtins[]       = { TEXT("IsDefined"), TEXT("Count"), TEXT("Push"), TEXT("InsertAt"), TEXT("Pop"), TEXT("RemoveAt") };
+	static const TCHAR* const Builtins[]       = { TEXT("IsNil"), TEXT("Count"), TEXT("Push"), TEXT("InsertAt"), TEXT("Pop"), TEXT("RemoveAt") };
 	static const TCHAR* const InvalidWords[]   = { TEXT("double") };
 	static const TCHAR* const VectorParts[]    = { TEXT("x"), TEXT("y"), TEXT("z") };
 
@@ -291,7 +291,8 @@ namespace BangoLineTokenizerPrivate
 			else if (IsOneOf(Line, Start, WordLen, Builtins))       { Kind = EBangoSyntaxKind::Builtin; }
 			else if (IsOneOf(Line, Start, WordLen, InvalidWords))   { Kind = EBangoSyntaxKind::Error; }
 			else if (IsFollowedByOpenParen())                       { Kind = EBangoSyntaxKind::Call; }
-			else if (Line[Start] == TEXT('_'))                      { Kind = EBangoSyntaxKind::Local; }
+			// A name is the graph's local, parameter or loop variable if it has one, and otherwise a global. One line
+			// can't tell, so it's a global here; FBangoScriptNames, which reads the whole file, tells them apart.
 			else                                                    { Kind = EBangoSyntaxKind::Global; }
 
 			Emit(Kind, Start, WordLen);
@@ -432,28 +433,9 @@ namespace BangoLineTokenizerPrivate
 					continue;
 				}
 
-				if (Style == EStringStyle::Plain && C == TEXT('%'))
-				{
-					if (At(Pos + 1) == TEXT('%'))
-					{
-						Add(EBangoSyntaxKind::Placeholder, Pos, 2);
-						Pos += 2;
-						continue;
-					}
-					if (IsDigit(At(Pos + 1)))
-					{
-						int32 End = Pos + 1;
-						while (End < Len && IsDigit(Line[End]))
-						{
-							++End;
-						}
-						Add(EBangoSyntaxKind::Placeholder, Pos, End - Pos);
-						Pos = End;
-						continue;
-					}
-				}
-
-				if (Style == EStringStyle::LocSource)
+				// Plain strings (Log, Format, Hint) and a localized text's source have the same placeholders, as in
+				// FText::Format: {0}, {1}, ..., with a backtick escaping the next character.
+				if (Style == EStringStyle::LocSource || Style == EStringStyle::Plain)
 				{
 					// A backtick escapes the next character, as in FText::Format.
 					if (C == TEXT('`') && At(Pos + 1) != 0 && At(Pos + 1) != TEXT('"'))
@@ -476,10 +458,14 @@ namespace BangoLineTokenizerPrivate
 							{
 								bAllDigits &= IsDigit(Line[I]);
 							}
-							// {0} is a placeholder; {Name} isn't supported.
-							Add(bAllDigits ? EBangoSyntaxKind::Placeholder : EBangoSyntaxKind::Error, Pos, End + 1 - Pos);
-							Pos = End + 1;
-							continue;
+							// {0} is a placeholder. {Name} isn't supported in a text (an error); in a plain string it's just
+							// characters, shown as they are.
+							if (bAllDigits || Style == EStringStyle::LocSource)
+							{
+								Add(bAllDigits ? EBangoSyntaxKind::Placeholder : EBangoSyntaxKind::Error, Pos, End + 1 - Pos);
+								Pos = End + 1;
+								continue;
+							}
 						}
 					}
 				}

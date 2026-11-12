@@ -3,25 +3,34 @@
 #include "CoreMinimal.h"
 #include "Widgets/DeclarativeSyntaxSupport.h"
 #include "Widgets/SCompoundWidget.h"
+#include "Widgets/Docking/SDockTab.h"
 #include "Widgets/Views/SListView.h"
 #include "Widgets/Views/STreeView.h"
 
+class FTabManager;
 class ITableRow;
 class SBangoScriptEditor;
-class SBox;
-class SHorizontalBox;
+class SDockTab;
 class STableViewBase;
+class SWindow;
 
 /**
  * The content of the "Bango Scripts" tab: every script in the script folder on the left, and the open scripts on
  * the right, one tab each. Each tab is a script editor of its own (SBangoScriptEditor), kept while the tab is open,
  * so switching tabs keeps each script's view, selection and unsaved changes. The list only picks which script to
  * show; everything about an open script is its editor's.
+ *
+ * The script tabs are the editor's own document tabs (SDockTab, in a tab well of a tab manager owned by the Bango
+ * Scripts tab), as an asset editor's are: they look and behave like Blueprint tabs, and can be dragged out.
  */
 class SBangoScriptBrowser : public SCompoundWidget
 {
 public:
 	SLATE_BEGIN_ARGS(SBangoScriptBrowser) {}
+		/** The Bango Scripts tab this is the content of: it owns the tab manager the script tabs are in. */
+		SLATE_ARGUMENT(TSharedPtr<SDockTab>, OwnerTab)
+		/** The window that tab is in, when it's made. */
+		SLATE_ARGUMENT(TSharedPtr<SWindow>, OwnerWindow)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -32,6 +41,8 @@ private:
 	{
 		FString Script;
 		TSharedPtr<SBangoScriptEditor> Editor;
+		/** The script's document tab (its tab manager keeps it alive while it's open). */
+		TWeakPtr<SDockTab> DockTab;
 	};
 
 	TArray<TSharedPtr<FString>> ScriptItems;
@@ -58,13 +69,13 @@ private:
 	/** Set while the list's selection is changed in code, so it doesn't count as picking a script. */
 	bool bIgnoreScriptSelection = false;
 
-	/** The open scripts, in tab order. */
+	/** The open scripts, in the order they were opened. */
 	TArray<FScriptTab> Tabs;
-	/** Which of Tabs is shown, or INDEX_NONE when none is open. */
+	/** Which of Tabs was shown last (its tab activated last), or INDEX_NONE when none is open. */
 	int32 ActiveTab = INDEX_NONE;
 
-	TSharedPtr<SHorizontalBox> TabStrip;
-	TSharedPtr<SBox> EditorHost;
+	/** Owned by the Bango Scripts tab; the script tabs are document tabs in its one tab stack. */
+	TSharedPtr<FTabManager> TabManager;
 
 	/** Finds every .bango file in the script folder again, keeping the shown script selected. */
 	void RefreshScriptList();
@@ -85,14 +96,15 @@ private:
 	/** Selects the shown script's row in the list (or nothing), without opening anything. */
 	void SelectShownScript();
 
-	/** Shows Script's tab, opening a new one at the end if it isn't open yet. */
+	/** Shows Script's tab, opening a new one if it isn't open yet. */
 	void OpenScriptTab(const FString& Script);
+	/** Brings a tab to the front of its tab well. */
 	void ActivateTab(int32 Index);
-	/** Closes a tab, asking about unsaved changes first. Returns false if the user cancelled. */
-	bool CloseTab(int32 Index);
 	int32 FindTab(const FString& Script) const;
+	int32 FindTab(const TSharedRef<SDockTab>& DockTab) const;
 
-	/** Rebuilds the row of tabs, after one is opened, closed or shown. */
-	void RebuildTabStrip();
-	TSharedRef<SWidget> MakeTab(const FString& Script);
+	/** A script's document tab, showing its editor. */
+	TSharedRef<SDockTab> MakeScriptDockTab(const FString& Script, const TSharedRef<SBangoScriptEditor>& Editor);
+	void OnScriptTabActivated(TSharedRef<SDockTab> DockTab, ETabActivationCause Cause);
+	void OnScriptTabClosed(TSharedRef<SDockTab> DockTab);
 };

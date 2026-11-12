@@ -681,9 +681,9 @@ namespace Bango
 
 	bool FillMissingPlaceholders(FBangoGraphNode& Node, bool bInFunctionGraph, const FBangoNodeLayoutContext& Context)
 	{
-		if (!Node.Text.Contains(TEXT("%")))
+		if (!Node.Text.Contains(TEXT("{")))
 		{
-			return false; // no placeholders: skip the layout
+			return false; // no placeholders ({0}, in a string or a text): skip the layout
 		}
 		bool bChanged = false;
 		// One value at a time, since each one is added after the last.

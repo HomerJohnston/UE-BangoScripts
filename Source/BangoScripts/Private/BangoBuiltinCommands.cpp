@@ -188,7 +188,7 @@ namespace Bango
 		// Log(text, ...): writes to the output log only.
 		{
 			FBangoCommand Command;
-			Command.Signature = FBangoCommandSignature::Make(TEXT("Log")).Param(TEXT("Msg"), String).WithPlaceholders().Variadic(TEXT("%"), 0).InCategory(TEXT("Text")).Describe(TEXT("Writes text to the output log."));
+			Command.Signature = FBangoCommandSignature::Make(TEXT("Log")).Param(TEXT("Msg"), String).WithPlaceholders().Variadic(TEXT("{"), 0, TEXT("}")).InCategory(TEXT("Text")).Describe(TEXT("Writes text to the output log, with {0}, {1}, ... replaced by the extra values."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{
 				FString Text;
@@ -205,7 +205,7 @@ namespace Bango
 		// Format(text, ...) -> string
 		{
 			FBangoCommand Command;
-			Command.Signature = FBangoCommandSignature::Make(TEXT("Format")).Param(TEXT("Text"), String).WithPlaceholders().Variadic(TEXT("%"), 0).Returns(String).InCategory(TEXT("Text")).Describe(TEXT("Returns the text with %0, %1, ... replaced by the extra values."));
+			Command.Signature = FBangoCommandSignature::Make(TEXT("Format")).Param(TEXT("Text"), String).WithPlaceholders().Variadic(TEXT("{"), 0, TEXT("}")).Returns(String).InCategory(TEXT("Text")).Describe(TEXT("Returns the text with {0}, {1}, ... replaced by the extra values."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{
 				FString Text;

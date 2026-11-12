@@ -54,16 +54,16 @@ static const FBangoLayoutTestCase GBangoLayoutTestCases[] =
 	// ---- Commands ----
 	{ EBangoGraphNodeKind::Call, false, TEXT("Sleep(1.0)"), TEXT("Sleep (Command) | seconds <float>: `1.0`?") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("Sleep( 1.0 )"), TEXT("Sleep (Command) | seconds <float>: `1.0`?") },
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"%0 of %1\", _a, Random(1.0, 2.0))"), TEXT("Hint (Command) | text <string>: `\"%0 of %1\"` | %0 <any>: `_a`? | %1 <any>: `Random(1.0, 2.0)`?") },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"{0} of {1}\", _a, Random(1.0, 2.0))"), TEXT("Hint (Command) | text <string>: `\"{0} of {1}\"` | {0} <any>: `_a`? | {1} <any>: `Random(1.0, 2.0)`?") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("Collect(1, \"x\")"), TEXT("Collect (Command) | Value 1 <any>: `1`? | Value 2 <any>: `\"x\"`?") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"a, b\")"), TEXT("Hint (Command) | text <string>: `\"a, b\"`") },
 	// A row for every placeholder in a literal text, even ones without a value yet.
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"Test %0 %1 %2\", 1, 2)"), TEXT("Hint (Command) | text <string>: `\"Test %0 %1 %2\"` | %0 <any>: `1`? | %1 <any>: `2`? | %2 <any>: -") },
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"%1 then %0\")"), TEXT("Hint (Command) | text <string>: `\"%1 then %0\"` | %0 <any>: - | %1 <any>: -") },
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"only %2\", 0)"), TEXT("Hint (Command) | text <string>: `\"only %2\"` | %0 <any>: `0`? | %1 <any>: - | %2 <any>: -") },
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"100%% sure\")"), TEXT("Hint (Command) | text <string>: `\"100%% sure\"`") },
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"%0\", 1, 2)"), TEXT("Hint (Command) | text <string>: `\"%0\"` | %0 <any>: `1`? | %1 <any>: `2`?") },
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(_text, 1)"), TEXT("Hint (Command) | text <string>: `_text` | %0 <any>: `1`?") },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"Test {0} {1} {2}\", 1, 2)"), TEXT("Hint (Command) | text <string>: `\"Test {0} {1} {2}\"` | {0} <any>: `1`? | {1} <any>: `2`? | {2} <any>: -") },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"{1} then {0}\")"), TEXT("Hint (Command) | text <string>: `\"{1} then {0}\"` | {0} <any>: - | {1} <any>: -") },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"only {2}\", 0)"), TEXT("Hint (Command) | text <string>: `\"only {2}\"` | {0} <any>: `0`? | {1} <any>: - | {2} <any>: -") },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"100% sure\")"), TEXT("Hint (Command) | text <string>: `\"100% sure\"`") },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"{0}\", 1, 2)"), TEXT("Hint (Command) | text <string>: `\"{0}\"` | {0} <any>: `1`? | {1} <any>: `2`?") },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(_text, 1)"), TEXT("Hint (Command) | text <string>: `_text` | {0} <any>: `1`?") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("@john Speak(\"Hi\")"), TEXT("Speak (Command) | Target <entity>: `@john` | text <string>: `\"Hi\"`") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("_people[2] Speak(\"Hi\")"), TEXT("Speak (Command) | Target <entity>: `_people[2]` | text <string>: `\"Hi\"`") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("Speak(\"x\")"), TEXT("Speak (Command) | Target <entity>: - | text <string>: `\"x\"`") },
@@ -72,7 +72,7 @@ static const FBangoLayoutTestCase GBangoLayoutTestCases[] =
 	{ EBangoGraphNodeKind::Call, false, TEXT("Random(1.0, 2.0)"), TEXT("Random (Command) | min <float>: `1.0` | max <float>: `2.0` !! Random gives a value that must be used, so it can't be a node of its own. Use it in the Value of a Set node, like '_x = Random(...)'.") },
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_x = boss GetName()"), TEXT("Set (Generic) | Var (x): `_x` | Value: `boss GetName()`") },
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_a[F(1)] = Sleep(2.0)"), TEXT("Set (Generic) | Var (x): `_a[F(1)]` | Value: `Sleep(2.0)`") },
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(Format(\"%0\", 1))"), TEXT("Hint (Command) | text <string>: `Format(\"%0\", 1)`") },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(Format(\"{0}\", 1))"), TEXT("Hint (Command) | text <string>: `Format(\"{0}\", 1)`") },
 
 	// Problems the node shows straight away
 	{ EBangoGraphNodeKind::Call, false, TEXT("Sleep(1.0, 2.0)"), TEXT("Sleep (Command) | seconds <float>: `1.0`? | Value 1 <any>: `2.0`? !! Sleep takes at most 1 argument(s), but 2 are given.") },

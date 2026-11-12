@@ -60,19 +60,19 @@ bool FBangoLineTokenizerTest::RunTest(const FString& Parameters)
 	};
 
 	Check(TEXT("global int foundThings = 0;      //@1(0, 0)"), TEXT("DeclKeyword[global] Type[int] Global[foundThings] Operator[=] Number[0] Punctuation[;] Metadata[//@1(0, 0)]"));
-	Check(TEXT("if (IsDefined(foundThings) && foundThings >= 10)"), TEXT("Keyword[if] Punctuation[(] Builtin[IsDefined] Punctuation[(] Global[foundThings] Punctuation[)] Operator[&&] Global[foundThings] Operator[>=] Number[10]"));
-	Check(TEXT("\tHint(LOCTEXT(\"Countdown\", \"Countdown: {0}\"), 3 - _i);"), TEXT("Call[Hint] Punctuation[(] LocMacro[LOCTEXT] Punctuation[(] LocKey[\"Countdown\"] Punctuation[,] String[\"Countdown: ] Placeholder[{0}] String[\"] Punctuation[)] Punctuation[,] Number[3] Operator[-] Local[_i]"));
+	Check(TEXT("if (IsNil(foundThings) && foundThings >= 10)"), TEXT("Keyword[if] Punctuation[(] Builtin[IsNil] Punctuation[(] Global[foundThings] Punctuation[)] Operator[&&] Global[foundThings] Operator[>=] Number[10]"));
+	Check(TEXT("\tHint(LOCTEXT(\"Countdown\", \"Countdown: {0}\"), 3 - _i);"), TEXT("Call[Hint] Punctuation[(] LocMacro[LOCTEXT] Punctuation[(] LocKey[\"Countdown\"] Punctuation[,] String[\"Countdown: ] Placeholder[{0}] String[\"] Punctuation[)] Punctuation[,] Number[3] Operator[-] Global[_i]"));
 	Check(TEXT("Hint(NSNOTELOCTEXT(\"Ns\", \"K\", \"Hi {Name} `{\", \"note\"));"), TEXT("LocKey[\"Ns\"] Punctuation[,] LocKey[\"K\"] Punctuation[,] String[\"Hi ] Error[{Name}] String[ ] StringEscape[`{] String[\"] Punctuation[,] LocNotes[\"note\"]"));
-	Check(TEXT("Log(\"%0 and %% \\n \\q\", _a);"), TEXT("String[\"] Placeholder[%0] String[ and ] Placeholder[%%] String[ ] StringEscape[\\n] String[ ] Error[\\q] String[\"]"));
+	Check(TEXT("Log(\"{0} and `{ \\n \\q {Name}\", _a);"), TEXT("String[\"] Placeholder[{0}] String[ and ] StringEscape[`{] String[ ] StringEscape[\\n] String[ ] Error[\\q] String[ {Name}\"]"));
 	Check(TEXT("@john Speak(\"Hi\");"), TEXT("Entity[@john] Call[Speak]"));
 	Check(TEXT("label Check;"), TEXT("LabelKeyword[label] LabelName[Check] Punctuation[;]"));
 	Check(TEXT("goto Hub;"), TEXT("LabelKeyword[goto] LabelName[Hub]"));
 	Check(TEXT("return;"), TEXT("JumpKeyword[return]"));
-	Check(TEXT("float _h = _who GetPos().z;"), TEXT("Type[float] Local[_h] Operator[=] Local[_who] Call[GetPos] Punctuation[(] Punctuation[)] Punctuation[.] VectorPart[z]"));
-	Check(TEXT("_pos.X = 1;"), TEXT("Local[_pos] Punctuation[.] Error[X]"));
-	Check(TEXT("int[][] _grid = [[1, 2], [3]];"), TEXT("Type[int[][]] Local[_grid]"));
-	Check(TEXT("double _d = 1. + .5 + 12abc + 2.5e-3;"), TEXT("Error[double] Local[_d] Operator[=] Error[1.] Operator[+] Error[.5] Operator[+] Error[12abc] Operator[+] Number[2.5e-3]"));
-	Check(TEXT("#define params (entity _speaker, int _n = 1, entity _l = nil)"), TEXT("Preprocessor[#define] Preprocessor[params] Punctuation[(] Type[entity] Local[_speaker]"));
+	Check(TEXT("float _h = _who GetPos().z;"), TEXT("Type[float] Global[_h] Operator[=] Global[_who] Call[GetPos] Punctuation[(] Punctuation[)] Punctuation[.] VectorPart[z]"));
+	Check(TEXT("_pos.X = 1;"), TEXT("Global[_pos] Punctuation[.] Error[X]"));
+	Check(TEXT("int[][] _grid = [[1, 2], [3]];"), TEXT("Type[int[][]] Global[_grid]"));
+	Check(TEXT("double _d = 1. + .5 + 12abc + 2.5e-3;"), TEXT("Error[double] Global[_d] Operator[=] Error[1.] Operator[+] Error[.5] Operator[+] Error[12abc] Operator[+] Number[2.5e-3]"));
+	Check(TEXT("#define params (entity _speaker, int _n = 1, entity _l = nil)"), TEXT("Preprocessor[#define] Preprocessor[params] Punctuation[(] Type[entity] Global[_speaker]"));
 	Check(TEXT("#define params (entity _speaker, int _n = 1, entity _l = nil)"), TEXT("Nil[nil] Punctuation[)]"));
 	Check(TEXT("#define LOCTEXT_NAMESPACE \"Quest.Intro\""), TEXT("Preprocessor[#define] Preprocessor[LOCTEXT_NAMESPACE] String[\"Quest.Intro\"]"));
 	Check(TEXT("#undef LOCTEXT_NAMESPACE"), TEXT("Preprocessor[#undef] Preprocessor[LOCTEXT_NAMESPACE]"));
@@ -82,17 +82,17 @@ bool FBangoLineTokenizerTest::RunTest(const FString& Parameters)
 	Check(TEXT("// just a comment"), TEXT("Comment[// just a comment]"));
 	Check(TEXT("} else if (b) {"), TEXT("Structure[}] Keyword[else] Keyword[if] Punctuation[(] Global[b] Punctuation[)] Structure[{]"));
 	Check(TEXT("};"), TEXT("Structure[}] Punctuation[;]"));
-	Check(TEXT("forEach (_e in questLog)"), TEXT("Keyword[forEach] Punctuation[(] Local[_e] Keyword[in] Global[questLog]"));
+	Check(TEXT("forEach (_e in questLog)"), TEXT("Keyword[forEach] Punctuation[(] Global[_e] Keyword[in] Global[questLog]"));
 	Check(TEXT("questLog Push(\"x\");"), TEXT("Global[questLog] Builtin[Push]"));
-	Check(TEXT("function int AddScore(int _amount)"), TEXT("DeclKeyword[function] Type[int] Call[AddScore] Punctuation[(] Type[int] Local[_amount]"));
+	Check(TEXT("function int AddScore(int _amount)"), TEXT("DeclKeyword[function] Type[int] Call[AddScore] Punctuation[(] Type[int] Global[_amount]"));
 	Check(TEXT("if (a & b | c)"), TEXT("Error[&] Global[b] Error[|]"));
 	Check(TEXT("Log(\"unterminated);"), TEXT("Call[Log] Punctuation[(] Error[\"unterminated);]"));
-	Check(TEXT("_x++; _y -= 2; _z *= 3;"), TEXT("Local[_x] Operator[++] Punctuation[;] Local[_y] Operator[-=]"));
+	Check(TEXT("_x++; _y -= 2; _z *= 3;"), TEXT("Global[_x] Operator[++] Punctuation[;] Global[_y] Operator[-=]"));
 	Check(TEXT("@ john"), TEXT("Error[@] Global[john]"));
-	Check(TEXT("Hint(LOCTEXT(\"K\", Format(\"%0\", 1)), \"%1\");"), TEXT("LocKey[\"K\"] Punctuation[,] Call[Format] Punctuation[(] String[\"] Placeholder[%0]"));
-	Check(TEXT("Hint(LOCTEXT(\"K\", \"s\"), \"%1\");"), TEXT("Punctuation[)] Punctuation[,] String[\"] Placeholder[%1] String[\"]"));
-	Check(TEXT("vector3 _p = [1, 2, 3];"), TEXT("Type[vector3] Local[_p]"));
-	Check(TEXT("bool _b = !_c != false;"), TEXT("Operator[!] Local[_c] Operator[!=] Constant[false]"));
+	Check(TEXT("Hint(LOCTEXT(\"K\", Format(\"{0}\", 1)), \"{1}\");"), TEXT("LocKey[\"K\"] Punctuation[,] Call[Format] Punctuation[(] String[\"] Placeholder[{0}]"));
+	Check(TEXT("Hint(LOCTEXT(\"K\", \"s\"), \"{1}\");"), TEXT("Punctuation[)] Punctuation[,] String[\"] Placeholder[{1}] String[\"]"));
+	Check(TEXT("vector3 _p = [1, 2, 3];"), TEXT("Type[vector3] Global[_p]"));
+	Check(TEXT("bool _b = !_c != false;"), TEXT("Operator[!] Global[_c] Operator[!=] Constant[false]"));
 	Check(TEXT(""), TEXT(""));
 
 	return true;
@@ -213,6 +213,96 @@ bool FBangoTextMetadataTest::RunTest(const FString& Parameters)
 	e.Edit(TEXT("same lines, enter at start of 1st"), TEXT("|A();|A();"), 1, TEXT("|A();    //@1(0, 0)|A();    //@2(0, 1)"));
 	T f; f.Eq = Eq; f.Start(TEXT("A();    //@1(0, 0)\nB();    //@2(0, 1)\nC();    //@3(0, 2)\nD();    //@4(0, 3)"), TEXT("A();|B();|C();|D();"));
 	f.Edit(TEXT("select B..C delete"), TEXT("A();|D();"), 1, TEXT("A();    //@1(0, 0)|D();    //@4(0, 3)"));
+
+	return true;
+}
+
+// ---- Locals, parameters and globals (FBangoScriptNames) ----
+
+#include "BangoScriptNames.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoScriptNamesTest, "Bango.ScriptEditor.TextEditor.ScriptNames",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FBangoScriptNamesTest::RunTest(const FString& Parameters)
+{
+	const TCHAR* Source =
+		TEXT("#define params (entity speaker, int _rounds = 3)\n")
+		TEXT("#define LOCTEXT_NAMESPACE \"Q\"\n")
+		TEXT("// ============ GLOBAL VARS ====================\n")
+		TEXT("global int foundThings;\n")
+		TEXT("global string[] questLog;\n")
+		TEXT("int count = 0;\n")
+		TEXT("string _name;\n")
+		TEXT("if (IsNil(foundThings) && otherGlobal)    //@1(0, 0)\n")
+		TEXT("{\n")
+		TEXT("\tcount += _rounds;\n")
+		TEXT("};\n")
+		TEXT("forEach (entry in questLog)\n")
+		TEXT("{\n")
+		TEXT("\tLog(entry);\n")
+		TEXT("};\n")
+		TEXT("for (int i = 0; i < count; i++)\n")
+		TEXT("{\n")
+		TEXT("};\n")
+		TEXT("function int AddScore(int amount,\n")
+		TEXT("\tentity who)\n")
+		TEXT("{\n")
+		TEXT("\tint count;\n")
+		TEXT("\tcount = amount + foundThings + speaker;\n")
+		TEXT("\tif (true)\n")
+		TEXT("\t{\n")
+		TEXT("\t};\n")
+		TEXT("\treturn count;\n")
+		TEXT("};\n")
+		TEXT("Log(count);\n");
+
+	TArray<FString> Lines;
+	FBangoMetadataTracker::SplitLines(Source, Lines);
+	TArray<TArray<FBangoSyntaxToken>> Tokens;
+	Tokens.SetNum(Lines.Num());
+	for (int32 I = 0; I < Lines.Num(); ++I)
+	{
+		FBangoLineTokenizer::TokenizeLine(FStringView(Lines[I]), Tokens[I]);
+	}
+
+	FBangoScriptNames Names;
+	Names.Build(Lines, Tokens);
+
+	// Line numbers from 1, as in an editor.
+	auto Check = [this, &Names](int32 Line, const TCHAR* Name, EBangoSyntaxKind Want)
+	{
+		const EBangoSyntaxKind Got = Names.Classify(Line - 1, Name);
+		if (Got != Want)
+		{
+			AddError(FString::Printf(TEXT("Line %d, '%s': want %s, got %s"), Line, Name,
+				BangoLineTokenizerTests::KindName(Want), BangoLineTokenizerTests::KindName(Got)));
+		}
+	};
+
+	using K = EBangoSyntaxKind;
+	Check(1, TEXT("speaker"), K::Parameter);
+	Check(1, TEXT("_rounds"), K::Parameter);
+	Check(4, TEXT("foundThings"), K::Global);
+	Check(6, TEXT("count"), K::Local);
+	Check(7, TEXT("_name"), K::Local);
+	Check(8, TEXT("foundThings"), K::Global);
+	Check(8, TEXT("otherGlobal"), K::UndeclaredGlobal);
+	Check(10, TEXT("count"), K::Local);
+	Check(10, TEXT("_rounds"), K::Parameter);
+	Check(12, TEXT("entry"), K::Local);
+	Check(12, TEXT("questLog"), K::Global);
+	Check(14, TEXT("entry"), K::Local);
+	Check(16, TEXT("i"), K::Local);
+	Check(19, TEXT("amount"), K::Parameter);
+	Check(20, TEXT("who"), K::Parameter);                 // a function header over two lines
+	Check(22, TEXT("count"), K::Local);
+	Check(23, TEXT("amount"), K::Parameter);
+	Check(23, TEXT("foundThings"), K::Global);
+	Check(23, TEXT("speaker"), K::UndeclaredGlobal);      // functions can't see the script's parameters
+	Check(27, TEXT("count"), K::Local);
+	Check(29, TEXT("count"), K::Local);                   // the main graph again, after the function's };
+	Check(29, TEXT("amount"), K::UndeclaredGlobal);
 
 	return true;
 }

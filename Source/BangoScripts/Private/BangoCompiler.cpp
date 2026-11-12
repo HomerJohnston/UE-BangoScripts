@@ -2361,7 +2361,7 @@ namespace BangoCompilerPrivate
 		}
 
 		/**
-		 * For a command whose text has %0, %1, ... placeholders (Hint, Log, Format): when the text is written out as a
+		 * For a command whose text has {0}, {1}, ... placeholders (Hint, Log, Format): when the text is written out as a
 		 * string, every placeholder it uses needs a value after it. (A text worked out while the script runs is
 		 * only checked then.)
 		 */
@@ -2376,7 +2376,7 @@ namespace BangoCompilerPrivate
 			{
 				return true;
 			}
-			// A text's placeholders are {0}, {1}, ... (FText::Format); a string's are %0, %1, ...
+			// Both use {0}, {1}, ... with backtick escapes; only a text's may not have named ones ({Name}), which FText::Format would fail on.
 			const bool bText = Text->LiteralKind == EBangoLiteralKind::Text;
 			FString Named;
 			const int32 Needed = bText ? Bango::CountTextFormatValues(Text->StringValue, &Named) : Bango::CountFormatValues(Text->StringValue);
@@ -2391,7 +2391,7 @@ namespace BangoCompilerPrivate
 				return true;
 			}
 			const FString Values = Given == 0 ? FString(TEXT("no values come")) : Given == 1 ? FString(TEXT("only 1 value comes")) : FString::Printf(TEXT("only %d values come"), Given);
-			const FString Placeholder = bText ? FString::Printf(TEXT("{%d}"), Needed - 1) : FString::Printf(TEXT("%%%d"), Needed - 1);
+			const FString Placeholder = FString::Printf(TEXT("{%d}"), Needed - 1);
 			return Fail(SourceLoc, FString::Printf(TEXT("This text uses %s, but %s after it. Add a value for every placeholder (nil shows as \"nil\")."), *Placeholder, *Values));
 		}
 

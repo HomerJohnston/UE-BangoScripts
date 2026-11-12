@@ -872,76 +872,78 @@ namespace Bango
 		return Needed;
 	}
 
+	/**
+	 * Reads the placeholder at Text[Start] (a '{'): {digits}, its closing '}' and index, as FText::Format does.
+	 * False if it isn't one ({Name}, {}, or no closing '}'), in which case the '{' is just a character.
+	 */
+	static bool ReadNumberedPlaceholder(const FString& Text, int32 Start, int32& OutClose, int32& OutIndex)
+	{
+		int32 Close = Start + 1;
+		int64 Index = 0;
+		while (Close < Text.Len() && Text[Close] >= TEXT('0') && Text[Close] <= TEXT('9') && Close - Start <= 9)
+		{
+			Index = Index * 10 + (Text[Close] - TEXT('0'));
+			++Close;
+		}
+		if (Close == Start + 1 || Close >= Text.Len() || Text[Close] != TEXT('}'))
+		{
+			return false;
+		}
+		OutClose = Close;
+		OutIndex = (int32)Index;
+		return true;
+	}
+
 	bool FormatText(const FString& Text, TConstArrayView<FBangoValue> Args, FString& OutText, FString& OutError)
 	{
+		// One pass, with FText::Format's rules: {0}, {1}, ... are the values; a backtick makes the next character
+		// literal (`{ `} ``); anything else, including {Name} and a '{' with no '}', is copied as it is.
 		OutText.Reset();
+		OutText.Reserve(Text.Len());
 		for (int32 i = 0; i < Text.Len(); ++i)
 		{
 			const TCHAR C = Text[i];
-			if (C != TEXT('%') || i + 1 >= Text.Len())
+			if (C == TEXT('`') && i + 1 < Text.Len())
 			{
-				OutText.AppendChar(C);
+				OutText.AppendChar(Text[++i]);
 				continue;
 			}
-			const TCHAR Next = Text[i + 1];
-			if (Next == TEXT('%'))
-			{
-				OutText.AppendChar(TEXT('%'));
-				++i;
-				continue;
-			}
-			if (Next < TEXT('0') || Next > TEXT('9'))
-			{
-				OutText.AppendChar(C);
-				continue;
-			}
+			int32 Close = 0;
 			int32 Index = 0;
-			int32 j = i + 1;
-			while (j < Text.Len() && Text[j] >= TEXT('0') && Text[j] <= TEXT('9') && Index < 100000)
+			if (C != TEXT('{') || !ReadNumberedPlaceholder(Text, i, Close, Index))
 			{
-				Index = Index * 10 + (Text[j] - TEXT('0'));
-				++j;
+				OutText.AppendChar(C);
+				continue;
 			}
 			if (Index >= Args.Num())
 			{
-				OutError = FString::Printf(TEXT("The text uses %%%d, but only %d value(s) were given."), Index, Args.Num());
+				OutError = FString::Printf(TEXT("The text uses {%d}, but only %d value(s) were given."), Index, Args.Num());
 				return false;
 			}
 			OutText += Args[Index].ToDisplayString();
-			i = j - 1;
+			i = Close;
 		}
 		return true;
 	}
 
 	int32 CountFormatValues(const FString& Text)
 	{
-		// Reads %n exactly as FormatText does.
+		// Reads {n} exactly as FormatText does.
 		int32 Count = 0;
-		for (int32 i = 0; i + 1 < Text.Len(); ++i)
+		for (int32 i = 0; i < Text.Len(); ++i)
 		{
-			if (Text[i] != TEXT('%'))
+			if (Text[i] == TEXT('`'))
 			{
+				++i; // the next character is literal
 				continue;
 			}
-			const TCHAR Next = Text[i + 1];
-			if (Next == TEXT('%'))
-			{
-				++i;
-				continue;
-			}
-			if (Next < TEXT('0') || Next > TEXT('9'))
-			{
-				continue;
-			}
+			int32 Close = 0;
 			int32 Index = 0;
-			int32 j = i + 1;
-			while (j < Text.Len() && Text[j] >= TEXT('0') && Text[j] <= TEXT('9') && Index < 100000)
+			if (Text[i] == TEXT('{') && ReadNumberedPlaceholder(Text, i, Close, Index))
 			{
-				Index = Index * 10 + (Text[j] - TEXT('0'));
-				++j;
+				Count = FMath::Max(Count, Index + 1);
+				i = Close;
 			}
-			Count = FMath::Max(Count, Index + 1);
-			i = j - 1;
 		}
 		return Count;
 	}

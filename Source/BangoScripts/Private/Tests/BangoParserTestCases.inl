@@ -32,14 +32,14 @@ static const FBangoParserTestCase GBangoParserTestCases[] =
 		TEXT("int _x = (1 + 2) * 3 % 4 - -(5);"),
 		TEXT("(decl int _x (- (% (* (+ 1 2) 3) 4) (neg 5)))"), nullptr, nullptr },
 	{ TEXT("calls"),
-		TEXT("Hint(\"Hi\");\n@player SetDamage(0.2);\nHint(\"%0 left\", _n);\nQuitGame();\n_grid[1] Push(4);\nint _e = _arr Pop();"),
-		TEXT("(call Hint \"Hi\") (call @player:SetDamage 0.2) (call Hint \"%0 left\" _n) (call QuitGame) (call (index _grid 1):Push 4) (decl int _e (call _arr:Pop))"), nullptr, nullptr },
+		TEXT("Hint(\"Hi\");\n@player SetDamage(0.2);\nHint(\"{0} left\", _n);\nQuitGame();\n_grid[1] Push(4);\nint _e = _arr Pop();"),
+		TEXT("(call Hint \"Hi\") (call @player:SetDamage 0.2) (call Hint \"{0} left\" _n) (call QuitGame) (call (index _grid 1):Push 4) (decl int _e (call _arr:Pop))"), nullptr, nullptr },
 	{ TEXT("entity literals"),
 		TEXT("@john Speak(\"Hi\");\nentity _e = @door17;\nentity[] _c = [@bob, @_alice, @if];\nbool _b = _e == @john;\n@john GetPos()[0];"),
 		nullptr, TEXT("(5:1)"), TEXT("doesn't do anything") },
 	{ TEXT("entity literals parse"),
-		TEXT("@john Speak(\"Hi\");\nentity _e = @door17;\nentity[] _c = [@bob, @_alice, @if];\nbool _b = _e == @john;\nHint(\"%0\", @john GetPos()[0]);"),
-		TEXT("(call @john:Speak \"Hi\") (decl entity _e @door17) (decl entity[] _c (array @bob @_alice @if)) (decl bool _b (== _e @john)) (call Hint \"%0\" (index (call @john:GetPos) 0))"), nullptr, nullptr },
+		TEXT("@john Speak(\"Hi\");\nentity _e = @door17;\nentity[] _c = [@bob, @_alice, @if];\nbool _b = _e == @john;\nHint(\"{0}\", @john GetPos()[0]);"),
+		TEXT("(call @john:Speak \"Hi\") (decl entity _e @door17) (decl entity[] _c (array @bob @_alice @if)) (decl bool _b (== _e @john)) (call Hint \"{0}\" (index (call @john:GetPos) 0))"), nullptr, nullptr },
 	{ TEXT("call in expression"),
 		TEXT("if (AskChoice(\"A\", \"B\") == 0)\n{\n};\nint _c = Count(_a) + 1;"),
 		TEXT("(if (== (call AskChoice \"A\" \"B\") 0) ()) (decl int _c (+ (call Count _a) 1))"), nullptr, nullptr },
@@ -108,7 +108,7 @@ static const FBangoParserTestCase GBangoParserTestCases[] =
 		TEXT("\n")
 		TEXT("for (int _i = 0; _i < 3; _i++)     //@7(0, 6)\n")
 		TEXT("{\n")
-		TEXT("\tHint(\"Countdown: %0\", 3 - _i); //@8(1, 7)\n")
+		TEXT("\tHint(\"Countdown: {0}\", 3 - _i); //@8(1, 7)\n")
 		TEXT("\tSleep(1.0);                    //@9(1, 8)\n")
 		TEXT("};\n")
 		TEXT("\n")
@@ -265,8 +265,8 @@ static const FBangoParserTestCase GBangoParserTestCases[] =
 	{ TEXT("empty ++ target"), TEXT("++;\n--;"), TEXT("(++ <empty>) (-- <empty>)"), nullptr, nullptr },
 	{ TEXT("empty forEach array"), TEXT("forEach (_e in )\n{\n};"), TEXT("(forEach _e <empty> ())"), nullptr, nullptr },
 	{ TEXT("empty label and goto"), TEXT("label ;\ngoto ;"), TEXT("(label ) (goto )"), nullptr, nullptr },
-	{ TEXT("empty right side"), TEXT("Hint(\"%0\", 1 + );"), TEXT("(call Hint \"%0\" (+ 1 <empty>))"), nullptr, nullptr },
-	{ TEXT("a value can't be left out before a comma"), TEXT("Hint(\"%0\", , 2);"), nullptr, TEXT("(1:12)"), TEXT("Expected a value, but found ','.") },
+	{ TEXT("empty right side"), TEXT("Hint(\"{0}\", 1 + );"), TEXT("(call Hint \"{0}\" (+ 1 <empty>))"), nullptr, nullptr },
+	{ TEXT("a value can't be left out before a comma"), TEXT("Hint(\"{0}\", , 2);"), nullptr, TEXT("(1:13)"), TEXT("Expected a value, but found ','.") },
 	{ TEXT("an assignment target that can't be stored to"), TEXT("1 = ;"), nullptr, TEXT("(1:1)"), TEXT("You can only assign to a variable") },
 	{ TEXT("a run of reroutes on one line"), TEXT("Hint(\"a\");\n//@3(1, 2) @4(2,2)   @5 ( 3 , 2 )\nHint(\"b\");"), TEXT("(call Hint \"a\") (reroute) (reroute) (reroute) (call Hint \"b\")"), nullptr, nullptr },
 	{ TEXT("a statement line with two nodes"), TEXT("Hint(\"a\"); //@3(1, 2) @4(2, 2)"), nullptr, TEXT("(1:1)"), TEXT("only have one //@ entry") },

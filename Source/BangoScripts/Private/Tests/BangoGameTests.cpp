@@ -89,12 +89,12 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 		TEXT("fl = Floor(-1.5);\n")
 		TEXT("ro = Round(2.5);\n")
 		TEXT("rn = Round(-2.5);\n")
-		TEXT("fm = Format(\"%0-%1-%2\", 1, \"a\", [1.5]);\n")
-		TEXT("en = Format(\"%0 %1\", ToEntity(\"door17\"), [@john, ToEntity(\"_x\")]);\n")
+		TEXT("fm = Format(\"{0}-{1}-{2}\", 1, \"a\", [1.5]);\n")
+		TEXT("en = Format(\"{0} {1}\", ToEntity(\"door17\"), [@john, ToEntity(\"_x\")]);\n")
 		TEXT("same = ToEntity(\"john\") == @john;\n")
 		TEXT("Sleep(0.5);\n")
 		TEXT("Sleep(0);\n")
-		TEXT("Log(\"logged %0\", 1);\n")
+		TEXT("Log(\"logged {0}\", 1);\n")
 		TEXT("Hint(LOCTEXT(\"NoWorld\", \"a hint with no world goes to the log, {0}\"), 1);\n")
 		TEXT("tf = FormatText(LOCTEXT(\"Count\", \"{1}: {0}\"), 2, ToText(\"x\"));\n")
 		TEXT("ts = ToString(NSLOCTEXT(\"Bango.Other\", \"Hello\", \"Hello\"));\n")
@@ -133,7 +133,7 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 		{ TEXT("Sleep(-1.0);"), TEXT("negative time") },
 		{ TEXT("float _t;\n_t = GameTime();"), TEXT("needs a game world") },
 		{ TEXT("int _x;\n_x = Floor(1e300);"), TEXT("too large to convert") },
-		{ TEXT("string _text = \"%2\";\nLog(_text, 1);"), TEXT("uses %2") },   // a literal text is checked when compiling instead
+		{ TEXT("string _text = \"{2}\";\nLog(_text, 1);"), TEXT("uses {2}") },   // a literal text is checked when compiling instead
 		{ TEXT("text _t;\n_t = ToText(\"{2}\");\nHint(_t, 1);"), TEXT("uses {2}") },
 		{ TEXT("text _t;\n_t = ToText(\"{Name}\");\nHint(_t);"), TEXT("uses {Name}") },
 		{ TEXT("text _s;\nHint(_s);"), TEXT("'_s' is nil") },

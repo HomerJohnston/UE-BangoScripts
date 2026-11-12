@@ -243,12 +243,13 @@ namespace Bango
 	BANGOSCRIPTS_API bool IsValidBangoIDName(const FString& Name);
 
 	/**
-	 * Replaces %0, %1, ... in Text with Args[0], Args[1], ... (as ToDisplayString). "%%" is a literal '%'.
-	 * A % followed by a number with no matching argument is an error.
+	 * Replaces {0}, {1}, ... in Text with Args[0], Args[1], ... (as ToDisplayString), with FText::Format's rules: a
+	 * backtick makes the next character literal (`{ is a brace, `` a backtick), and {Name} or a '{' with no '}' is
+	 * copied as it is. A {n} with no matching argument is an error.
 	 */
 	BANGOSCRIPTS_API bool FormatText(const FString& Text, TConstArrayView<FBangoValue> Args, FString& OutText, FString& OutError);
 
-	/** How many values FormatText needs for Text: one more than its highest %n (so 3 for "%0 and %2"), or 0. "%%" doesn't count. */
+	/** How many values FormatText needs for Text: one more than its highest {n} (so 3 for "{0} and {2}"), or 0. `{ doesn't count. */
 	BANGOSCRIPTS_API int32 CountFormatValues(const FString& Text);
 
 	/**

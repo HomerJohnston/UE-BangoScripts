@@ -139,10 +139,10 @@ static const TCHAR* const GBangoGraphRoundTripSources[] =
 	TEXT("};\n"),
 
 	// Comments everywhere, no metadata at all, CRLF line endings.
-	TEXT("// File header\r\n// second line\r\nparams (string _name, int _n = 3);\r\n\r\n//   indented comment\r\nHint(\"%0\", _name); // trailing\r\nif (_n > 2)\r\n{\r\n\t// inside\r\n\tHint(\"big\");\r\n\t// at the end of the block\r\n}; // after the block\r\n//no space\r\nfor (int _i = 0; _i < _n; _i++)\r\n{\r\n};\r\n// at the end of the file\r\n"),
+	TEXT("// File header\r\n// second line\r\nparams (string _name, int _n = 3);\r\n\r\n//   indented comment\r\nHint(\"{0}\", _name); // trailing\r\nif (_n > 2)\r\n{\r\n\t// inside\r\n\tHint(\"big\");\r\n\t// at the end of the block\r\n}; // after the block\r\n//no space\r\nfor (int _i = 0; _i < _n; _i++)\r\n{\r\n};\r\n// at the end of the file\r\n"),
 
 	// Functions with comments, and code after a return/goto (only reachable through a label).
-	TEXT("// about F\nfunction int F(int _a, string[] _b) // on the function line\n{\n\t// first\n\treturn _a;\n\tlabel After;\n\tHint(\"x\");\n};\ngoto Skip;\nHint(\"never\");\nlabel Skip;\nHint(\"%0\", F(1, []));\n"),
+	TEXT("// about F\nfunction int F(int _a, string[] _b) // on the function line\n{\n\t// first\n\treturn _a;\n\tlabel After;\n\tHint(\"x\");\n};\ngoto Skip;\nHint(\"never\");\nlabel Skip;\nHint(\"{0}\", F(1, []));\n"),
 
 	// Disconnected nodes in the main graph and in a function.
 	TEXT("Hint(\"a\");    //@1(0, 0)\n")

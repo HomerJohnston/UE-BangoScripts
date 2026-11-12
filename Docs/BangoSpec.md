@@ -4,7 +4,9 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
 
-**Changes in v0.30:** a local's name no longer has to start with `_`, and a global's may (section 4). A name means the graph's local, parameter or loop variable if there is one, and otherwise a global.
+**Changes in v0.30:** strings use the same placeholders as texts, Unreal's `{0}`, `{1}`, ... with backtick escapes, instead of `%0` and `%%` (section 7).
+
+**Changes in v0.30, continued:** a local's name no longer has to start with `_`, and a global's may (section 4). A name means the graph's local, parameter or loop variable if there is one, and otherwise a global.
 
 **Changes in v0.30, continued:** a script can have a **description**: the `//` lines it starts with, edited in the new **Script Description** box at the top of the script editor's left pane, and not shown in the graph (section 12). When saving, each part of the file gets a section heading: `// ============ SCRIPT INPUT ====================`, `GLOBAL VARS`, `SCRIPT VARS`, `SCRIPT BODY` and `FUNCTIONS`, and a `// ----------------------------------------------` line goes between functions. Reading skips any comment that starts with `// ====` (section 12). The script editor has a **script text pane** beside the graph, opened with the **TEXT** tab on the graph area's left edge. It shows the script as it would be saved, and follows the graph; text typed there is applied to the graph with **Apply** (Ctrl+Enter), and a script whose text doesn't read can be fixed there (section 12).
 
@@ -236,7 +238,7 @@ Hint(NSLOCTEXT("Shared.UI", "Continue", "Continue"));
 - Keys made in the graph editor are random: 32 hex digits, like Unreal's own (`9F3A...`). They can be changed to something readable, in the graph or the text.
 - Texts can't be joined with `+`; use `FormatText` (section 7). Texts can only be compared with `==` and `!=`, which compare what they show in the current language.
 - Text parameters can't have a text default (section 10); default them to `nil` and set the text in the script, as above.
-- `Format("%0", _text)` shows the text in the current language.
+- `Format("{0}", _text)` shows the text in the current language.
 
 ### nil
 - `nil` is the **undefined value**. It is not a separate type: any variable, global or array element of any type can hold `nil`.
@@ -249,7 +251,7 @@ Hint(NSLOCTEXT("Shared.UI", "Continue", "Continue"));
   _name = nil;
   _arr[2] = nil;
   ```
-- `nil` with no known type is a compile error, like `[nil]` passed where any array would do. The exception is an extra value of a variadic command: `Log("%0", nil)` is allowed, and shows `nil`.
+- `nil` with no known type is a compile error, like `[nil]` passed where any array would do. The exception is an extra value of a variadic command: `Log("{0}", nil)` is allowed, and shows `nil`.
 - The only way to test for `nil` is `IsNil(...)`. `x == nil` is a compile error, because comparing reads `x`.
 
 ### IsNil
@@ -268,7 +270,7 @@ Hint(NSLOCTEXT("Shared.UI", "Continue", "Continue"));
 ### Conversions
 - Strongly typed. The only automatic conversion is **int → float**. It also applies to arrays at the same depth (`int[][]` → `float[][]`), to array literals (`float[] _d = [1, 2.5];`), and to script arguments and parameter defaults. Everything else needs an explicit conversion command, such as `Floor`, `Round` or `Format` (section 7).
 - **Entities are checked before a command runs.** If a command's target or entity-typed argument names an actor that isn't registered (no Bango ID component with that name in the level), the script stops with an error naming the missing Bango ID. The command's code never runs. Storing, comparing and formatting an entity never checks it.
-- A name that comes from data (a string) becomes an entity with `ToEntity(name)` (section 7). `Format("%0", @john)` gives the name back as a string.
+- A name that comes from data (a string) becomes an entity with `ToEntity(name)` (section 7). `Format("{0}", @john)` gives the name back as a string.
 - A string becomes a text with `ToText(string)`; it isn't translated (it's shown as it is in every language), so use it for names and numbers, not for sentences. `ToString(text)` gives the text in the current language.
 
 ---
@@ -394,7 +396,7 @@ All binary operators are left-associative: `a - b - c` is `(a - b) - c`.
 - Expressions can be nested up to 64 levels deep (parentheses, unary operators and blocks combined).
 
 ### Empty values
-A value can be **left empty** where it comes right before a `)` or `;`: `if ()`, `while ()`, `_x = ;`, `_a > ;`, `forEach (_e in )`. So can the variable of an assignment or `++`/`--` (`= 5;`, `+= 2;`, `++;`) and the name after `label` or `goto` (`label ;`). Such a line reads, so it can be saved, but **it doesn't compile**: the error says what's missing ("This value is missing. Fill it in."). This is how the graph editor saves a new node whose fields haven't been filled in yet (section 12). A value can't be left out before a `,` (`Hint("%0", , 2);` is an error), and a missing argument at the end is simply an argument that wasn't given.
+A value can be **left empty** where it comes right before a `)` or `;`: `if ()`, `while ()`, `_x = ;`, `_a > ;`, `forEach (_e in )`. So can the variable of an assignment or `++`/`--` (`= 5;`, `+= 2;`, `++;`) and the name after `label` or `goto` (`label ;`). Such a line reads, so it can be saved, but **it doesn't compile**: the error says what's missing ("This value is missing. Fill it in."). This is how the graph editor saves a new node whose fields haven't been filled in yet (section 12). A value can't be left out before a `,` (`Hint("{0}", , 2);` is an error), and a missing argument at the end is simply an argument that wasn't given.
 
 ### Assignment statements
 | Form | Meaning | Allowed types |
@@ -511,16 +513,16 @@ Commands are defined in C++ at the project or engine level. Scripts can only use
 AwaitSpeak();
 AwaitSpeak(0.5);
 @door17 SetLocked(true);
-Log("There are %0 things left.", _thingCount);
+Log("There are {0} things left.", _thingCount);
 _t = Random(3.0, 5.0);
 ```
 
 - Command names are written in PascalCase (`Hint`, `SetPos`, `RandomInt`), and so are their parameter names (`Msg`, `Time`, `Min`), since they label the fields of the command's graph node. A parameter can also have a short description, shown when hovering its value on the node: `.Param(TEXT("Time"), Double, TEXT("Seconds"))`. Registering a command with a parameter name that starts with a lowercase letter logs a warning.
-- For the graph editor, a signature can also have a category and a one-line description (`.InCategory(TEXT("Actors")).Describe(TEXT("Moves the actor."))`), and a variadic command can choose how its extra values are labelled (`.Variadic(TEXT("%"), 0)` gives `%0`, `%1`, ...; the default gives `Value 1`, `Value 2`, ...). `.WithPlaceholders()` after a parameter marks it as a text whose `%0`, `%1`, ... the extra values fill, as `Hint`, `Log` and `Format` do; the graph editor then shows a row for each placeholder (section 12).
+- For the graph editor, a signature can also have a category and a one-line description (`.InCategory(TEXT("Actors")).Describe(TEXT("Moves the actor."))`), and a variadic command can choose how its extra values are labelled (`.Variadic(TEXT("{"), 0, TEXT("}"))` gives `{0}`, `{1}`, ...; the default gives `Value 1`, `Value 2`, ...). `.WithPlaceholders()` after a parameter marks it as a text whose `{0}`, `{1}`, ... the extra values fill, as `Hint`, `Log` and `Format` do; the graph editor then shows a row for each placeholder (section 12).
 - A command's signature declares:
   - **Target:** either none, or a required target of one type. A command with a target can't be called without one, and vice versa.
   - **Parameters:** typed. Trailing parameters may be **optional**. Normally a `nil` variable passed to a command, or an entity naming no actor, stops the script before the command runs. `.MayBeNil()` after a `.Param(...)` hands the command that argument as it is instead, `nil` included, and leaves the actor check to the command (as `IsNull` does).
-  - **Variadic:** optionally, any number of extra arguments of any type after the parameters (like `Hint`'s `%0` values).
+  - **Variadic:** optionally, any number of extra arguments of any type after the parameters (like `Hint`'s `{0}` values).
   - **Return type:** optional.
   - **Discardable:** for a command with a return type, whether a script may call it on a line of its own and throw the value away (`.Discardable()`). Without it, the value **must be used** (see below).
 - Calling a command with the wrong number of arguments, or an argument or target of the wrong type, is a compile error. The error shows the command's signature.
@@ -537,16 +539,16 @@ _t = Random(3.0, 5.0);
 - If a script calls a command that isn't registered or has no implementation in the running game, the script fails when it's spawned, not when it reaches the call.
 
 ### Text formatting
-There are two kinds of placeholder, one for each kind of text:
+Strings and texts use the same placeholders, Unreal's: `{0}`, `{1}`, ..., with a backtick escaping the next character (`` `{ `` is a literal `{`, ``` `` ``` a backtick). `%` is just a character.
 
-- **Strings** (`Log`, `Format`) use `%0`, `%1`, ..., described below.
-- **Texts** (`Hint`, `FormatText`) use Unreal's `{0}`, `{1}`, ..., filled by `FText::Format`, so translators can move them around: `Hint(LOCTEXT("Left", "{0} things left"), _count)`. Ints and floats are formatted as numbers for the current language, texts are inserted as they are, and anything else (strings, entities, arrays, bools) is inserted as it would be by `Format`, untranslated. A backtick escapes the next character (`` `{ `` is a literal `{`). Named placeholders like `{Name}` aren't supported: they're a compile error when the text is a literal, and stop the script otherwise. Unreal's plural and gender forms (`{0}|plural(one=thing,other=things)`) work, since they're part of the translated text.
+- **Strings** (`Log`, `Format`): described below.
+- **Texts** (`Hint`, `FormatText`): filled by `FText::Format`, so translators can move them around: `Hint(LOCTEXT("Left", "{0} things left"), _count)`. Ints and floats are formatted as numbers for the current language, texts are inserted as they are, and anything else (strings, entities, arrays, bools) is inserted as it would be by `Format`, untranslated. A backtick escapes the next character (`` `{ `` is a literal `{`). Named placeholders like `{Name}` aren't supported: they're a compile error when the text is a literal, and stop the script otherwise. Unreal's plural and gender forms (`{0}|plural(one=thing,other=things)`) work, since they're part of the translated text.
 
 The rules for which placeholders need values below apply to both kinds.
 
-`Log` and `Format` replace `%0`, `%1`, ... in their text with the extra arguments. Strings appear without quotes, entities as their name, arrays as `[1, 2]`. `%%` is a literal `%`. A `nil` value shows as `nil`.
+`Log` and `Format` replace `{0}`, `{1}`, ... in their text with the extra arguments, in one pass, with `FText::Format`'s rules: a backtick makes the next character literal, and anything else that isn't a numbered placeholder (`{Name}`, a `{` with no `}`) is shown as it is. Strings appear without quotes, entities as their name, arrays as `[1, 2]`. A `nil` value shows as `nil`.
 
-Every placeholder needs a value. When the text is written as a literal (`Log("%0 and %1", _a);`, `Hint(LOCTEXT("K", "{0} and {1}"), _a);`), a placeholder with no value after it is a **compile error**: *"This text uses %1, but only 1 value comes after it."* This applies to any command marked `.WithPlaceholders()`, wherever the call is (`_s = Format("%0", _a) + Format("%1", _b);` fails on the second). When the text is worked out while the script runs (`Log(_text, 1);`), a placeholder with no value stops the script. A `nil` value for a text placeholder stops the script too.
+Every placeholder needs a value. When the text is written as a literal (`Log("{0} and {1}", _a);`, `Hint(LOCTEXT("K", "{0} and {1}"), _a);`), a placeholder with no value after it is a **compile error**: *"This text uses {1}, but only 1 value comes after it."* This applies to any command marked `.WithPlaceholders()`, wherever the call is (`_s = Format("{0}", _a) + Format("{1}", _b);` fails on the second). When the text is worked out while the script runs (`Log(_text, 1);`), a placeholder with no value stops the script. A `nil` value for a text placeholder stops the script too.
 
 ### Built-in commands
 
@@ -892,7 +894,7 @@ Opening a file and saving it without changes gives the same script: the same sta
 ### The graph editor
 The graph editor is the **Bango Scripts** tab (Tools menu). It doesn't need the details panel. It has three parts:
 - **Scripts** (left): every `.bango` file in the script folder; open ones are in bold. Clicking one opens it in a new **script tab**, or shows its tab if it's already open. The **Folders** toggle beside Refresh switches between this list and a **folder tree** like the Content Browser's, with the script folder (Content/Bango) at the top: folders first, then scripts, each by name, and empty folders too. Clicking a script opens it; double-clicking a folder (or its arrow) opens or closes it. The shown script is selected in either view, with its folders opened. Which view is shown is remembered between sessions, and Refresh keeps the open folders open. **Refresh** looks for scripts again (new, renamed or deleted files); it doesn't touch open scripts.
-- **Script tabs** (along the top of the rest): one per open script, named by its path, with a `*` while it has unsaved changes. Clicking a tab shows it; its × button or a middle-click closes it, asking first whether to save unsaved changes. Each tab keeps its own script editor while it's open, so switching tabs keeps each script's view, selection and unsaved changes. With no tab open, a hint says to pick a script.
+- **Script tabs** (along the top of the rest): one per open script, named by its path, with a `*` while it has unsaved changes. They're the editor's own document tabs, as an open Blueprint's are, and look and behave the same: clicking a tab shows it; its × button, a middle-click or its right-click menu closes it, asking first whether to save unsaved changes; tabs can be reordered, and dragged out into a window of their own. Each tab keeps its own script editor while it's open, so switching tabs keeps each script's view, selection and unsaved changes. With no tab open, a hint says to pick a script.
 - **The script editor** (under the tabs): everything for one open script. It's a self-contained pane, so it can also be shown in a window of its own (planned).
   - **Toolbar** (across the top): **Reload**, **Compile**, **Save** (also Ctrl+S), and the script's name, with a `*` while it has unsaved changes. **Reload** reads the script again from its file, so edits made to the text elsewhere show up; it asks first whether to save unsaved changes (Cancel keeps them and doesn't reload). It works on a script whose text didn't read too, so the text can be fixed elsewhere and reloaded. Reloading keeps the shown graph (if the script still has it) and its view.
   - **Script Description** (left, first): a box holding the script's description (section 12, Comments), as several lines of text. Enter starts a new line; clicking elsewhere applies it, as one undoable edit (trailing spaces and empty lines at the end are dropped). Saving while typing in it saves what's typed.
@@ -925,11 +927,11 @@ A statement that is exactly one call (`[target] Name(args);`) gets a **dedicated
 |---|---|
 | **Target** | the command takes a target (`@john Speak(...)`) |
 | one field per parameter | labelled with the parameter's name; optional ones may be left empty |
-| extra values | variadic commands; labelled from the signature (`%0`, `%1`, ... for `Log` and `Format`, `{0}`, `{1}`, ... for `Hint` and `FormatText`; `Value 1`, `Value 2`, ... by default). For these commands (and others marked `.WithPlaceholders()`), when the text is a literal there is a row for every placeholder it uses, up to `%31` (or `{31}`), even if it has no value yet: changing `"Test %0 %1"` to `"Test %0 %1 %2"` adds a `%2` row, shown as *missing* until it's filled in. A row left *missing* is **saved as `nil`** (`Log("Test %0 %1 %2", 1, 2, nil);`), so the text shows `nil` there; after reopening, the row shows `nil`. Values beyond the placeholders still get rows. |
+| extra values | variadic commands; labelled from the signature (`{0}`, `{1}`, ... for `Log`, `Format`, `Hint` and `FormatText`; `Value 1`, `Value 2`, ... by default). For these commands (and others marked `.WithPlaceholders()`), when the text is a literal there is a row for every placeholder it uses, up to `{31}`, even if it has no value yet: changing `"Test {0} {1}"` to `"Test {0} {1} {2}"` adds a `{2}` row, shown as *missing* until it's filled in. A row left *missing* is **saved as `nil`** (`Log("Test {0} {1} {2}", 1, 2, nil);`), so the text shows `nil` there; after reopening, the row shows `nil`. Values beyond the placeholders still get rows. |
 
 This covers registered commands, this script's functions, and the array commands. A command whose value can be thrown away (`_a Pop();`, `AskChoice("A", "B");`, a script function) can be a node on its own; the node shows no row for the value.
 
-**Commands whose value must be used never get a node of their own** (section 7): `Format`, `Random`, `Count` and the like only appear inside a field's text, such as a Set's Value (`_s = Format("%0", _n)`) or a Hint's value. A file that has one on a line of its own shows it as that command's node with an **ERROR!** banner saying so, and it doesn't compile. The add-node menu leaves these commands out.
+**Commands whose value must be used never get a node of their own** (section 7): `Format`, `Random`, `Count` and the like only appear inside a field's text, such as a Set's Value (`_s = Format("{0}", _n)`) or a Hint's value. A file that has one on a line of its own shows it as that command's node with an **ERROR!** banner saying so, and it doesn't compile. The add-node menu leaves these commands out.
 
 **A line that stores a value is about storing it.** Any assignment is a **Set** node (or Add To and the like), even when its value is a call: `_t = Random(1.0, 2.0);` is a **Set** node with Var `_t` and Value `Random(1.0, 2.0)`. So a line never changes kind depending on what its value is.
 
@@ -953,7 +955,7 @@ Problems visible from the line alone show Blueprint's **ERROR!** banner on the n
     - **Notes**: for translators; filling it in gives `NOTELOCTEXT` / `NSNOTELOCTEXT`.
 
     Which rows are open isn't saved.
-  - A text field can hold a variable or expression instead: type it after a `=`, like `=_name` or `=Format("%0", _n)`. Such a field shows `=` and the expression. To start the text itself with `=`, type `\=`. Clearing an optional text field removes it; type `=""` for an empty text.
+  - A text field can hold a variable or expression instead: type it after a `=`, like `=_name` or `=Format("{0}", _n)`. Such a field shows `=` and the expression. To start the text itself with `=`, type `\=`. Clearing an optional text field removes it; type `=""` for an empty text.
 - **Adding nodes:** right-click the graph, or drag a wire off a pin and let go, for the **add-node menu**: Blueprint's searchable menu, with the nodes grouped by category and sorted by name in each.
   - **Flow Control:** If, While, For, For Each, Break, Continue, Return, Label, Go To, Reroute.
   - **Variables:** Set, Add To, Subtract From, Multiply, Divide, Increment, Decrement. (Variables themselves are added in the Globals and Locals lists.)

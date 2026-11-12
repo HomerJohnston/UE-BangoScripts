@@ -53,10 +53,11 @@ bool FBangoTypeTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("empty Bango ID name"), Bango::IsValidBangoIDName(TEXT("")));
 
 	TestEqual(TEXT("format values: none"), Bango::CountFormatValues(TEXT("plain")), 0);
-	TestEqual(TEXT("format values: highest wins"), Bango::CountFormatValues(TEXT("%0 and %2")), 3);
-	TestEqual(TEXT("format values: %% isn't one"), Bango::CountFormatValues(TEXT("100%% of %0")), 1);
-	TestEqual(TEXT("format values: two digits"), Bango::CountFormatValues(TEXT("%12")), 13);
-	TestEqual(TEXT("format values: trailing %"), Bango::CountFormatValues(TEXT("50%")), 0);
+	TestEqual(TEXT("format values: highest wins"), Bango::CountFormatValues(TEXT("{0} and {2}")), 3);
+	TestEqual(TEXT("format values: an escaped brace isn't one"), Bango::CountFormatValues(TEXT("`{5} of {0}")), 1);
+	TestEqual(TEXT("format values: two digits"), Bango::CountFormatValues(TEXT("{12}")), 13);
+	TestEqual(TEXT("format values: a named or unclosed brace isn't one"), Bango::CountFormatValues(TEXT("{Name} {3")), 0);
+	TestEqual(TEXT("format values: % is just a character now"), Bango::CountFormatValues(TEXT("100% sure, 50%")), 0);
 	return true;
 }
 

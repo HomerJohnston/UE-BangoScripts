@@ -51,7 +51,7 @@ public:
 			.SetDisplayName(LOCTEXT("TabTitle", "Bango Scripts"))
 			.SetTooltipText(LOCTEXT("TabTooltip", "Browse Bango scripts and view them as node graphs."))
 			.SetGroup(WorkspaceMenu::GetMenuStructure().GetToolsCategory())
-			.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "GraphEditor.EventGraph_16x"));
+			.SetIcon(FSlateIcon(FBangoEditorStyle::GetStyleSetName(), FBangoEditorStyle::GetScriptIconName())); // the script icon (the style is set up above)
 	}
 
 	virtual void ShutdownModule() override
@@ -85,11 +85,14 @@ private:
 
 	TSharedRef<SDockTab> SpawnTab(const FSpawnTabArgs& Args)
 	{
-		return SNew(SDockTab)
-			.TabRole(ETabRole::NomadTab)
-			[
-				SNew(SBangoScriptBrowser)
-			];
+		// The browser's script tabs are document tabs of a tab manager this tab owns, so it's made first.
+		const TSharedRef<SDockTab> Tab = SNew(SDockTab)
+			.TabRole(ETabRole::NomadTab);
+		Tab->SetContent(
+			SNew(SBangoScriptBrowser)
+			.OwnerTab(Tab)
+			.OwnerWindow(Args.GetOwnerWindow()));
+		return Tab;
 	}
 };
 

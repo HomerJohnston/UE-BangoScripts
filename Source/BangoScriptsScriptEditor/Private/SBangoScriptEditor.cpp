@@ -174,14 +174,6 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 					.IsEnabled_Lambda([this]() { return EdGraphs.Num() > 0 || bTextEdited; })
 					.OnClicked(this, &SBangoScriptEditor::OnSaveClicked)
 				]
-				+ SHorizontalBox::Slot()
-				.FillWidth(1.0f)
-				.VAlign(VAlign_Center)
-				[
-					SAssignNew(TitleText, STextBlock)
-					.Font(FAppStyle::GetFontStyle("BoldFont"))
-					.Text(this, &SBangoScriptEditor::GetTitle)
-				]
 			]
 		]
 
@@ -2798,7 +2790,7 @@ bool SBangoScriptEditor::BuildCurrentDocument(FBangoGraphDocument& OutDocument, 
 	{
 		return false;
 	}
-	// A placeholder left without a value (Hint's %2 shown as "missing") is saved as nil.
+	// A placeholder left without a value (Hint's {2} shown as "missing") is saved as nil.
 	if (LayoutContext.IsValid())
 	{
 		Bango::FillMissingPlaceholders(OutDocument, *LayoutContext);

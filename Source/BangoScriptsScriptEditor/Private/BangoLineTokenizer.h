@@ -25,8 +25,8 @@ enum class EBangoSyntaxKind : uint8
 	Constant,           // true false
 	Nil,                // nil
 	Preprocessor,       // #define #undef params LOCTEXT_NAMESPACE
-	Local,              // _name
-	Global,             // any other name that isn't a call
+	Local,              // a name the graph declares (set by FBangoScriptNames)
+	Global,             // any other name that isn't a call (the tokenizer gives every name this)
 	Entity,             // @john
 	Number,
 	String,
@@ -37,7 +37,7 @@ enum class EBangoSyntaxKind : uint8
 	LocNotes,           // notes string of NOTELOCTEXT / NSNOTELOCTEXT
 	VectorPart,         // .x .y .z (the part after the dot)
 	Call,               // a name followed by (
-	Builtin,            // IsDefined Count Push InsertAt Pop RemoveAt
+	Builtin,            // IsNil Count Push InsertAt Pop RemoveAt
 	Comment,
 	Metadata,           // //@12(4, 7) to the end of the line
 	DisconnectedMarker, // the //~ at the start of a disconnected line
@@ -46,11 +46,11 @@ enum class EBangoSyntaxKind : uint8
 	Punctuation,        // ( ) [ ] , ; .
 	Error,
 
-	// Meaning layer (planned; set by the semantic pass, never by the tokenizer)
-	Command,
-	Function,
-	Parameter,
-	UndeclaredGlobal,
+	// Meaning layer: set from the whole file, never by the tokenizer
+	Command,            // (planned)
+	Function,           // (planned)
+	Parameter,          // a script or function parameter (FBangoScriptNames)
+	UndeclaredGlobal,   // a global the file uses but doesn't declare (FBangoScriptNames)
 
 	Count
 };

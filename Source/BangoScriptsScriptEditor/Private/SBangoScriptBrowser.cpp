@@ -1,6 +1,7 @@
 #include "SBangoScriptBrowser.h"
 
 #include "BangoEditorStyle.h"
+#include "Framework/Docking/TabManager.h"
 #include "HAL/FileManager.h"
 #include "Misc/ConfigCacheIni.h"
 #include "InputCoreTypes.h"
@@ -14,6 +15,7 @@
 #include "Widgets/Layout/SWidgetSwitcher.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/SOverlay.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/SBoxPanel.h"
@@ -25,10 +27,31 @@
 namespace BangoScriptBrowserPrivate
 {
 	static const TCHAR* ConfigSection = TEXT("BangoScripts.ScriptBrowser");
+	/** The script tabs' tab stack holds this (closed) tab, so new script tabs know where to go. */
+	static const FName ScriptDocumentTabId(TEXT("BangoScriptDocument"));
 }
 
 void SBangoScriptBrowser::Construct(const FArguments& InArgs)
 {
+	using namespace BangoScriptBrowserPrivate;
+
+	// The script tabs: document tabs in a tab manager of the Bango Scripts tab's own, as an asset editor has.
+	check(InArgs._OwnerTab.IsValid());
+	TabManager = FGlobalTabmanager::Get()->NewTabManager(InArgs._OwnerTab.ToSharedRef());
+	const TSharedRef<FTabManager::FLayout> TabLayout = FTabManager::NewLayout(TEXT("BangoScriptBrowser_Documents_v1"))
+		->AddArea
+		(
+			FTabManager::NewPrimaryArea()
+			->SetOrientation(Orient_Vertical)
+			->Split
+			(
+				FTabManager::NewStack()
+				->AddTab(ScriptDocumentTabId, ETabState::ClosedTab)
+				->SetHideTabWell(false)
+			)
+		);
+	const TSharedPtr<SWidget> TabArea = TabManager->RestoreFrom(TabLayout, InArgs._OwnerWindow);
+
 	GConfig->GetBool(BangoScriptBrowserPrivate::ConfigSection, TEXT("bTreeView"), bTreeView, GEditorPerProjectIni);
 	ExpandedFolders.Add(FString()); // the script folder starts open
 
@@ -127,32 +150,31 @@ void SBangoScriptBrowser::Construct(const FArguments& InArgs)
 			]
 		]
 
-		// Right: a tab per open script, and the shown one's editor
+		// Right: a document tab per open script, each showing its editor
 		+ SSplitter::Slot()
 		.Value(0.85f)
 		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
+			SNew(SOverlay)
+			+ SOverlay::Slot()
 			[
-				SNew(SScrollBox)
-				.Orientation(Orient_Horizontal)
-				.ScrollBarVisibility(EVisibility::Collapsed)
-				+ SScrollBox::Slot()
-				[
-					SAssignNew(TabStrip, SHorizontalBox)
-				]
+				TabArea.IsValid() ? TabArea.ToSharedRef() : SNullWidget::NullWidget
 			]
-			+ SVerticalBox::Slot()
-			.FillHeight(1.0f)
+			// Shown while no script is open.
+			+ SOverlay::Slot()
+			.HAlign(HAlign_Center)
+			.VAlign(VAlign_Center)
+			.Padding(16.0f)
 			[
-				SAssignNew(EditorHost, SBox)
+				SNew(STextBlock)
+				.Visibility_Lambda([this]() { return Tabs.Num() == 0 ? EVisibility::HitTestInvisible : EVisibility::Collapsed; })
+				.Text(LOCTEXT("PickScript", "Pick a script on the left to open it. Each open script gets a tab here."))
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				.AutoWrapText(true)
 			]
 		]
 	];
 
 	RefreshScriptList();
-	ActivateTab(INDEX_NONE);
 }
 
 // ---- Script list ----
@@ -355,13 +377,13 @@ TSharedRef<ITableRow> SBangoScriptBrowser::OnGenerateTreeRow(TSharedPtr<FScriptT
 				{
 					if (!bFolder)
 					{
-						return FAppStyle::GetBrush("GraphEditor.EventGraph_16x"); // a script is a graph
+						return FBangoEditorStyle::GetScriptIcon();
 					}
 					const TSharedPtr<FScriptTreeItem> Pinned = WeakItem.Pin();
 					return FAppStyle::GetBrush(Pinned.IsValid() && ScriptTree.IsValid() && ScriptTree->IsItemExpanded(Pinned)
 						? "ContentBrowser.AssetTreeFolderOpen" : "ContentBrowser.AssetTreeFolderClosed");
 				})
-				.ColorAndOpacity(bFolder ? FSlateColor(FLinearColor(0.84f, 0.71f, 0.42f)) : FSlateColor::UseForeground()) // folders in the Content Browser's tan
+				.ColorAndOpacity(bFolder ? FSlateColor(FLinearColor(0.84f, 0.71f, 0.42f)) : FSlateColor(FLinearColor::White)) // folders in the Content Browser's tan; scripts in the icon's own colours
 			]
 			+ SHorizontalBox::Slot()
 			.FillWidth(1.0f)
@@ -453,6 +475,11 @@ int32 SBangoScriptBrowser::FindTab(const FString& Script) const
 	return Tabs.IndexOfByPredicate([&Script](const FScriptTab& Tab) { return Tab.Script.Equals(Script); });
 }
 
+int32 SBangoScriptBrowser::FindTab(const TSharedRef<SDockTab>& DockTab) const
+{
+	return Tabs.IndexOfByPredicate([&DockTab](const FScriptTab& Tab) { return Tab.DockTab.Pin() == DockTab; });
+}
+
 void SBangoScriptBrowser::OpenScriptTab(const FString& Script)
 {
 	int32 Index = FindTab(Script);
@@ -461,146 +488,81 @@ void SBangoScriptBrowser::OpenScriptTab(const FString& Script)
 		FScriptTab& Tab = Tabs.AddDefaulted_GetRef();
 		Tab.Script = Script;
 		SAssignNew(Tab.Editor, SBangoScriptEditor).Script(Script);
+		const TSharedRef<SDockTab> DockTab = MakeScriptDockTab(Script, Tab.Editor.ToSharedRef());
+		Tab.DockTab = DockTab;
 		Index = Tabs.Num() - 1;
+		// Beside the open script tabs, or where the last one was if none is open.
+		TabManager->InsertNewDocumentTab(BangoScriptBrowserPrivate::ScriptDocumentTabId, FTabManager::ESearchPreference::PreferLiveTab, DockTab);
 	}
 	ActivateTab(Index);
 }
 
 void SBangoScriptBrowser::ActivateTab(int32 Index)
 {
-	ActiveTab = Tabs.IsValidIndex(Index) ? Index : INDEX_NONE;
-	if (ActiveTab != INDEX_NONE)
+	if (!Tabs.IsValidIndex(Index))
 	{
-		// The other editors stay alive (keeping their view and changes) while they aren't shown.
-		EditorHost->SetContent(Tabs[ActiveTab].Editor.ToSharedRef());
+		return;
 	}
-	else
+	if (const TSharedPtr<SDockTab> DockTab = Tabs[Index].DockTab.Pin())
 	{
-		EditorHost->SetContent(
-			SNew(SBorder)
-			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-			.Padding(16.0f)
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("PickScript", "Pick a script on the left to open it. Each open script gets a tab here."))
-				.AutoWrapText(true)
-			]);
+		DockTab->ActivateInParent(ETabActivationCause::SetDirectly); // OnScriptTabActivated follows
 	}
-	RebuildTabStrip();
+	ActiveTab = Index;
 	SelectShownScript();
 }
 
-bool SBangoScriptBrowser::CloseTab(int32 Index)
+TSharedRef<SDockTab> SBangoScriptBrowser::MakeScriptDockTab(const FString& Script, const TSharedRef<SBangoScriptEditor>& Editor)
 {
-	if (!Tabs.IsValidIndex(Index) || !Tabs[Index].Editor->ConfirmCloseScript())
-	{
-		return false;
-	}
-	const FString Shown = Tabs.IsValidIndex(ActiveTab) ? Tabs[ActiveTab].Script : FString();
-	Tabs.RemoveAt(Index);
-	if (Index == ActiveTab)
-	{
-		// Show the tab that took its place, or the one before it if it was the last.
-		ActivateTab(FMath::Min(Index, Tabs.Num() - 1));
-	}
-	else
-	{
-		ActivateTab(FindTab(Shown));
-	}
-	return true;
-}
-
-void SBangoScriptBrowser::RebuildTabStrip()
-{
-	TabStrip->ClearChildren();
-	for (const FScriptTab& Tab : Tabs)
-	{
-		TabStrip->AddSlot()
-			.AutoWidth()
-			.Padding(0.0f, 0.0f, 1.0f, 0.0f)
-			[
-				MakeTab(Tab.Script)
-			];
-	}
-}
-
-TSharedRef<SWidget> SBangoScriptBrowser::MakeTab(const FString& Script)
-{
-	// Looked up by name each time, so the tab still finds its editor after other tabs close.
-	auto IsShown = [this, Script]() { return Tabs.IsValidIndex(ActiveTab) && Tabs[ActiveTab].Script.Equals(Script); };
-	auto Label = [this, Script]()
-	{
-		const int32 Index = FindTab(Script);
-		const bool bDirty = Index != INDEX_NONE && Tabs[Index].Editor->HasUnsavedChanges();
-		return FText::FromString(bDirty ? Script + TEXT(" *") : Script);
-	};
-
-	return SNew(SBorder)
-		.BorderImage(FBangoEditorStyle::GetWhiteBrush())
-		.BorderBackgroundColor_Lambda([IsShown]() { return IsShown() ? FSlateColor(FStyleColors::Panel) : FSlateColor(FStyleColors::Recessed); })
-		.Padding(0.0f)
-		.ToolTipText(FText::FromString(Script + TEXT(".bango")))
-		.OnMouseButtonDown_Lambda([this, Script](const FGeometry&, const FPointerEvent& MouseEvent)
+	const TWeakPtr<SBangoScriptEditor> WeakEditor = Editor;
+	TSharedRef<SDockTab> DockTab = SNew(SDockTab)
+		.TabRole(ETabRole::DocumentTab)
+		// The script's name, with a * while it has unsaved changes (as an asset's tab).
+		.Label_Lambda([Script, WeakEditor]()
 		{
-			if (MouseEvent.GetEffectingButton() == EKeys::MiddleMouseButton)
-			{
-				CloseTab(FindTab(Script)); // middle-click closes, as in a browser
-				return FReply::Handled();
-			}
-			if (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
-			{
-				ActivateTab(FindTab(Script));
-				return FReply::Handled();
-			}
-			return FReply::Unhandled();
+			const TSharedPtr<SBangoScriptEditor> Pinned = WeakEditor.Pin();
+			return FText::FromString(Pinned.IsValid() && Pinned->HasUnsavedChanges() ? Script + TEXT("*") : Script);
 		})
+		.ToolTipText(FText::FromString(Script + TEXT(".bango")))
+		// Closing (the tab's x, middle-click, or its menu) asks about unsaved changes first.
+		.OnCanCloseTab_Lambda([WeakEditor]()
+		{
+			const TSharedPtr<SBangoScriptEditor> Pinned = WeakEditor.Pin();
+			return !Pinned.IsValid() || Pinned->ConfirmCloseScript();
+		})
+		.OnTabClosed(this, &SBangoScriptBrowser::OnScriptTabClosed)
+		.OnTabActivated(this, &SBangoScriptBrowser::OnScriptTabActivated)
 		[
-			SNew(SVerticalBox)
-			// The shown tab is marked with a line along its top.
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(SBorder)
-				.BorderImage(FBangoEditorStyle::GetWhiteBrush())
-				.BorderBackgroundColor_Lambda([IsShown]() { return IsShown() ? FSlateColor(FStyleColors::Primary) : FSlateColor(FStyleColors::Transparent); })
-				.Padding(0.0f)
-				[
-					SNew(SBox).HeightOverride(2.0f)
-				]
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Center)
-				.Padding(10.0f, 4.0f, 4.0f, 4.0f)
-				[
-					SNew(STextBlock)
-					.Text_Lambda(Label)
-					.ColorAndOpacity_Lambda([IsShown]() { return IsShown() ? FSlateColor(FStyleColors::ForegroundHover) : FSlateColor(FStyleColors::Foreground); })
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Center)
-				.Padding(0.0f, 0.0f, 4.0f, 0.0f)
-				[
-					SNew(SButton)
-					.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-					.ContentPadding(FMargin(3.0f, 0.0f))
-					.ToolTipText(LOCTEXT("CloseTab", "Close (asks first if there are unsaved changes). Middle-clicking the tab closes it too."))
-					.OnClicked_Lambda([this, Script]()
-					{
-						CloseTab(FindTab(Script));
-						return FReply::Handled();
-					})
-					[
-						SNew(STextBlock).Text(FText::FromString(TEXT("×"))) // a multiplication sign, as the close cross
-					]
-				]
-			]
+			Editor
 		];
+	DockTab->SetTabIcon(FBangoEditorStyle::GetScriptIcon());
+	return DockTab;
+}
+
+void SBangoScriptBrowser::OnScriptTabActivated(TSharedRef<SDockTab> DockTab, ETabActivationCause Cause)
+{
+	const int32 Index = FindTab(DockTab);
+	if (Index != INDEX_NONE && Index != ActiveTab)
+	{
+		ActiveTab = Index;
+		SelectShownScript(); // the script picked by its tab is selected on the left
+	}
+}
+
+void SBangoScriptBrowser::OnScriptTabClosed(TSharedRef<SDockTab> DockTab)
+{
+	const int32 Index = FindTab(DockTab);
+	if (Index == INDEX_NONE)
+	{
+		return;
+	}
+	Tabs.RemoveAt(Index);
+	// The shown script is now whichever tab is in front (the tab well shows another one when one closes).
+	ActiveTab = Tabs.IndexOfByPredicate([](const FScriptTab& Tab)
+	{
+		const TSharedPtr<SDockTab> Pinned = Tab.DockTab.Pin();
+		return Pinned.IsValid() && Pinned->IsForeground();
+	});
+	SelectShownScript();
 }
 
 #undef LOCTEXT_NAMESPACE

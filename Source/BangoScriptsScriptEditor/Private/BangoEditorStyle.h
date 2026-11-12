@@ -38,6 +38,13 @@ public:
 	/** An exec pin's circle: filled when connected, a ring when not. Never null once the style is initialized. */
 	static const FSlateBrush* GetPinBrush(bool bConnected);
 
+	/** A Bango script's icon (Resources/ClassIcons/Icon_Script.svg), 16x16, in its own colours. Never null. */
+	static const FSlateBrush* GetScriptIcon();
+
+	/** The style set's name, and the script icon's brush name in it, for an FSlateIcon (like a menu entry's). */
+	static FName GetStyleSetName();
+	static FName GetScriptIconName();
+
 	/** A plain white rectangle, to be tinted (like the script tabs' backgrounds). Never null. */
 	static const FSlateBrush* GetWhiteBrush();
 

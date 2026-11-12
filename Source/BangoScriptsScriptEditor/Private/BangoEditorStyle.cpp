@@ -70,6 +70,9 @@ void FBangoEditorStyle::Initialize()
 	StyleSet->Set("Bango.Pin.Disconnected", new FSlateVectorImageBrush(StyleSet->RootToContentDir(TEXT("Icons/PinDisconnected"), TEXT(".svg")), PinIconSize));
 	StyleSet->Set("Bango.White", new FSlateColorBrush(FLinearColor::White));
 
+	// A Bango script (the scripts' folder tree and tabs), from Resources/ClassIcons.
+	StyleSet->Set(GetScriptIconName(), new FSlateVectorImageBrush(StyleSet->RootToContentDir(TEXT("ClassIcons/Icon_Script"), TEXT(".svg")), FVector2D(16.0f, 16.0f)));
+
 	FSlateStyleRegistry::RegisterSlateStyle(*StyleSet);
 }
 
@@ -163,6 +166,21 @@ const FSlateBrush* FBangoEditorStyle::GetPinBrush(bool bConnected)
 		return FAppStyle::GetBrush(bConnected ? "Graph.Pin.Connected" : "Graph.Pin.Disconnected");
 	}
 	return StyleSet->GetBrush(bConnected ? "Bango.Pin.Connected" : "Bango.Pin.Disconnected");
+}
+
+const FSlateBrush* FBangoEditorStyle::GetScriptIcon()
+{
+	return StyleSet.IsValid() ? StyleSet->GetBrush(GetScriptIconName()) : FAppStyle::GetBrush("GraphEditor.EventGraph_16x");
+}
+
+FName FBangoEditorStyle::GetStyleSetName()
+{
+	return BangoEditorStylePrivate::StyleSetName;
+}
+
+FName FBangoEditorStyle::GetScriptIconName()
+{
+	return TEXT("Bango.ScriptIcon");
 }
 
 const FSlateBrush* FBangoEditorStyle::GetWhiteBrush()

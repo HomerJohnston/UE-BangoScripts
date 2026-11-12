@@ -248,7 +248,7 @@ namespace BangoGraphLayoutPrivate
 		int32 VariadicFirstIndex = 1;
 		FString VariadicLabelSuffix;
 		int32 PlaceholderParam = INDEX_NONE;
-		/** True if the placeholder parameter is text, with {0} placeholders (otherwise a string, with %0). */
+		/** True if the placeholder parameter is text (a LOCTEXT), otherwise a string; both have {0} placeholders. */
 		bool bTextPlaceholders = false;
 		bool bReturnsValue = false;
 		/** Its value must be used (see FBangoCommandSignature::MustUseResult), so it can't be a line of its own. */
@@ -342,7 +342,7 @@ namespace BangoGraphLayoutPrivate
 		}
 	}
 
-	/** Placeholder rows past this (like %40 in a text) aren't shown until they have values. */
+	/** Placeholder rows past this (like {40} in a text) aren't shown until they have values. */
 	static constexpr int32 MaxPlaceholderRows = 32;
 
 	/**
@@ -433,7 +433,7 @@ namespace BangoGraphLayoutPrivate
 			SetArgumentEdits(Tok, Field, Args, i, NameTok);
 			Out.Fields.Add(Field);
 		}
-		// Extra values: the ones given, plus a row for each placeholder in a literal text (like Hint's "%0 %1")
+		// Extra values: the ones given, plus a row for each placeholder in a literal text (like Hint's "{0} {1}")
 		// that has no value yet, so it can be filled in.
 		int32 NumPlaceholders = 0;
 		if (Callee.bVariadic && Args.IsValidIndex(Callee.PlaceholderParam))

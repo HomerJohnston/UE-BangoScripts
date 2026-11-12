@@ -32,11 +32,11 @@ static const FBangoFieldEditTestCase GBangoFieldEditTestCases[] =
 	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"a\", 1, 2)"), 1, TEXT(""), nullptr, EBangoGraphNodeKind::Call },   // a value in the middle can't be removed
 	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"a\", 1, 2)"), 1, TEXT("_x"), TEXT("Hint(\"a\", _x, 2)"), EBangoGraphNodeKind::Call },
 	// Placeholder rows without a value can be filled in, in order.
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"Test %0 %1 %2\", 1, 2)"), 3, TEXT("3"), TEXT("Hint(\"Test %0 %1 %2\", 1, 2, 3)"), EBangoGraphNodeKind::Call },
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"%0 %1\")"), 1, TEXT("_a"), TEXT("Hint(\"%0 %1\", _a)"), EBangoGraphNodeKind::Call },
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"%0 %1\")"), 2, TEXT("_b"), nullptr, EBangoGraphNodeKind::Call },   // locked: %0 comes first
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"%0 %1\", 1, 2)"), 2, TEXT(""), TEXT("Hint(\"%0 %1\", 1)"), EBangoGraphNodeKind::Call },   // the row stays, now missing
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"Test %0 %1\", 1, 2)"), 0, TEXT("\"Test %0 %1 %2\""), TEXT("Hint(\"Test %0 %1 %2\", 1, 2)"), EBangoGraphNodeKind::Call },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"Test {0} {1} {2}\", 1, 2)"), 3, TEXT("3"), TEXT("Hint(\"Test {0} {1} {2}\", 1, 2, 3)"), EBangoGraphNodeKind::Call },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"{0} {1}\")"), 1, TEXT("_a"), TEXT("Hint(\"{0} {1}\", _a)"), EBangoGraphNodeKind::Call },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"{0} {1}\")"), 2, TEXT("_b"), nullptr, EBangoGraphNodeKind::Call },   // locked: {0} comes first
+	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"{0} {1}\", 1, 2)"), 2, TEXT(""), TEXT("Hint(\"{0} {1}\", 1)"), EBangoGraphNodeKind::Call },   // the row stays, now missing
+	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"Test {0} {1}\", 1, 2)"), 0, TEXT("\"Test {0} {1} {2}\""), TEXT("Hint(\"Test {0} {1} {2}\", 1, 2)"), EBangoGraphNodeKind::Call },
 
 	// Targets
 	{ EBangoGraphNodeKind::Call, false, TEXT("@john Speak(\"Hi\")"), 0, TEXT("@mary"), TEXT("@mary Speak(\"Hi\")"), EBangoGraphNodeKind::Call },
@@ -315,7 +315,7 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 		{
 			{ TEXT("Hint(\"x\")"), 0, TEXT("x"), TEXT("Hi \"there\""), TEXT("Hint(\"Hi \\\"there\\\"\")") },
 			{ TEXT("Hint(\"a\\\"b\")"), 0, TEXT("a\"b"), TEXT("two\\nlines"), TEXT("Hint(\"two\\nlines\")") },
-			{ TEXT("Hint(_name)"), 0, TEXT("=_name"), TEXT("=Format(\"%0\", 1)"), TEXT("Hint(Format(\"%0\", 1))") },
+			{ TEXT("Hint(_name)"), 0, TEXT("=_name"), TEXT("=Format(\"{0}\", 1)"), TEXT("Hint(Format(\"{0}\", 1))") },
 			{ TEXT("Hint(\"x\")"), 0, TEXT("x"), TEXT("=_line"), TEXT("Hint(_line)") },
 			{ TEXT("Hint(\"x\")"), 0, TEXT("x"), TEXT(""), TEXT("Hint(\"\")") },
 			{ TEXT("Hint(\"x\")"), 0, TEXT("x"), TEXT("\\=x"), TEXT("Hint(\"=x\")") },
@@ -351,10 +351,10 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 		struct FFillCase { const TCHAR* Text; const TCHAR* Filled; };
 		const FFillCase FillCases[] =
 		{
-			{ TEXT("Hint(\"%0 %1 %2\", 1)"), TEXT("Hint(\"%0 %1 %2\", 1, nil, nil)") },
-			{ TEXT("Hint(\"%0\")"), TEXT("Hint(\"%0\", nil)") },
-			{ TEXT("Hint(\"%0\", 1)"), TEXT("Hint(\"%0\", 1)") },
-			{ TEXT("Hint(\"100%% sure\")"), TEXT("Hint(\"100%% sure\")") },
+			{ TEXT("Hint(\"{0} {1} {2}\", 1)"), TEXT("Hint(\"{0} {1} {2}\", 1, nil, nil)") },
+			{ TEXT("Hint(\"{0}\")"), TEXT("Hint(\"{0}\", nil)") },
+			{ TEXT("Hint(\"{0}\", 1)"), TEXT("Hint(\"{0}\", 1)") },
+			{ TEXT("Hint(\"100% sure\")"), TEXT("Hint(\"100% sure\")") },
 			{ TEXT("Hint(_text)"), TEXT("Hint(_text)") },
 			{ TEXT("Collect(1)"), TEXT("Collect(1)") },
 		};
@@ -372,15 +372,15 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 
 		FBangoGraphNode Node;
 		Node.Kind = EBangoGraphNodeKind::Call;
-		Node.Text = TEXT("Hint(\"%0 %1 %2\", 1, nil)");
+		Node.Text = TEXT("Hint(\"{0} {1} {2}\", 1, nil)");
 		TArray<Bango::FBangoFieldWarning> Warnings;
 		Bango::GetNodeWarnings(Bango::GetNodeLayout(Node, false, Context), Warnings);
 		if (Warnings.Num() != 2 || Warnings[0].Field != 2 || Warnings[1].Field != 3
-			|| !Warnings[0].Message.Contains(TEXT("%1 is nil")) || !Warnings[1].Message.Contains(TEXT("%2 has no value")))
+			|| !Warnings[0].Message.Contains(TEXT("{1} is nil")) || !Warnings[1].Message.Contains(TEXT("{2} has no value")))
 		{
-			OutFailures.Add(FString::Printf(TEXT("warnings: expected %%1 (nil) on field 2 and %%2 (missing) on field 3, got %d warning(s)"), Warnings.Num()));
+			OutFailures.Add(FString::Printf(TEXT("warnings: expected {1} (nil) on field 2 and {2} (missing) on field 3, got %d warning(s)"), Warnings.Num()));
 		}
-		Node.Text = TEXT("Hint(\"%0\", 1, nil)");
+		Node.Text = TEXT("Hint(\"{0}\", 1, nil)");
 		Bango::GetNodeWarnings(Bango::GetNodeLayout(Node, false, Context), Warnings);
 		if (Warnings.Num() != 0)
 		{
@@ -389,7 +389,7 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 
 		// A whole document: filled, written and compiled.
 		FBangoGraphDocument Doc;
-		if (!Bango::BuildGraph(TEXT("Hint(\"%0 and %1\", 1); //@1(0, 0)\nfunction void F()\n{\n\tHint(\"%0\"); //@2(0, 0)\n};\nF(); //@3(0, 1)\n"), TEXT("test.bango"), Doc, Error))
+		if (!Bango::BuildGraph(TEXT("Hint(\"{0} and {1}\", 1); //@1(0, 0)\nfunction void F()\n{\n\tHint(\"{0}\"); //@2(0, 0)\n};\nF(); //@3(0, 1)\n"), TEXT("test.bango"), Doc, Error))
 		{
 			OutFailures.Add(FString(TEXT("fill document: build: ")) + Error.ToString());
 		}
@@ -400,7 +400,7 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 			FString WriteError;
 			FBangoProgram Program;
 			if (!Bango::FillMissingPlaceholders(Doc, DocContext) || !Bango::WriteGraphText(Doc, Written, WriteError)
-				|| !Written.Contains(TEXT("Hint(\"%0 and %1\", 1, nil);")) || !Written.Contains(TEXT("Hint(\"%0\", nil);"))
+				|| !Written.Contains(TEXT("Hint(\"{0} and {1}\", 1, nil);")) || !Written.Contains(TEXT("Hint(\"{0}\", nil);"))
 				|| !Bango::CompileSource(Written, TEXT("test.bango"), Commands, Program, Error))
 			{
 				OutFailures.Add(FString(TEXT("fill document: expected nils that compile, got:\n")) + Written + Error.ToString());

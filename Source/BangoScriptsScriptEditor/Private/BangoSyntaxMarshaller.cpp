@@ -11,6 +11,7 @@
 #include "Framework/Text/TextLayout.h"
 #include "Rendering/SlateRenderer.h"
 #include "BangoLineTokenizer.h"
+#include "BangoScriptNames.h"
 #include "BangoSyntaxStyle.h"
 
 namespace BangoSyntaxMarshallerPrivate
@@ -170,14 +171,29 @@ void FBangoSyntaxMarshaller::SetText(const FString& SourceString, FTextLayout& T
 	LinesToAdd.Reserve(LineRanges.Num());
 
 	const FTextBlockStyle& DefaultStyle = Style->GetDefaultStyle();
-	TArray<FBangoSyntaxToken> Tokens;
 
-	for (const FTextRange& LineRange : LineRanges)
+	// Every line's tokens first, then the file's declarations from them, so each name can be coloured as the
+	// graph's local or parameter, or a global (FBangoScriptNames).
+	TArray<FString> Lines;
+	TArray<TArray<FBangoSyntaxToken>> LineTokens;
+	Lines.Reserve(LineRanges.Num());
+	LineTokens.SetNum(LineRanges.Num());
+	for (int32 LineIndex = 0; LineIndex < LineRanges.Num(); ++LineIndex)
 	{
-		TSharedRef<FString> LineText = MakeShared<FString>(SourceString.Mid(LineRange.BeginIndex, LineRange.Len()));
+		const FTextRange& LineRange = LineRanges[LineIndex];
+		Lines.Add(SourceString.Mid(LineRange.BeginIndex, LineRange.Len()));
+		FBangoLineTokenizer::TokenizeLine(FStringView(Lines[LineIndex]), LineTokens[LineIndex]);
+	}
 
-		Tokens.Reset();
-		FBangoLineTokenizer::TokenizeLine(FStringView(*LineText), Tokens);
+	FBangoScriptNames Names;
+	Names.Build(Lines, LineTokens);
+
+	for (int32 LineIndex = 0; LineIndex < LineRanges.Num(); ++LineIndex)
+	{
+		TSharedRef<FString> LineText = MakeShared<FString>(MoveTemp(Lines[LineIndex]));
+
+		TArray<FBangoSyntaxToken>& Tokens = LineTokens[LineIndex];
+		Names.RefineTokens(LineIndex, *LineText, Tokens);
 
 		TArray<TSharedRef<IRun>> Runs;
 		Runs.Reserve(Tokens.Num() * 2 + 1);
