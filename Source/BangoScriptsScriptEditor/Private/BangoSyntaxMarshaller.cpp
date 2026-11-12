@@ -6,16 +6,59 @@
 #include "Fonts/FontMeasure.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Text/ILayoutBlock.h"
+#include "Framework/Text/ISlateLineHighlighter.h"
 #include "Framework/Text/SlateTextRun.h"
 #include "Framework/Text/TextHitPoint.h"
 #include "Framework/Text/TextLayout.h"
+#include "Rendering/DrawElements.h"
 #include "Rendering/SlateRenderer.h"
+#include "Styling/AppStyle.h"
 #include "BangoLineTokenizer.h"
 #include "BangoScriptNames.h"
 #include "BangoSyntaxStyle.h"
 
 namespace BangoSyntaxMarshallerPrivate
 {
+	/** Draws a box behind characters: the bracket next to the cursor and its match. Like Slate's search highlighter. */
+	class FBangoBracketHighlighter : public ISlateLineHighlighter
+	{
+	public:
+		explicit FBangoBracketHighlighter(const FLinearColor& InColor)
+			: Color(InColor)
+		{
+		}
+
+		virtual int32 OnPaint(const FPaintArgs& Args, const FTextLayout::FLineView& Line, const FVector2D Offset, const float Width,
+			const FTextBlockStyle& DefaultStyle, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect,
+			FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
+		{
+			if (Width <= 0.0f)
+			{
+				return LayerId;
+			}
+			const FVector2D Location(Line.Offset.X + Offset.X, Line.Offset.Y + Offset.Y);
+
+			// The block size and offset values are pre-scaled, so undo that for the paint geometry (as Slate's own highlighters do).
+			const float InverseScale = Inverse(AllottedGeometry.Scale);
+			FSlateDrawElement::MakeBox(
+				OutDrawElements,
+				++LayerId,
+				AllottedGeometry.ToPaintGeometry(
+					TransformVector(InverseScale, FVector2D(Width, FMath::Max(Line.Size.Y, Line.TextHeight))),
+					FSlateLayoutTransform(TransformPoint(InverseScale, Location))),
+				FAppStyle::GetBrush("WhiteBrush"),
+				bParentEnabled ? ESlateDrawEffect::None : ESlateDrawEffect::DisabledEffect,
+				Color * InWidgetStyle.GetColorAndOpacityTint());
+			return LayerId;
+		}
+
+	private:
+		FLinearColor Color;
+	};
+
+	/** Above the selection (-10) and search results (-9), below the text. */
+	static constexpr int32 BracketHighlightZOrder = -8;
+
 	/** The column after a tab at Column: the next multiple of TabSize. */
 	static int32 NextTabStop(int32 Column, int32 TabSize)
 	{
@@ -135,6 +178,50 @@ TSharedRef<FBangoSyntaxMarshaller> FBangoSyntaxMarshaller::Create(TSharedRef<con
 FBangoSyntaxMarshaller::FBangoSyntaxMarshaller(TSharedRef<const FBangoSyntaxStyle> InStyle)
 	: Style(MoveTemp(InStyle))
 {
+	using namespace BangoSyntaxMarshallerPrivate;
+	MatchHighlighter = MakeShared<FBangoBracketHighlighter>(FLinearColor(1.0f, 1.0f, 1.0f, 0.16f));
+	UnmatchedHighlighter = MakeShared<FBangoBracketHighlighter>(FLinearColor(0.9f, 0.1f, 0.1f, 0.45f));
+}
+
+void FBangoSyntaxMarshaller::SetCursor(const FBangoTextPosition& InCursor)
+{
+	BracketCursor = InCursor;
+	UpdateBracketHighlights();
+}
+
+void FBangoSyntaxMarshaller::UpdateBracketHighlights()
+{
+	if (LastLayout == nullptr)
+	{
+		return;
+	}
+	for (const FTextLineHighlight& Highlight : BracketHighlights)
+	{
+		LastLayout->RemoveLineHighlight(Highlight);
+	}
+	BracketHighlights.Reset();
+
+	const FBangoBracketMatch Match = FBangoEditingAids::FindMatchingBracket(CachedLines, CachedTokens, BracketCursor);
+	if (!Match.bFound)
+	{
+		return;
+	}
+	const TSharedRef<ISlateLineHighlighter> Highlighter = (Match.bMatched ? MatchHighlighter : UnmatchedHighlighter).ToSharedRef();
+	const int32 NumLines = LastLayout->GetLineModels().Num();
+	auto Add = [this, &Highlighter, NumLines](const FBangoTextPosition& At)
+	{
+		if (At.Line >= 0 && At.Line < NumLines)
+		{
+			FTextLineHighlight Highlight(At.Line, FTextRange(At.Column, At.Column + 1), BangoSyntaxMarshallerPrivate::BracketHighlightZOrder, Highlighter);
+			LastLayout->AddLineHighlight(Highlight);
+			BracketHighlights.Add(Highlight);
+		}
+	};
+	Add(Match.Bracket);
+	if (Match.bMatched)
+	{
+		Add(Match.Match);
+	}
 }
 
 void FBangoSyntaxMarshaller::SetStyle(TSharedRef<const FBangoSyntaxStyle> InStyle)
@@ -187,6 +274,10 @@ void FBangoSyntaxMarshaller::SetText(const FString& SourceString, FTextLayout& T
 
 	FBangoScriptNames Names;
 	Names.Build(Lines, LineTokens);
+
+	// Kept for finding brackets when the cursor moves (before the lines are handed to the layout below).
+	CachedLines = Lines;
+	CachedTokens = LineTokens;
 
 	for (int32 LineIndex = 0; LineIndex < LineRanges.Num(); ++LineIndex)
 	{
@@ -250,6 +341,11 @@ void FBangoSyntaxMarshaller::SetText(const FString& SourceString, FTextLayout& T
 	}
 
 	TargetTextLayout.AddLines(LinesToAdd);
+
+	// The layout dropped every highlight before laying the text out again; put the bracket boxes back.
+	LastLayout = &TargetTextLayout;
+	BracketHighlights.Reset();
+	UpdateBracketHighlights();
 }
 
 void FBangoSyntaxMarshaller::GetText(FString& TargetString, const FTextLayout& SourceTextLayout)

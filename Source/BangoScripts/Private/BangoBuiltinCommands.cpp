@@ -369,13 +369,18 @@ namespace Bango
 			Add(Commands, Command);
 		}
 
-		// entity GetPos() -> vector3
+		// GetPos(entity) -> vector3. The entity is its argument, not a target: a command with no other arguments takes
+		// what it works on as its only argument (SetPos, with a position to give, keeps a target).
 		{
 			FBangoCommand Command;
-			Command.Signature = FBangoCommandSignature::Make(TEXT("GetPos")).Target(Entity).Returns(Vector3).InCategory(TEXT("Actors")).Describe(TEXT("The actor's location."));
+			Command.Signature = FBangoCommandSignature::Make(TEXT("GetPos")).Param(TEXT("Entity"), Entity).Returns(Vector3).InCategory(TEXT("Actors")).Describe(TEXT("The actor's location."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{
-				const AActor* Actor = ResolveActor(Call, Call.Target);
+				if (!RequireArgs(Call, 1))
+				{
+					return EBangoCommandResult::Failed;
+				}
+				const AActor* Actor = ResolveActor(Call, Call.Args[0]);
 				if (!Actor)
 				{
 					return EBangoCommandResult::Failed;

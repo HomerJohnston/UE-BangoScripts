@@ -151,7 +151,7 @@ private:
 	TSharedPtr<STextBlock> LineNumbers;
 	/** How many line numbers LineNumbers shows. */
 	int32 LineNumberCount = 0;
-	/** Shown or hidden with the TEXT tab on the graph's left edge (SetTextPaneOpen). Hidden to start with. */
+	/** Shown or hidden with the Source Editor tab on the graph's left edge (SetTextPaneOpen). Hidden to start with. */
 	bool bTextPaneOpen = false;
 	/** How far the pane is slid out, 0 (hidden) to 1 (open): it moves toward bTextPaneOpen when the tab is clicked. */
 	float TextPaneOpenness = 0.0f;
@@ -316,7 +316,7 @@ private:
 
 	// Script text pane
 	TSharedRef<SWidget> MakeTextPane();
-	/** The TEXT tab: a folder tab on the graph's left edge that pulls the pane out, or pushes it back. */
+	/** The Source Editor tab: a folder tab on the graph's left edge that pulls the pane out, or pushes it back. */
 	TSharedRef<SWidget> MakeTextTab();
 	/** Opens or closes the text pane, sliding it (bAnimate) or at once. */
 	void SetTextPaneOpen(bool bOpen, bool bAnimate);

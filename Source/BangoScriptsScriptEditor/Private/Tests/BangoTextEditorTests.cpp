@@ -307,4 +307,97 @@ bool FBangoScriptNamesTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// ---- Editing comforts (FBangoEditingAids) ----
+
+#include "BangoEditingAids.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoEditingAidsTest, "Bango.ScriptEditor.TextEditor.EditingAids",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FBangoEditingAidsTest::RunTest(const FString& Parameters)
+{
+	using namespace BangoTextMetadataTests; // UV: '>' is a tab; N: line breaks as '|', tabs as '>'
+
+	// Enter at a column of a line: what's typed, and the cursor's column on the new line.
+	auto NewLine = [this](const TCHAR* Line, int32 Column, const TCHAR* WantInsert, int32 WantColumn)
+	{
+		const FBangoNewLineEdit Edit = FBangoEditingAids::NewLine(UV(Line), Column);
+		if (!N(Edit.Insert).Equals(WantInsert, ESearchCase::CaseSensitive) || Edit.CursorColumn != WantColumn)
+		{
+			AddError(FString::Printf(TEXT("NewLine('%s', %d): want '%s' at %d, got '%s' at %d"), Line, Column, WantInsert, WantColumn, *N(Edit.Insert), Edit.CursorColumn));
+		}
+	};
+	NewLine(TEXT(">Log(1);"), 8, TEXT("|>"), 1);          // keeps the indentation
+	NewLine(TEXT(">>if (x)"), 8, TEXT("|>>"), 2);
+	NewLine(TEXT(">if (x) {"), 9, TEXT("|>>"), 2);        // one tab more after {
+	NewLine(TEXT("{"), 1, TEXT("|>"), 1);
+	NewLine(TEXT(">{   // comment"), 2, TEXT("|>>"), 2);
+	NewLine(TEXT(">{ // c"), 7, TEXT("|>>"), 2);          // a comment after the { doesn't count
+	NewLine(TEXT(">{}"), 2, TEXT("|>>|>"), 2);            // {|}: the } on its own line
+	NewLine(TEXT(">{};"), 2, TEXT("|>>|>"), 2);
+	NewLine(TEXT(">>foo"), 1, TEXT("|>"), 1);             // inside the indentation
+	NewLine(TEXT("Log(\"{\");"), 9, TEXT("|"), 0);        // a { in a string isn't one
+	NewLine(TEXT("//~ >Log();"), 11, TEXT("|"), 0);       // a disconnected line has no leading indentation
+
+	auto Outdent = [this](const TCHAR* Line, int32 Column, int32 Want)
+	{
+		const int32 Got = FBangoEditingAids::OutdentBeforeClosingBrace(UV(Line), Column);
+		if (Got != Want)
+		{
+			AddError(FString::Printf(TEXT("OutdentBeforeClosingBrace('%s', %d): want %d, got %d"), Line, Column, Want, Got));
+		}
+	};
+	Outdent(TEXT(">>"), 2, 1);
+	Outdent(TEXT(">"), 1, 0);
+	Outdent(TEXT(">x"), 2, INDEX_NONE);
+	Outdent(TEXT(""), 0, INDEX_NONE);
+	Outdent(TEXT(">  "), 3, INDEX_NONE);                 // ends in spaces, not a tab
+	Outdent(TEXT("  >"), 3, 2);
+
+	TArray<FString> Lines;
+	FBangoMetadataTracker::SplitLines(UV(TEXT("if (a[1] == (2))|{|>Log(\"}\");  // }|>{|>};|};|//~ if (b)|//~ {|//~ };")), Lines);
+	TArray<TArray<FBangoSyntaxToken>> Tokens;
+	Tokens.SetNum(Lines.Num());
+	for (int32 I = 0; I < Lines.Num(); ++I)
+	{
+		FBangoLineTokenizer::TokenizeLine(FStringView(Lines[I]), Tokens[I]);
+	}
+
+	// The cursor at a line and column (from 0): whether it's next to a bracket, whether that has a match, and where.
+	auto Bracket = [this, &Lines, &Tokens](int32 Line, int32 Column, bool bWantFound, bool bWantMatched, int32 MatchLine, int32 MatchColumn)
+	{
+		FBangoTextPosition Cursor;
+		Cursor.Line = Line;
+		Cursor.Column = Column;
+		const FBangoBracketMatch Got = FBangoEditingAids::FindMatchingBracket(Lines, Tokens, Cursor);
+		const bool bOk = Got.bFound == bWantFound
+			&& (!bWantFound || (Got.bMatched == bWantMatched && (!bWantMatched || (Got.Match.Line == MatchLine && Got.Match.Column == MatchColumn))));
+		if (!bOk)
+		{
+			AddError(FString::Printf(TEXT("Bracket at %d:%d: found %d, matched %d at %d:%d"), Line, Column, Got.bFound, Got.bMatched, Got.Match.Line, Got.Match.Column));
+		}
+	};
+	Bracket(0, 3, true, true, 0, 15);    // before the ( of "if (": its )
+	Bracket(0, 4, true, true, 0, 15);    // after it
+	Bracket(0, 6, true, true, 0, 7);     // [ ]
+	Bracket(0, 16, true, true, 0, 3);    // after the last ): back to the first (
+	Bracket(1, 0, true, true, 5, 0);     // { to the }; four lines down, past the braces in a string and a comment
+	Bracket(3, 2, true, true, 4, 1);     // the inner { }
+	Bracket(5, 1, true, true, 1, 0);     // after the } of };
+	Bracket(2, 1, false, false, 0, 0);   // no bracket next to the cursor
+	Bracket(7, 5, true, true, 8, 4);     // a disconnected { matches a disconnected }
+
+	TArray<FString> Unmatched;
+	Unmatched.Add(TEXT("if ((x)"));
+	TArray<TArray<FBangoSyntaxToken>> UnmatchedTokens;
+	UnmatchedTokens.SetNum(1);
+	FBangoLineTokenizer::TokenizeLine(FStringView(Unmatched[0]), UnmatchedTokens[0]);
+	FBangoTextPosition Cursor;
+	Cursor.Column = 3;
+	const FBangoBracketMatch Got = FBangoEditingAids::FindMatchingBracket(Unmatched, UnmatchedTokens, Cursor);
+	TestTrue(TEXT("An unclosed ( is found, with no match"), Got.bFound && !Got.bMatched);
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

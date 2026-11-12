@@ -81,6 +81,15 @@ public:
 
 private:
 	FReply HandleKeyDown(const FGeometry& Geometry, const FKeyEvent& KeyEvent);
+
+	/** Enter: a line break and the line's indentation (FBangoEditingAids::NewLine). */
+	void InsertNewLine();
+
+	/** Asked before each typed character: a '}' on an indentation-only line is typed here, one tab further left. */
+	bool HandleIsTypedCharValid(const TCHAR Character);
+
+	/** Moves the bracket highlight along with the cursor. */
+	void HandleCursorMoved(const FTextLocation& Location);
 	void HandleTextChanged(const FText& NewVisibleText);
 	void HandleTextCommitted(const FText& NewVisibleText, ETextCommit::Type CommitType);
 

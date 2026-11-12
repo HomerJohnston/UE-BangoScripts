@@ -476,7 +476,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 						]
 					]
 
-					// The TEXT tab, floating on the graph's left edge: on the pane's right side when it's open, so
+					// The Source Editor tab, floating on the graph's left edge: on the pane's right side when it's open, so
 					// opening the pane pulls the tab out with it.
 					+ SOverlay::Slot()
 					.HAlign(HAlign_Left)
@@ -2252,7 +2252,7 @@ void SBangoScriptEditor::LoadScript(const FString& Script)
 	if (!Bango::BuildGraph(Source, Script + TEXT(".bango"), Document, Error))
 	{
 		// The text pane shows the file, so it can be fixed there (and applied), or elsewhere and reloaded.
-		ShowMessage(FText::Format(LOCTEXT("CantOpen", "This script can't be shown as a graph until its text is fixed. Fix it in the script text pane (the TEXT tab on the left) and Apply, or elsewhere and Reload:\n\n{0}"), FText::FromString(Error.ToString())));
+		ShowMessage(FText::Format(LOCTEXT("CantOpen", "This script can't be shown as a graph until its text is fixed. Fix it in the script text pane (the Source Editor tab on the left) and Apply, or elsewhere and Reload:\n\n{0}"), FText::FromString(Error.ToString())));
 		SetScriptText(Source);
 		SetTextPaneOpen(true, false); // at once: there's nothing else to show
 		TextError = Error.ToString();
@@ -2419,6 +2419,51 @@ void SBangoScriptEditor::UpdateDescriptionBox()
 
 // ---- Script text pane ----
 
+namespace BangoScriptEditorPrivate
+{
+	/** Shows its content turned a quarter turn anticlockwise, so it reads from bottom to top, and takes up the turned size in
+	 *  layout (a render transform on its own would leave the space of the unturned content). */
+	class SBangoSidewaysBox : public SCompoundWidget
+	{
+	public:
+		SLATE_BEGIN_ARGS(SBangoSidewaysBox) {}
+			SLATE_DEFAULT_SLOT(FArguments, Content)
+		SLATE_END_ARGS()
+
+		void Construct(const FArguments& InArgs)
+		{
+			ChildSlot
+			[
+				InArgs._Content.Widget
+			];
+		}
+
+		virtual FVector2D ComputeDesiredSize(float) const override
+		{
+			const FVector2D ChildSize = FVector2D(ChildSlot.GetWidget()->GetDesiredSize());
+			return FVector2D(ChildSize.Y, ChildSize.X);
+		}
+
+		virtual void OnArrangeChildren(const FGeometry& AllottedGeometry, FArrangedChildren& ArrangedChildren) const override
+		{
+			const TSharedRef<SWidget>& Child = ChildSlot.GetWidget();
+			if (!ArrangedChildren.Accepts(Child->GetVisibility()))
+			{
+				return;
+			}
+			// The content gets its own (unturned) size, centred on this box, and is turned about its centre.
+			const FVector2D ChildSize = FVector2D(Child->GetDesiredSize());
+			const FVector2D Offset = (FVector2D(AllottedGeometry.GetLocalSize()) - ChildSize) * 0.5;
+			const FGeometry ChildGeometry = AllottedGeometry.MakeChild(
+				ChildSize,
+				FSlateLayoutTransform(Offset),
+				FSlateRenderTransform(FQuat2D(FMath::DegreesToRadians(-90.0f))),
+				FVector2D(0.5, 0.5));
+			ArrangedChildren.AddWidget(FArrangedWidget(Child, ChildGeometry));
+		}
+	};
+}
+
 TSharedRef<SWidget> SBangoScriptEditor::MakeTextTab()
 {
 	// A folder tab standing out from the graph's left edge: square on the left (against the edge or the pane), rounded on the right.
@@ -2441,7 +2486,7 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeTextTab()
 		[
 			SNew(SBorder)
 			.BorderImage(&TabBrush)
-			.Padding(FMargin(5.0f, 10.0f, 6.0f, 10.0f))
+			.Padding(FMargin(4.0f, 12.0f, 5.0f, 12.0f))
 			.BorderBackgroundColor_Lambda([this]() -> FSlateColor
 			{
 				if (bTextPaneOpen)
@@ -2451,15 +2496,17 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeTextTab()
 				return TextTabButton.IsValid() && TextTabButton->IsHovered() ? FSlateColor(FStyleColors::Hover) : FSlateColor(FStyleColors::Dropdown);
 			})
 			[
-				// Written down the tab, a letter a line.
-				SNew(STextBlock)
-				.Text(LOCTEXT("TextTab", "T\nE\nX\nT"))
-				.Justification(ETextJustify::Center)
-				.Font(FAppStyle::GetFontStyle("BoldFont"))
-				.ColorAndOpacity_Lambda([this]() -> FSlateColor
-				{
-					return bTextPaneOpen || (TextTabButton.IsValid() && TextTabButton->IsHovered()) ? FSlateColor::UseForeground() : FSlateColor::UseSubduedForeground();
-				})
+				// Written along the tab, turned to read from bottom to top.
+				SNew(BangoScriptEditorPrivate::SBangoSidewaysBox)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("TextTab", "Source Editor"))
+					.Font(FAppStyle::GetFontStyle("BoldFont"))
+					.ColorAndOpacity_Lambda([this]() -> FSlateColor
+					{
+						return bTextPaneOpen || (TextTabButton.IsValid() && TextTabButton->IsHovered()) ? FSlateColor::UseForeground() : FSlateColor::UseSubduedForeground();
+					})
+				]
 			]
 		];
 }
@@ -2516,7 +2563,7 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeTextPane()
 		})
 		.OnKeyDownHandler_Lambda([this](const FGeometry&, const FKeyEvent& KeyEvent)
 		{
-			if ((KeyEvent.GetKey() == EKeys::Enter || KeyEvent.GetKey() == EKeys::Virtual_Accept) && KeyEvent.IsControlDown())
+			if (KeyEvent.GetKey() == EKeys::Enter && KeyEvent.IsControlDown())
 			{
 				if (!OpenScript.IsEmpty())
 				{
@@ -2538,12 +2585,25 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeTextPane()
 			[
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot()
-				.FillWidth(1.0f)
+				.AutoWidth()
 				.VAlign(VAlign_Center)
 				[
 					SNew(STextBlock)
-					.Text(LOCTEXT("TextPaneHeading", "SCRIPT TEXT"))
+					.Text(LOCTEXT("TextPaneHeading", "SCRIPT"))
 					.Font(FAppStyle::GetFontStyle("BoldFont"))
+				]
+				// That the text has been typed in and isn't applied yet, beside the heading.
+				+ SHorizontalBox::Slot()
+				.FillWidth(1.0f)
+				.VAlign(VAlign_Center)
+				.Padding(8.0f, 0.0f, 0.0f, 0.0f)
+				[
+					SNew(STextBlock)
+					.Visibility_Lambda([this]() { return bTextEdited ? EVisibility::Visible : EVisibility::Hidden; })
+					.Text(LOCTEXT("TextEditedNote", "Press (Ctrl+Enter) to apply changes."))
+					.Font(FAppStyle::GetFontStyle("BoldFont"))
+					.ColorAndOpacity(FStyleColors::AccentOrange)
+					.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
 				]
 				+ SHorizontalBox::Slot()
 				.AutoWidth()
@@ -2574,23 +2634,16 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeTextPane()
 					})
 				]
 			]
-			// Why the text doesn't read, or that it's been typed in and isn't applied yet.
+			// Why the text doesn't read. (That it's been edited is shown beside the heading.)
 			+ SVerticalBox::Slot()
 			.AutoHeight()
 			.Padding(2.0f, 0.0f, 2.0f, 4.0f)
 			[
 				SNew(STextBlock)
 				.AutoWrapText(true)
-				.Visibility_Lambda([this]() { return !TextError.IsEmpty() || bTextEdited ? EVisibility::Visible : EVisibility::Collapsed; })
-				.Text_Lambda([this]()
-				{
-					return !TextError.IsEmpty() ? FText::FromString(TextError)
-						: LOCTEXT("TextEditedNote", "Edited. Apply (Ctrl+Enter) to update the graph; until then, changes made in the graph don't show here.");
-				})
-				.ColorAndOpacity_Lambda([this]()
-				{
-					return !TextError.IsEmpty() ? FSlateColor(FLinearColor(1.0f, 0.4f, 0.35f)) : FSlateColor::UseSubduedForeground();
-				})
+				.Visibility_Lambda([this]() { return !TextError.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed; })
+				.Text_Lambda([this]() { return FText::FromString(TextError); })
+				.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.4f, 0.35f)))
 			]
 			+ SVerticalBox::Slot()
 			.FillHeight(1.0f)

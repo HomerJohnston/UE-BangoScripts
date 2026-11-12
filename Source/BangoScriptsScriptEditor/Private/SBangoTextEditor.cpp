@@ -16,6 +16,7 @@
 #include "Widgets/SNullWidget.h"
 #include "Widgets/Text/STextBlock.h"
 #include "BangoSyntaxMarshaller.h"
+#include "BangoEditingAids.h"
 #include "BangoSyntaxStyle.h"
 #include "SBangoScrollFollower.h"
 
@@ -93,6 +94,8 @@ void SBangoTextEditor::Construct(const FArguments& InArgs)
 							.OnTextChanged(this, &SBangoTextEditor::HandleTextChanged)
 							.OnTextCommitted(this, &SBangoTextEditor::HandleTextCommitted)
 							.OnKeyDownHandler(this, &SBangoTextEditor::HandleKeyDown)
+							.OnIsTypedCharValid(this, &SBangoTextEditor::HandleIsTypedCharValid)
+							.OnCursorMoved(this, &SBangoTextEditor::HandleCursorMoved)
 						]
 
 						+ SVerticalBox::Slot()
@@ -233,6 +236,62 @@ const FSlateFontInfo& SBangoTextEditor::GetFont() const
 	return SyntaxStyle->GetDefaultStyle().Font;
 }
 
+void SBangoTextEditor::InsertNewLine()
+{
+	// One undoable edit: the replaced selection, the line break and the indentation.
+	SMultiLineEditableText::FScopedEditableTextTransaction Transaction(TextBox);
+
+	if (TextBox->AnyTextSelected())
+	{
+		TextBox->DeleteSelectedText();
+	}
+
+	// The cursor's line as it is now (the metadata tracker hears about changes only when the edit ends).
+	const FTextLocation Cursor = TextBox->GetCursorLocation();
+	TArray<FString> Lines;
+	FBangoMetadataTracker::SplitLines(TextBox->GetText().ToString(), Lines);
+	const FString Line = Lines.IsValidIndex(Cursor.GetLineIndex()) ? Lines[Cursor.GetLineIndex()] : FString();
+
+	const FBangoNewLineEdit Edit = FBangoEditingAids::NewLine(Line, Cursor.GetOffset());
+	TextBox->InsertTextAtCursor(Edit.Insert);
+	TextBox->GoTo(FTextLocation(Cursor.GetLineIndex() + Edit.CursorLinesDown, Edit.CursorColumn));
+}
+
+bool SBangoTextEditor::HandleIsTypedCharValid(const TCHAR Character)
+{
+	// A '}' typed on a line that's only indentation takes one tab off first, so it lines up with its block's start.
+	if (Character != TEXT('}') || !TextBox.IsValid() || TextBox->IsTextReadOnly() || TextBox->AnyTextSelected())
+	{
+		return true;
+	}
+	const FTextLocation Cursor = TextBox->GetCursorLocation();
+	const TArray<FString>& Lines = Metadata.GetLines();
+	if (!Lines.IsValidIndex(Cursor.GetLineIndex()))
+	{
+		return true;
+	}
+	const int32 TabColumn = FBangoEditingAids::OutdentBeforeClosingBrace(Lines[Cursor.GetLineIndex()], Cursor.GetOffset());
+	if (TabColumn == INDEX_NONE)
+	{
+		return true;
+	}
+
+	// Type it here instead, with the tab taken off, as one undoable edit; returning false stops it being typed again.
+	SMultiLineEditableText::FScopedEditableTextTransaction Transaction(TextBox);
+	TextBox->SelectText(FTextLocation(Cursor.GetLineIndex(), TabColumn), FTextLocation(Cursor.GetLineIndex(), TabColumn + 1));
+	TextBox->DeleteSelectedText();
+	TextBox->InsertTextAtCursor(FString(TEXT("}")));
+	return false;
+}
+
+void SBangoTextEditor::HandleCursorMoved(const FTextLocation& Location)
+{
+	FBangoTextPosition Position;
+	Position.Line = Location.GetLineIndex();
+	Position.Column = Location.GetOffset();
+	Marshaller->SetCursor(Position);
+}
+
 FReply SBangoTextEditor::HandleKeyDown(const FGeometry& Geometry, const FKeyEvent& KeyEvent)
 {
 	// Tab indents (Bango uses one tab per block level) instead of moving focus
@@ -242,6 +301,15 @@ FReply SBangoTextEditor::HandleKeyDown(const FGeometry& Geometry, const FKeyEven
 	{
 		return FReply::Handled();
 	}
+
+	// Enter keeps the line's indentation (FBangoEditingAids::NewLine). Ctrl+Enter is left for the caller (Apply).
+	if (KeyEvent.GetKey() == EKeys::Enter && !KeyEvent.IsControlDown() && !KeyEvent.IsAltDown() && !KeyEvent.IsCommandDown()
+		&& TextBox.IsValid() && !TextBox->IsTextReadOnly())
+	{
+		InsertNewLine();
+		return FReply::Handled();
+	}
+
 	return OnKeyDownHandler.IsBound() ? OnKeyDownHandler.Execute(Geometry, KeyEvent) : FReply::Unhandled();
 }
 

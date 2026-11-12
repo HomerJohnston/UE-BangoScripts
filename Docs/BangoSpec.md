@@ -4,11 +4,13 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
 
-**Changes in v0.30:** strings use the same placeholders as texts, Unreal's `{0}`, `{1}`, ... with backtick escapes, instead of `%0` and `%%` (section 7).
+**Changes in v0.30:** `GetPos` takes its entity as an argument, `GetPos(_who)`, not as a target (section 7).
+
+**Changes in v0.30, continued:** strings use the same placeholders as texts, Unreal's `{0}`, `{1}`, ... with backtick escapes, instead of `%0` and `%%` (section 7).
 
 **Changes in v0.30, continued:** a local's name no longer has to start with `_`, and a global's may (section 4). A name means the graph's local, parameter or loop variable if there is one, and otherwise a global.
 
-**Changes in v0.30, continued:** a script can have a **description**: the `//` lines it starts with, edited in the new **Script Description** box at the top of the script editor's left pane, and not shown in the graph (section 12). When saving, each part of the file gets a section heading: `// ============ SCRIPT INPUT ====================`, `GLOBAL VARS`, `SCRIPT VARS`, `SCRIPT BODY` and `FUNCTIONS`, and a `// ----------------------------------------------` line goes between functions. Reading skips any comment that starts with `// ====` (section 12). The script editor has a **script text pane** beside the graph, opened with the **TEXT** tab on the graph area's left edge. It shows the script as it would be saved, and follows the graph; text typed there is applied to the graph with **Apply** (Ctrl+Enter), and a script whose text doesn't read can be fixed there (section 12).
+**Changes in v0.30, continued:** a script can have a **description**: the `//` lines it starts with, edited in the new **Script Description** box at the top of the script editor's left pane, and not shown in the graph (section 12). When saving, each part of the file gets a section heading: `// ============ SCRIPT INPUT ====================`, `GLOBAL VARS`, `SCRIPT VARS`, `SCRIPT BODY` and `FUNCTIONS`, and a `// ----------------------------------------------` line goes between functions. Reading skips any comment that starts with `// ====` (section 12). The script editor has a **script text pane** beside the graph, opened with the **Source Editor** tab on the graph area's left edge. It shows the script as it would be saved, and follows the graph; text typed there is applied to the graph with **Apply** (Ctrl+Enter), and a script whose text doesn't read can be fixed there (section 12).
 
 **Changes in v0.29:** `IsDefined(x)` is replaced by **`IsNil(x)`**, which gives the opposite answer: `if (!IsDefined(_x))` is now `if (IsNil(_x))` (section 3). New **`IsNull`** command: `IsNull(_who)` is true if the entity is `nil`, or no actor in the level has its Bango ID because it was never there or has been destroyed (section 7).
 
@@ -189,11 +191,11 @@ _path = [[0, 0, 0], _pos];
 - An array literal next to a vector in an operator is a vector of the same kind: `_pos + [0, 0, 100]`, `_v -= [1, 0, 0];`.
 - A vector variable declared without a value is `nil`, like any other type.
 
-**Parts.** `_v.x`, `_v.y` and `_v.z` read and write the parts, which are floats. They work after array elements and call results too: `_path[2].y`, `_who GetPos().z`.
+**Parts.** `_v.x`, `_v.y` and `_v.z` read and write the parts, which are floats. They work after array elements and call results too: `_path[2].y`, `GetPos(_who).z`.
 ```
 _pos.z = 0;
 _pos.x += 10;
-_height = _who GetPos().z;
+_height = GetPos(_who).z;
 ```
 - A `vector2` has only `x` and `y`. Parts are lowercase; `.X` and any other name after a `.` is a compile error.
 - Setting a part of a `nil` vector stops the script; give the vector a whole value first. A part can't be set to `nil`.
@@ -520,7 +522,7 @@ _t = Random(3.0, 5.0);
 - Command names are written in PascalCase (`Hint`, `SetPos`, `RandomInt`), and so are their parameter names (`Msg`, `Time`, `Min`), since they label the fields of the command's graph node. A parameter can also have a short description, shown when hovering its value on the node: `.Param(TEXT("Time"), Double, TEXT("Seconds"))`. Registering a command with a parameter name that starts with a lowercase letter logs a warning.
 - For the graph editor, a signature can also have a category and a one-line description (`.InCategory(TEXT("Actors")).Describe(TEXT("Moves the actor."))`), and a variadic command can choose how its extra values are labelled (`.Variadic(TEXT("{"), 0, TEXT("}"))` gives `{0}`, `{1}`, ...; the default gives `Value 1`, `Value 2`, ...). `.WithPlaceholders()` after a parameter marks it as a text whose `{0}`, `{1}`, ... the extra values fill, as `Hint`, `Log` and `Format` do; the graph editor then shows a row for each placeholder (section 12).
 - A command's signature declares:
-  - **Target:** either none, or a required target of one type. A command with a target can't be called without one, and vice versa.
+  - **Target:** either none, or a required target of one type. A command with a target can't be called without one, and vice versa. *Guideline (not yet a fixed rule):* give a command a target only if it also takes at least one argument (`@john Speak("Hi")`, `_who SetPos(_p)`). A command that only needs the thing it works on takes it as its first and only argument instead (`GetPos(_who)`, `IsNull(_who)`).
   - **Parameters:** typed. Trailing parameters may be **optional**. Normally a `nil` variable passed to a command, or an entity naming no actor, stops the script before the command runs. `.MayBeNil()` after a `.Param(...)` hands the command that argument as it is instead, `nil` included, and leaves the actor check to the command (as `IsNull` does).
   - **Variadic:** optionally, any number of extra arguments of any type after the parameters (like `Hint`'s `{0}` values).
   - **Return type:** optional.
@@ -568,7 +570,7 @@ Every placeholder needs a value. When the text is written as a literal (`Log("{0
 | `GameTime()` → `float` | Seconds since the level started; stops while the game is paused. |
 | `ToEntity(string Name)` → `entity` | The entity with this Bango ID name, for names that come from data (`ToEntity("john")` is the same as `@john`). A name that isn't letters, digits and `_` (or starts with a digit) is an error. |
 | `entity SetPos(vector3 Pos)` | Moves the actor. |
-| `entity GetPos()` → `vector3` | The actor's location. |
+| `GetPos(entity Entity)` → `vector3` | The actor's location. |
 | `entity SetHidden(bool Hidden)` | Hides or shows the actor in game. |
 | `entity DistanceTo(entity Other)` → `float` | Distance between two actors. |
 | `IsNull(entity Entity)` → `bool` | True if the entity is `nil`, or no actor in the level has its Bango ID: it was never there (or never registered, like a duplicate name), or it's been destroyed. It never stops the script for those: a `nil` variable, a global nobody made or an element past the end counts as `nil` here, and a missing actor isn't an error. Use it before a command that would stop the script: `if (!IsNull(_who)) { _who SetHidden(true); }`. |
@@ -906,7 +908,7 @@ The graph editor is the **Bango Scripts** tab (Tools menu). It doesn't need the 
   - Each of the changes in Globals and Locals is one undoable edit.
   - **Dragging a variable onto the graph:** a row of **Inputs**, **Globals** or **Locals** (by anything but its grab handle), or a loop variable, can be dragged onto the graph. Dropping it opens a menu of the nodes that work on that variable, with it filled in: **Set** for every type; **Add To** for `int`, `float`, `string` and vectors; **Subtract From**, **Multiply** and **Divide** for `int`, `float` and vectors; **Increment** and **Decrement** for `int`; and for arrays **Push**, **Insert At**, **Pop**, **Remove At** and **For Each** (with a new loop variable). A global whose type isn't known (declared elsewhere) offers only Set. The node picked goes where the variable was dropped; dropped on a pin, it's wired to it, as with a node from the add-node menu.
   - **Changes on disk:** when something other than the graph editor changes the open script's file (a text editor, source control), the editor notices within a moment. With no unsaved changes, it **reloads** the script, keeping the shown graph and its view. With unsaved changes, it never throws them away by itself: a bar above the graph says the file changed, with **Reload** (read the file, losing the changes) and **Keep Mine** (keep them; the bar goes away until the file changes again, and Save then overwrites the file without asking). A script tab that isn't shown checks when it's shown again. A file that's been deleted is left alone.
-  - **Script text pane** (between the lists and the graph): the script's text. It's hidden to start with. The **TEXT** tab, a folder tab floating on the graph's left edge, pulls it out: the pane slides open from the left, and the tab rides out on its right side. Clicking the tab again slides it back. When open, the splitter between it and the graph resizes it, and it opens to that width next time.
+  - **Script text pane** (between the lists and the graph): the script's text. It's hidden to start with. The **Source Editor** tab, a folder tab floating on the graph's left edge with its name written up it (reading bottom to top), pulls it out: the pane slides open from the left, and the tab rides out on its right side. Clicking the tab again slides it back. When open, the splitter between it and the graph resizes it, and it opens to that width next time.
     - It shows the script as it would be saved, and follows the graph as it's edited. It's the Bango text editor (**Bango Text Editor Spec**): Bango syntax highlighting, tabs typed and shown as tabs. Line numbers are shown down its left side, and scroll with the text.
     - It can be typed in. Typed text isn't used until it's applied: **Apply** (or Ctrl+Enter) makes the graphs again from it, keeping the shown graph and its view, like Reload. Applying can't be undone with Undo. If the text doesn't read, the error is shown above the text, the cursor goes to where it is, and the graphs are left as they are. **Revert** throws the typing away. While there's typed text that isn't applied, the graph doesn't change the pane's text, a note says so, and the script counts as having unsaved changes; **Save** and **Compile** apply it first (and don't go ahead if it doesn't read).
     - A script whose text doesn't read opens with the pane shown, holding the file's text and its error, so it can be fixed there and applied.
