@@ -13,6 +13,7 @@
 
 class FUICommandList;
 class SBox;
+class SButton;
 class SGraphEditor;
 class SInlineEditableTextBlock;
 class SMultiLineEditableTextBox;
@@ -150,8 +151,16 @@ private:
 	TSharedPtr<STextBlock> LineNumbers;
 	/** How many line numbers LineNumbers shows. */
 	int32 LineNumberCount = 0;
-	/** Shown or hidden with the tab on the graph area's left edge. Hidden to start with. */
+	/** Shown or hidden with the TEXT tab on the graph's left edge (SetTextPaneOpen). Hidden to start with. */
 	bool bTextPaneOpen = false;
+	/** How far the pane is slid out, 0 (hidden) to 1 (open): it moves toward bTextPaneOpen when the tab is clicked. */
+	float TextPaneOpenness = 0.0f;
+	/** True while the pane is sliding (AnimateTextPane is running). */
+	bool bTextPaneSliding = false;
+	/** The text pane's and the graph's shares of the width when the pane is open (the splitter between them sets these). */
+	float TextPaneValue = 0.35f;
+	float GraphPaneValue = 0.65f;
+	TSharedPtr<SButton> TextTabButton;
 	/** The text as last put in the box (from the graphs, or the file if it didn't read), so typing in it can be told apart. */
 	FString TextShown;
 	/** The box has been typed in since TextShown: the graphs don't change it until the typing is applied or reverted. */
@@ -307,6 +316,12 @@ private:
 
 	// Script text pane
 	TSharedRef<SWidget> MakeTextPane();
+	/** The TEXT tab: a folder tab on the graph's left edge that pulls the pane out, or pushes it back. */
+	TSharedRef<SWidget> MakeTextTab();
+	/** Opens or closes the text pane, sliding it (bAnimate) or at once. */
+	void SetTextPaneOpen(bool bOpen, bool bAnimate);
+	/** Every frame while the pane is sliding: moves TextPaneOpenness toward bTextPaneOpen. */
+	EActiveTimerReturnType AnimateTextPane(double InCurrentTime, float InDeltaTime);
 	/** Shows a number for each line of Text beside the script text. */
 	void UpdateLineNumbers(const FString& Text);
 	/** Every frame while the pane is shown: scrolls the line numbers to where the text is scrolled. */

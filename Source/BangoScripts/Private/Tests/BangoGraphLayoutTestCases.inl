@@ -52,8 +52,8 @@ struct FBangoLayoutTestCase
 static const FBangoLayoutTestCase GBangoLayoutTestCases[] =
 {
 	// ---- Commands ----
-	{ EBangoGraphNodeKind::Call, false, TEXT("Sleep(1.0)"), TEXT("Sleep (Command) | seconds <float>: `1.0`") },
-	{ EBangoGraphNodeKind::Call, false, TEXT("Sleep( 1.0 )"), TEXT("Sleep (Command) | seconds <float>: `1.0`") },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Sleep(1.0)"), TEXT("Sleep (Command) | seconds <float>: `1.0`?") },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Sleep( 1.0 )"), TEXT("Sleep (Command) | seconds <float>: `1.0`?") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"%0 of %1\", _a, Random(1.0, 2.0))"), TEXT("Hint (Command) | text <string>: `\"%0 of %1\"` | %0 <any>: `_a`? | %1 <any>: `Random(1.0, 2.0)`?") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("Collect(1, \"x\")"), TEXT("Collect (Command) | Value 1 <any>: `1`? | Value 2 <any>: `\"x\"`?") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"a, b\")"), TEXT("Hint (Command) | text <string>: `\"a, b\"`") },
@@ -75,8 +75,8 @@ static const FBangoLayoutTestCase GBangoLayoutTestCases[] =
 	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(Format(\"%0\", 1))"), TEXT("Hint (Command) | text <string>: `Format(\"%0\", 1)`") },
 
 	// Problems the node shows straight away
-	{ EBangoGraphNodeKind::Call, false, TEXT("Sleep(1.0, 2.0)"), TEXT("Sleep (Command) | seconds <float>: `1.0` | Value 1 <any>: `2.0`? !! Sleep takes 1 argument(s), but 2 are given.") },
-	{ EBangoGraphNodeKind::Call, false, TEXT("@john Sleep(1.0)"), TEXT("Sleep (Command) | Target: `@john` | seconds <float>: `1.0` !! Sleep doesn't take a target.") },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Sleep(1.0, 2.0)"), TEXT("Sleep (Command) | seconds <float>: `1.0`? | Value 1 <any>: `2.0`? !! Sleep takes at most 1 argument(s), but 2 are given.") },
+	{ EBangoGraphNodeKind::Call, false, TEXT("@john Sleep(1.0)"), TEXT("Sleep (Command) | Target: `@john` | seconds <float>: `1.0`? !! Sleep doesn't take a target.") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("Foo(1)"), TEXT("Foo (Generic) | Call: `Foo(1)` !! Unknown command or function 'Foo'.") },
 
 	// Expressions around a call are generic nodes

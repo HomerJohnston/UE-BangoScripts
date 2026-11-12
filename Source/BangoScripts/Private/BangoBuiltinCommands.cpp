@@ -219,17 +219,15 @@ namespace Bango
 			Add(Commands, Command);
 		}
 
-		// Sleep(seconds): pauses the script. Sleep(0) waits until the next frame.
+		// Sleep(seconds): pauses the script. Sleep(0), or Sleep() with no time, waits until the next frame.
 		{
 			FBangoCommand Command;
-			Command.Signature = FBangoCommandSignature::Make(TEXT("Sleep")).Param(TEXT("Time"), Double, TEXT("Seconds")).InCategory(TEXT("Time")).Describe(TEXT("Pauses the script for a number of seconds."));
+			Command.Signature = FBangoCommandSignature::Make(TEXT("Sleep")).Optional().Param(TEXT("Time"), Double, TEXT("Seconds (none: until the next frame)"))
+				.InCategory(TEXT("Time")).Describe(TEXT("Pauses the script for a number of seconds, or until the next frame if no time is given."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{
-				if (!RequireArgs(Call, 1))
-				{
-					return EBangoCommandResult::Failed;
-				}
-				const double Seconds = Call.Args[0].GetDouble();
+				// No time (or nil): the same as Sleep(0), the next frame.
+				const double Seconds = Call.Args.Num() > 0 && !Call.Args[0].IsNil() ? Call.Args[0].GetDouble() : 0.0;
 				if (Seconds < 0.0)
 				{
 					return Call.Fail(FString::Printf(TEXT("Can't sleep for a negative time (%s seconds)."), *FString::SanitizeFloat(Seconds)));

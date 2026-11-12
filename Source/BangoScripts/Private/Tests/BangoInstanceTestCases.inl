@@ -125,10 +125,10 @@ static void BangoMakeRuntimeTestCommands(FBangoCommandTable& Table, TArray<FStri
 
 	// Latent: waits until the given seconds have passed.
 	FBangoCommand Sleep;
-	Sleep.Signature = FBangoCommandSignature::Make(TEXT("Sleep")).Param(TEXT("seconds"), Double);
+	Sleep.Signature = FBangoCommandSignature::Make(TEXT("Sleep")).Optional().Param(TEXT("seconds"), Double); // like the built-in Sleep
 	Sleep.Start = [](FBangoCommandCall& Call)
 	{
-		Call.LatentState.Add(Call.Args[0]);
+		Call.LatentState.Add(Call.Args.Num() > 0 ? Call.Args[0] : FBangoValue::MakeDouble(0.0)); // Sleep(): the next frame
 		return EBangoCommandResult::Pending;
 	};
 	Sleep.Poll = [](FBangoCommandCall& Call)
@@ -423,6 +423,23 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 		Expect(Instance.Resume(Context) == EBangoInstanceStatus::Waiting, TEXT("pause: still waiting after 0.5s"));
 		Expect(Instance.Resume(Context) == EBangoInstanceStatus::Finished, TEXT("pause: finishes after 1s"));
 		Expect(Log.Num() == 2 && Log[1].Equals(TEXT("john: done"), ESearchCase::CaseSensitive), TEXT("pause: continues after Sleep"));
+	}
+
+	// ---- Sleep() with no time waits one frame, like Sleep(0) ----
+	{
+		TSharedPtr<FBangoProgram> FrameProgram = MakeShared<FBangoProgram>();
+		Expect(Bango::CompileSource(TEXT("Hint(\"a\");\nSleep();\nHint(\"b\");\nSleep(0);\nHint(\"c\");"), TEXT("frame.bango"), Commands, *FrameProgram, CompileError),
+			TEXT("Sleep(): compiles"));
+		Log.Reset();
+		FBangoGlobalStore Globals;
+		BangoMakeRuntimeTestGlobals(Globals);
+		Context.Globals = &Globals;
+		FBangoInstance Instance;
+		FBangoRuntimeError Error;
+		Expect(Instance.Start(FrameProgram, Commands, Globals, 1, Error), TEXT("Sleep(): starts"));
+		Expect(Instance.Resume(Context) == EBangoInstanceStatus::Waiting && Log.Num() == 1, TEXT("Sleep(): waits after 'a'"));
+		Expect(Instance.Resume(Context) == EBangoInstanceStatus::Waiting && Log.Num() == 2, TEXT("Sleep(): one frame later, 'b', then Sleep(0) waits"));
+		Expect(Instance.Resume(Context) == EBangoInstanceStatus::Finished && Log.Num() == 3, TEXT("Sleep(0): one frame later, 'c'"));
 	}
 
 	// ---- Terminate ----

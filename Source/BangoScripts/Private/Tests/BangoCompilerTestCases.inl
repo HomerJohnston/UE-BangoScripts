@@ -18,7 +18,7 @@ static void BangoMakeTestCommands(FBangoCommandTable& Table)
 	Table.Add(FBangoCommandSignature::Make(TEXT("Wave")).Optional().Param(TEXT("times"), Int).Param(TEXT("speed"), Double), Error);
 	Table.Add(FBangoCommandSignature::Make(TEXT("Speak")).Target(Entity).Param(TEXT("text"), String), Error);
 	Table.Add(FBangoCommandSignature::Make(TEXT("AwaitSpeak")).Optional().Param(TEXT("pause"), Double), Error);
-	Table.Add(FBangoCommandSignature::Make(TEXT("Sleep")).Param(TEXT("seconds"), Double), Error);
+	Table.Add(FBangoCommandSignature::Make(TEXT("Sleep")).Optional().Param(TEXT("seconds"), Double), Error); // like the built-in Sleep
 	Table.Add(FBangoCommandSignature::Make(TEXT("Random")).Param(TEXT("min"), Double).Param(TEXT("max"), Double).Returns(Double), Error);
 	Table.Add(FBangoCommandSignature::Make(TEXT("SetDamage")).Target(Entity).Param(TEXT("amount"), Double), Error);
 	Table.Add(FBangoCommandSignature::Make(TEXT("SetLocked")).Target(Entity).Param(TEXT("locked"), Bool), Error);
@@ -287,7 +287,7 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 	{ TEXT("command with wrong case"), TEXT("hint(\"x\");"), nullptr, TEXT("(1:1)"), TEXT("Did you mean 'Hint'?") },
 	{ TEXT("array command with wrong case"), TEXT("int[] _a = [];\n_a push(1);"), nullptr, TEXT("(2:4)"), TEXT("Did you mean 'Push'?") },
 	{ TEXT("function with wrong case"), TEXT("function void Greet()\n{\n};\ngreet();"), nullptr, TEXT("(4:1)"), TEXT("Did you mean 'Greet'?") },
-	{ TEXT("wrong argument count"), TEXT("Sleep();"), nullptr, TEXT("(1:1)"), TEXT("Wrong number of arguments") },
+	{ TEXT("wrong argument count"), TEXT("Sleep(1.0, 2.0);"), nullptr, TEXT("(1:1)"), TEXT("Wrong number of arguments") },
 	{ TEXT("missing target"), TEXT("Speak(\"hi\");"), nullptr, TEXT("(1:1)"), TEXT("needs a target") },
 	{ TEXT("unexpected target"), TEXT("@john Hint(\"a\");"), nullptr, TEXT("(1:7)"), TEXT("doesn't take a target") },
 	{ TEXT("target type"), TEXT("5 Speak(\"x\");"), nullptr, TEXT("(1:1)"), TEXT("The target of 'Speak' needs an entity, but this is an int") },

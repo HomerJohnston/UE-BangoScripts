@@ -467,7 +467,8 @@ namespace BangoGraphLayoutPrivate
 			Out.Fields.Add(Extra);
 			if (bGiven && !Callee.bVariadic && Out.Error.IsEmpty())
 			{
-				Out.Error = FString::Printf(TEXT("%s takes %d argument(s), but %d are given."), *Call->Name, Callee.ParamNames.Num(), Args.Num());
+				Out.Error = FString::Printf(TEXT("%s takes %s%d argument(s), but %d are given."), *Call->Name,
+					Callee.NumRequired < Callee.ParamNames.Num() ? TEXT("at most ") : TEXT(""), Callee.ParamNames.Num(), Args.Num());
 			}
 		}
 		// A command whose value must be used is never a node of its own: it goes in a Value, like `_s = Format(...)`.

@@ -45,6 +45,7 @@
 #include "SBangoTextEditor.h"
 #include "Framework/Text/TextLayout.h"
 #include "Styling/StyleColors.h"
+#include "Brushes/SlateRoundedBoxBrush.h"
 #include "DragAndDrop/DecoratedDragDropOp.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "BangoGraphMenu.h"
@@ -394,73 +395,35 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 			+ SSplitter::Slot()
 			.Value(0.82f)
 			[
-				SNew(SHorizontalBox)
+				SNew(SSplitter)
+				.Orientation(Orient_Horizontal)
 
-				// The tab on the left edge that shows or hides the script text pane.
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
+				// The script text pane. While it's hidden, the graph has the whole width. Opening and closing slide it
+				// (its share of the width grows from nothing, TextPaneOpenness); the splitter sets its open width.
+				+ SSplitter::Slot()
+				.Value_Lambda([this]() { return TextPaneValue * FMath::InterpEaseInOut(0.0f, 1.0f, TextPaneOpenness, 2.0f); })
+				.OnSlotResized_Lambda([this](float NewValue)
+				{
+					if (TextPaneOpenness >= 1.0f)
+					{
+						TextPaneValue = NewValue;
+					}
+				})
 				[
-					SNew(SBorder)
-					.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-					.Padding(0.0f)
+					SNew(SBox)
+					.Clipping(EWidgetClipping::ClipToBounds)
+					.Visibility_Lambda([this]() { return TextPaneOpenness > 0.0f ? EVisibility::Visible : EVisibility::Collapsed; })
 					[
-						SNew(SVerticalBox)
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(0.0f, 8.0f, 0.0f, 0.0f)
-						[
-							SNew(SButton)
-							.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-							.ContentPadding(FMargin(4.0f, 8.0f))
-							.ToolTipText_Lambda([this]()
-							{
-								return bTextPaneOpen
-									? LOCTEXT("HideTextTooltip", "Hide the script's text.")
-									: LOCTEXT("ShowTextTooltip", "Show the script's text beside the graph, where it can be edited too.");
-							})
-							.OnClicked_Lambda([this]()
-							{
-								bTextPaneOpen = !bTextPaneOpen;
-								if (bTextPaneOpen)
-								{
-									UpdateScriptText(nullptr);
-								}
-								return FReply::Handled();
-							})
-							[
-								// Written down the tab, a letter a line.
-								SNew(STextBlock)
-								.Text(LOCTEXT("TextTab", "T\nE\nX\nT"))
-								.Justification(ETextJustify::Center)
-								.Font(FAppStyle::GetFontStyle("BoldFont"))
-								.ColorAndOpacity_Lambda([this]()
-								{
-									return bTextPaneOpen ? FSlateColor(FStyleColors::Primary) : FSlateColor::UseForeground();
-								})
-							]
-						]
+						MakeTextPane()
 					]
 				]
 
-				+ SHorizontalBox::Slot()
-				.FillWidth(1.0f)
+				+ SSplitter::Slot()
+				.Value_Lambda([this]() { return GraphPaneValue; })
+				.OnSlotResized_Lambda([this](float NewValue) { GraphPaneValue = NewValue; })
 				[
-					SNew(SSplitter)
-					.Orientation(Orient_Horizontal)
-
-					// The script text pane. While it's hidden, the graph has the whole width.
-					+ SSplitter::Slot()
-					.Value(0.35f)
-					[
-						SNew(SBox)
-						.Visibility_Lambda([this]() { return bTextPaneOpen ? EVisibility::Visible : EVisibility::Collapsed; })
-						[
-							MakeTextPane()
-						]
-					]
-
-					+ SSplitter::Slot()
-					.Value(0.65f)
+					SNew(SOverlay)
+					+ SOverlay::Slot()
 					[
 						SNew(SVerticalBox)
 						// Shown when the file changed outside the editor while there are unsaved changes here.
@@ -519,6 +482,16 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 						[
 							SAssignNew(GraphHost, SBox)
 						]
+					]
+
+					// The TEXT tab, floating on the graph's left edge: on the pane's right side when it's open, so
+					// opening the pane pulls the tab out with it.
+					+ SOverlay::Slot()
+					.HAlign(HAlign_Left)
+					.VAlign(VAlign_Top)
+					.Padding(0.0f, 90.0f, 0.0f, 0.0f)
+					[
+						MakeTextTab()
 					]
 				]
 			]
@@ -2289,7 +2262,7 @@ void SBangoScriptEditor::LoadScript(const FString& Script)
 		// The text pane shows the file, so it can be fixed there (and applied), or elsewhere and reloaded.
 		ShowMessage(FText::Format(LOCTEXT("CantOpen", "This script can't be shown as a graph until its text is fixed. Fix it in the script text pane (the TEXT tab on the left) and Apply, or elsewhere and Reload:\n\n{0}"), FText::FromString(Error.ToString())));
 		SetScriptText(Source);
-		bTextPaneOpen = true;
+		SetTextPaneOpen(true, false); // at once: there's nothing else to show
 		TextError = Error.ToString();
 		if (Error.Line > 0)
 		{
@@ -2453,6 +2426,84 @@ void SBangoScriptEditor::UpdateDescriptionBox()
 }
 
 // ---- Script text pane ----
+
+TSharedRef<SWidget> SBangoScriptEditor::MakeTextTab()
+{
+	// A folder tab standing out from the graph's left edge: square on the left (against the edge or the pane), rounded on the right.
+	static const FSlateRoundedBoxBrush TabBrush(FLinearColor::White, FVector4(0.0f, 6.0f, 6.0f, 0.0f), FSlateColor(FStyleColors::InputOutline), 1.0f);
+
+	return SAssignNew(TextTabButton, SButton)
+		.ButtonStyle(FAppStyle::Get(), "NoBorder")
+		.ContentPadding(FMargin(0.0f))
+		.ToolTipText_Lambda([this]()
+		{
+			return bTextPaneOpen
+				? LOCTEXT("HideTextTooltip", "Put the script's text away.")
+				: LOCTEXT("ShowTextTooltip", "Pull out the script's text beside the graph, where it can be edited too.");
+		})
+		.OnClicked_Lambda([this]()
+		{
+			SetTextPaneOpen(!bTextPaneOpen, true);
+			return FReply::Handled();
+		})
+		[
+			SNew(SBorder)
+			.BorderImage(&TabBrush)
+			.Padding(FMargin(5.0f, 10.0f, 6.0f, 10.0f))
+			.BorderBackgroundColor_Lambda([this]() -> FSlateColor
+			{
+				if (bTextPaneOpen)
+				{
+					return FSlateColor(FStyleColors::Primary); // pulled out
+				}
+				return TextTabButton.IsValid() && TextTabButton->IsHovered() ? FSlateColor(FStyleColors::Hover) : FSlateColor(FStyleColors::Dropdown);
+			})
+			[
+				// Written down the tab, a letter a line.
+				SNew(STextBlock)
+				.Text(LOCTEXT("TextTab", "T\nE\nX\nT"))
+				.Justification(ETextJustify::Center)
+				.Font(FAppStyle::GetFontStyle("BoldFont"))
+				.ColorAndOpacity_Lambda([this]() -> FSlateColor
+				{
+					return bTextPaneOpen || (TextTabButton.IsValid() && TextTabButton->IsHovered()) ? FSlateColor::UseForeground() : FSlateColor::UseSubduedForeground();
+				})
+			]
+		];
+}
+
+void SBangoScriptEditor::SetTextPaneOpen(bool bOpen, bool bAnimate)
+{
+	bTextPaneOpen = bOpen;
+	if (bOpen)
+	{
+		UpdateScriptText(nullptr); // up to date before it slides into view
+	}
+	if (!bAnimate)
+	{
+		TextPaneOpenness = bOpen ? 1.0f : 0.0f;
+		return;
+	}
+	if (!bTextPaneSliding)
+	{
+		bTextPaneSliding = true;
+		RegisterActiveTimer(0.0f, FWidgetActiveTimerDelegate::CreateSP(this, &SBangoScriptEditor::AnimateTextPane));
+	}
+}
+
+EActiveTimerReturnType SBangoScriptEditor::AnimateTextPane(double, float InDeltaTime)
+{
+	static constexpr float SlideSeconds = 0.18f;
+	const float Target = bTextPaneOpen ? 1.0f : 0.0f;
+	TextPaneOpenness = FMath::FInterpConstantTo(TextPaneOpenness, Target, InDeltaTime, 1.0f / SlideSeconds);
+	if (FMath::IsNearlyEqual(TextPaneOpenness, Target))
+	{
+		TextPaneOpenness = Target;
+		bTextPaneSliding = false;
+		return EActiveTimerReturnType::Stop;
+	}
+	return EActiveTimerReturnType::Continue;
+}
 
 TSharedRef<SWidget> SBangoScriptEditor::MakeTextPane()
 {

@@ -4,6 +4,7 @@
 #include "Widgets/DeclarativeSyntaxSupport.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/SListView.h"
+#include "Widgets/Views/STreeView.h"
 
 class ITableRow;
 class SBangoScriptEditor;
@@ -35,6 +36,25 @@ private:
 
 	TArray<TSharedPtr<FString>> ScriptItems;
 	TSharedPtr<SListView<TSharedPtr<FString>>> ScriptList;
+
+	/** A folder or a script in the folder tree. */
+	struct FScriptTreeItem
+	{
+		/** Shown: the folder's or the script's name. */
+		FString Name;
+		/** A script's name as the list shows it (its path under the script folder, without .bango), or a folder's path under it ("" for the script folder itself). */
+		FString Path;
+		bool bFolder = false;
+		TArray<TSharedPtr<FScriptTreeItem>> Children;
+	};
+
+	/** The folder tree's one root: the script folder (Content/Bango). */
+	TArray<TSharedPtr<FScriptTreeItem>> TreeRoots;
+	TSharedPtr<STreeView<TSharedPtr<FScriptTreeItem>>> ScriptTree;
+	/** The folders open in the tree (by Path), kept when the tree is made again. The script folder starts open. */
+	TSet<FString> ExpandedFolders;
+	/** Showing the folder tree instead of the list. Remembered between sessions. */
+	bool bTreeView = false;
 	/** Set while the list's selection is changed in code, so it doesn't count as picking a script. */
 	bool bIgnoreScriptSelection = false;
 
@@ -49,6 +69,16 @@ private:
 	/** Finds every .bango file in the script folder again, keeping the shown script selected. */
 	void RefreshScriptList();
 	FReply OnRefreshClicked();
+
+	/** Makes the folder tree again from the script folder's folders and Files (paths under it, without .bango). */
+	void RebuildScriptTree(const TArray<FString>& Scripts, const TArray<FString>& Folders);
+	TSharedRef<ITableRow> OnGenerateTreeRow(TSharedPtr<FScriptTreeItem> Item, const TSharedRef<STableViewBase>& Owner);
+	void OnGetTreeChildren(TSharedPtr<FScriptTreeItem> Item, TArray<TSharedPtr<FScriptTreeItem>>& OutChildren);
+	void OnTreeSelectionChanged(TSharedPtr<FScriptTreeItem> Item, ESelectInfo::Type SelectInfo);
+	void OnTreeExpansionChanged(TSharedPtr<FScriptTreeItem> Item, bool bExpanded);
+	/** The tree item with this Path (a script or a folder), or null. Fills OutParents with the folders above it. */
+	TSharedPtr<FScriptTreeItem> FindTreeItem(const FString& Path, bool bFolder, TArray<TSharedPtr<FScriptTreeItem>>* OutParents = nullptr) const;
+	void SetTreeView(bool bInTreeView);
 
 	TSharedRef<ITableRow> OnGenerateScriptRow(TSharedPtr<FString> Item, const TSharedRef<STableViewBase>& Owner);
 	void OnScriptSelected(TSharedPtr<FString> Item, ESelectInfo::Type SelectInfo);
