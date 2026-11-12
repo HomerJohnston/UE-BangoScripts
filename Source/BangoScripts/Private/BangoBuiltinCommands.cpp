@@ -72,6 +72,25 @@ namespace BangoBuiltinPrivate
 		return Actor;
 	}
 
+	/** For a ReturnsNumber command: true if every argument is an int, so the result must be one too. */
+	static bool AllInts(const FBangoCommandCall& Call)
+	{
+		for (const FBangoValue& Arg : Call.Args)
+		{
+			if (!(Arg.GetType() == FBangoType::Int()))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/** Sets Call.Result to Value as an int if bInt (the value is then a whole number in the int range), otherwise as a float. */
+	static void SetNumberResult(FBangoCommandCall& Call, bool bInt, double Value)
+	{
+		Call.Result = bInt ? FBangoValue::MakeInt((int32)Value) : FBangoValue::MakeDouble(Value);
+	}
+
 	static bool ToInt(FBangoCommandCall& Call, double Value, int32& Out)
 	{
 		if (!(Value >= (double)MIN_int32 && Value <= (double)MAX_int32))
@@ -310,6 +329,118 @@ namespace Bango
 				return EBangoCommandResult::Done;
 			};
 			Add(Commands, Command);
+		}
+
+		// Min(a, b), Max(a, b) -> number: an int if both are ints, otherwise a float (spec section 7).
+		for (const bool bMax : { false, true })
+		{
+			FBangoCommand Command;
+			Command.Signature = FBangoCommandSignature::Make(bMax ? TEXT("Max") : TEXT("Min")).NumberParam(TEXT("A")).NumberParam(TEXT("B")).ReturnsNumber()
+				.InCategory(TEXT("Math")).Describe(bMax
+					? TEXT("The larger of two numbers: an int if both are ints, otherwise a float.")
+					: TEXT("The smaller of two numbers: an int if both are ints, otherwise a float."));
+			Command.Start = [bMax](FBangoCommandCall& Call)
+			{
+				if (!RequireArgs(Call, 2))
+				{
+					return EBangoCommandResult::Failed;
+				}
+				if (AllInts(Call))
+				{
+					const int32 A = Call.Args[0].GetInt();
+					const int32 B = Call.Args[1].GetInt();
+					Call.Result = FBangoValue::MakeInt(bMax ? FMath::Max(A, B) : FMath::Min(A, B));
+					return EBangoCommandResult::Done;
+				}
+				const double A = Call.Args[0].GetNumberAsDouble();
+				const double B = Call.Args[1].GetNumberAsDouble();
+				Call.Result = FBangoValue::MakeDouble(bMax ? FMath::Max(A, B) : FMath::Min(A, B));
+				return EBangoCommandResult::Done;
+			};
+			Add(Commands, Command);
+		}
+
+		// Abs(value) -> number: an int for an int, a float for a float.
+		{
+			FBangoCommand Command;
+			Command.Signature = FBangoCommandSignature::Make(TEXT("Abs")).NumberParam(TEXT("Value")).ReturnsNumber()
+				.InCategory(TEXT("Math")).Describe(TEXT("The number without its sign: an int for an int, a float for a float."));
+			Command.Start = [](FBangoCommandCall& Call)
+			{
+				if (!RequireArgs(Call, 1))
+				{
+					return EBangoCommandResult::Failed;
+				}
+				if (AllInts(Call))
+				{
+					const int32 Value = Call.Args[0].GetInt();
+					if (Value == MIN_int32)
+					{
+						return Call.Fail(TEXT("-2147483648 has no positive int (ints go up to 2147483647). Pass it as a float to get 2147483648.0."));
+					}
+					Call.Result = FBangoValue::MakeInt(FMath::Abs(Value));
+					return EBangoCommandResult::Done;
+				}
+				Call.Result = FBangoValue::MakeDouble(FMath::Abs(Call.Args[0].GetNumberAsDouble()));
+				return EBangoCommandResult::Done;
+			};
+			Add(Commands, Command);
+		}
+
+		// Clamp(value, min, max) -> number: an int if all three are ints, otherwise a float.
+		{
+			FBangoCommand Command;
+			Command.Signature = FBangoCommandSignature::Make(TEXT("Clamp")).NumberParam(TEXT("Value")).NumberParam(TEXT("Min")).NumberParam(TEXT("Max")).ReturnsNumber()
+				.InCategory(TEXT("Math")).Describe(TEXT("The value, kept from min to max: an int if all three are ints, otherwise a float."));
+			Command.Start = [](FBangoCommandCall& Call)
+			{
+				if (!RequireArgs(Call, 3))
+				{
+					return EBangoCommandResult::Failed;
+				}
+				const double Value = Call.Args[0].GetNumberAsDouble();
+				const double Min = Call.Args[1].GetNumberAsDouble();
+				const double Max = Call.Args[2].GetNumberAsDouble();
+				if (Min > Max)
+				{
+					return Call.Fail(FString::Printf(TEXT("Min (%s) is greater than Max (%s)."), *Call.Args[1].ToDebugString(), *Call.Args[2].ToDebugString()));
+				}
+				// Every int fits a double exactly, so for ints this gives one of the three ints back.
+				SetNumberResult(Call, AllInts(Call), FMath::Clamp(Value, Min, Max));
+				return EBangoCommandResult::Done;
+			};
+			Add(Commands, Command);
+		}
+
+		// Sin(rads), Cos(rads), SinDegrees(degrees), CosDegrees(degrees) -> float
+		{
+			struct FTrigCommand { const TCHAR* Name; const TCHAR* ParamName; const TCHAR* ParamDescription; bool bCos; bool bDegrees; const TCHAR* Description; };
+			static const FTrigCommand TrigCommands[] =
+			{
+				{ TEXT("Sin"),        TEXT("Rads"),    TEXT("An angle in radians"), false, false, TEXT("The sine of an angle in radians.") },
+				{ TEXT("Cos"),        TEXT("Rads"),    TEXT("An angle in radians"), true,  false, TEXT("The cosine of an angle in radians.") },
+				{ TEXT("SinDegrees"), TEXT("Degrees"), TEXT("An angle in degrees"), false, true,  TEXT("The sine of an angle in degrees.") },
+				{ TEXT("CosDegrees"), TEXT("Degrees"), TEXT("An angle in degrees"), true,  true,  TEXT("The cosine of an angle in degrees.") },
+			};
+			for (const FTrigCommand& Trig : TrigCommands)
+			{
+				FBangoCommand Command;
+				Command.Signature = FBangoCommandSignature::Make(Trig.Name).Param(Trig.ParamName, Double, Trig.ParamDescription).Returns(Double)
+					.InCategory(TEXT("Math")).Describe(Trig.Description);
+				const bool bCos = Trig.bCos;
+				const bool bDegrees = Trig.bDegrees;
+				Command.Start = [bCos, bDegrees](FBangoCommandCall& Call)
+				{
+					if (!RequireArgs(Call, 1))
+					{
+						return EBangoCommandResult::Failed;
+					}
+					const double Angle = bDegrees ? FMath::DegreesToRadians(Call.Args[0].GetDouble()) : Call.Args[0].GetDouble();
+					Call.Result = FBangoValue::MakeDouble(bCos ? FMath::Cos(Angle) : FMath::Sin(Angle));
+					return EBangoCommandResult::Done;
+				};
+				Add(Commands, Command);
+			}
 		}
 
 		// GameTime() -> double: seconds since the level started (pauses with the game).

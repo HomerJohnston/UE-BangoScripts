@@ -931,6 +931,18 @@ bool FBangoInstance::CallCommand(int32 NameIndex, int32 ArgCount, bool bHasTarge
 		return false;
 	}
 
+	// Number parameters take an int or a float; an undeclared global passed to one is only checked here.
+	for (int32 i = 0; i < Call.Args.Num() && i < Signature.Params.Num(); ++i)
+	{
+		const FBangoValue& Arg = Call.Args[i];
+		if (Signature.Params[i].bNumber && (Arg.IsNil() || Arg.GetType().IsArray()
+			|| (Arg.GetType().Base != EBangoBaseType::Int && Arg.GetType().Base != EBangoBaseType::Double)))
+		{
+			return RuntimeFail(FString::Printf(TEXT("%s: argument %d ('%s') must be a number (an int or a float), but it is %s."),
+				*Signature.Name, i + 1, *Signature.Params[i].Name, *ValueTypeText(Arg)));
+		}
+	}
+
 	if (Context.Entities)
 	{
 		auto CheckEntity = [&](const FBangoValue& Value) -> bool
@@ -966,6 +978,11 @@ bool FBangoInstance::CallCommand(int32 NameIndex, int32 ArgCount, bool bHasTarge
 
 	if (Result == EBangoCommandResult::Pending)
 	{
+		if (Signature.bReturnsNumber)
+		{
+			// Its result's type comes from the arguments, which aren't kept while a command is pending.
+			return RuntimeFail(FString::Printf(TEXT("Command '%s' returns a number (ReturnsNumber), so it can't be latent, but it returned Pending."), *Signature.Name));
+		}
 		if (!Command->Poll)
 		{
 			return RuntimeFail(FString::Printf(TEXT("Command '%s' returned Pending but has no Poll handler."), *Signature.Name));
@@ -993,7 +1010,19 @@ bool FBangoInstance::FinishCommand(EBangoCommandResult Result)
 		return RuntimeFail(FString::Printf(TEXT("%s: %s"), *Signature.Name, PendingCall.Error.IsEmpty() ? TEXT("the command failed.") : *PendingCall.Error));
 	}
 
-	if (Signature.bReturnsValue)
+	if (Signature.bReturnsNumber)
+	{
+		// The compiler expects an int if every number argument was an int, and a float otherwise (like +).
+		const FBangoType Expected = Signature.NumberResultIsInt(PendingCall.Args) ? FBangoType::Int() : FBangoType::Double();
+		FBangoValue Converted;
+		if (PendingCall.Result.IsNil() || !PendingCall.Result.TryConvertTo(Expected, Converted))
+		{
+			return RuntimeFail(FString::Printf(TEXT("Command '%s' returned %s, but with these arguments it should return %s."),
+				*Signature.Name, *ValueTypeText(PendingCall.Result), *TypeText(Expected)));
+		}
+		Stack.Add(MoveTemp(Converted));
+	}
+	else if (Signature.bReturnsValue)
 	{
 		FBangoValue Converted;
 		if (PendingCall.Result.IsNil())

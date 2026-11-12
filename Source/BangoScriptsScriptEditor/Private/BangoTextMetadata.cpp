@@ -352,3 +352,62 @@ void FBangoMetadataTracker::PushHistory()
 	State.Meta = Meta;
 	History.Add(MoveTemp(State));
 }
+
+void FBangoMetadataTracker::ParseNodeIDs(const FString& Metadata, TArray<int64>& OutNodeIDs)
+{
+	for (int32 I = 0; I < Metadata.Len(); ++I)
+	{
+		if (Metadata[I] != TEXT('@'))
+		{
+			continue;
+		}
+		int32 J = I + 1;
+		while (J < Metadata.Len() && (Metadata[J] == TEXT(' ') || Metadata[J] == TEXT('\t')))
+		{
+			++J;
+		}
+		int64 NodeID = 0;
+		bool bAnyDigit = false;
+		while (J < Metadata.Len() && Metadata[J] >= TEXT('0') && Metadata[J] <= TEXT('9'))
+		{
+			NodeID = NodeID * 10 + (Metadata[J] - TEXT('0'));
+			bAnyDigit = true;
+			++J;
+		}
+		if (bAnyDigit)
+		{
+			OutNodeIDs.Add(NodeID);
+		}
+		I = J - 1;
+	}
+}
+
+void FBangoMetadataTracker::GetNodeIDs(int32 LineIndex, TArray<int64>& OutNodeIDs) const
+{
+	if (LineIndex >= 0 && LineIndex < Meta.Num())
+	{
+		ParseNodeIDs(Meta[LineIndex].Metadata, OutNodeIDs);
+	}
+}
+
+int32 FBangoMetadataTracker::FindLineOfNode(int64 NodeID) const
+{
+	TArray<int64> NodeIDs;
+	for (int32 LineIndex = 0; LineIndex < Meta.Num(); ++LineIndex)
+	{
+		if (!Meta[LineIndex].HasMetadata())
+		{
+			continue;
+		}
+		NodeIDs.Reset();
+		ParseNodeIDs(Meta[LineIndex].Metadata, NodeIDs);
+		for (const int64 Each : NodeIDs)
+		{
+			if (Each == NodeID)
+			{
+				return LineIndex;
+			}
+		}
+	}
+	return INDEX_NONE;
+}

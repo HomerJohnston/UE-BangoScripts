@@ -24,6 +24,9 @@ class SButton;
 class STextBlock;
 struct FTextLocation;
 
+/** The nodes on the cursor's line(s): the graph's function name (empty for the main graph), and their NodeIDs (0 for the graph's entry). */
+DECLARE_DELEGATE_TwoParams(FOnBangoCursorNodesChanged, const FString& /*FunctionName*/, const TArray<int64>& /*NodeIDs*/);
+
 class SBangoTextEditor : public SCompoundWidget
 {
 public:
@@ -53,6 +56,12 @@ public:
 		/** The whole text, metadata included. */
 		SLATE_EVENT(FOnTextCommitted, OnTextCommitted)
 
+		/**
+		 * Sync Graph: the cursor moved to a line (or a selection over lines) with nodes on it, while the text has keyboard
+		 * focus. Lines that aren't nodes ({, };, declarations) don't send this.
+		 */
+		SLATE_EVENT(FOnBangoCursorNodesChanged, OnCursorNodesChanged)
+
 		/** Keys the editor doesn't use itself (it uses Tab) go here first, like SMultiLineEditableTextBox's OnKeyDownHandler. */
 		SLATE_EVENT(FOnKeyDown, OnKeyDownHandler)
 	SLATE_END_ARGS()
@@ -71,6 +80,16 @@ public:
 	/** The font the text is in (Regular), for things that need to line up with it, like line numbers. */
 	const FSlateFontInfo& GetFont() const;
 
+	/**
+	 * Sync Graph: moves the cursor to the top-most line of these nodes (0: the entry of FunctionName's graph, or of the
+	 * main graph if it's empty) and scrolls it into view. Does nothing while Sync Graph is off.
+	 */
+	void ShowNodes(const FString& FunctionName, const TArray<int64>& NodeIDs);
+
+	/** The Sync Graph toggle at the gutter's top-right: whether the text and the graph follow each other's selection. On to start with. */
+	void SetGraphSyncEnabled(bool bEnabled);
+	bool IsGraphSyncEnabled() const { return bGraphSync; }
+
 	/** Shows or hides the node metadata gutter (the divider beside it does the same). Shown to start with. */
 	void SetMetadataShown(bool bShown);
 	bool IsMetadataShown() const { return bMetadataShown; }
@@ -88,8 +107,17 @@ private:
 	/** Asked before each typed character: a '}' on an indentation-only line is typed here, one tab further left. */
 	bool HandleIsTypedCharValid(const TCHAR Character);
 
-	/** Moves the bracket highlight along with the cursor. */
+	/** Moves the bracket highlight and the gutter's white line along with the cursor, and tells the graph (Sync Graph). */
 	void HandleCursorMoved(const FTextLocation& Location);
+
+	/** The nodes on lines FirstLine to LastLine, in the first such line's graph. False if there are none. */
+	bool GetNodesOfLines(int32 FirstLine, int32 LastLine, FString& OutFunctionName, TArray<int64>& OutNodeIDs) const;
+
+	/** Sends the cursor's nodes to OnCursorNodesChanged, unless they're the ones sent last (or bForce). */
+	void ReportCursorNodes(bool bForce);
+
+	/** Shows a line's metadata in white in the gutter. */
+	void UpdateGutterHighlight(int32 Line);
 	void HandleTextChanged(const FText& NewVisibleText);
 	void HandleTextCommitted(const FText& NewVisibleText, ETextCommit::Type CommitType);
 
@@ -99,6 +127,7 @@ private:
 	FOnKeyDown OnKeyDownHandler;
 	FOnTextChanged OnTextChangedHandler;
 	FOnTextCommitted OnTextCommittedHandler;
+	FOnBangoCursorNodesChanged OnCursorNodesChangedHandler;
 
 	/** The frame's look, for the current state: read-only, focused, hovered or normal. */
 	const FSlateBrush* GetFrameBrush() const;
@@ -122,6 +151,16 @@ private:
 
 	/** Whether any line has metadata; the gutter and its divider are hidden when none does. */
 	bool bGutterHasMetadata = false;
+
+	/** Sync Graph, and the nodes last sent to the graph (so the same line isn't sent twice). */
+	bool bGraphSync = true;
+	bool bHasReportedNodes = false;
+	FString ReportedFunctionName;
+	TArray<int64> ReportedNodeIDs;
+
+	/** The cursor's line's metadata, in white, over the gutter's grey text. */
+	TSharedPtr<STextBlock> GutterHighlightText;
+	int32 GutterHighlightLine = INDEX_NONE;
 
 	/** Whether the gutter is shown (the divider toggles it). */
 	bool bMetadataShown = true;

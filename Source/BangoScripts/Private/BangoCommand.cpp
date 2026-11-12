@@ -17,7 +17,7 @@ FString FBangoCommandSignature::ToString() const
 		{
 			Result += TEXT(", ");
 		}
-		Result += Params[i].Type.ToString();
+		Result += Params[i].GetTypeName();
 		Result += TEXT(" ");
 		Result += Params[i].Name;
 		if (i >= Required)
@@ -33,7 +33,7 @@ FString FBangoCommandSignature::ToString() const
 	if (bReturnsValue)
 	{
 		Result += TEXT(" -> ");
-		Result += ReturnType.ToString();
+		Result += GetReturnTypeName();
 	}
 	return Result;
 }
@@ -60,6 +60,32 @@ FBangoCommandSignature& FBangoCommandSignature::Param(const FString& ParamName, 
 	NewParam.Description = ParamDescription;
 	Params.Add(NewParam);
 	return *this;
+}
+
+FBangoCommandSignature& FBangoCommandSignature::NumberParam(const FString& ParamName, const FString& ParamDescription)
+{
+	Param(ParamName, FBangoType::Double(), ParamDescription);
+	Params.Last().bNumber = true;
+	return *this;
+}
+
+FBangoCommandSignature& FBangoCommandSignature::ReturnsNumber()
+{
+	Returns(FBangoType::Double());
+	bReturnsNumber = true;
+	return *this;
+}
+
+bool FBangoCommandSignature::NumberResultIsInt(TConstArrayView<FBangoValue> Args) const
+{
+	for (int32 i = 0; i < Args.Num() && i < Params.Num(); ++i)
+	{
+		if (Params[i].bNumber && !(Args[i].GetType() == FBangoType::Int()))
+		{
+			return false;
+		}
+	}
+	return true;
 }
 
 FBangoCommandSignature& FBangoCommandSignature::Optional()

@@ -65,6 +65,15 @@ public:
 	/** One line per line of text: its metadata, or empty. */
 	FString GetGutterText() const;
 
+	/** The NodeIDs in a line's metadata: one for a statement, several for a run of reroutes. None for a line without any. */
+	void GetNodeIDs(int32 LineIndex, TArray<int64>& OutNodeIDs) const;
+
+	/** The line whose metadata has this NodeID, or INDEX_NONE. */
+	int32 FindLineOfNode(int64 NodeID) const;
+
+	/** The NodeIDs in metadata like `//@12(4, 7)` or `//@7(4, 9) @8(8, 13)`: the number after each '@'. */
+	static void ParseNodeIDs(const FString& Metadata, TArray<int64>& OutNodeIDs);
+
 	const TArray<FString>& GetLines() const { return Lines; }
 	const TArray<FBangoLineMetadata>& GetMetadata() const { return Meta; }
 

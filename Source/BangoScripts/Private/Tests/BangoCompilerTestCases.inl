@@ -29,6 +29,7 @@ static void BangoMakeTestCommands(FBangoCommandTable& Table)
 	Table.Add(FBangoCommandSignature::Make(TEXT("Say")).Param(TEXT("Text"), FBangoType::Text()).WithPlaceholders().Variadic(TEXT("{"), 0, TEXT("}")), Error);
 	Table.Add(FBangoCommandSignature::Make(TEXT("FormatText")).Param(TEXT("Text"), FBangoType::Text()).WithPlaceholders().Variadic(TEXT("{"), 0, TEXT("}")).Returns(FBangoType::Text()), Error);
 	Table.Add(FBangoCommandSignature::Make(TEXT("ToText")).Param(TEXT("Value"), String).Returns(FBangoType::Text()), Error);
+	Table.Add(FBangoCommandSignature::Make(TEXT("Max")).NumberParam(TEXT("A")).NumberParam(TEXT("B")).ReturnsNumber(), Error);
 }
 
 struct FBangoCompilerTestCase
@@ -428,4 +429,16 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 	{ TEXT("empty label"), TEXT("label ;"), nullptr, TEXT("(1:7)"), TEXT("This label has no name. Fill it in.") },
 	{ TEXT("empty goto"), TEXT("goto ;"), nullptr, TEXT("(1:6)"), TEXT("This goto doesn't say which label to jump to. Fill it in.") },
 	{ TEXT("vector default of the wrong size"), TEXT("#define params (vector3 _p = [1, 2])"), nullptr, TEXT("(1:30)"), TEXT("A vector3 needs exactly 3 numbers") },
+
+	// ---- Number commands (NumberParam, ReturnsNumber): an int for ints, otherwise a float ----
+	{ TEXT("number: ints give an int"), TEXT("int _a = 1;\nint _b;\n_b = Max(_a, 2);"), TEXT("*"), nullptr, nullptr },
+	{ TEXT("number: a float gives a float"), TEXT("int _a = 1;\nfloat _f;\n_f = Max(_a, 2.5);\n_f = Max(1, 2);"), TEXT("*"), nullptr, nullptr },
+	{ TEXT("number: a float result into an int"), TEXT("int _a = 1;\nint _b;\n_b = Max(_a, 2.5);"), nullptr, TEXT("(3:6)"), TEXT("float") },
+	{ TEXT("number: nested"), TEXT("int _b;\n_b = Max(Max(1, 2), 3);\n_b = Max(1, 2) + 3;"), TEXT("*"), nullptr, nullptr },
+	{ TEXT("number: not a number"), TEXT("int _b;\n_b = Max(1, \"two\");"), nullptr, TEXT("(2:13)"), TEXT("Argument 2 of 'Max' needs a number (an int or a float), but this is a string.") },
+	{ TEXT("number: nil"), TEXT("int _b;\n_b = Max(1, nil);"), nullptr, TEXT("(2:13)"), TEXT("nil can only be assigned, passed or returned where its type is known.") },
+	{ TEXT("number: an array"), TEXT("int _b;\n_b = Max([1], 2);"), nullptr, TEXT("(2:10)"), TEXT("needs a number (an int or a float), but this is an int[].") },
+	{ TEXT("number: an undeclared global is allowed"), TEXT("int _b;\n_b = Max(someGlobal, 2);"), TEXT("*"), nullptr, nullptr },
+	{ TEXT("number: must be used"), TEXT("Max(1, 2);"), nullptr, TEXT("(1:1)"), TEXT("'Max' gives a value that must be used") },
+	{ TEXT("number: signature in errors"), TEXT("int _b;\n_b = Max(1);"), nullptr, TEXT("(2:6)"), TEXT("Max(number A, number B) -> number") },
 };

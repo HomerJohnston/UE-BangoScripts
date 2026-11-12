@@ -2309,11 +2309,16 @@ void SBangoScriptEditor::ShowGraph(int32 GraphIndex, bool bZoomToFit)
 	FGraphAppearanceInfo Appearance;
 	Appearance.CornerText = LOCTEXT("CornerText", "BANGO");
 
+	// Sync Graph: selecting nodes moves the script text's cursor to them.
+	SGraphEditor::FGraphEditorEvents GraphEvents;
+	GraphEvents.OnSelectionChanged = SGraphEditor::FOnSelectionChanged::CreateSP(this, &SBangoScriptEditor::OnGraphSelectionChanged);
+
 	GraphEditor = SNew(SGraphEditor)
 		.AdditionalCommands(GraphCommands)
 		.IsEditable(true)
 		.Appearance(Appearance)
 		.GraphToEdit(EdGraphs[GraphIndex].Get())
+		.GraphEvents(GraphEvents)
 		.ShowGraphStateOverlay(false);
 	// A function's graph has a button in its top-left corner that goes back to the main graph.
 	TSharedRef<SOverlay> View = SNew(SOverlay)
@@ -2556,6 +2561,7 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeTextPane()
 		.VScrollBar(TextVScrollBar) // its scroll position is read back for the line numbers
 		.Text(FText::FromString(TextShown))
 		.IsReadOnly_Lambda([this]() { return OpenScript.IsEmpty(); })
+		.OnCursorNodesChanged(this, &SBangoScriptEditor::OnTextCursorNodes) // Sync Graph
 		.OnTextChanged_Lambda([this](const FText& NewText)
 		{
 			bTextEdited = !NewText.ToString().Equals(TextShown, ESearchCase::CaseSensitive);
@@ -3545,6 +3551,82 @@ void SBangoScriptEditor::Notify(const FText& Message, bool bSuccess)
 	{
 		Item->SetCompletionState(bSuccess ? SNotificationItem::CS_Success : SNotificationItem::CS_Fail);
 	}
+}
+
+void SBangoScriptEditor::OnTextCursorNodes(const FString& FunctionName, const TArray<int64>& NodeIDs)
+{
+	// The main graph, or the function with that name (GraphItems' labels are the functions' names).
+	int32 GraphIndex = FunctionName.IsEmpty() ? 0 : INDEX_NONE;
+	for (int32 i = 1; GraphIndex == INDEX_NONE && i < GraphItems.Num(); ++i)
+	{
+		if (GraphItems[i].IsValid() && GraphItems[i]->Label.Equals(FunctionName, ESearchCase::CaseSensitive))
+		{
+			GraphIndex = i;
+		}
+	}
+	if (!EdGraphs.IsValidIndex(GraphIndex) || !EdGraphs[GraphIndex].IsValid())
+	{
+		return;
+	}
+
+	// The nodes, by NodeID (0 is the graph's entry node).
+	TArray<UBangoEdGraphNode*> Found;
+	for (UEdGraphNode* Node : EdGraphs[GraphIndex]->Nodes)
+	{
+		UBangoEdGraphNode* BangoNode = Cast<UBangoEdGraphNode>(Node);
+		if (BangoNode && NodeIDs.Contains(BangoNode->NodeID))
+		{
+			Found.Add(BangoNode);
+		}
+	}
+	if (Found.Num() == 0)
+	{
+		return; // a line typed in and not applied yet, say
+	}
+
+	TGuardValue<bool> Guard(bSyncingFromText, true);
+	const bool bSwitched = GraphIndex != ShownGraph;
+	if (bSwitched)
+	{
+		ShowGraph(GraphIndex, /*bZoomToFit*/ false);
+	}
+	if (!GraphEditor.IsValid())
+	{
+		return;
+	}
+	GraphEditor->ClearSelectionSet();
+	for (UBangoEdGraphNode* Node : Found)
+	{
+		GraphEditor->SetNodeSelection(Node, true);
+	}
+	// Pan only when the node isn't in view, so moving through the text line by line doesn't keep moving the graph.
+	if (bSwitched || !GraphEditor->IsNodeTitleVisible(Found[0], /*bRequestRename*/ false))
+	{
+		GraphEditor->JumpToNode(Found[0], /*bRequestRename*/ false, /*bSelectNode*/ false);
+	}
+}
+
+void SBangoScriptEditor::OnGraphSelectionChanged(const TSet<UObject*>& Selection)
+{
+	if (bSyncingFromText || !TextBox.IsValid())
+	{
+		return;
+	}
+	TArray<int64> NodeIDs;
+	for (UObject* Selected : Selection)
+	{
+		if (const UBangoEdGraphNode* BangoNode = Cast<UBangoEdGraphNode>(Selected))
+		{
+			NodeIDs.Add(BangoNode->NodeID);
+		}
+	}
+	if (NodeIDs.Num() == 0)
+	{
+		return;
+	}
+	const FString FunctionName = ShownGraph > 0 && GraphItems.IsValidIndex(ShownGraph) && GraphItems[ShownGraph].IsValid()
+		? GraphItems[ShownGraph]->Label : FString();
+	TextBox->ShowNodes(FunctionName, NodeIDs);
 }
 
 #undef LOCTEXT_NAMESPACE

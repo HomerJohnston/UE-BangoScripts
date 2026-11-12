@@ -285,6 +285,15 @@ private:
 	void CloseScript();
 	/** Shows one of EdGraphs. With bZoomToFit, the view fits the whole graph; otherwise it's left for the caller to set. */
 	void ShowGraph(int32 GraphIndex, bool bZoomToFit = true);
+
+	/** Sync Graph (SBangoTextEditor): the text's cursor moved to these nodes, so select them in their graph. */
+	void OnTextCursorNodes(const FString& FunctionName, const TArray<int64>& NodeIDs);
+
+	/** Sync Graph: nodes were selected in the graph, so move the text's cursor to them. */
+	void OnGraphSelectionChanged(const TSet<UObject*>& Selection);
+
+	/** Set while the text's cursor is selecting nodes, so that selection isn't sent back to the text. */
+	bool bSyncingFromText = false;
 	void ShowMessage(const FText& Message);
 	FText GetTitle() const;
 

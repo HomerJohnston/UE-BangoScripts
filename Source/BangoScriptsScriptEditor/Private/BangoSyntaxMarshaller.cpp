@@ -272,8 +272,8 @@ void FBangoSyntaxMarshaller::SetText(const FString& SourceString, FTextLayout& T
 		FBangoLineTokenizer::TokenizeLine(FStringView(Lines[LineIndex]), LineTokens[LineIndex]);
 	}
 
-	FBangoScriptNames Names;
-	Names.Build(Lines, LineTokens);
+	ScriptNames.Build(Lines, LineTokens);
+	const FBangoScriptNames& Names = ScriptNames;
 
 	// Kept for finding brackets when the cursor moves (before the lines are handed to the layout below).
 	CachedLines = Lines;

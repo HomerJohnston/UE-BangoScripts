@@ -43,6 +43,7 @@ namespace BangoEditorStylePrivate
 	static const FLinearColor Vector3Color(1.00f, 0.78f, 0.15f); // Blueprint's Vector gold
 	static const FLinearColor Vector2Color(0.85f, 0.70f, 0.30f); // a duller gold, so the two are told apart
 	static const FLinearColor AnyColor(0.70f, 0.70f, 0.70f);
+	static const FLinearColor NumberColor = FMath::Lerp(IntColor, DoubleColor, 0.5f); // an int or a float (a NumberParam)
 }
 
 void FBangoEditorStyle::Initialize()
@@ -111,6 +112,7 @@ const FSlateBrush* FBangoEditorStyle::GetTypeIcon(const FString& TypeHint, FLine
 	if (Base.Equals(TEXT("bool"), ESearchCase::CaseSensitive))        { Icon = TEXT("Bool");   OutTint = BoolColor; }
 	else if (Base.Equals(TEXT("int"), ESearchCase::CaseSensitive))    { Icon = TEXT("Int");    OutTint = IntColor; }
 	else if (Base.Equals(TEXT("float"), ESearchCase::CaseSensitive))  { Icon = TEXT("Double"); OutTint = DoubleColor; }
+	else if (Base.Equals(TEXT("number"), ESearchCase::CaseSensitive)) { Icon = TEXT("Double"); OutTint = NumberColor; }
 	else if (Base.Equals(TEXT("string"), ESearchCase::CaseSensitive)) { Icon = TEXT("String"); OutTint = StringColor; }
 	else if (Base.Equals(TEXT("entity"), ESearchCase::CaseSensitive)) { Icon = TEXT("Entity"); OutTint = EntityColor; }
 	else if (Base.Equals(TEXT("text"), ESearchCase::CaseSensitive))   { Icon = TEXT("Text");   OutTint = TextColor; }

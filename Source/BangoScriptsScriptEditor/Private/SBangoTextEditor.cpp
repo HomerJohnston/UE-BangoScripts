@@ -9,6 +9,8 @@
 #include "Styling/StyleColors.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SCheckBox.h"
+#include "Widgets/SOverlay.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBar.h"
@@ -25,6 +27,7 @@ void SBangoTextEditor::Construct(const FArguments& InArgs)
 	OnKeyDownHandler = InArgs._OnKeyDownHandler;
 	OnTextChangedHandler = InArgs._OnTextChanged;
 	OnTextCommittedHandler = InArgs._OnTextCommitted;
+	OnCursorNodesChangedHandler = InArgs._OnCursorNodesChanged;
 
 	SyntaxStyle = MakeShared<FBangoSyntaxStyle>(InArgs._FontSize);
 	Marshaller = FBangoSyntaxMarshaller::Create(SyntaxStyle.ToSharedRef());
@@ -157,13 +160,58 @@ void SBangoTextEditor::Construct(const FArguments& InArgs)
 					// As far down as the text starts, so each entry is level with its line.
 					.Padding_Lambda([TextPadding]() { const FMargin Pad = TextPadding.Get(); return FMargin(6.0f, Pad.Top, 6.0f, Pad.Bottom); })
 					[
-						SAssignNew(GutterScroll, SBangoScrollFollower)
-						.ScrollBar(VScrollBar)
+						SNew(SOverlay)
+
+						+ SOverlay::Slot()
 						[
-							SAssignNew(GutterText, STextBlock)
-							.Font(SyntaxStyle->GetDefaultStyle().Font) // the text's own font, so each entry is level with its line
-							.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-							.ToolTipText(NSLOCTEXT("BangoTextEditor", "GutterTooltip", "Node metadata: each line's node ID and position in the graph. The graph editor keeps these up to date, so they can't be edited here."))
+							SAssignNew(GutterScroll, SBangoScrollFollower)
+							.ScrollBar(VScrollBar)
+							[
+								SNew(SOverlay)
+
+								+ SOverlay::Slot()
+								.HAlign(HAlign_Left)
+								.VAlign(VAlign_Top)
+								[
+									SAssignNew(GutterText, STextBlock)
+									.Font(SyntaxStyle->GetDefaultStyle().Font) // the text's own font, so each entry is level with its line
+									.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+									.ToolTipText(NSLOCTEXT("BangoTextEditor", "GutterTooltip", "Node metadata: each line's node ID and position in the graph. The graph editor keeps these up to date, so they can't be edited here."))
+								]
+
+								// The cursor's line, in white, exactly over its grey copy: the same font, and blank lines above it.
+								+ SOverlay::Slot()
+								.HAlign(HAlign_Left)
+								.VAlign(VAlign_Top)
+								[
+									SAssignNew(GutterHighlightText, STextBlock)
+									.Font(SyntaxStyle->GetDefaultStyle().Font)
+									.ColorAndOpacity(FLinearColor::White)
+									.Visibility(EVisibility::HitTestInvisible)
+								]
+							]
+						]
+
+						// Sync Graph: whether the cursor's line selects its node in the graph, and the other way round.
+						+ SOverlay::Slot()
+						.HAlign(HAlign_Fill)
+						.VAlign(VAlign_Top)
+						.Padding(0, 7, 3, 0)
+						[
+							SNew(SCheckBox)
+							.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+							.IsChecked_Lambda([this]() { return bGraphSync ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+							.OnCheckStateChanged_Lambda([this](ECheckBoxState NewState) { SetGraphSyncEnabled(NewState == ECheckBoxState::Checked); })
+							.ToolTipText(NSLOCTEXT("BangoTextEditor", "SyncGraphTooltip", "While on, the line the cursor is on selects its node in the graph, and selecting a node in the graph moves the cursor to its line."))
+							[
+								SNew(SBox)
+								.Padding(FMargin(6.0f, 1.0f))
+								[
+									SNew(STextBlock)
+									.Text(NSLOCTEXT("BangoTextEditor", "SyncGraph", "Sync Graph"))
+									// .Font(FAppStyle::GetFontStyle("SmallFont"))
+								]
+							]
 						]
 					]
 				]
@@ -210,6 +258,7 @@ FText SBangoTextEditor::GetText() const
 void SBangoTextEditor::SetText(const FText& InText)
 {
 	const FString VisibleText = Metadata.Reset(InText.ToString());
+	bHasReportedNodes = false;
 	UpdateGutter();
 	if (TextBox.IsValid())
 	{
@@ -290,6 +339,167 @@ void SBangoTextEditor::HandleCursorMoved(const FTextLocation& Location)
 	Position.Line = Location.GetLineIndex();
 	Position.Column = Location.GetOffset();
 	Marshaller->SetCursor(Position);
+
+	UpdateGutterHighlight(Location.GetLineIndex());
+	ReportCursorNodes(false);
+}
+
+void SBangoTextEditor::SetGraphSyncEnabled(bool bEnabled)
+{
+	bGraphSync = bEnabled;
+	bHasReportedNodes = false;
+	if (bGraphSync)
+	{
+		ReportCursorNodes(true);
+	}
+}
+
+bool SBangoTextEditor::GetNodesOfLines(int32 FirstLine, int32 LastLine, FString& OutFunctionName, TArray<int64>& OutNodeIDs) const
+{
+	const FBangoScriptNames& Names = Marshaller->GetScriptNames();
+	OutFunctionName.Reset();
+	OutNodeIDs.Reset();
+
+	int32 Graph = INDEX_NONE;
+	TArray<int64> LineNodeIDs;
+	for (int32 Line = FirstLine; Line <= LastLine; ++Line)
+	{
+		LineNodeIDs.Reset();
+		Metadata.GetNodeIDs(Line, LineNodeIDs);
+		if (Names.IsEntryLine(Line))
+		{
+			LineNodeIDs.Add(0); // a graph's entry node is node 0 of that graph
+		}
+		if (LineNodeIDs.Num() == 0)
+		{
+			continue;
+		}
+
+		// Only one graph's nodes can be selected at once: the first line's graph.
+		const int32 LineGraph = Names.GetLineGraph(Line);
+		if (Graph == INDEX_NONE)
+		{
+			Graph = LineGraph;
+			OutFunctionName = Names.GetGraphFunctionName(Graph);
+		}
+		else if (LineGraph != Graph)
+		{
+			continue;
+		}
+		OutNodeIDs.Append(LineNodeIDs);
+	}
+	return OutNodeIDs.Num() > 0;
+}
+
+void SBangoTextEditor::ReportCursorNodes(bool bForce)
+{
+	// Only while the cursor is being moved here: when the text is set from the graph, the cursor moves too, and that
+	// mustn't change what's selected in the graph.
+	if (!bGraphSync || !OnCursorNodesChangedHandler.IsBound() || !TextBox.IsValid() || !TextBox->HasKeyboardFocus())
+	{
+		return;
+	}
+
+	int32 FirstLine = TextBox->GetCursorLocation().GetLineIndex();
+	int32 LastLine = FirstLine;
+	if (TextBox->AnyTextSelected())
+	{
+		const FTextSelection Selection = TextBox->GetSelection();
+		FirstLine = FMath::Min(Selection.GetBeginning().GetLineIndex(), Selection.GetEnd().GetLineIndex());
+		LastLine = FMath::Max(Selection.GetBeginning().GetLineIndex(), Selection.GetEnd().GetLineIndex());
+	}
+
+	FString FunctionName;
+	TArray<int64> NodeIDs;
+	if (!GetNodesOfLines(FirstLine, LastLine, FunctionName, NodeIDs))
+	{
+		return; // a line that isn't a node ({, };, a declaration): leave the graph's selection alone
+	}
+	if (!bForce && bHasReportedNodes && FunctionName.Equals(ReportedFunctionName, ESearchCase::CaseSensitive) && NodeIDs == ReportedNodeIDs)
+	{
+		return;
+	}
+	bHasReportedNodes = true;
+	ReportedFunctionName = FunctionName;
+	ReportedNodeIDs = NodeIDs;
+	OnCursorNodesChangedHandler.Execute(FunctionName, NodeIDs);
+}
+
+void SBangoTextEditor::ShowNodes(const FString& FunctionName, const TArray<int64>& NodeIDs)
+{
+	if (!bGraphSync || !TextBox.IsValid())
+	{
+		return;
+	}
+
+	// The top-most line of the nodes. NodeIDs are unique in the file; 0 is the entry node of the given graph.
+	int32 Line = INDEX_NONE;
+	for (const int64 NodeID : NodeIDs)
+	{
+		const int32 NodeLine = NodeID == 0 ? Marshaller->GetScriptNames().FindEntryLine(FunctionName) : Metadata.FindLineOfNode(NodeID);
+		if (NodeLine != INDEX_NONE && (Line == INDEX_NONE || NodeLine < Line))
+		{
+			Line = NodeLine;
+		}
+	}
+	if (Line == INDEX_NONE)
+	{
+		return;
+	}
+
+	// What that line would report, so moving the cursor there doesn't send it back to the graph.
+	bHasReportedNodes = GetNodesOfLines(Line, Line, ReportedFunctionName, ReportedNodeIDs);
+
+	const FTextLocation Cursor = TextBox->GetCursorLocation();
+	if (Cursor.GetLineIndex() == Line)
+	{
+		TextBox->ScrollTo(Cursor);
+		return;
+	}
+
+	// The start of the line's code: past its indentation, and past the //~ of a disconnected line.
+	const TArray<FString>& Lines = Metadata.GetLines();
+	const FString& Text = Lines.IsValidIndex(Line) ? Lines[Line] : FString();
+	int32 Column = 0;
+	auto SkipIndent = [&Text, &Column]()
+	{
+		while (Column < Text.Len() && (Text[Column] == TEXT(' ') || Text[Column] == TEXT('\t')))
+		{
+			++Column;
+		}
+	};
+	SkipIndent();
+	if (Text.Mid(Column, 3) == TEXT("//~"))
+	{
+		Column += 3;
+		SkipIndent();
+	}
+
+	const FTextLocation Target(Line, Column);
+	TextBox->GoTo(Target);
+	TextBox->ScrollTo(Target);
+	UpdateGutterHighlight(Line);
+}
+
+void SBangoTextEditor::UpdateGutterHighlight(int32 Line)
+{
+	GutterHighlightLine = Line;
+	if (!GutterHighlightText.IsValid())
+	{
+		return;
+	}
+	// Blank lines down to the cursor's line, then its metadata: it lands exactly on its grey copy.
+	FString Highlight;
+	const TArray<FBangoLineMetadata>& LineMeta = Metadata.GetMetadata();
+	if (LineMeta.IsValidIndex(Line))
+	{
+		for (int32 I = 0; I < Line; ++I)
+		{
+			Highlight += TEXT("\n");
+		}
+		Highlight += LineMeta[Line].Metadata;
+	}
+	GutterHighlightText->SetText(FText::FromString(Highlight));
 }
 
 FReply SBangoTextEditor::HandleKeyDown(const FGeometry& Geometry, const FKeyEvent& KeyEvent)
@@ -355,4 +565,5 @@ void SBangoTextEditor::UpdateGutter()
 	{
 		GutterText->SetText(FText::FromString(Metadata.GetGutterText()));
 	}
+	UpdateGutterHighlight(GutterHighlightLine);
 }

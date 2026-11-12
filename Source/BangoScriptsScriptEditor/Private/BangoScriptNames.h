@@ -30,6 +30,18 @@ public:
 	 */
 	EBangoSyntaxKind Classify(int32 LineIndex, const FString& Name) const;
 
+	/** The graph a line belongs to: 0 for the main graph, then one per function in file order. */
+	int32 GetLineGraph(int32 LineIndex) const;
+
+	/** A graph's function name, or empty for the main graph (or a function whose name hasn't been typed yet). */
+	FString GetGraphFunctionName(int32 Graph) const;
+
+	/** Whether the line is its graph's entry: the `#define params` line, or a function's `function` line. */
+	bool IsEntryLine(int32 LineIndex) const;
+
+	/** The entry line of the main graph (FunctionName empty) or of the function with that name, or INDEX_NONE. */
+	int32 FindEntryLine(const FString& FunctionName) const;
+
 	/** Gives each Global token on a line its kind from Classify. */
 	void RefineTokens(int32 LineIndex, const FString& Line, TArray<FBangoSyntaxToken>& InOutTokens) const;
 
@@ -38,6 +50,8 @@ private:
 	{
 		TArray<FString> Params;
 		TArray<FString> Locals;
+		FString FunctionName;
+		int32 EntryLine = INDEX_NONE;
 	};
 
 	static bool Contains(const TArray<FString>& Names, const FString& Name);

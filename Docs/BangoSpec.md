@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.30)
+# Bango Language Spec (draft v0.31)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.31:** **number commands**. A command can take a **number**, an `int` or a `float`, and give back a number whose type follows what it was given, like `+`: an `int` if every number passed in is an `int`, a `float` if any is a `float`. New math commands work this way: `Min`, `Max`, `Abs` and `Clamp`. Also new: `Sin`, `Cos`, `SinDegrees` and `CosDegrees` (section 7).
 
 **Changes in v0.30:** `GetPos` takes its entity as an argument, `GetPos(_who)`, not as a target (section 7).
 
@@ -524,8 +526,9 @@ _t = Random(3.0, 5.0);
 - A command's signature declares:
   - **Target:** either none, or a required target of one type. A command with a target can't be called without one, and vice versa. *Guideline (not yet a fixed rule):* give a command a target only if it also takes at least one argument (`@john Speak("Hi")`, `_who SetPos(_p)`). A command that only needs the thing it works on takes it as its first and only argument instead (`GetPos(_who)`, `IsNull(_who)`).
   - **Parameters:** typed. Trailing parameters may be **optional**. Normally a `nil` variable passed to a command, or an entity naming no actor, stops the script before the command runs. `.MayBeNil()` after a `.Param(...)` hands the command that argument as it is instead, `nil` included, and leaves the actor check to the command (as `IsNull` does).
+  - **Number parameters:** `.NumberParam(TEXT("A"))` adds a parameter that takes an `int` or a `float` and hands it on as it is (a `float` parameter would turn an `int` into a `float`). Signatures, errors and the graph editor show its type as `number`. An undeclared global passed to one is checked to be a number when the command is called.
   - **Variadic:** optionally, any number of extra arguments of any type after the parameters (like `Hint`'s `{0}` values).
-  - **Return type:** optional.
+  - **Return type:** optional. `.ReturnsNumber()` gives back a **number** whose type follows the number parameters, like `+` (section 5): an `int` if every number argument is an `int`, a `float` if any is a `float`. The compiler works the type out at each call, so `_i = Max(_a, 2.5);` for an `int _i` is a compile error, the same as `_i = _a + 2.5;`; say how to make it an int (`_i = Round(Max(_a, 2.5));`). If one of them is an undeclared global (and none is a `float`), the type is known only when the script runs, and storing a `float` in an `int` stops the script then. The command must give back that type (an `int` where a `float` is expected is turned into a `float`; a `float` where an `int` is expected stops the script), and such a command can't be latent.
   - **Discardable:** for a command with a return type, whether a script may call it on a line of its own and throw the value away (`.Discardable()`). Without it, the value **must be used** (see below).
 - Calling a command with the wrong number of arguments, or an argument or target of the wrong type, is a compile error. The error shows the command's signature.
 - Arguments and targets that are undeclared globals are type-checked when the script runs.
@@ -567,6 +570,14 @@ Every placeholder needs a value. When the text is written as a literal (`Log("{0
 | `RandomInt(int Min, int Max)` → `int` | A random int from Min to Max inclusive. |
 | `Floor(float Value)` → `int` | Rounds down. A result outside the int range is an error. |
 | `Round(float Value)` → `int` | Rounds to the nearest int (halves away from zero). A result outside the int range is an error. |
+| `Min(number A, number B)` → `number` | The smaller of the two: an `int` if both are ints, otherwise a `float`. |
+| `Max(number A, number B)` → `number` | The larger of the two: an `int` if both are ints, otherwise a `float`. |
+| `Abs(number Value)` → `number` | The number without its sign: an `int` for an int, a `float` for a float. `Abs(-2147483647 - 1)` is an error, since 2147483648 doesn't fit in an int. |
+| `Clamp(number Value, number Min, number Max)` → `number` | The value, kept from Min to Max: an `int` if all three are ints, otherwise a `float`. Min greater than Max is an error. |
+| `Sin(float Rads)` → `float` | The sine of an angle in radians. |
+| `Cos(float Rads)` → `float` | The cosine of an angle in radians. |
+| `SinDegrees(float Degrees)` → `float` | The sine of an angle in degrees. |
+| `CosDegrees(float Degrees)` → `float` | The cosine of an angle in degrees. |
 | `GameTime()` → `float` | Seconds since the level started; stops while the game is paused. |
 | `ToEntity(string Name)` → `entity` | The entity with this Bango ID name, for names that come from data (`ToEntity("john")` is the same as `@john`). A name that isn't letters, digits and `_` (or starts with a digit) is an error. |
 | `entity SetPos(vector3 Pos)` | Moves the actor. |
@@ -921,7 +932,7 @@ The graph editor is the **Bango Scripts** tab (Tools menu). It doesn't need the 
 - A script whose text doesn't parse (or whose `//~` lines don't) shows the error instead of a graph, and its text in the script text pane.
 
 ### Fields
-Each node shows its text as **fields** in columns, like the details panel: each row starts with its type's icon (bool (a ?), int, float, string (an S), text (a T), entity, array, or any; hovering it shows the type), then the name, then the value, which fills the rest. Values stay on one line, in a box 90 to 240 pixels wide (wider only if the node is): a longer value ends in "…". Hovering a value shows its parameter's description if it has one (Sleep's Time says *Seconds*), or else the whole value. Rows that name a variable (a Var, For Each's Variable, an array command's Target) show a variable icon, an italic `(x)`, tinted with the variable's type when it's known. Rows without a type leave the icon space empty so the names line up, and a node where no row has a type has no icon column. Empty fields show *not set* (optional) or *missing* (required).
+Each node shows its text as **fields** in columns, like the details panel: each row starts with its type's icon (bool (a ?), int, float, number (float's icon, tinted between int's and float's colours), string (an S), text (a T), entity, array, or any; hovering it shows the type), then the name, then the value, which fills the rest. Values stay on one line, in a box 90 to 240 pixels wide (wider only if the node is): a longer value ends in "…". Hovering a value shows its parameter's description if it has one (Sleep's Time says *Seconds*), or else the whole value. Rows that name a variable (a Var, For Each's Variable, an array command's Target) show a variable icon, an italic `(x)`, tinted with the variable's type when it's known. Rows without a type leave the icon space empty so the names line up, and a node where no row has a type has no icon column. Empty fields show *not set* (optional) or *missing* (required).
 
 A statement that is exactly one call (`[target] Name(args);`) gets a **dedicated node** titled with the command or function's name:
 

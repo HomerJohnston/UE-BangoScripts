@@ -8,6 +8,7 @@
 #include "Framework/Text/TextLineHighlight.h"
 #include "BangoEditingAids.h"
 #include "BangoLineTokenizer.h"
+#include "BangoScriptNames.h"
 
 class FBangoSyntaxStyle;
 class ISlateLineHighlighter;
@@ -36,6 +37,9 @@ public:
 	 */
 	void SetCursor(const FBangoTextPosition& InCursor);
 
+	/** The text's locals, parameters, globals and graphs, as of the last layout. */
+	const FBangoScriptNames& GetScriptNames() const { return ScriptNames; }
+
 	// ITextLayoutMarshaller
 	virtual void SetText(const FString& SourceString, FTextLayout& TargetTextLayout) override;
 	virtual void GetText(FString& TargetString, const FTextLayout& SourceTextLayout) override;
@@ -55,6 +59,7 @@ private:
 	/** The text as last laid out: its lines and their tokens, for finding brackets. */
 	TArray<FString> CachedLines;
 	TArray<TArray<FBangoSyntaxToken>> CachedTokens;
+	FBangoScriptNames ScriptNames;
 
 	/**
 	 * The layout the text was last laid out in. It belongs to the text widget, which also owns this marshaller's

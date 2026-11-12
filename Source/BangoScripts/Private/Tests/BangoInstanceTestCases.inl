@@ -173,6 +173,43 @@ static void BangoMakeRuntimeTestCommands(FBangoCommandTable& Table, TArray<FStri
 		return EBangoCommandResult::Done;
 	};
 	Table.Add(BadReturn, Error);
+
+	// A number command like the built-in Max: an int for two ints, otherwise a float.
+	FBangoCommand Max;
+	Max.Signature = FBangoCommandSignature::Make(TEXT("Max")).NumberParam(TEXT("A")).NumberParam(TEXT("B")).ReturnsNumber();
+	Max.Start = [](FBangoCommandCall& Call)
+	{
+		if (Call.Args[0].GetType() == FBangoType::Int() && Call.Args[1].GetType() == FBangoType::Int())
+		{
+			Call.Result = FBangoValue::MakeInt(FMath::Max(Call.Args[0].GetInt(), Call.Args[1].GetInt()));
+		}
+		else
+		{
+			Call.Result = FBangoValue::MakeDouble(FMath::Max(Call.Args[0].GetNumberAsDouble(), Call.Args[1].GetNumberAsDouble()));
+		}
+		return EBangoCommandResult::Done;
+	};
+	Table.Add(Max, Error);
+
+	// A number command that wrongly always returns a float.
+	FBangoCommand BadNumber;
+	BadNumber.Signature = FBangoCommandSignature::Make(TEXT("BadNumber")).NumberParam(TEXT("Value")).ReturnsNumber();
+	BadNumber.Start = [](FBangoCommandCall& Call)
+	{
+		Call.Result = FBangoValue::MakeDouble(Call.Args[0].GetNumberAsDouble());
+		return EBangoCommandResult::Done;
+	};
+	Table.Add(BadNumber, Error);
+
+	// A number command that wrongly returns an int for a float: turned into a float.
+	FBangoCommand IntNumber;
+	IntNumber.Signature = FBangoCommandSignature::Make(TEXT("IntNumber")).NumberParam(TEXT("Value")).ReturnsNumber();
+	IntNumber.Start = [](FBangoCommandCall& Call)
+	{
+		Call.Result = FBangoValue::MakeInt(3);
+		return EBangoCommandResult::Done;
+	};
+	Table.Add(IntNumber, Error);
 }
 
 /** Globals every runtime test starts with (as if set by other scripts and Blueprints). */
@@ -185,6 +222,10 @@ static void BangoMakeRuntimeTestGlobals(FBangoGlobalStore& Globals)
 	Globals.Set(TEXT("flag"), FBangoValue::MakeBool(true), Error);
 	Globals.Declare(TEXT("lots"), FBangoType::String(), Error);
 	Globals.Set(TEXT("lots"), FBangoValue::MakeString(TEXT("lots")), Error);
+	Globals.Declare(TEXT("score"), FBangoType::Int(), Error);
+	Globals.Set(TEXT("score"), FBangoValue::MakeInt(7), Error);
+	Globals.Declare(TEXT("ratio"), FBangoType::Double(), Error);
+	Globals.Set(TEXT("ratio"), FBangoValue::MakeDouble(0.5), Error);
 	Globals.Declare(TEXT("spot"), FBangoType::Vector3(), Error);
 	Globals.Set(TEXT("spot"), FBangoValue::MakeVector3(1.0, 2.0, 3.0), Error);
 }
@@ -342,6 +383,20 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 	{ TEXT("nested write into nil array"), TEXT("int[][] _g;\n_g[0][0] = 1;"), TEXT(""), TEXT("(2:1)"), TEXT("Writing to '_g'") },
 	{ TEXT("compound on missing inner array"), TEXT("int[][] _g = [];\n_g[1][2] += 5;"), TEXT(""), TEXT("(2:1)"), TEXT("past the end") },
 	{ TEXT("runtime error node id"), TEXT("int _x;\nHint(\"{0}\", _x); //@8(0, 1)"), TEXT(""), TEXT("[node 8]"), TEXT("'_x' is nil") },
+	// ---- Number commands (NumberParam, ReturnsNumber) ----
+	{ TEXT("number command: int for ints, float otherwise"),
+		TEXT("int _i = 3;\nfloat _f = 2.5;\nint _ri;\nfloat _rf;\n_ri = Max(_i, 9);\n_rf = Max(_i, _f);\n_rf = _rf + Max(1, 2);\nHint(\"{0} {1} {2} {3}\", _ri, _rf, Max(_f, 1), Max(Max(1, 2), 3));"),
+		TEXT("9 5.0 2.5 3"), nullptr, nullptr },
+	{ TEXT("number command: undeclared globals are checked when called"),
+		TEXT("int _a;\nfloat _b;\n_a = Max(score, 2);\n_b = Max(ratio, 2);\nHint(\"{0} {1}\", _a, _b);"), TEXT("7 2.0"), nullptr, nullptr },
+	{ TEXT("number command: an undeclared float global into an int"),
+		TEXT("int _a;\n_a = Max(ratio, 2);"), TEXT(""), TEXT("(2:1)"), TEXT("Can't store a float in '_a', which holds an int.") },
+	{ TEXT("number command: an undeclared global that isn't a number"),
+		TEXT("Hint(\"{0}\", Max(lots, 2));"), TEXT(""), TEXT("(1:13)"), TEXT("Max: argument 1 ('A') must be a number (an int or a float), but it is a string") },
+	{ TEXT("number command: a float result for ints is an error"),
+		TEXT("Hint(\"{0}\", BadNumber(2));"), TEXT(""), TEXT("(1:13)"), TEXT("returned a float, but with these arguments it should return an int") },
+	{ TEXT("number command: an int result for a float becomes a float"),
+		TEXT("Hint(\"{0}\", IntNumber(2.5));"), TEXT("3.0"), nullptr, nullptr },
 	{ TEXT("command returns the wrong type"), TEXT("int _x;\n_x = BadReturn();"), TEXT(""), TEXT("(2:6)"), TEXT("returned a string, but it should return an int") },
 	{ TEXT("error inside a function"), TEXT("function void F()\n{\n\tint _x;\n\tHint(\"{0}\", _x);\n};\nF();"), TEXT(""), TEXT("(4:14) in F()"), TEXT("'_x' is nil") },
 	{ TEXT("Hint with a missing value"), TEXT("Hint(\"{1}\", 5);"), TEXT(""), TEXT("(1:1)"), TEXT("uses {1}, but only 1 value(s)") },

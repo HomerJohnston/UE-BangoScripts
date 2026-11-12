@@ -87,6 +87,10 @@ void FBangoScriptNames::Build(const TArray<FString>& Lines, const TArray<TArray<
 			&& TokenIs(Line, Code[0], EBangoSyntaxKind::Preprocessor, TEXT("#define"))
 			&& TokenIs(Line, Code[1], EBangoSyntaxKind::Preprocessor, TEXT("params"));
 		const bool bGlobalLine = Code.Num() >= 1 && TokenIs(Line, Code[0], EBangoSyntaxKind::DeclKeyword, TEXT("global"));
+		if (bParamsLine && Graphs[0].EntryLine == INDEX_NONE)
+		{
+			Graphs[0].EntryLine = LineIndex;
+		}
 
 		int32 LineBelongsTo = Graph;
 		for (int32 I = 0; I < Code.Num(); ++I)
@@ -98,8 +102,16 @@ void FBangoScriptNames::Build(const TArray<FString>& Lines, const TArray<TArray<
 			{
 				Graph = Graphs.Num();
 				Graphs.AddDefaulted();
+				Graphs[Graph].EntryLine = LineIndex;
 				LineBelongsTo = Graph;
 				bInFunctionHeader = true;
+				continue;
+			}
+
+			// function <type> Name(: the function's name is the header's first call.
+			if (bInFunctionHeader && Token.Kind == EBangoSyntaxKind::Call && Graphs[Graph].FunctionName.IsEmpty())
+			{
+				Graphs[Graph].FunctionName = TokenText(Line, Token);
 				continue;
 			}
 
@@ -186,4 +198,36 @@ void FBangoScriptNames::RefineTokens(int32 LineIndex, const FString& Line, TArra
 			Token.Kind = Classify(LineIndex, Line.Mid(Token.Start, Token.Len));
 		}
 	}
+}
+
+int32 FBangoScriptNames::GetLineGraph(int32 LineIndex) const
+{
+	return LineIndex >= 0 && LineIndex < LineGraph.Num() ? LineGraph[LineIndex] : 0;
+}
+
+FString FBangoScriptNames::GetGraphFunctionName(int32 Graph) const
+{
+	return Graphs.IsValidIndex(Graph) ? Graphs[Graph].FunctionName : FString();
+}
+
+bool FBangoScriptNames::IsEntryLine(int32 LineIndex) const
+{
+	const int32 Graph = GetLineGraph(LineIndex);
+	return Graphs.IsValidIndex(Graph) && Graphs[Graph].EntryLine == LineIndex && LineIndex != INDEX_NONE;
+}
+
+int32 FBangoScriptNames::FindEntryLine(const FString& FunctionName) const
+{
+	if (FunctionName.IsEmpty())
+	{
+		return Graphs.Num() > 0 ? Graphs[0].EntryLine : INDEX_NONE;
+	}
+	for (int32 Graph = 1; Graph < Graphs.Num(); ++Graph)
+	{
+		if (Graphs[Graph].FunctionName.Equals(FunctionName, ESearchCase::CaseSensitive))
+		{
+			return Graphs[Graph].EntryLine;
+		}
+	}
+	return INDEX_NONE;
 }

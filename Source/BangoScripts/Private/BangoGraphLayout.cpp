@@ -268,7 +268,7 @@ namespace BangoGraphLayoutPrivate
 			for (const FBangoCommandParam& Param : Signature.Params)
 			{
 				Out.ParamNames.Add(Param.Name);
-				Out.ParamHints.Add(Param.Type.ToString());
+				Out.ParamHints.Add(Param.GetTypeName()); // "number" for a NumberParam
 				Out.ParamDescriptions.Add(Param.Description);
 			}
 			Out.NumRequired = Signature.GetNumRequiredParams();
@@ -280,7 +280,7 @@ namespace BangoGraphLayoutPrivate
 			Out.bTextPlaceholders = Signature.Params.IsValidIndex(Signature.PlaceholderParam) && Signature.Params[Signature.PlaceholderParam].Type == FBangoType::Text();
 			Out.bReturnsValue = Signature.bReturnsValue;
 			Out.bMustUseResult = Style == EBangoNodeStyle::Command && Signature.MustUseResult(); // script functions can be thrown away
-			Out.ReturnHint = Signature.bReturnsValue ? Signature.ReturnType.ToString() : FString();
+			Out.ReturnHint = Signature.bReturnsValue ? Signature.GetReturnTypeName() : FString();
 			Out.CategoryName = Signature.CategoryName;
 			Out.Description = Signature.CommandDescription;
 		};

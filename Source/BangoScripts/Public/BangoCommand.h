@@ -19,6 +19,14 @@ struct FBangoCommandParam
 	 * actor registry first. See FBangoCommandSignature::MayBeNil.
 	 */
 	bool bMayBeNil = false;
+	/**
+	 * A number parameter: takes an int or a float, and an int stays an int (Type is then float, only as a fallback).
+	 * See FBangoCommandSignature::NumberParam and ReturnsNumber.
+	 */
+	bool bNumber = false;
+
+	/** "number" for a number parameter, otherwise the type's name. */
+	FString GetTypeName() const { return bNumber ? FString(TEXT("number")) : Type.ToString(); }
 };
 
 /**
@@ -59,6 +67,11 @@ struct BANGOSCRIPTS_API FBangoCommandSignature
 	bool bReturnsValue = false;
 	FBangoType ReturnType;
 	/**
+	 * The command returns a number whose type follows its number parameters (like + does): an int if every number
+	 * argument is an int, a float if any is a float. ReturnType is then float, only as a fallback. See ReturnsNumber.
+	 */
+	bool bReturnsNumber = false;
+	/**
 	 * Only for commands that return a value: true if a script may call it on a line of its own and throw the value
 	 * away (like a latent command whose pausing is the point). Otherwise its result must be used, and
 	 * `Format("x");` on its own is a compile error. See MustUseResult.
@@ -83,6 +96,11 @@ struct BANGOSCRIPTS_API FBangoCommandSignature
 	FBangoCommandSignature& Target(const FBangoType& Type);
 	/** Adds a parameter. ParamDescription is the tooltip on its value in the graph editor (e.g. the unit: "Seconds"). */
 	FBangoCommandSignature& Param(const FString& ParamName, const FBangoType& Type, const FString& ParamDescription = FString());
+	/**
+	 * Adds a number parameter: it takes an int or a float, and an int is passed on as an int (Param with a float type
+	 * would turn it into a float). Used with ReturnsNumber for commands like Max that work on either.
+	 */
+	FBangoCommandSignature& NumberParam(const FString& ParamName, const FString& ParamDescription = FString());
 	/** The parameter added last may be nil, or an entity naming no actor: the command gets it as it is (bMayBeNil). */
 	FBangoCommandSignature& MayBeNil();
 	/** Marks every parameter added after this call as optional. */
@@ -93,6 +111,16 @@ struct BANGOSCRIPTS_API FBangoCommandSignature
 	FBangoCommandSignature& WithPlaceholders();
 	/** The command returns a value. Scripts must use it (`_x = Name(...)`), unless Discardable() is also called. */
 	FBangoCommandSignature& Returns(const FBangoType& Type);
+	/**
+	 * The command returns a number: an int if every number argument (NumberParam) is an int, otherwise a float, like
+	 * `_a + _b`. The compiler works out which at each call. The command must return that type (an int result where a
+	 * float is expected is turned into a float), and can't be latent.
+	 */
+	FBangoCommandSignature& ReturnsNumber();
+	/** "number" for a ReturnsNumber command, otherwise the return type's name. */
+	FString GetReturnTypeName() const { return bReturnsNumber ? FString(TEXT("number")) : ReturnType.ToString(); }
+	/** For a ReturnsNumber command: true if the result should be an int, given these arguments (every number argument is an int). */
+	bool NumberResultIsInt(TConstArrayView<FBangoValue> Args) const;
 	/** A script may call this command on a line of its own and throw its value away. */
 	FBangoCommandSignature& Discardable();
 	FBangoCommandSignature& InCategory(const FString& InCategory);

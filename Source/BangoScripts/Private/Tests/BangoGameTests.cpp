@@ -73,7 +73,7 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 	FBangoCommandTable Commands;
 	Bango::RegisterBuiltinCommands(Commands);
 	for (const TCHAR* Name : { TEXT("Hint"), TEXT("Log"), TEXT("Format"), TEXT("FormatText"), TEXT("ToText"), TEXT("ToString"), TEXT("Sleep"), TEXT("Random"), TEXT("RandomInt"), TEXT("Floor"), TEXT("Round"),
-		TEXT("GameTime"), TEXT("ToEntity"), TEXT("SetPos"), TEXT("GetPos"), TEXT("SetHidden"), TEXT("DistanceTo"), TEXT("IsNull") })
+		TEXT("Min"), TEXT("Max"), TEXT("Abs"), TEXT("Clamp"), TEXT("Sin"), TEXT("Cos"), TEXT("SinDegrees"), TEXT("CosDegrees"), TEXT("GameTime"), TEXT("ToEntity"), TEXT("SetPos"), TEXT("GetPos"), TEXT("SetHidden"), TEXT("DistanceTo"), TEXT("IsNull") })
 	{
 		TestNotNull(FString::Printf(TEXT("registered: %s"), Name), Commands.FindCommandImpl(Name));
 	}
@@ -84,11 +84,24 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 		TEXT("#define LOCTEXT_NAMESPACE \"Bango.Tests\"\n")
 		TEXT("global float r;\nglobal int ri;\nglobal int fl;\nglobal int ro;\nglobal int rn;\nglobal string fm;\nglobal string en;\nglobal bool same;\n")
 		TEXT("global text tf;\nglobal string ts;\nglobal bool teq;\nglobal bool nobody;\nglobal bool nilnull;\nglobal bool done;\nentity _ne;\n")
+		TEXT("global int mxi;\nglobal float mxf;\nglobal int mni;\nglobal float mnf;\nglobal int absi;\nglobal float absf;\nglobal int cli;\nglobal float clf;\nglobal float sn;\nglobal float cs;\nglobal float snd;\nglobal float csd;\n")
 		TEXT("r = Random(1.0, 2.0);\n")
 		TEXT("ri = RandomInt(3, 3);\n")
 		TEXT("fl = Floor(-1.5);\n")
 		TEXT("ro = Round(2.5);\n")
 		TEXT("rn = Round(-2.5);\n")
+		TEXT("mxi = Max(3, 9);\n")
+		TEXT("mxf = Max(3, 2.5);\n")
+		TEXT("mni = Min(-3, 9);\n")
+		TEXT("mnf = Min(1.5, 9);\n")
+		TEXT("absi = Abs(-4);\n")
+		TEXT("absf = Abs(-0.25);\n")
+		TEXT("cli = Clamp(12, 0, 10);\n")
+		TEXT("clf = Clamp(-1, 0.5, 10);\n")
+		TEXT("sn = Sin(1.5707963267948966);\n")
+		TEXT("cs = Cos(0);\n")
+		TEXT("snd = SinDegrees(30);\n")
+		TEXT("csd = CosDegrees(180.0);\n")
 		TEXT("fm = Format(\"{0}-{1}-{2}\", 1, \"a\", [1.5]);\n")
 		TEXT("en = Format(\"{0} {1}\", ToEntity(\"door17\"), [@john, ToEntity(\"_x\")]);\n")
 		TEXT("same = ToEntity(\"john\") == @john;\n")
@@ -115,6 +128,18 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Floor"), Globals.Find(TEXT("fl"))->GetInt(), -2);
 	TestEqual(TEXT("Round"), Globals.Find(TEXT("ro"))->GetInt(), 3);
 	TestEqual(TEXT("Round negative"), Globals.Find(TEXT("rn"))->GetInt(), -3);
+	TestEqual(TEXT("Max of ints is an int"), Globals.Find(TEXT("mxi"))->GetInt(), 9);
+	TestEqual(TEXT("Max with a float is a float"), Globals.Find(TEXT("mxf"))->GetDouble(), 3.0);
+	TestEqual(TEXT("Min of ints"), Globals.Find(TEXT("mni"))->GetInt(), -3);
+	TestEqual(TEXT("Min with a float"), Globals.Find(TEXT("mnf"))->GetDouble(), 1.5);
+	TestEqual(TEXT("Abs of an int"), Globals.Find(TEXT("absi"))->GetInt(), 4);
+	TestEqual(TEXT("Abs of a float"), Globals.Find(TEXT("absf"))->GetDouble(), 0.25);
+	TestEqual(TEXT("Clamp of ints"), Globals.Find(TEXT("cli"))->GetInt(), 10);
+	TestEqual(TEXT("Clamp with a float"), Globals.Find(TEXT("clf"))->GetDouble(), 0.5);
+	TestTrue(TEXT("Sin of pi/2"), FMath::IsNearlyEqual(Globals.Find(TEXT("sn"))->GetDouble(), 1.0, 1e-9));
+	TestTrue(TEXT("Cos of 0 (an int becomes a float)"), FMath::IsNearlyEqual(Globals.Find(TEXT("cs"))->GetDouble(), 1.0, 1e-9));
+	TestTrue(TEXT("SinDegrees of 30"), FMath::IsNearlyEqual(Globals.Find(TEXT("snd"))->GetDouble(), 0.5, 1e-9));
+	TestTrue(TEXT("CosDegrees of 180"), FMath::IsNearlyEqual(Globals.Find(TEXT("csd"))->GetDouble(), -1.0, 1e-9));
 	TestEqual(TEXT("Format"), Globals.Find(TEXT("fm"))->GetString(), FString(TEXT("1-a-[1.5]")));
 	TestEqual(TEXT("ToEntity and entities in Format"), Globals.Find(TEXT("en"))->GetString(), FString(TEXT("door17 [john, _x]")));
 	TestTrue(TEXT("ToEntity equals the @ literal"), Globals.Find(TEXT("same"))->GetBool());
@@ -133,6 +158,8 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 		{ TEXT("Sleep(-1.0);"), TEXT("negative time") },
 		{ TEXT("float _t;\n_t = GameTime();"), TEXT("needs a game world") },
 		{ TEXT("int _x;\n_x = Floor(1e300);"), TEXT("too large to convert") },
+		{ TEXT("int _x;\n_x = Abs(-2147483647 - 1);"), TEXT("has no positive int") },
+		{ TEXT("int _x;\n_x = Clamp(5, 10, 1);"), TEXT("Min (10) is greater than Max (1)") },
 		{ TEXT("string _text = \"{2}\";\nLog(_text, 1);"), TEXT("uses {2}") },   // a literal text is checked when compiling instead
 		{ TEXT("text _t;\n_t = ToText(\"{2}\");\nHint(_t, 1);"), TEXT("uses {2}") },
 		{ TEXT("text _t;\n_t = ToText(\"{Name}\");\nHint(_t);"), TEXT("uses {Name}") },

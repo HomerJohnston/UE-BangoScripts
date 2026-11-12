@@ -2217,13 +2217,31 @@ namespace BangoCompilerPrivate
 
 		// ---- Calls ----
 
-		/** NilOk (optional): the arguments a command takes even if nil (MayBeNil), so a nil variable there is passed on as nil. */
-		bool CompileArgs(const FBangoCallExpr& Call, const TArray<FBangoType>& ParamTypes, const FString& What, const TArray<bool>* NilOk = nullptr)
+		/**
+		 * NilOk (optional): the arguments a command takes even if nil (MayBeNil), so a nil variable there is passed on as nil.
+		 * Numbers (optional): a command's number parameters (NumberParam), which take an int or a float and leave it as it is;
+		 * OutNumberTypes gets the type of each argument given for one.
+		 */
+		bool CompileArgs(const FBangoCallExpr& Call, const TArray<FBangoType>& ParamTypes, const FString& What, const TArray<bool>* NilOk = nullptr,
+			const TArray<bool>* Numbers = nullptr, TArray<FExprType>* OutNumberTypes = nullptr)
 		{
 			for (int32 i = 0; i < Call.Args.Num() && i < ParamTypes.Num(); ++i)
 			{
 				FExprType ArgType;
 				bool bArgOk = false;
+				if (Numbers && Numbers->IsValidIndex(i) && (*Numbers)[i])
+				{
+					if (!CompileExpr(*Call.Args[i], nullptr, ArgType) || !CheckNumberArg(ArgType, Call.Args[i]->Loc, FString::Printf(TEXT("Argument %d of %s"), i + 1, *What)))
+					{
+						return false;
+					}
+					// An undeclared global is checked to be a number when the command is called.
+					if (OutNumberTypes)
+					{
+						OutNumberTypes->Add(ArgType);
+					}
+					continue;
+				}
 				if (NilOk && NilOk->IsValidIndex(i) && (*NilOk)[i] && IsPlaceExpr(*Call.Args[i]))
 				{
 					// Like IsNil: a nil variable, a global nobody made or an element past the end is passed on as nil.
@@ -2247,6 +2265,34 @@ namespace BangoCompilerPrivate
 				EmitConvertIfNeeded(ParamTypes[i], ArgType);
 			}
 			return true;
+		}
+
+		/** A number parameter's argument: an int, a float, or an undeclared global (checked when the script runs). */
+		bool CheckNumberArg(const FExprType& ArgType, const FBangoSourceLocation& Loc, const FString& What)
+		{
+			if (ArgType.IsNumber() || ArgType.IsUnknown())
+			{
+				return true;
+			}
+			return Fail(Loc, FString::Printf(TEXT("%s needs a number (an int or a float), but this is %s."), *What, *ArgType.Describe()));
+		}
+
+		/**
+		 * A ReturnsNumber command's result, from its number arguments (like +): a float if any is a float, an int if they're all
+		 * ints, and not known until the script runs if one is an undeclared global (and none is a float).
+		 */
+		static FExprType NumberResultType(const TArray<FExprType>& NumberArgTypes)
+		{
+			bool bUnknown = false;
+			for (const FExprType& ArgType : NumberArgTypes)
+			{
+				if (ArgType.Is(FBangoType::Double()))
+				{
+					return FExprType::MakeKnown(FBangoType::Double());
+				}
+				bUnknown |= ArgType.IsUnknown();
+			}
+			return bUnknown ? FExprType::MakeUnknown() : FExprType::MakeKnown(FBangoType::Int());
 		}
 
 		bool CompileCall(const FBangoCallExpr& Call, bool bValueNeeded, FExprType& OutType)
@@ -2329,12 +2375,15 @@ namespace BangoCompilerPrivate
 
 			TArray<FBangoType> ParamTypes;
 			TArray<bool> NilOk;
+			TArray<bool> Numbers;
 			for (const FBangoCommandParam& Param : Signature->Params)
 			{
 				ParamTypes.Add(Param.Type);
 				NilOk.Add(Param.bMayBeNil);
+				Numbers.Add(Param.bNumber);
 			}
-			if (!CompileArgs(Call, ParamTypes, FString::Printf(TEXT("'%s'"), *Call.Name), &NilOk))
+			TArray<FExprType> NumberArgTypes;
+			if (!CompileArgs(Call, ParamTypes, FString::Printf(TEXT("'%s'"), *Call.Name), &NilOk, &Numbers, &NumberArgTypes))
 			{
 				return false;
 			}
@@ -2357,6 +2406,10 @@ namespace BangoCompilerPrivate
 
 			CurrentLoc = Call.Loc;
 			Emit(EBangoOp::CallCommand, AddName(Call.Name), Call.Args.Num(), Call.Target ? 1 : 0);
+			if (Signature->bReturnsNumber)
+			{
+				return FinishCall(Call, true, NumberResultType(NumberArgTypes), bValueNeeded, OutType);
+			}
 			return FinishCall(Call, Signature->bReturnsValue, Signature->ReturnType, bValueNeeded, OutType);
 		}
 
@@ -2403,9 +2456,14 @@ namespace BangoCompilerPrivate
 
 		bool FinishCall(const FBangoCallExpr& Call, bool bReturnsValue, const FBangoType& ReturnType, bool bValueNeeded, FExprType& OutType)
 		{
+			return FinishCall(Call, bReturnsValue, FExprType::MakeKnown(ReturnType), bValueNeeded, OutType);
+		}
+
+		bool FinishCall(const FBangoCallExpr& Call, bool bReturnsValue, const FExprType& ReturnType, bool bValueNeeded, FExprType& OutType)
+		{
 			if (bReturnsValue)
 			{
-				OutType = FExprType::MakeKnown(ReturnType);
+				OutType = ReturnType;
 				if (!bValueNeeded)
 				{
 					Emit(EBangoOp::Pop);
