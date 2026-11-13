@@ -69,6 +69,7 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "HAL/PlatformTime.h"
+#include "Widgets/Colors/SColorBlock.h"
 
 #define LOCTEXT_NAMESPACE "SBangoScriptEditor"
 
@@ -126,64 +127,28 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 	[
 		SNew(SVerticalBox)
 
-		// Top: the toolbar
+		// Top: the toolbar, like an asset editor's (Blueprint's): Reload, Compile (with its status) and Save, then Debug.
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		[
-			SNew(SBorder)
-			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-			.Padding(FMargin(6.0f, 4.0f))
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.Padding(0.0f, 0.0f, 4.0f, 0.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("Reload", "Reload"))
-					.ToolTipText(LOCTEXT("ReloadTooltip", "Read the script again from its .bango file, to pick up changes made to the text outside the graph editor. Asks first if there are unsaved changes."))
-					.IsEnabled_Lambda([this]() { return !OpenScript.IsEmpty(); }) // also when the text didn't read, so it can be fixed and reloaded
-					.OnClicked(this, &SBangoScriptEditor::OnReloadClicked)
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.Padding(0.0f, 0.0f, 4.0f, 0.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("Compile", "Compile"))
-					.ToolTipText(LOCTEXT("CompileTooltip", "Check the script for errors. The first error is shown on its node. Text typed in the script text pane is applied first."))
-					.IsEnabled_Lambda([this]() { return EdGraphs.Num() > 0 || bTextEdited; })
-					.OnClicked(this, &SBangoScriptEditor::OnCompileClicked)
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.Padding(0.0f, 0.0f, 12.0f, 0.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("Save", "Save"))
-					.ToolTipText(LOCTEXT("SaveTooltip", "Write the script to its .bango file (Ctrl+S). Text typed in the script text pane is applied first."))
-					.IsEnabled_Lambda([this]() { return EdGraphs.Num() > 0 || bTextEdited; })
-					.OnClicked(this, &SBangoScriptEditor::OnSaveClicked)
-				]
-				// Debug: which running copy of this script to follow, like Blueprint's debug object.
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Center)
-				[
-					SNew(SComboButton)
-					.OnGetMenuContent(this, &SBangoScriptEditor::MakeDebugMenu)
-					.IsEnabled_Lambda([this]() { return !OpenScript.IsEmpty(); })
-					.ToolTipText(LOCTEXT("DebugTooltip", "While playing in the editor: the running copy of this script to follow. Its graph shows where it is with a pulsing outline, and the calls on the way there with a dim one; a copy that stopped with an error shows its node in red. The only running copy is followed by itself."))
-					.ButtonContent()
-					[
-						SNew(STextBlock)
-						.Text(this, &SBangoScriptEditor::GetDebugLabel)
-					]
-				]
-			]
+			MakeToolbar()
 		]
 
-		// Below: the functions and variables, then the graph
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		[
+			SNew(SBox)
+			.HeightOverride(4)
+			[
+				// The same brush as the toolbar and the panes, so the gap is the window's background colour (and
+				// follows the editor's theme).
+				SNew(SBorder)
+				.BorderImage(FAppStyle::GetBrush("Brushes.Background"))
+				.Padding(0.0f)
+			]
+		]
+		
+		// Below: the functions and variables, then the graph (a small gap under the toolbar)
 		+ SVerticalBox::Slot()
 		.FillHeight(1.0f)
 		[
@@ -2391,6 +2356,7 @@ void SBangoScriptEditor::CloseScript()
 	UpdateInputs();
 	SavedDocument = FBangoGraphDocument();
 	bDirty = false;
+	CompileStatus = ECompileStatus::Unknown;
 	bChangedOnDisk = false;
 	KeptFileTime = FDateTime::MinValue();
 	SetScriptText(FString());
@@ -2443,6 +2409,7 @@ void SBangoScriptEditor::LoadScript(const FString& Script)
 	BuildCurrentDocument(SavedDocument, nullptr, BuildError);
 	bDirty = false;
 	UpdateScriptText(&SavedDocument);
+	CompileQuietly(); // so the Compile Test icon starts with the script's real status
 }
 
 void SBangoScriptEditor::ShowDocument(const FBangoGraphDocument& Document)
@@ -4312,6 +4279,10 @@ EActiveTimerReturnType SBangoScriptEditor::OnPoll(double CurrentTime, float Delt
 		return EActiveTimerReturnType::Continue;
 	}
 	bDirty = Current != SavedDocument;
+	if (CompileStatus != ECompileStatus::Unknown && Current != CompiledDocument)
+	{
+		CompileStatus = ECompileStatus::Unknown; // changed since it was compiled
+	}
 
 	// A function's signature changed (calls to it need new fields, and the graph list a new name), or what some
 	// node's variables are (a Set node shows its variable's type, so renaming its Var or changing a declaration matters).
@@ -4457,6 +4428,109 @@ void SBangoScriptEditor::RebuildAllNodes()
 	}
 }
 
+TSharedRef<SWidget> SBangoScriptEditor::MakeToolbar()
+{
+	// The same builder and style as an asset editor's toolbar (Blueprint's), so the buttons have icons and labels.
+	FSlimHorizontalToolBarBuilder Toolbar(nullptr, FMultiBoxCustomization::None);
+	Toolbar.SetStyle(&FAppStyle::Get(), "AssetEditorToolbar");
+	Toolbar.SetLabelVisibility(EVisibility::Visible); // each button's label beside its icon (the slim style hides them)
+	const FName StyleSet = FAppStyle::GetAppStyleSetName();
+
+	// Save and Reload | Compile | Debug: each section has a separator before it.
+	Toolbar.BeginSection("File");
+	Toolbar.AddToolBarButton(
+		FUIAction(
+			FExecuteAction::CreateLambda([this]() { OnSaveClicked(); }),
+			FCanExecuteAction::CreateLambda([this]() { return EdGraphs.Num() > 0 || bTextEdited; })),
+		NAME_None,
+		LOCTEXT("Save", "Save"),
+		LOCTEXT("SaveTooltip", "Write the script to its .bango file (Ctrl+S). Text typed in the script text pane is applied first."),
+		FSlateIcon(StyleSet, "AssetEditor.SaveAsset"));
+	Toolbar.AddToolBarButton(
+		FUIAction(
+			FExecuteAction::CreateLambda([this]() { OnReloadClicked(); }),
+			// Also when the text didn't read, so it can be fixed and reloaded.
+			FCanExecuteAction::CreateLambda([this]() { return !OpenScript.IsEmpty(); })),
+		NAME_None,
+		LOCTEXT("Reload", "Reload"),
+		LOCTEXT("ReloadTooltip", "Read the script again from its .bango file, to pick up changes made to the text outside the graph editor. Asks first if there are unsaved changes."),
+		FSlateIcon(StyleSet, "Icons.Refresh"));
+	Toolbar.EndSection();
+
+	Toolbar.BeginSection("Compile");
+	// Compile Test, with Blueprint's status icon: a ? while it's changed since it was last compiled, a tick, a warning or
+	// a cross after.
+	Toolbar.AddToolBarButton(
+		FUIAction(
+			FExecuteAction::CreateLambda([this]() { OnCompileClicked(); }),
+			FCanExecuteAction::CreateLambda([this]() { return EdGraphs.Num() > 0 || bTextEdited; })),
+		NAME_None,
+		LOCTEXT("CompileTest", "Compile Test"),
+		TAttribute<FText>::CreateLambda([this]()
+		{
+			const FText Status =
+				bTextEdited || CompileStatus == ECompileStatus::Unknown ? LOCTEXT("CompileStatusUnknown", "Changed since it was last compiled.")
+				: CompileStatus == ECompileStatus::Good ? LOCTEXT("CompileStatusGood", "Compiled without errors.")
+				: CompileStatus == ECompileStatus::Warning ? LOCTEXT("CompileStatusWarning", "Compiled with warnings.")
+				: LOCTEXT("CompileStatusError", "Didn't compile: there's an error.");
+			return FText::Format(LOCTEXT("CompileTestTooltip", "Check the script for errors. The first error is shown on its node. Text typed in the script text pane is applied first.\n\nThis is only a test: scripts are always compiled when they're loaded at runtime, so there's nothing to compile before playing or saving. The script is also test-compiled when it's opened, for this button's icon.\n\n{0}"), Status);
+		}),
+		TAttribute<FSlateIcon>::CreateLambda([this, StyleSet]()
+		{
+			const FName Overlay =
+				bTextEdited || CompileStatus == ECompileStatus::Unknown ? FName("Blueprint.CompileStatus.Overlay.Unknown")
+				: CompileStatus == ECompileStatus::Good ? FName("Blueprint.CompileStatus.Overlay.Good")
+				: CompileStatus == ECompileStatus::Warning ? FName("Blueprint.CompileStatus.Overlay.Warning")
+				: FName("Blueprint.CompileStatus.Overlay.Error");
+			return FSlateIcon(StyleSet, "Blueprint.CompileStatus.Background", NAME_None, Overlay);
+		}));
+	Toolbar.EndSection();
+
+	// Debug: which running copy of this script to follow, like Blueprint's debug object.
+	Toolbar.BeginSection("Debug"); // a section has a separator before it
+	Toolbar.AddComboButton(
+		FUIAction(FExecuteAction(), FCanExecuteAction::CreateLambda([this]() { return !OpenScript.IsEmpty(); })),
+		FOnGetContent::CreateSP(this, &SBangoScriptEditor::MakeDebugMenu),
+		TAttribute<FText>::CreateSP(this, &SBangoScriptEditor::GetDebugLabel),
+		LOCTEXT("DebugTooltip", "While playing in the editor: the running copy of this script to follow. Its graph shows where it is with a pulsing outline, and the calls on the way there with a dim one; a copy that stopped with an error shows its node in red. The only running copy is followed by itself."),
+		FSlateIcon(StyleSet, "Debug"));
+	Toolbar.EndSection();
+
+	return Toolbar.MakeWidget();
+}
+
+void SBangoScriptEditor::CompileQuietly()
+{
+	// Like Compile Test, but only for its icon: no notification, nothing marked on the nodes, the view left alone.
+	FBangoGraphDocument Document;
+	TArray<TArray<UBangoEdGraphNode*>> Nodes;
+	FString Error;
+	FString Text;
+	if (EdGraphs.Num() == 0 || !BuildCurrentDocument(Document, &Nodes, Error) || !Bango::WriteGraphText(Document, Text, Error))
+	{
+		return; // left Unknown
+	}
+	CompiledDocument = Document;
+	FBangoProgram Program;
+	FBangoCompileError CompileError;
+	if (!Bango::CompileSource(Text, OpenScript + TEXT(".bango"), FBangoModule::Get().GetCommands(), Program, CompileError))
+	{
+		CompileStatus = ECompileStatus::Error;
+		return;
+	}
+	int32 NumWarnings = 0;
+	for (const TArray<UBangoEdGraphNode*>& GraphNodes : Nodes)
+	{
+		for (const UBangoEdGraphNode* Node : GraphNodes)
+		{
+			TArray<Bango::FBangoFieldWarning> Warnings;
+			Bango::GetNodeWarnings(Node->Layout, Warnings);
+			NumWarnings += Warnings.Num();
+		}
+	}
+	CompileStatus = NumWarnings == 0 ? ECompileStatus::Good : ECompileStatus::Warning;
+}
+
 FReply SBangoScriptEditor::OnCompileClicked()
 {
 	if (bTextEdited && !ApplyScriptText())
@@ -4473,6 +4547,9 @@ FReply SBangoScriptEditor::OnCompileClicked()
 		Notify(FText::FromString(Error), false);
 		return FReply::Handled();
 	}
+	// What the toolbar's Compile icon shows is for this version of the script, until it's changed (OnPoll).
+	CompiledDocument = Document;
+	CompileStatus = ECompileStatus::Error;
 
 	// Lay out every node again, which clears earlier compile errors and warnings. Whatever this compile finds is
 	// shown below; when this returns, only the nodes that look different are rebuilt.
@@ -4506,6 +4583,7 @@ FReply SBangoScriptEditor::OnCompileClicked()
 	const FString FileName = OpenScript + TEXT(".bango");
 	if (Bango::CompileSource(Text, FileName, FBangoModule::Get().GetCommands(), Program, CompileError))
 	{
+		CompileStatus = NumWarnings == 0 ? ECompileStatus::Good : ECompileStatus::Warning;
 		if (NumWarnings == 0)
 		{
 			Notify(FText::Format(LOCTEXT("Compiled", "{0} compiled without errors."), FText::FromString(FileName)), true);

@@ -244,6 +244,11 @@ private:
 	/** The document as last opened or saved; the script has unsaved changes when the graphs differ from it. */
 	FBangoGraphDocument SavedDocument;
 	bool bDirty = false;
+	/** What the toolbar's Compile Test icon shows, as Blueprint's does: compiled when opened (CompileQuietly), Unknown once changed after. */
+	enum class ECompileStatus : uint8 { Unknown, Good, Warning, Error };
+	ECompileStatus CompileStatus = ECompileStatus::Unknown;
+	/** The script as it was last compiled, so a change after it puts CompileStatus back to Unknown (OnPoll). */
+	FBangoGraphDocument CompiledDocument;
 
 	/**
 	 * The file was changed outside the editor while the editor had unsaved changes: a bar above the graph offers to
@@ -430,7 +435,11 @@ private:
 
 	/** Reload: asks about unsaved changes, then reads the script again from its file. */
 	FReply OnReloadClicked();
+	/** The toolbar: Reload, Compile (with its status icon) and Save, then the Debug dropdown, styled like an asset editor's. */
+	TSharedRef<SWidget> MakeToolbar();
 	FReply OnCompileClicked();
+	/** Compiles the script only to set CompileStatus (the Compile Test icon): no notification, no node errors, no view change. */
+	void CompileQuietly();
 	FReply OnSaveClicked();
 	/** Writes the open script to its file. Returns false if it couldn't (and says why). */
 	bool Save();
