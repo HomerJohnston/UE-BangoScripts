@@ -15,7 +15,7 @@ bool FBangoCompilerCasesTest::RunTest(const FString& Parameters)
 {
 	FBangoCommandTable Commands;
 	BangoMakeTestCommands(Commands);
-	TestEqual(TEXT("test commands registered"), Commands.Num(), 16);
+	TestEqual(TEXT("test commands registered"), Commands.Num(), 17);
 
 	for (const FBangoCompilerTestCase& Case : GBangoCompilerTestCases)
 	{

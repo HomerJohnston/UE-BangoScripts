@@ -53,6 +53,8 @@ void SBangoScriptBrowser::Construct(const FArguments& InArgs)
 	const TSharedPtr<SWidget> TabArea = TabManager->RestoreFrom(TabLayout, InArgs._OwnerWindow);
 
 	GConfig->GetBool(BangoScriptBrowserPrivate::ConfigSection, TEXT("bTreeView"), bTreeView, GEditorPerProjectIni);
+	GConfig->GetFloat(BangoScriptBrowserPrivate::ConfigSection, TEXT("ListWidth"), ListWidth, GEditorPerProjectIni);
+	ListWidth = FMath::Max(ListWidth, 120.0f);
 	ExpandedFolders.Add(FString()); // the script folder starts open
 
 	ChildSlot
@@ -62,97 +64,109 @@ void SBangoScriptBrowser::Construct(const FArguments& InArgs)
 
 		// Left: the scripts
 		+ SSplitter::Slot()
-		.Value(0.15f)
+		// Sized to its content, a width it keeps when the window is resized; dragging the splitter changes it (ListWidth, remembered).
+		.SizeRule(SSplitter::SizeToContent)
+		.Resizable(true) // a sized-to-content slot is only dragged if it says so (and has OnSlotResized)
+		.MinSize(120.0f)
+		.OnSlotResized_Lambda([this](float NewWidth)
+		{
+			ListWidth = FMath::Max(NewWidth, 120.0f);
+			GConfig->SetFloat(BangoScriptBrowserPrivate::ConfigSection, TEXT("ListWidth"), ListWidth, GEditorPerProjectIni);
+		})
 		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(6.0f, 4.0f)
+			SNew(SBox)
+			.WidthOverride_Lambda([this]() { return ListWidth; })
 			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.FillWidth(1.0f)
-				.VAlign(VAlign_Center)
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(6.0f, 4.0f)
 				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("ScriptsHeading", "SCRIPTS"))
-					.Font(FAppStyle::GetFontStyle("BoldFont"))
-				]
-				// Shows the scripts in their folders, like the Content Browser, instead of as one list.
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.Padding(0.0f, 0.0f, 4.0f, 0.0f)
-				[
-					SNew(SCheckBox)
-					.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
-					.ToolTipText(LOCTEXT("TreeViewTooltip", "Show the scripts in their folders, with the Bango script folder (Content/Bango) at the top, instead of as one list."))
-					.IsChecked_Lambda([this]() { return bTreeView ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-					.OnCheckStateChanged_Lambda([this](ECheckBoxState NewState) { SetTreeView(NewState == ECheckBoxState::Checked); })
-					.Padding(FMargin(6.0f, 2.0f))
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot()
+					.FillWidth(1.0f)
+					.VAlign(VAlign_Center)
 					[
-						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot()
-						.AutoWidth()
-						.VAlign(VAlign_Center)
-						.Padding(0.0f, 0.0f, 4.0f, 0.0f)
+						SNew(STextBlock)
+						.Text(LOCTEXT("ScriptsHeading", "SCRIPTS"))
+						.Font(FAppStyle::GetFontStyle("BoldFont"))
+					]
+					// Shows the scripts in their folders, like the Content Browser, instead of as one list.
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.Padding(0.0f, 0.0f, 4.0f, 0.0f)
+					[
+						SNew(SCheckBox)
+						.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+						.ToolTipText(LOCTEXT("TreeViewTooltip", "Show the scripts in their folders, with the Bango script folder (Content/Bango) at the top, instead of as one list."))
+						.IsChecked_Lambda([this]() { return bTreeView ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+						.OnCheckStateChanged_Lambda([this](ECheckBoxState NewState) { SetTreeView(NewState == ECheckBoxState::Checked); })
+						.Padding(FMargin(6.0f, 2.0f))
 						[
-							SNew(SImage)
-							.Image(FAppStyle::GetBrush("ContentBrowser.AssetTreeFolderClosed"))
-							.ColorAndOpacity(FSlateColor::UseForeground())
-						]
-						+ SHorizontalBox::Slot()
-						.AutoWidth()
-						.VAlign(VAlign_Center)
-						[
-							SNew(STextBlock).Text(LOCTEXT("TreeView", "Folders"))
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot()
+							.AutoWidth()
+							.VAlign(VAlign_Center)
+							.Padding(0.0f, 0.0f, 4.0f, 0.0f)
+							[
+								SNew(SImage)
+								.Image(FAppStyle::GetBrush("ContentBrowser.AssetTreeFolderClosed"))
+								.ColorAndOpacity(FSlateColor::UseForeground())
+							]
+							+ SHorizontalBox::Slot()
+							.AutoWidth()
+							.VAlign(VAlign_Center)
+							[
+								SNew(STextBlock).Text(LOCTEXT("TreeView", "Folders"))
+							]
 						]
 					]
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					[
+						SNew(SButton)
+						.Text(LOCTEXT("Refresh", "Refresh"))
+						.ToolTipText(LOCTEXT("RefreshTooltip", "Look for .bango files again. (To read an open script again from its file, use its Reload button.)"))
+						.OnClicked(this, &SBangoScriptBrowser::OnRefreshClicked)
+					]
 				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
+				+ SVerticalBox::Slot()
+				.FillHeight(1.0f)
 				[
-					SNew(SButton)
-					.Text(LOCTEXT("Refresh", "Refresh"))
-					.ToolTipText(LOCTEXT("RefreshTooltip", "Look for .bango files again. (To read an open script again from its file, use its Reload button.)"))
-					.OnClicked(this, &SBangoScriptBrowser::OnRefreshClicked)
-				]
-			]
-			+ SVerticalBox::Slot()
-			.FillHeight(1.0f)
-			[
-				SNew(SWidgetSwitcher)
-				.WidgetIndex_Lambda([this]() { return bTreeView ? 1 : 0; })
-				+ SWidgetSwitcher::Slot()
-				[
-					SAssignNew(ScriptList, SListView<TSharedPtr<FString>>)
-					.ListItemsSource(&ScriptItems)
-					.SelectionMode(ESelectionMode::Single)
-					.OnGenerateRow(this, &SBangoScriptBrowser::OnGenerateScriptRow)
-					.OnSelectionChanged(this, &SBangoScriptBrowser::OnScriptSelected)
-				]
-				+ SWidgetSwitcher::Slot()
-				[
-					SAssignNew(ScriptTree, STreeView<TSharedPtr<FScriptTreeItem>>)
-					.TreeItemsSource(&TreeRoots)
-					.SelectionMode(ESelectionMode::Single)
-					.OnGenerateRow(this, &SBangoScriptBrowser::OnGenerateTreeRow)
-					.OnGetChildren(this, &SBangoScriptBrowser::OnGetTreeChildren)
-					.OnSelectionChanged(this, &SBangoScriptBrowser::OnTreeSelectionChanged)
-					.OnExpansionChanged(this, &SBangoScriptBrowser::OnTreeExpansionChanged)
-					.OnMouseButtonDoubleClick_Lambda([this](TSharedPtr<FScriptTreeItem> Item)
-					{
-						if (Item.IsValid() && Item->bFolder)
+					SNew(SWidgetSwitcher)
+					.WidgetIndex_Lambda([this]() { return bTreeView ? 1 : 0; })
+					+ SWidgetSwitcher::Slot()
+					[
+						SAssignNew(ScriptList, SListView<TSharedPtr<FString>>)
+						.ListItemsSource(&ScriptItems)
+						.SelectionMode(ESelectionMode::Single)
+						.OnGenerateRow(this, &SBangoScriptBrowser::OnGenerateScriptRow)
+						.OnSelectionChanged(this, &SBangoScriptBrowser::OnScriptSelected)
+					]
+					+ SWidgetSwitcher::Slot()
+					[
+						SAssignNew(ScriptTree, STreeView<TSharedPtr<FScriptTreeItem>>)
+						.TreeItemsSource(&TreeRoots)
+						.SelectionMode(ESelectionMode::Single)
+						.OnGenerateRow(this, &SBangoScriptBrowser::OnGenerateTreeRow)
+						.OnGetChildren(this, &SBangoScriptBrowser::OnGetTreeChildren)
+						.OnSelectionChanged(this, &SBangoScriptBrowser::OnTreeSelectionChanged)
+						.OnExpansionChanged(this, &SBangoScriptBrowser::OnTreeExpansionChanged)
+						.OnMouseButtonDoubleClick_Lambda([this](TSharedPtr<FScriptTreeItem> Item)
 						{
-							ScriptTree->SetItemExpansion(Item, !ScriptTree->IsItemExpanded(Item)); // double-click opens or closes a folder
-						}
-					})
+							if (Item.IsValid() && Item->bFolder)
+							{
+								ScriptTree->SetItemExpansion(Item, !ScriptTree->IsItemExpanded(Item)); // double-click opens or closes a folder
+							}
+						})
+					]
 				]
 			]
 		]
 
 		// Right: a document tab per open script, each showing its editor
 		+ SSplitter::Slot()
-		.Value(0.85f)
+		.Value(1.0f) // takes up any change in the window's width
 		[
 			SNew(SOverlay)
 			+ SOverlay::Slot()

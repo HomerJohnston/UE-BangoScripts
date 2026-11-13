@@ -66,6 +66,8 @@ private:
 	TSet<FString> ExpandedFolders;
 	/** Showing the folder tree instead of the list. Remembered between sessions. */
 	bool bTreeView = false;
+	/** The script list's width: kept when the window is resized, set by dragging the splitter, and remembered between sessions. */
+	float ListWidth = 240.0f;
 	/** Set while the list's selection is changed in code, so it doesn't count as picking a script. */
 	bool bIgnoreScriptSelection = false;
 

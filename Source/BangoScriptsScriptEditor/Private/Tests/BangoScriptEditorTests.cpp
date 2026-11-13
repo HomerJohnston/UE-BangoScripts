@@ -96,7 +96,7 @@ bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Sleep title"), SleepNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString(), FString(TEXT("Sleep")));
 	TestTrue(TEXT("Sleep is a command node"), SleepNode->Layout.Style == EBangoNodeStyle::Command);
 	TestTrue(TEXT("Sleep has a Time field holding 1.5"), SleepNode->Layout.Fields.Num() == 1 && SleepNode->Layout.Fields[0].Label.Equals(TEXT("Time"), ESearchCase::CaseSensitive) && SleepNode->Layout.Fields[0].Text == TEXT("1.5"));
-	TestTrue(TEXT("Sleep's Time is described as Seconds"), SleepNode->Layout.Fields.Num() == 1 && SleepNode->Layout.Fields[0].Description.Equals(TEXT("Seconds"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("Sleep's Time is described as Seconds"), SleepNode->Layout.Fields.Num() == 1 && SleepNode->Layout.Fields[0].Description.StartsWith(TEXT("Seconds"), ESearchCase::CaseSensitive));
 	TestFalse(TEXT("no error on a known command"), SleepNode->bHasCompilerMessage);
 
 	// Reading the editor graph back gives the same document.

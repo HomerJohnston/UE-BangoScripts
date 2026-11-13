@@ -204,7 +204,7 @@ static const FBangoParserTestCase GBangoParserTestCases[] =
 	{ TEXT("disabled: no defines"), TEXT("/*\n#define params (int _a)\n*/"), nullptr, TEXT("(2:1)"), TEXT("can't be disabled") },
 	{ TEXT("disabled: no declarations"), TEXT("/* int _a = 1; */"), nullptr, TEXT("(1:4)"), TEXT("A declaration can't be disabled") },
 	{ TEXT("disabled: two on a line"), TEXT("/* a(); */ /* b(); */"), nullptr, TEXT("(1:15)"), TEXT("one statement is allowed per line") },
-	{ TEXT("disabled: bad code inside gets the note"), TEXT("/*\nHint(\"a\"\n*/"), nullptr, nullptr, TEXT("must still be Bango statements") },
+	{ TEXT("disabled: bad code inside gets the note"), TEXT("/*\nHint(\"a\"\n*/"), nullptr, TEXT("(3:1)"), TEXT("must still be Bango statements") },
 	{ TEXT("unclosed block"), TEXT("while (a)\n{\n\tHint();"), nullptr, TEXT("(3:9)"), TEXT("never closed") },
 	{ TEXT("array type too deep"), TEXT("int[][][][][][][][][] _x;"), nullptr, TEXT("(1:1)"), TEXT("at most 8") },
 	{ TEXT("assign to call"), TEXT("Foo() = 5;"), nullptr, TEXT("(1:1)"), TEXT("only assign to") },

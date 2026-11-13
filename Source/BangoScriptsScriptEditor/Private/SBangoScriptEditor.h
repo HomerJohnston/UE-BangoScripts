@@ -149,8 +149,8 @@ private:
 	bool bCommandsPaneOpen = false;
 	float CommandsPaneOpenness = 0.0f;
 	bool bCommandsPaneSliding = false;
-	/** Its share of the width when it's open (the splitter beside it sets this). */
-	float CommandsPaneValue = 0.2f;
+	/** Its width in pixels when it's open (the splitter beside it sets this; resizing the window doesn't). */
+	float CommandsPaneWidth = 260.0f;
 	TSharedPtr<SButton> CommandsTabButton;
 	/** What the lists show, so they're only made again when it changes. */
 	FString DeclsShown;
@@ -179,9 +179,12 @@ private:
 	float TextPaneOpenness = 0.0f;
 	/** True while the pane is sliding (AnimateTextPane is running). */
 	bool bTextPaneSliding = false;
-	/** The text pane's and the graph's shares of the width when the pane is open (the splitter between them sets these). */
-	float TextPaneValue = 0.35f;
-	float GraphPaneValue = 0.65f;
+	/** The text pane's width in pixels when it's open (the splitter beside it sets this; resizing the window doesn't). */
+	float TextPaneWidth = 480.0f;
+	/** The left pane's width (SCRIPT DESCRIPTION ... FUNCTIONS): kept when the window is resized; the splitter sets it. */
+	float ScriptDataWidth = 280.0f;
+	/** The side panes can't be dragged narrower than this. */
+	static constexpr float MinSidePaneWidth = 120.0f;
 	TSharedPtr<SButton> TextTabButton;
 	/** The text as last put in the box (from the graphs, or the file if it didn't read), so typing in it can be told apart. */
 	FString TextShown;
