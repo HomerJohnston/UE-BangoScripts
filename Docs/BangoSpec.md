@@ -1111,6 +1111,8 @@ Each node shows its text as **fields** in columns, like the details panel: each 
 
 **Autocomplete.** While a field is being edited, typing a name opens a list under it of what fits there, as in the script text pane: the variables the node can see (its graph's parameters and locals, the file's globals), this script's functions, the registered commands and the built-ins, sorted by name, with each one's kind (P, L, G, F, C or B), type or signature, and a command's description. It filters as more is typed and closes when nothing matches or the name is typed in full. Up and Down (and Page Up / Page Down) pick, **Enter** or **Tab** puts the name in (a command or function also gets its `(`), clicking an entry does the same, and **Escape** closes the list (a second Escape cancels the edit). **Ctrl+Space** opens it for the word at the cursor. Nothing is offered in a string or text field's plain text (one that starts with `=` is an expression, and gets the list), after `@` or `.`, or inside a string.
 
+**Moving between fields.** While a field is being edited (and the autocomplete list isn't open; when it is, Enter and Tab pick from it), **Enter** applies what's typed and opens the node's next field, with its text selected; after the last field, editing ends. **Tab** does the same but wraps around to the first field, and **Shift+Enter** / **Shift+Tab** go to the previous field instead. Fields that can't be edited are skipped, and the next field is found after the edit, so an edit that changes the node's fields (like a call's command) moves on through its new ones.
+
 A statement that is exactly one call (`[target] Name(args);`) gets a **dedicated node** titled with the command or function's name:
 
 | Field | When |

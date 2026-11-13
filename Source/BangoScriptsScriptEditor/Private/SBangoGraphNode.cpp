@@ -817,9 +817,20 @@ FReply SBangoGraphNode::OnValueClicked(const FGeometry& Geometry, const FPointer
 		return FReply::Unhandled();
 	}
 
+	BeginEditingField(FieldIndex);
+	return FReply::Handled();
+}
+
+void SBangoGraphNode::BeginEditingField(int32 FieldIndex)
+{
+	if (!EditBoxes.IsValidIndex(FieldIndex) || !EditBoxes[FieldIndex].IsValid())
+	{
+		return;
+	}
 	EditingField = FieldIndex;
 	TWeakPtr<SEditableTextBox> WeakBox = EditBoxes[FieldIndex];
-	// The edit box only becomes visible on the next frame; give it keyboard focus then.
+	// The edit box only becomes visible on the next frame; give it keyboard focus then. (Its text is all selected
+	// when it gets focus, so typing replaces it.)
 	RegisterActiveTimer(0.0f, FWidgetActiveTimerDelegate::CreateLambda([WeakBox](double, float)
 	{
 		if (TSharedPtr<SEditableTextBox> Box = WeakBox.Pin())
@@ -828,7 +839,59 @@ FReply SBangoGraphNode::OnValueClicked(const FGeometry& Geometry, const FPointer
 		}
 		return EActiveTimerReturnType::Stop;
 	}));
+}
+
+int32 SBangoGraphNode::FindEditableField(int32 From, int32 Step, bool bWrap) const
+{
+	const int32 Num = EditBoxes.Num();
+	for (int32 Offset = 1; Offset <= Num; ++Offset)
+	{
+		int32 Index = From + Step * Offset;
+		if (Index < 0 || Index >= Num)
+		{
+			if (!bWrap)
+			{
+				return INDEX_NONE;
+			}
+			Index = ((Index % Num) + Num) % Num;
+		}
+		if (EditBoxes[Index].IsValid())
+		{
+			return Index;
+		}
+	}
+	return INDEX_NONE;
+}
+
+FReply SBangoGraphNode::CommitAndMoveOn(int32 FieldIndex, int32 Step, bool bWrap)
+{
+	const TSharedPtr<SEditableTextBox> Box = EditBoxes.IsValidIndex(FieldIndex) ? EditBoxes[FieldIndex] : nullptr;
+	if (!Box.IsValid() || EditingField != FieldIndex)
+	{
+		return FReply::Unhandled();
+	}
+	// The edit can change which fields the node has (like a call's command), so the next one is found after the
+	// node has rebuilt itself for it.
+	PendingEditFrom = FieldIndex;
+	PendingEditStep = Step;
+	bPendingEditWrap = bWrap;
+	OnValueCommitted(Box->GetText(), ETextCommit::OnEnter, FieldIndex); // and the node rebuilds on the next frame
 	return FReply::Handled();
+}
+
+void SBangoGraphNode::ResumePendingEdit()
+{
+	const int32 From = PendingEditFrom;
+	PendingEditFrom = INDEX_NONE;
+	if (From == INDEX_NONE)
+	{
+		return;
+	}
+	const int32 Next = FindEditableField(From, PendingEditStep, bPendingEditWrap);
+	if (Next != INDEX_NONE && Next != From)
+	{
+		BeginEditingField(Next);
+	}
 }
 
 void SBangoGraphNode::OnValueCommitted(const FText& NewText, ETextCommit::Type CommitType, int32 FieldIndex)
@@ -869,6 +932,7 @@ void SBangoGraphNode::RefreshSoon()
 		if (TSharedPtr<SBangoGraphNode> This = WeakThis.Pin())
 		{
 			This->UpdateGraphNode();
+			This->ResumePendingEdit(); // Enter or Tab: on to the next field
 		}
 		return EActiveTimerReturnType::Stop;
 	}));
@@ -1249,8 +1313,18 @@ FReply SBangoGraphNode::OnEditBoxKeyDown(const FGeometry& Geometry, const FKeyEv
 		QueueCompletionUpdate(FieldIndex, true); // Ctrl+Space: open the list for the word at the cursor
 		return FReply::Handled();
 	}
-	if (!IsCompletionOpen() || KeyEvent.IsControlDown() || KeyEvent.IsAltDown() || KeyEvent.IsCommandDown())
+	if (KeyEvent.IsControlDown() || KeyEvent.IsAltDown() || KeyEvent.IsCommandDown())
 	{
+		return FReply::Unhandled();
+	}
+	if (!IsCompletionOpen())
+	{
+		// Enter applies what's typed and moves on to the next field (after the last, editing ends); Tab does the
+		// same but wraps around to the first, and Shift goes back instead.
+		if (Key == EKeys::Enter || Key == EKeys::Tab)
+		{
+			return CommitAndMoveOn(FieldIndex, KeyEvent.IsShiftDown() ? -1 : 1, Key == EKeys::Tab);
+		}
 		return FReply::Unhandled();
 	}
 	if (Key == EKeys::Up || Key == EKeys::Down)

@@ -59,6 +59,14 @@ private:
 	int32 EditingField = INDEX_NONE;
 	/** One edit box per field (null for fields that can't be edited). */
 	TArray<TSharedPtr<SEditableTextBox>> EditBoxes;
+	/**
+	 * Enter or Tab in a field: the field it was pressed in, and which way to move on (1 next, -1 previous; Tab wraps
+	 * around, Enter stops after the last). The node rebuilds itself after the edit, so the next field is found and
+	 * opened then. INDEX_NONE when there's nowhere to move on to.
+	 */
+	int32 PendingEditFrom = INDEX_NONE;
+	int32 PendingEditStep = 1;
+	bool bPendingEditWrap = false;
 
 	// ---- Autocomplete in the field being edited (FBangoCompletion) ----
 
@@ -126,6 +134,14 @@ private:
 	TSharedRef<SWidget> MakeFieldValue(int32 FieldIndex);
 
 	FReply OnValueClicked(const FGeometry& Geometry, const FPointerEvent& MouseEvent, int32 FieldIndex);
+	/** Opens FieldIndex's edit box and gives it keyboard focus (on the next frame, once the box is showing). */
+	void BeginEditingField(int32 FieldIndex);
+	/** The next field (by Step) that has an edit box, after From; wrapping around if bWrap. INDEX_NONE if none. */
+	int32 FindEditableField(int32 From, int32 Step, bool bWrap) const;
+	/** Enter or Tab: applies what's typed, then (once the node has rebuilt) opens the next field. */
+	FReply CommitAndMoveOn(int32 FieldIndex, int32 Step, bool bWrap);
+	/** After a rebuild: opens the field Enter or Tab moved on to, if any. */
+	void ResumePendingEdit();
 	void OnValueCommitted(const FText& NewText, ETextCommit::Type CommitType, int32 FieldIndex);
 	/** Rebuilds the node's widgets on the next frame (never from inside one of its own callbacks). */
 	void RefreshSoon();
