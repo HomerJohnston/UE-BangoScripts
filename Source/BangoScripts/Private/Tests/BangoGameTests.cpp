@@ -78,8 +78,11 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 		TEXT("Tan"), TEXT("TanDegrees"), TEXT("Asin"), TEXT("AsinDegrees"), TEXT("Acos"), TEXT("AcosDegrees"), TEXT("Atan"), TEXT("AtanDegrees"), TEXT("Atan2"), TEXT("Atan2Degrees"),
 		TEXT("Pi"), TEXT("RandomBool"), TEXT("Chance"), TEXT("IsNearlyEqual"), TEXT("Length"), TEXT("Distance"), TEXT("Normalize"), TEXT("Dot"), TEXT("Cross"), TEXT("LerpVector"), TEXT("Exec") })
 	{
-		TestNotNull(FString::Printf(TEXT("registered: %s"), Name), Commands.FindCommandImpl(Name));
+		const FBangoCommand* Registered = Commands.FindCommandImpl(Name);
+		TestNotNull(FString::Printf(TEXT("registered: %s"), Name), Registered);
+		TestTrue(FString::Printf(TEXT("built in: %s"), Name), Registered && Registered->Signature.bBuiltIn);
 	}
+	TestFalse(TEXT("a game's own command isn't built in, with nothing set"), FBangoCommandSignature::Make(TEXT("MyGameCommand")).bBuiltIn);
 
 	FBangoGlobalStore Globals;
 	FString Error;

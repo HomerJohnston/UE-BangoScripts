@@ -82,6 +82,12 @@ struct BANGOSCRIPTS_API FBangoCommandSignature
 	FString CategoryName;
 	FString CommandDescription;
 
+	/**
+	 * True for the commands that come with the Bango plugin (Bango::RegisterBuiltinCommands sets it). A game's own
+	 * commands leave it false: there's nothing to set to register one.
+	 */
+	bool bBuiltIn = false;
+
 	int32 GetNumRequiredParams() const { return NumRequiredParams < 0 ? Params.Num() : NumRequiredParams; }
 
 	/** True if the command returns a value that must be used (it returns one and isn't Discardable). */

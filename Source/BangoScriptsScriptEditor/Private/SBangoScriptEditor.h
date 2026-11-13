@@ -143,9 +143,15 @@ private:
 	bool bInputsExpanded = true;
 	bool bGlobalsExpanded = true;
 	bool bLocalsExpanded = true;
-	/** SCRIPTING COMMANDS' list: one line per command name. */
+	/** COMMAND REFERENCE's list: one line per command name (under a heading per category, if listed that way). */
 	TSharedPtr<SVerticalBox> CommandListBox;
-	/** The SCRIPTING COMMANDS pane on the right, shown or hidden with its Commands tab, like the text pane on the left. */
+	/** What's typed in COMMAND REFERENCE's search box: only names that contain it are listed. */
+	FString CommandFilter;
+	/** COMMAND REFERENCE lists commands in groups by category, instead of all by name (remembered between sessions). */
+	bool bCommandsByCategory = false;
+	/** Whether each of COMMAND REFERENCE's group foldouts is open, by "Order:Group" (shared, so the foldouts can point at them). */
+	TMap<FString, TSharedPtr<bool>> CommandGroupsExpanded;
+	/** The COMMAND REFERENCE pane on the right, shown or hidden with its Commands tab, like the text pane on the left. */
 	bool bCommandsPaneOpen = false;
 	float CommandsPaneOpenness = 0.0f;
 	bool bCommandsPaneSliding = false;
@@ -354,7 +360,7 @@ private:
 	TSharedRef<SWidget> MakeTextTab();
 	/** Opens or closes the text pane, sliding it (bAnimate) or at once. */
 	void SetTextPaneOpen(bool bOpen, bool bAnimate);
-	/** The Commands tab on the graph's right edge, and the SCRIPTING COMMANDS pane it pulls out. */
+	/** The Commands tab on the graph's right edge, and the COMMAND REFERENCE pane it pulls out. */
 	TSharedRef<SWidget> MakeCommandsTab();
 	TSharedRef<SWidget> MakeCommandsPane();
 	void SetCommandsPaneOpen(bool bOpen, bool bAnimate);
@@ -408,7 +414,7 @@ private:
 	 * + Add button) at its right if given. bExpanded is the member that says whether it's open.
 	 */
 	TSharedRef<SWidget> MakeFoldout(const FText& Title, bool* bExpanded, TSharedRef<SWidget> Body, TSharedPtr<SWidget> Extra = nullptr);
-	/** Fills SCRIPTING COMMANDS with every command's name, sorted alphabetically. */
+	/** Fills COMMAND REFERENCE: every command whose name contains CommandFilter, by name or in groups by category. */
 	void RefreshCommandList();
 
 	void DeleteSelectedNodes();

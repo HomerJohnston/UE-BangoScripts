@@ -144,6 +144,7 @@ namespace BangoBuiltinPrivate
 	{
 		FBangoCommand Command;
 		Command.Signature = Signature;
+		Command.Signature.bBuiltIn = true;
 		Command.Start = [RequiredArgs, Run = MoveTemp(Run)](FBangoCommandCall& Call)
 		{
 			if (!RequireArgs(Call, RequiredArgs))
@@ -159,8 +160,10 @@ namespace BangoBuiltinPrivate
 		}
 	}
 
-	static void Add(FBangoCommandTable& Commands, const FBangoCommand& Command)
+	static void Add(FBangoCommandTable& Commands, const FBangoCommand& InCommand)
 	{
+		FBangoCommand Command = InCommand;
+		Command.Signature.bBuiltIn = true; // every command registered here comes with the plugin
 		FString Error;
 		if (!Commands.Add(Command, Error))
 		{
@@ -299,7 +302,7 @@ namespace Bango
 		{
 			FBangoCommand Command;
 			Command.Signature = FBangoCommandSignature::Make(TEXT("Sleep")).Optional().Param(TEXT("Time"), Double, TEXT("Seconds (none: until the next frame)"))
-				.InCategory(TEXT("Time")).Describe(TEXT("Pauses the script for a number of seconds, or until the next frame if no time is given."));
+				.InCategory(TEXT("Flow Control")).Describe(TEXT("Pauses the script for a number of seconds, or until the next frame if no time is given."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{
 				// No time (or nil): the same as Sleep(0), the next frame.
@@ -793,7 +796,7 @@ namespace Bango
 		{
 			FBangoCommand Command;
 			Command.Signature = FBangoCommandSignature::Make(TEXT("Exec")).Param(TEXT("Path"), String, TEXT("The script, like \"Quest/Intro\" for Content/Bango/Quest/Intro.bango"))
-				.Variadic(TEXT("Arg "), 1).Returns(Int).Discardable().InCategory(TEXT("Scripts"))
+				.Variadic(TEXT("Arg "), 1).Returns(Int).Discardable().InCategory(TEXT("Flow Control"))
 				.Describe(TEXT("Starts another script, which runs on its own alongside this one. The extra values are its parameters, in order. It runs straight away until it first pauses; then this script carries on. Gives back the new script's id."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{

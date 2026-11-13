@@ -43,6 +43,8 @@
 #include "Widgets/SLeafWidget.h"
 #include "Widgets/Input/SComboButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
+#include "Widgets/Input/SSearchBox.h"
+#include "Misc/ConfigCacheIni.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "SBangoTextEditor.h"
 #include "Framework/Text/TextLayout.h"
@@ -547,7 +549,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 						MakeTextTab()
 					]
 
-					// The Commands tab, the same on the graph's right edge, for the SCRIPTING COMMANDS pane.
+					// The Commands tab, the same on the graph's right edge, for the COMMAND REFERENCE pane.
 					+ SOverlay::Slot()
 					.HAlign(HAlign_Right)
 					.VAlign(VAlign_Top)
@@ -557,7 +559,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 					]
 				]
 
-				// The SCRIPTING COMMANDS pane, on the right: hidden to start with, and slid out by its tab like the text pane.
+				// The COMMAND REFERENCE pane, on the right: hidden to start with, and slid out by its tab like the text pane.
 				+ SSplitter::Slot()
 				.SizeRule(SSplitter::SizeToContent)
 				.Resizable(true) // a sized-to-content slot is only dragged if it says so (and has OnSlotResized)
@@ -2463,7 +2465,7 @@ void SBangoScriptEditor::ShowMessage(const FText& Message)
 		]);
 }
 
-// ---- The left pane's foldouts: SCRIPT DATA and SCRIPTING COMMANDS ----
+// ---- The left pane's foldouts, and the COMMAND REFERENCE list ----
 
 TSharedRef<SWidget> SBangoScriptEditor::MakeFoldout(const FText& Title, bool* bExpanded, TSharedRef<SWidget> Body, TSharedPtr<SWidget> Extra)
 {
@@ -2544,45 +2546,139 @@ void SBangoScriptEditor::RefreshCommandList()
 	{
 		return;
 	}
-	// Every command a script can call: the registered ones and the array commands built into the compiler.
+	// Every command a script can call: the registered ones (the plugin's and the game's) and the array commands built
+	// into the compiler.
+	struct FEntry
+	{
+		FString Name;
+		FString Category;
+		FString Tooltip;
+		bool bBuiltIn = true;
+	};
+	const FBangoCommandTable& Table = FBangoModule::Get().GetCommands();
 	TArray<FString> Names;
-	FBangoModule::Get().GetCommands().GetCommandNames(Names);
+	Table.GetCommandNames(Names);
+	TArray<FEntry> Entries;
+	for (const FString& Name : Names)
+	{
+		const FBangoCommandSignature* Signature = Table.FindCommand(Name);
+		FEntry Entry;
+		Entry.Name = Name;
+		Entry.Category = Signature && !Signature->CategoryName.IsEmpty() ? Signature->CategoryName : FString(TEXT("Other"));
+		Entry.bBuiltIn = !Signature || Signature->bBuiltIn;
+		if (Signature)
+		{
+			// Hovering a name shows how it's called and what it does, and whether it's the plugin's or the game's.
+			Entry.Tooltip = Signature->ToString();
+			if (!Signature->CommandDescription.IsEmpty())
+			{
+				Entry.Tooltip += TEXT("\n\n") + Signature->CommandDescription;
+			}
+			Entry.Tooltip += Signature->bBuiltIn ? TEXT("\n\n(Built into Bango)") : TEXT("\n\n(This project's own command)");
+		}
+		Entries.Add(MoveTemp(Entry));
+	}
 	for (const TCHAR* Builtin : { TEXT("Count"), TEXT("InsertAt"), TEXT("Pop"), TEXT("Push"), TEXT("RemoveAt") })
 	{
-		Names.AddUnique(Builtin);
+		if (!Table.FindCommand(Builtin))
+		{
+			FEntry Entry;
+			Entry.Name = Builtin;
+			Entry.Category = TEXT("Arrays");
+			Entry.Tooltip = LOCTEXT("BuiltinCommandTooltip", "An array command, built into Bango: called on an array, as in _list Push(_x).").ToString();
+			Entries.Add(MoveTemp(Entry));
+		}
 	}
-	Names.Sort([](const FString& A, const FString& B)
+
+	// Only the names that contain what's typed in the search box.
+	if (!CommandFilter.IsEmpty())
+	{
+		Entries.RemoveAll([this](const FEntry& Entry) { return !Entry.Name.Contains(CommandFilter, ESearchCase::IgnoreCase); });
+	}
+	const auto ByName = [](const FString& A, const FString& B)
 	{
 		const int32 IgnoringCase = A.Compare(B, ESearchCase::IgnoreCase);
 		return IgnoringCase != 0 ? IgnoringCase < 0 : A.Compare(B, ESearchCase::CaseSensitive) < 0;
+	};
+	// Each entry's group: by category, or (Alphabetical) Native for the plugin's commands and Game for the project's own.
+	const bool bByCategory = bCommandsByCategory;
+	const auto GroupOf = [bByCategory](const FEntry& Entry) -> FString
+	{
+		return bByCategory ? Entry.Category : FString(Entry.bBuiltIn ? TEXT("Native") : TEXT("Game"));
+	};
+	const auto GroupOrder = [bByCategory, &ByName](const FString& A, const FString& B)
+	{
+		if (!bByCategory)
+		{
+			return A == TEXT("Native") && B != TEXT("Native"); // Native first, then Game
+		}
+		const bool bAOther = A == TEXT("Other");
+		const bool bBOther = B == TEXT("Other");
+		return bAOther != bBOther ? bBOther : ByName(A, B); // categories by name, Other last
+	};
+	Entries.Sort([&ByName, &GroupOf, &GroupOrder](const FEntry& A, const FEntry& B)
+	{
+		const FString GroupA = GroupOf(A);
+		const FString GroupB = GroupOf(B);
+		if (GroupA != GroupB)
+		{
+			return GroupOrder(GroupA, GroupB);
+		}
+		return ByName(A.Name, B.Name);
 	});
 
 	CommandListBox->ClearChildren();
-	const FBangoCommandTable& Table = FBangoModule::Get().GetCommands();
-	for (const FString& Name : Names)
+	if (Entries.Num() == 0)
 	{
-		// Hovering a name shows how it's called and what it does.
-		FString Tooltip;
-		if (Bango::IsBuiltinCommandName(Name))
+		CommandListBox->AddSlot()
+		.AutoHeight()
+		.Padding(0.0f, 4.0f)
+		[
+			SNew(STextBlock)
+			.Text(FText::Format(LOCTEXT("NoCommandsMatch", "No command names contain \"{0}\"."), FText::FromString(CommandFilter)))
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			.AutoWrapText(true)
+		];
+		return;
+	}
+
+	// One foldout per group, like the left pane's sections. Whether each is open is kept per group (and per order).
+	int32 Index = 0;
+	while (Index < Entries.Num())
+	{
+		const FString Group = GroupOf(Entries[Index]);
+		TSharedRef<SVerticalBox> Rows = SNew(SVerticalBox);
+		int32 Count = 0;
+		for (; Index < Entries.Num() && GroupOf(Entries[Index]) == Group; ++Index, ++Count)
 		{
-			Tooltip = LOCTEXT("BuiltinCommandTooltip", "An array command, built into Bango: called on an array, as in _list Push(_x).").ToString();
+			const FEntry& Entry = Entries[Index];
+			Rows->AddSlot()
+			.AutoHeight()
+			.Padding(8.0f, 1.0f, 0.0f, 1.0f)
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(Entry.Name))
+				.Font(FCoreStyle::GetDefaultFontStyle("Mono", 9))
+				.ToolTipText(FText::FromString(Entry.Tooltip))
+			];
 		}
-		else if (const FBangoCommandSignature* Signature = Table.FindCommand(Name))
+		const FString Key = FString(bByCategory ? TEXT("Category:") : TEXT("Alphabetical:")) + Group;
+		TSharedPtr<bool>& bExpanded = CommandGroupsExpanded.FindOrAdd(Key);
+		if (!bExpanded.IsValid())
 		{
-			Tooltip = Signature->ToString();
-			if (!Signature->CommandDescription.IsEmpty())
-			{
-				Tooltip += TEXT("\n\n") + Signature->CommandDescription;
-			}
+			bExpanded = MakeShared<bool>(true);
 		}
 		CommandListBox->AddSlot()
 		.AutoHeight()
-		.Padding(0.0f, 1.0f)
+		.Padding(0.0f, 0.0f, 0.0f, 2.0f)
 		[
-			SNew(STextBlock)
-			.Text(FText::FromString(Name))
-			.Font(FCoreStyle::GetDefaultFontStyle("Mono", 9))
-			.ToolTipText(FText::FromString(Tooltip))
+			MakeFoldout(FText::Format(LOCTEXT("CommandGroupTitle", "{0}  ({1})"), FText::FromString(Group.ToUpper()), FText::AsNumber(Count)),
+				bExpanded.Get(),
+				SNew(SBox)
+				.Padding(FMargin(0.0f, 2.0f, 0.0f, 4.0f))
+				[
+					Rows
+				])
 		];
 	}
 }
@@ -2903,6 +2999,13 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeCommandsTab()
 
 TSharedRef<SWidget> SBangoScriptEditor::MakeCommandsPane()
 {
+	// How the list is ordered is remembered between sessions, like the script browser's settings.
+	FString Order;
+	if (GConfig->GetString(TEXT("BangoScriptEditor"), TEXT("CommandReferenceOrder"), Order, GEditorPerProjectIni))
+	{
+		bCommandsByCategory = Order == TEXT("Category");
+	}
+
 	return SNew(SBorder)
 		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
 		.Padding(0.0f)
@@ -2910,19 +3013,76 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeCommandsPane()
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot()
 			.AutoHeight()
-			.Padding(8.0f, 6.0f)
+			.Padding(8.0f, 6.0f, 8.0f, 4.0f)
 			[
 				SNew(STextBlock)
-				.Text(LOCTEXT("ScriptingCommandsHeading", "SCRIPTING COMMANDS"))
+				.Text(LOCTEXT("CommandReferenceHeading", "COMMAND REFERENCE"))
 				.Font(FAppStyle::GetFontStyle("BoldFont"))
-				.ToolTipText(LOCTEXT("ScriptingCommandsTooltip", "Every command a script can call, by name. Hover one to see how it's called and what it does."))
+				.ToolTipText(LOCTEXT("CommandReferenceTooltip", "Every command a script can call. Hover one to see how it's called and what it does."))
+			]
+			// A search box (by name), and how the list is ordered.
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(8.0f, 0.0f, 8.0f, 4.0f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.FillWidth(1.0f)
+				.VAlign(VAlign_Center)
+				[
+					SNew(SSearchBox)
+					.HintText(LOCTEXT("CommandSearchHint", "Search commands"))
+					.ToolTipText(LOCTEXT("CommandSearchTooltip", "Shows only the commands whose names contain this."))
+					.OnTextChanged_Lambda([this](const FText& NewText)
+					{
+						CommandFilter = NewText.ToString().TrimStartAndEnd();
+						RefreshCommandList();
+					})
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(4.0f, 0.0f, 0.0f, 0.0f)
+				[
+					SNew(SComboButton)
+					.ToolTipText(LOCTEXT("CommandOrderTooltip", "How the commands are listed: by name, or in groups by category."))
+					.ButtonContent()
+					[
+						SNew(STextBlock)
+						.Text_Lambda([this]()
+						{
+							return bCommandsByCategory ? LOCTEXT("CommandOrderCategory", "Category") : LOCTEXT("CommandOrderAlphabetical", "Alphabetical");
+						})
+					]
+					.OnGetMenuContent_Lambda([this]()
+					{
+						FMenuBuilder Menu(/*bShouldCloseWindowAfterMenuSelection*/ true, nullptr);
+						const auto AddOrder = [this, &Menu](bool bByCategory, const FText& Label, const FText& Tooltip)
+						{
+							Menu.AddMenuEntry(Label, Tooltip, FSlateIcon(),
+								FUIAction(
+									FExecuteAction::CreateLambda([this, bByCategory]()
+									{
+										bCommandsByCategory = bByCategory;
+										GConfig->SetString(TEXT("BangoScriptEditor"), TEXT("CommandReferenceOrder"), bByCategory ? TEXT("Category") : TEXT("Alphabetical"), GEditorPerProjectIni);
+										RefreshCommandList();
+									}),
+									FCanExecuteAction(),
+									FIsActionChecked::CreateLambda([this, bByCategory]() { return bCommandsByCategory == bByCategory; })),
+								NAME_None, EUserInterfaceActionType::RadioButton);
+						};
+						AddOrder(false, LOCTEXT("CommandOrderAlphabetical", "Alphabetical"), LOCTEXT("CommandOrderAlphabeticalTooltip", "All the commands, by name."));
+						AddOrder(true, LOCTEXT("CommandOrderCategory", "Category"), LOCTEXT("CommandOrderCategoryTooltip", "In groups (Actors, Flow Control, Math, Text, ...), each by name."));
+						return Menu.MakeWidget();
+					})
+				]
 			]
 			+ SVerticalBox::Slot()
 			.FillHeight(1.0f)
 			[
 				SNew(SScrollBox)
 				+ SScrollBox::Slot()
-				.Padding(8.0f, 0.0f, 8.0f, 6.0f)
+				.Padding(0.0f, 0.0f, 0.0f, 6.0f)
 				[
 					SAssignNew(CommandListBox, SVerticalBox)
 				]
