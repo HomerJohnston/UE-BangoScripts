@@ -80,9 +80,15 @@ TSharedRef<SWidget> SBangoGraphNode::CreateNodeContentArea()
 	// at the same place on nodes with no input pin (Script Start).
 	const FMargin BodyInset = GetDefault<UGraphEditorSettings>()->GetNonPinNodeBodyPadding();
 	const float HalfPin = SBangoGraphPin::PinSize * 0.5f;
+	// A disabled node: SGraphNode fades the title and the body and adds the Disabled banner; this fades the fields
+	// and the pins to match.
 	return SNew(SBorder)
 		.BorderImage(FAppStyle::GetNoBrush())
 		.Padding(FMargin(0.0f, 3.0f))
+		.ColorAndOpacity_Lambda([this]()
+		{
+			return BangoNode && BangoNode->IsDisabledNode() ? FLinearColor(1.0f, 1.0f, 1.0f, 0.45f) : FLinearColor::White;
+		})
 		[
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot()

@@ -20,7 +20,7 @@ public:
 	 */
 	explicit FBangoSyntaxStyle(float FontSize = 10.0f, const UObject* FontObject = nullptr);
 
-	const FTextBlockStyle& GetStyle(EBangoSyntaxKind Kind, bool bDisconnected) const;
+	const FTextBlockStyle& GetStyle(EBangoSyntaxKind Kind, bool bDisconnected, bool bDisabled = false) const;
 	const FTextBlockStyle& GetDefaultStyle() const { return GetStyle(EBangoSyntaxKind::Default, false); }
 
 	FLinearColor GetBackgroundColor() const { return BackgroundColor; }
@@ -28,7 +28,7 @@ public:
 private:
 	static constexpr int32 NumKinds = static_cast<int32>(EBangoSyntaxKind::Count);
 
-	// [Kind][0] connected, [Kind][1] disconnected.
-	FTextBlockStyle Styles[NumKinds][2];
+	// [Kind][Variant]: Variant bit 1 is disconnected (//~), bit 2 disabled (between the markers).
+	FTextBlockStyle Styles[NumKinds][4];
 	FLinearColor BackgroundColor;
 };

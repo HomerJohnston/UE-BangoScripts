@@ -176,6 +176,11 @@ public:
 	/** A bend in a wire: shown as a small dot with an input and an output, no title and no fields. */
 	bool IsReroute() const { return GetKind() == EBangoGraphNodeKind::Reroute; }
 
+	/** Every node but an entry or a reroute can be turned off (Disable Node). It's kept in UEdGraphNode's EnabledState. */
+	bool CanBeDisabled() const { return !IsEntry() && !IsReroute(); }
+	/** True if the node is off: it's written between slash-star and star-slash, and does nothing when the script runs. */
+	bool IsDisabledNode() const { return CanBeDisabled() && GetDesiredEnabledState() != ENodeEnabledState::Enabled; }
+
 	UEdGraphPin* GetInputPin() const { return FindPin(InPinName, EGPD_Input); }
 	UEdGraphPin* GetNextPin() const { return FindPin(NextPinName, EGPD_Output); }
 	UEdGraphPin* GetBranchPin(int32 Branch) const { return FindPin(BranchPinNames[Branch], EGPD_Output); }
@@ -195,5 +200,7 @@ public:
 	/** An entry node is never pasted: each graph has exactly one. */
 	virtual bool CanPasteHere(const UEdGraph* TargetGraph) const override;
 	virtual void PostEditUndo() override;
+	/** Disable Node / Enable Node (FBangoGraphCommands), for the node's right-click menu. */
+	virtual void GetNodeContextMenuActions(class UToolMenu* Menu, class UGraphNodeContextMenuContext* Context) const override;
 	//~ End UEdGraphNode
 };

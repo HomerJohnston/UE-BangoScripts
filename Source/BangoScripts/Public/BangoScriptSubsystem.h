@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
+#include "BangoConditions.h"
 #include "BangoInstance.h"
 #include "BangoScriptSubsystem.generated.h"
 
@@ -66,6 +67,37 @@ public:
 	 */
 	FBangoScriptHandle Spawn(const FString& ScriptPath, const TArray<FBangoValue>& Args = TArray<FBangoValue>());
 
+	/**
+	 * Compiles Source, the text of a script, and starts it, like Spawn does with a file. Name is what errors show in
+	 * place of a file name (like "Dialogue.Intro"), and what the debugger lists it as. Everything else is as for Spawn:
+	 * Args fill its params line, it runs straight away until it first pauses, and an invalid handle is returned (with
+	 * an error shown) if it doesn't compile or can't start. It's compiled on every call. Its text is kept with it, so
+	 * SaveState saves it and LoadState can restore it; it isn't hot reloaded, since it has no file.
+	 */
+	FBangoScriptHandle SpawnFromSource(const FString& Source, const FString& Name = TEXT("Script"), const TArray<FBangoValue>& Args = TArray<FBangoValue>());
+
+	/**
+	 * Runs a condition registered with Bango::RegisterCondition and gives its answer. It runs straight away, to the end,
+	 * in this world, with its globals and actors; Args fill its #define params line, if it has one.
+	 *
+	 * Returns true, with the answer in bOutResult, if it ran and returned true or false. Returns false, with the error in
+	 * OutError (and bOutResult false), if the handle isn't registered, its arguments don't fit, it stops with an error, it
+	 * reaches its end without returning, or it calls a command that waits (like Sleep): a condition must answer at once.
+	 * The error isn't shown or logged here, so a caller checking often can say so once (Bango::ReportError shows one).
+	 *
+	 * Conditions aren't running scripts: they're not listed by the debugger, saved, or reloaded.
+	 */
+	bool EvaluateBoolCondition(FBangoConditionHandle Condition, bool& bOutResult, FString& OutError,
+		const TArray<FBangoValue>& Args = TArray<FBangoValue>());
+
+	/**
+	 * Compiles and runs a condition given as text (see Bango::CompileCondition), as the other EvaluateBoolCondition does.
+	 * Name is what errors show in place of a file name. It's compiled on every call and nothing is kept, so for a condition
+	 * checked often, register it once with Bango::RegisterCondition instead.
+	 */
+	bool EvaluateBoolCondition(const FString& Source, bool& bOutResult, FString& OutError,
+		const TArray<FBangoValue>& Args = TArray<FBangoValue>(), const FString& Name = TEXT("Condition"));
+
 	/** Stops a script. Does nothing if it has already ended. */
 	void Terminate(FBangoScriptHandle Handle);
 
@@ -128,13 +160,21 @@ protected:
 private:
 	struct FRunningScript
 	{
+		/** The script's path, or for a script spawned from text (SpawnFromSource), its name. */
 		FString Path;
+		/** True for a script spawned from text (SpawnFromSource): Source is its text, and it has no file. */
+		bool bFromSource = false;
+		FString Source;
 		FBangoInstance Instance;
 		/** The newest version it's been asked to switch to (hot reload), so each version is asked for once. */
 		TSharedPtr<const FBangoProgram> ReloadTarget;
 	};
 
 	bool MakeContext(float DeltaSeconds, FBangoExecContext& OutContext);
+	/** Starts a compiled script (Spawn and SpawnFromSource). */
+	FBangoScriptHandle StartScript(const TSharedPtr<const FBangoProgram>& Program, TSharedPtr<FRunningScript> Script, const TArray<FBangoValue>& Args);
+	/** Compiles a script's text (SpawnFromSource, and loading one that was saved). */
+	static bool CompileFromSource(const FString& Source, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError);
 	/** Resumes one script. Returns false once it has ended (for any reason). */
 	bool ResumeScript(FRunningScript& Script, float DeltaSeconds);
 	void ReportFailure(const FRunningScript& Script);
@@ -147,6 +187,9 @@ private:
 	float ReloadCheckCountdown = 0.0f;
 	/** The last compile error reported for each changed script, so each error is reported once. */
 	TMap<FString, FString> ReloadErrors;
+
+	/** Runs a compiled condition (EvaluateBoolCondition). */
+	bool RunCondition(const TSharedPtr<const FBangoProgram>& Program, const TArray<FBangoValue>& Args, bool& bOutResult, FString& OutError);
 
 	/** Editor builds: scripts that stopped with an error, newest last, for the debugger (at most MaxEndedScripts). */
 	TArray<FBangoScriptDebugInfo> EndedScripts;

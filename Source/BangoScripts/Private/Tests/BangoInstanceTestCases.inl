@@ -297,6 +297,13 @@ struct FBangoRuntimeTestCase
 
 static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 {
+	// ---- Disabled nodes ----
+	{ TEXT("disabled: a simple node is skipped"), TEXT("Hint(\"a\");\n/* Hint(\"b\"); */\nHint(\"c\");"), TEXT("a|c"), nullptr, nullptr },
+	{ TEXT("disabled: a block node skips its block"), TEXT("/*\nif (true)\n{\n\tHint(\"x\");\n};\n*/\nHint(\"y\");"), TEXT("y"), nullptr, nullptr },
+	{ TEXT("disabled: not type-checked"), TEXT("/* Hint(nosuch + 1, @ghost); */\n/*\nwhile (\"no\")\n{\n\tbreak;\n};\n*/\nHint(\"ok\");"), TEXT("ok"), nullptr, nullptr },
+	{ TEXT("disabled: a break in a loop"), TEXT("int _i = 0;\nwhile (_i < 3)\n{\n\t_i++;\n\t/* break; */\n};\nHint(\"{0}\", _i);"), TEXT("3"), nullptr, nullptr },
+	{ TEXT("disabled: inside a disabled block"), TEXT("/*\nif (true)\n{\n\tHint(\"in\");\n\t/* Hint(\"off\"); */\n};\n*/\nif (true)\n{\n\t/* return; */\n\tHint(\"after\");\n};"), TEXT("after"), nullptr, nullptr },
+
 	// ---- Vectors ----
 	{ TEXT("vector literals and operators"),
 		TEXT("vector3 _v1 = [1, 2, 3];\nvector3 _v2 = [0.5, 0, -1];\nvector3 _vec;\nvector2 _w;\n_vec = _v1 + _v2;\nHint(\"{0} {1} {2} {3}\", _vec, _v1 - _v2, _v1 * 2, 2 * _v1 / 4);\nHint(\"{0} {1} {2}\", -_v1, _v1 == [1, 2, 3], _v1 != _v2);\n_w = [3, 4];\nHint(\"{0} {1}\", _w, _w.x * _w.x + _w.y * _w.y);"),
@@ -775,6 +782,62 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			Nodes.Reset();
 			Seen = Run.Instance.GetTrail(Seen, Nodes);
 			Expect(Nodes == TArray<int64>({ 1, 2, 3, 4, 5 }) && Seen == 9, *FString::Printf(TEXT("trail: the second time round it is, and only the new nodes are given (%s)"), *TrailText(Nodes)));
+		}
+
+		// Conditions (Bango::CompileCondition): a script, or one expression, that returns true or false.
+		{
+			struct FConditionCase
+			{
+				const TCHAR* Name;
+				const TCHAR* Source;
+				int32 Expected;              // 1 true, 0 false, -1 an error
+				const TCHAR* ErrorLocation;  // for errors: like "(1:5)"
+				const TCHAR* ErrorContains;
+			};
+			const FConditionCase Cases[] =
+			{
+				{ TEXT("expression"), TEXT("lots == \"lots\""), 1, nullptr, nullptr },
+				{ TEXT("expression, false"), TEXT("Count([1, 2]) > 2"), 0, nullptr, nullptr },
+				{ TEXT("expression with comments and a params line"), TEXT("// Is it big?\n#define params (int _n = 7)\n\n_n > 5    // more than five"), 1, nullptr, nullptr },
+				{ TEXT("expression with a string holding ;"), TEXT("lots != \"a;b\" && lots != \"//\""), 1, nullptr, nullptr },
+				{ TEXT("a script that returns"), TEXT("int _n = 0;\nfor (int _i = 0; _i < 4; _i++)\n{\n\t_n += _i;\n};\nreturn _n == 6;"), 1, nullptr, nullptr },
+				{ TEXT("a script with a function"), TEXT("function bool Big(int _v)\n{\n\treturn _v > 10;\n};\n\nreturn Big(3);"), 0, nullptr, nullptr },
+				{ TEXT("not a bool"), TEXT("3 + 4"), -1, TEXT("(1:3)"), TEXT("The condition needs a bool, but this is an int.") },
+				{ TEXT("an error points into the expression as written"), TEXT("lots == missing_cmd()"), -1, TEXT("(1:9)"), TEXT("missing_cmd") },
+				{ TEXT("return with no value"), TEXT("return;"), -1, TEXT("(1:1)"), TEXT("A condition must return true or false") },
+				{ TEXT("reaching the end"), TEXT("int _n = 1;\nif (_n > 5)\n{\n\treturn true;\n};"), -1, nullptr, TEXT("reached its end without returning true or false") },
+				{ TEXT("a runtime error points into the expression as written"), TEXT("lots == \"lots\" && nothere > 1"), -1, TEXT("(1:19)"), TEXT("nothere") },
+			};
+			for (const FConditionCase& Case : Cases)
+			{
+				TSharedPtr<FBangoProgram> Condition = MakeShared<FBangoProgram>();
+				FBangoCompileError ConditionError;
+				const bool bCompiled = Bango::CompileCondition(Case.Source, TEXT("cond"), Commands, *Condition, ConditionError);
+				FString Outcome;
+				int32 Got = -1;
+				if (!bCompiled)
+				{
+					Outcome = ConditionError.ToString();
+				}
+				else
+				{
+					FBangoGlobalStore ConditionGlobals;
+					BangoMakeRuntimeTestGlobals(ConditionGlobals);
+					Context.Globals = &ConditionGlobals;
+					FBangoInstance Instance;
+					FBangoRuntimeError StartError;
+					if (Instance.Start(Condition, Commands, ConditionGlobals, 1, StartError) && Instance.Resume(Context) == EBangoInstanceStatus::Finished
+						&& Instance.GetResult().GetType() == FBangoType::Bool())
+					{
+						Got = Instance.GetResult().GetBool() ? 1 : 0;
+					}
+					Outcome = Instance.GetStatus() == EBangoInstanceStatus::Failed ? Instance.GetError().ToString() : StartError.ToString();
+				}
+				const bool bOk = Case.Expected >= 0
+					? Got == Case.Expected
+					: Got == -1 && Outcome.Contains(Case.ErrorContains) && (!Case.ErrorLocation || Outcome.Contains(Case.ErrorLocation));
+				Expect(bOk, *FString::Printf(TEXT("condition: %s (got %d: %s)"), Case.Name, Got, *Outcome));
+			}
 		}
 
 		// A call in the middle of a calculation can't be switched while it's under way, so the switch waits until the

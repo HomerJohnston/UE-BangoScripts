@@ -236,6 +236,9 @@ static const TCHAR* const GBangoGraphRoundTripSources[] =
 	TEXT("//~ };\n")
 	TEXT("\n")
 	TEXT("//~ = ;                   //@9(0, 14)\n"),
+
+	// Disabled nodes, among comments and reroutes, in a function and a disconnected chain.
+	TEXT("// first\n/* Hint(\"b\"); */ //@2(4, 0)\n/*\n// a loop\nwhile (true) //@3(1, 1)\n{\n\t/* break; */ //@4(2, 2)\n\t//@5(3, 3)\n};\n*/\nfunction void F()\n{\n\t/* return; */\n};\n//~ /*\n//~ if (a) //@6(9, 9)\n//~ {\n//~ \t/* /* b(); */ */\n//~ };\n//~ */\n"),
 };
 
 static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
@@ -247,6 +250,79 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			OutFailures.Add(What);
 		}
 	};
+
+	// ---- Disabled nodes: inline for simple nodes, marker lines around block nodes, nested, in disconnected chains ----
+	{
+		const TCHAR* Source =
+			TEXT("Hint(\"a\");          //@1(0, 0)\n")
+			TEXT("// off for now\n")
+			TEXT("/* Hint(\"b\"); */    //@2(4, 0)\n")
+			TEXT("/*\n")
+			TEXT("if (x)              //@3(8, 0)\n")
+			TEXT("{\n")
+			TEXT("\t/* y(); */      //@4(12, 0)\n")
+			TEXT("\tz();            //@5(12, 4)\n")
+			TEXT("}\n")
+			TEXT("else if (w)         //@6(8, 4)\n")
+			TEXT("{\n")
+			TEXT("};\n")
+			TEXT("*/\n")
+			TEXT("//~ /* q(); */      //@9(0, 20)\n");
+		const TCHAR* Expected =
+			TEXT("// ============ SCRIPT BODY =====================\n")
+			TEXT("\n")
+			TEXT("Hint(\"a\");          //@1(0, 0)\n")
+			TEXT("\n")
+			TEXT("// off for now\n")
+			TEXT("/* Hint(\"b\"); */    //@2(4, 0)\n")
+			TEXT("\n")
+			TEXT("/*\n")
+			TEXT("if (x)              //@3(8, 0)\n")
+			TEXT("{\n")
+			TEXT("\t/* y(); */      //@4(12, 0)\n")
+			TEXT("\tz();            //@5(12, 4)\n")
+			TEXT("}\n")
+			TEXT("else if (w)         //@6(8, 4)\n")
+			TEXT("{\n")
+			TEXT("};\n")
+			TEXT("*/\n")
+			TEXT("\n")
+			TEXT("//~ /* q(); */      //@9(0, 20)\n");
+		FBangoGraphDocument Doc;
+		FBangoCompileError Error;
+		FString Text;
+		FString WriteError;
+		const bool bBuilt = Bango::BuildGraph(Source, TEXT("disabled.bango"), Doc, Error);
+		auto IsDisabled = [&Doc](int64 Id)
+		{
+			for (const FBangoGraphNode& Node : Doc.Main.Nodes)
+			{
+				if (Node.NodeID == Id)
+				{
+					return Node.bDisabled;
+				}
+			}
+			return false;
+		};
+		Expect(bBuilt && !IsDisabled(1) && IsDisabled(2) && IsDisabled(3) && IsDisabled(4) && !IsDisabled(5) && !IsDisabled(6) && IsDisabled(9),
+			FString(TEXT("Disabled nodes: read: ")) + Error.ToString());
+		Expect(bBuilt && Bango::WriteGraphText(Doc, Text, WriteError) && Text == FString(Expected), FString(TEXT("Disabled nodes: written:\n")) + Text);
+
+		// Disabling the else-if node: it can't stay `else if`, so it's written in an else block.
+		for (FBangoGraphNode& Node : Doc.Main.Nodes)
+		{
+			if (Node.NodeID == 6)
+			{
+				Node.bDisabled = true;
+			}
+		}
+		const TCHAR* ExpectedElse = TEXT("}\nelse\n{\n\t/*\n\tif (w) ");
+		const TCHAR* ExpectedElseEnd = TEXT("\t{\n\t};\n\t*/\n};\n*/\n");
+		FString ElseText;
+		Expect(bBuilt && Bango::WriteGraphText(Doc, ElseText, WriteError) && ElseText.Contains(ExpectedElse) && ElseText.Contains(ExpectedElseEnd), FString(TEXT("Disabled nodes: a disabled else-if: ")) + WriteError + TEXT("\n") + ElseText);
+		FBangoGraphDocument ElseDoc;
+		Expect(Bango::BuildGraph(ElseText, TEXT("disabled.bango"), ElseDoc, Error) && ElseDoc == Doc, FString(TEXT("Disabled nodes: a disabled else-if reads back the same: ")) + Error.ToString());
+	}
 
 	// ---- LOCTEXT_NAMESPACE and text: #define after the params line, #undef at the end, text literals kept as written ----
 	{

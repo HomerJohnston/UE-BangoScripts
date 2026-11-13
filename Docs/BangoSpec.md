@@ -1,8 +1,12 @@
-# Bango Language Spec (draft v0.34)
+# Bango Language Spec (draft v0.36)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.36:** **disabled nodes**. A node can be turned off without unwiring it: in the text it's written between `/*` and `*/`, and it does nothing when the script runs (execution goes straight on to the next node, and a disabled `if` or loop skips its block). What's between the markers is still code, not a comment, and the markers can be nested (section 1). In the graph, **Disable Node** / **Enable Node** in a node's right-click menu (or Ctrl+/) turns nodes off and on, and a disabled node is drawn faded with a **Disabled** banner (section 12).
+
+**Changes in v0.35:** scripts can be **spawned from text** in C++ with `UBangoScriptSubsystem::SpawnFromSource`, as well as from a file (section 10). Their text is saved with them. Save data from earlier versions can't be loaded (section 11). **Conditions**: `UBangoScriptSubsystem::EvaluateBoolCondition` runs a script, or a single expression, that answers true or false, for other plugins and C++ to use (section 10).
 
 **Changes in v0.34:** **debugging**, first part. While playing in the editor, the script editor's **Debug** dropdown lists the running copies of the script, and the graph outlines where the one being followed is: a pulsing outline on the node it's paused on, a dim one on the calls on the way there, and a red one where a copy stopped with an error. Nodes it has just run flash and fade out. The script text pane's gutter shows the same, line by line (section 12).
 
@@ -108,7 +112,31 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
   - Metadata on a line with no statement, including a `function` line or a line with only `{` or `};`
   - A reroute line where a statement couldn't go
 - Errors about the `params` line, and argument errors for a script with no `params` line, show `[node 0]`.
-- Ordinary comments: `// ...`. A comment starting with `//@` is always metadata. Block comments (`/* */`) are not supported.
+- Ordinary comments: `// ...`. A comment starting with `//@` is always metadata. There are no block comments: `/*` and `*/` mark **disabled nodes** (below), and what's between them must be code.
+
+### Disabled nodes
+- A statement between `/*` and `*/` is **disabled**: it's still a node in the graph, wired as before, but it does nothing when the script runs. Execution goes straight on to the statement after it, as if it were a reroute. A disabled `if`, `while`, `for` or `forEach` skips its whole block (and its `else`).
+- A disabled simple statement is written on its line, with its metadata after the `*/`:
+  ```
+  Log("a");                   //@1(0, 0)
+  /* Log("b"); */             //@2(4, 0)
+  Log("c");                   //@3(8, 0)
+  ```
+- A disabled block statement has `/*` and `*/` on lines of their own, at its indentation, around the whole statement, from its `if (...)` line to its last `};`:
+  ```
+  /*
+  if (_ready)                 //@4(12, 0)
+  {
+  	/* Log("not yet"); */     //@5(16, 4)
+  	Log("go");                //@6(16, 8)
+  };
+  */
+  ```
+- Unlike C++ comments, the markers **nest**: a statement inside a disabled block keeps its own setting (above, `Log("not yet")` stays disabled when the `if` is enabled again). Each `/*` must be closed by a `*/` in the same block. `/*` and `*/` inside strings and `//` comments don't count.
+- What's between the markers is **read as code**: it must be statements, each on its own line as usual, and can have `//` comments and reroutes among them. Prose there is an error that says to write notes as `//` comments. Disabled statements are parsed but not compiled: their names, types and commands aren't checked, and they can use names that don't exist.
+- Only statements can be disabled. A declaration, a `#define` or `#undef` line or a `function` can't be: each is an error.
+- A disabled `label` isn't in the compiled script, so a `goto` to it (or to a label inside a disabled block) is a compile error that says the label is disabled. A disabled `goto`, `break`, `continue` or `return` does nothing.
+- `//~` lines are still only for disconnected nodes (section 12). A disconnected node can be disabled too: `//~ /* Log("x"); */`.
 - **Lines starting with `#` are the script's settings**, written like C++ preprocessor lines: `#define params (...)` (section 10), `#define LOCTEXT_NAMESPACE "Name"` and `#undef LOCTEXT_NAMESPACE` (section 3). They start their line, have a space after `#define` / `#undef`, don't end with `;`, aren't graph nodes and can't have metadata. Any other `#` line is a compile error. Future settings will use the same form.
 
 ### Statements that become nodes
@@ -731,8 +759,67 @@ These checks happen when the script is spawned. If any fails, the script doesn't
 
 ### From C++
 - `UBangoScriptSubsystem::Spawn(ScriptPath, Args)`, where `Args` is a `TArray<FBangoValue>` in parameter order.
+- `UBangoScriptSubsystem::SpawnFromSource(Source, Name, Args)` starts a script from its **text** instead of a file, for scripts made at runtime or kept somewhere else (a data asset, a string table, a server). It's compiled on every call, then started exactly like `Spawn`: the same arguments, checks and errors, and the same handle. `Name` stands in for the file name in its errors (`Dialogue.Intro(3:5) [node 2]: ...`) and in the editor's debugger; it defaults to `Script`.
+  ```cpp
+  const FString Source = TEXT("#define params (entity _who)\n_who Speak(\"Hello.\");");
+  TArray<FBangoValue> Args;
+  Args.Add(FBangoValue::MakeEntity(TEXT("john")));
+  UBangoScriptSubsystem::Get(this)->SpawnFromSource(Source, TEXT("Greeting"), Args);
+  ```
+  A script spawned from text keeps its text: saving the state saves it, and loading compiles it again (section 11). It isn't hot reloaded, since there's no file to watch, and no script editor tab follows it.
+- `Bango::RegisterCondition(Source, Name, Error)` and `Bango::UnregisterCondition(Handle)` compile a **condition** once and keep it, and `UBangoScriptSubsystem::EvaluateBoolCondition(Handle, bResult, Error, Args)` runs it and gives its answer (see Conditions below).
 - `Bango::ActorToEntity(Actor, Value, Error)` turns an actor into an entity argument: its Bango ID name, or `nil` for a null pointer. An actor with no Bango ID component, or whose Bango ID name isn't registered, is an error.
 - `FBangoModule::Get().GetScriptParams(ScriptPath, Params, Error)` reads a script's parameters (names, types, whether each has a default, and the default value) without running it.
+
+### Conditions
+A **condition** is a script that answers **true or false**, for C++ and other plugins (like a triggers system) to ask. It's either:
+- **one expression**, on a line of its own (comments, blank lines and `#define` lines can be around it):
+  ```
+  foundThings >= 10 && !IsNull(@door)
+  ```
+- or **a script whose main graph returns** `true` or `false`, with everything a script can have (`#define params`, globals, locals, loops, functions):
+  ```
+  #define params (entity _who)
+  global int foundThings;
+
+  if (IsNull(_who))
+  {
+  	return false;
+  };
+
+  return foundThings >= 10 && GetPos(_who).z > 100;
+  ```
+
+Text with no `;`, `{` or `}` (outside strings and comments) and only one line of code is an expression; it's compiled as `return <expression>;`, and errors still point at the expression as it was written. In a condition, the main graph's `return` must have a `bool` value (`return;` is an error), and reaching the end without returning one is an error when it runs. Functions are as usual.
+
+A condition is **registered** once, which compiles it, then checked as often as needed, and **unregistered** when it's no longer needed:
+```cpp
+// When the trigger is set up (BangoConditions.h):
+FString Error;
+FBangoConditionHandle Condition = Bango::RegisterCondition(TEXT("foundThings >= 10"), TEXT("Trigger.Gate"), Error);
+if (!Condition.IsValid())
+{
+	Bango::ReportError(Error); // it doesn't compile
+}
+
+// Whenever it's checked:
+bool bOpen = false;
+if (!UBangoScriptSubsystem::Get(this)->EvaluateBoolCondition(Condition, bOpen, Error))
+{
+	Bango::ReportError(Error);
+}
+
+// When the trigger goes away:
+Bango::UnregisterCondition(Condition); // and Condition is made invalid
+```
+- `RegisterCondition` gives an invalid handle, and the compile error, if the condition doesn't compile. Commands it calls must be registered before it is (built-in commands always are). `Name` stands in for the file name in its errors.
+- There's **no limit** on how many are registered. Registering the same text with the same name again gives the **same handle**; it's kept until it has been unregistered as many times as it was registered. Registrations are shared by every world, and last until they're unregistered (or the game ends).
+- `UBangoScriptSubsystem::EvaluateBoolCondition(Source, bResult, Error, Args, Name)` checks a condition given as text, without registering it. It's compiled on every call, so it's for conditions checked once in a while.
+- It runs straight away, to the end, in that world: with its globals and its actors' Bango IDs. `Args` fill its `#define params` line, as for spawning (section 10).
+- **A condition must answer at once:** calling a command that waits (`Sleep`, a dialogue choice) is an error.
+- `EvaluateBoolCondition` returns `true` with the answer in `bResult` if it ran and answered, and `false` with the error in `Error` (and `bResult` false) if the handle isn't registered (or the text doesn't compile), its arguments don't fit, it stopped with an error, it didn't return a `bool`, or it waited. Errors aren't shown or logged by it, so a caller asking often can show each once (`Bango::ReportError`).
+- A condition isn't a running script: it isn't listed in the debugger, saved or reloaded, and it has no handle. Globals it sets stay set.
+- For C++ that compiles it itself: `Bango::CompileCondition`, and `FBangoInstance::GetResult` after it finishes. `Bango::GetNumRegisteredConditions()` says how many are registered, for checking that a plugin unregisters its own.
 
 ### From Blueprint: the Spawn Bango Script node
 The **Spawn Bango Script** node reads the script's `params` line and creates one input pin per parameter:
@@ -814,7 +901,7 @@ To set it up, in the **Localization Dashboard**, open the game target's **Gather
 
 Then gather as usual.
 
-- Lines disabled with `//~` are comments, so their texts aren't gathered.
+- Lines disabled with `//~` are comments, so their texts aren't gathered, and neither are the texts of disabled nodes (between `/*` and `*/`), which the gatherer reads as C++ comments. But C++ comments don't nest: after a `*/` that closes an inner disabled node, the gatherer thinks the outer one has ended, so texts later in the outer disabled block are gathered. That only adds unused entries for translators.
 - `#define` lines are skipped by the gatherer, which is why parameter defaults can't be texts (section 10).
 - Texts made with `INVTEXT` or `ToText` aren't gathered; they're never translated.
 - The gatherer doesn't compile scripts. A key used for two different texts across files is reported by the gatherer; within one file, Compile reports it first.
@@ -851,13 +938,13 @@ How a running copy switches:
 
 ### Save and load
 A save stores:
-- Every running instance: script path, call stack (function, resume point, locals including script parameters), and value stack, so a script paused in the middle of a function or an expression resumes exactly where it was.
+- Every running instance: script path (or, for a script spawned from text, its name and its whole text), call stack (function, resume point, locals including script parameters), and value stack, so a script paused in the middle of a function or an expression resumes exactly where it was.
 - The pending state of whatever latent command each instance is waiting on.
 - All global values.
 
-On load, each saved script is loaded and compiled from its path, and its saved state is checked against it. If a script was changed so that the saved state no longer fits (or the file is missing), that script isn't restored and an error is shown. Other scripts still load. Beyond that check, loading state into a changed script is **undefined behaviour** (not supported).
+On load, each saved script is loaded and compiled from its path (or from its saved text), and its saved state is checked against it. If a script was changed so that the saved state no longer fits (or the file is missing), that script isn't restored and an error is shown. Other scripts still load. Beyond that check, loading state into a changed script is **undefined behaviour** (not supported).
 
-The save data has a format version. Data from an older version (such as saves made before ints became 32-bit in v0.9) fails to load with an error rather than being misread.
+The save data has a format version. Data from an older version (such as saves made before ints became 32-bit in v0.9, or before scripts spawned from text were saved with their text in v0.35) fails to load with an error rather than being misread.
 
 ### Limits (project settings)
 | Setting | Default |
@@ -905,6 +992,10 @@ The graph editor shows a script as nodes and wires and saves it back as text. Th
 - `//~` lines are written at the end of their graph: after the main graph's code, or at the end of a function's body. A blank line separates one disconnected chain from the next.
 - `//~` lines must read as valid statements (as if the `//~ ` were removed). Declarations can't be in them: a disconnected chain uses the graph's locals like any other node. A broken `//~` line, a `#` line or a `function` in them, or a NodeID already used elsewhere in the file stops the graph editor from opening the file.
 - A disconnected `label` isn't part of the compiled script, so a `goto` to it is a compile error until it's wired in.
+
+### Disabled nodes in the graph
+- Any node but an entry or a reroute can be disabled (section 1). It keeps its wires; when the script runs, execution passes through it to its Next pin, and a disabled If or loop never runs its branches.
+- Saving writes a disabled simple node as `/* <statement> */` followed by its `//@` comment, and a disabled If or loop with `/*` and `*/` lines around it (its comment goes above the `/*`). A disabled If that would be written as `else if` is written in an `else { ... }` block instead, since the markers can't go around an `else if`.
 
 ### Comments
 - **The script's description:** the `//` lines the file starts with, from its very first line, up to the first line that isn't one (a blank line, code, a `//~` line or a `// ====` heading). It describes the script for designers. It isn't a node's comment and isn't shown in the graph; the script editor's **Script Description** box shows and edits it. A file that doesn't start with a `//` line has none. A bare `//` line in it is an empty line of the description. A description line can't start with `====` (it would be read as a section heading).
@@ -970,6 +1061,8 @@ The graph editor is the **Bango Scripts** tab (Tools menu). It doesn't need the 
     - Pins are Blueprint exec pins; wires have no arrowheads. There are no data pins: values are text in fields.
     - Title colours follow Blueprint: red entry, blue commands, a calmer blue for this script's functions, green assignments, grey flow control, purple labels and `goto`, orange `return`/`break`/`continue`.
     - Comments are pinned comment bubbles.
+    - **Disable Node** / **Enable Node**, in a node's right-click menu, or **Ctrl+/**, turns the selected nodes off, or back on if they're all off already, as one undoable edit. A disabled node is drawn faded, with a striped **Disabled** banner under its fields, like a disabled Blueprint node. Entries and reroutes can't be disabled. A node's own text can't contain `/*` or `*/`.
+    - In the script text pane, disabled code is faded (more than `//~` lines, and not in italics), and the `/*` and `*/` markers are shown in bold green.
     - Node coordinates are multiplied by 16 pixels.
 - A script whose text doesn't parse (or whose `//~` lines don't) shows the error instead of a graph, and its text in the script text pane.
 

@@ -1,9 +1,10 @@
 // Bango text editor: the text layer of syntax highlighting.
 // See "Bango Text Editor Spec", section 2.
 //
-// Works from one line alone: Bango statements fit on one line, strings end on
-// the line they start and there are no block comments, so no state is carried
-// from one line to the next.
+// Works from one line alone: Bango statements fit on one line and strings end on
+// the line they start. The one thing carried from line to line is how many
+// disabled regions (slash-star ... star-slash, spec section 1) are open: what's
+// inside one is still code, tokenized as usual, and marked bDisabled.
 //
 // Depends only on FStringView and TArray, so it can be unit-tested without Slate.
 
@@ -41,6 +42,7 @@ enum class EBangoSyntaxKind : uint8
 	Comment,
 	Metadata,           // //@12(4, 7) to the end of the line
 	DisconnectedMarker, // the //~ at the start of a disconnected line
+	DisabledMarker,     // the slash-star and star-slash around disabled nodes
 	Structure,          // { }
 	Operator,
 	Punctuation,        // ( ) [ ] , ; .
@@ -67,6 +69,9 @@ struct FBangoSyntaxToken
 
 	/** True for every token on a //~ line after the //~ itself. */
 	bool bDisconnected = false;
+
+	/** True for every token inside a disabled region (but not for the markers themselves). */
+	bool bDisabled = false;
 };
 
 class FBangoLineTokenizer
@@ -77,4 +82,10 @@ public:
 	 * without overlaps. Whitespace gets no token; callers treat gaps as Default.
 	 */
 	static void TokenizeLine(FStringView Line, TArray<FBangoSyntaxToken>& OutTokens);
+
+	/**
+	 * The same, for a line in a file: InOutDisabledDepth is how many disabled regions are open at the start of
+	 * the line (0 for the first line), and is updated for the next one.
+	 */
+	static void TokenizeLine(FStringView Line, TArray<FBangoSyntaxToken>& OutTokens, int32& InOutDisabledDepth);
 };

@@ -1,5 +1,6 @@
 #include "BangoConnectionDrawingPolicy.h"
 #include "BangoEditorStyle.h"
+#include "BangoGraphCommands.h"
 #include "BangoEdGraphSchema.h"
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphUtilities.h"
@@ -39,6 +40,7 @@ public:
 	virtual void StartupModule() override
 	{
 		FBangoEditorStyle::Initialize();
+		FBangoGraphCommands::Register();
 
 		PinFactory = MakeShared<FBangoGraphPinFactory>();
 		FEdGraphUtilities::RegisterVisualPinFactory(PinFactory);
@@ -75,6 +77,7 @@ public:
 			FEdGraphUtilities::UnregisterVisualNodeFactory(NodeFactory);
 			NodeFactory.Reset();
 		}
+		FBangoGraphCommands::Unregister();
 		FBangoEditorStyle::Shutdown();
 	}
 

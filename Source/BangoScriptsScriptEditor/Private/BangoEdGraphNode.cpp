@@ -1,6 +1,11 @@
 #include "BangoEdGraphNode.h"
 
 #include "BangoEdGraphSchema.h"
+#include "BangoGraphCommands.h"
+#include "EdGraph/EdGraphSchema.h"
+#include "GraphEditor.h"
+#include "ToolMenu.h"
+#include "ToolMenuSection.h"
 #include "EdGraph/EdGraphPin.h"
 #include "BangoGraphEdit.h"
 #include "EdGraph/EdGraph.h"
@@ -138,6 +143,41 @@ void UBangoEdGraphNode::PostEditUndo()
 {
 	Super::PostEditUndo();
 	UpdateLayout(); // Text may have changed back
+}
+
+void UBangoEdGraphNode::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const
+{
+	Super::GetNodeContextMenuActions(Menu, Context);
+	if (!Menu || !Context || Context->Pin || !CanBeDisabled())
+	{
+		return;
+	}
+	// The command works on the selected nodes: it turns them off unless they're all off already. The label says
+	// which it will do (the right-clicked node is selected by then; if not, it's the only one counted).
+	int32 Count = 0;
+	bool bAnyEnabled = false;
+	if (const TSharedPtr<SGraphEditor> GraphEditor = SGraphEditor::FindGraphEditorForGraph(Context->Graph))
+	{
+		for (UObject* Selected : GraphEditor->GetSelectedNodes())
+		{
+			const UBangoEdGraphNode* Node = Cast<UBangoEdGraphNode>(Selected);
+			if (Node && Node->CanBeDisabled())
+			{
+				++Count;
+				bAnyEnabled |= !Node->IsDisabledNode();
+			}
+		}
+	}
+	if (Count == 0)
+	{
+		Count = 1;
+		bAnyEnabled = !IsDisabledNode();
+	}
+	const FText Label = bAnyEnabled
+		? (Count == 1 ? LOCTEXT("DisableNode", "Disable Node") : LOCTEXT("DisableNodes", "Disable Nodes"))
+		: (Count == 1 ? LOCTEXT("EnableNode", "Enable Node") : LOCTEXT("EnableNodes", "Enable Nodes"));
+	FToolMenuSection& Section = Menu->AddSection(TEXT("BangoNode"), LOCTEXT("BangoNodeSection", "Bango Node"));
+	Section.AddMenuEntry(FBangoGraphCommands::Get().ToggleNodesDisabled, Label);
 }
 
 FText UBangoEdGraphNode::GetNodeTitle(ENodeTitleType::Type TitleType) const

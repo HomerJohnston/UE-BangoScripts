@@ -125,10 +125,14 @@ namespace BangoCompilerPrivate
 		{
 		}
 
+		/** A condition (Bango::CompileCondition): the main graph returns a bool. */
+		bool bCondition = false;
+
 		bool Run()
 		{
 			Program = FBangoProgram();
 			Program.FileName = Script.FileName;
+			Program.bIsCondition = bCondition;
 
 			if (!CheckDeclarations() || !CollectGlobals() || !CollectFunctions())
 			{
@@ -212,6 +216,8 @@ namespace BangoCompilerPrivate
 		TArray<FLoop> Loops;
 		TArray<int32> BlockParents;
 		TBangoNameMap<FLabel> Labels;
+		/** Labels in disabled statements, by name, with their lines: a goto to one gets its own error. */
+		TBangoNameMap<int32> DisabledLabels;
 		TArray<FGotoFixup> Gotos;
 		const FBangoStmt* CurrentStmt = nullptr;
 		FBangoSourceLocation CurrentLoc;
@@ -965,6 +971,7 @@ namespace BangoCompilerPrivate
 			Loops.Reset();
 			BlockParents.Reset();
 			Labels = TBangoNameMap<FLabel>();
+			DisabledLabels = TBangoNameMap<int32>();
 			Gotos.Reset();
 			CurrentStmt = nullptr;
 			CurrentLoc = Ast ? Ast->Loc : FBangoSourceLocation();
@@ -997,7 +1004,8 @@ namespace BangoCompilerPrivate
 			CurrentStmt = nullptr;
 			if (!Ast)
 			{
-				Emit(EBangoOp::Halt);
+				// A condition must say true or false; reaching the end is an error when it runs.
+				Emit(bCondition ? EBangoOp::ErrorMissingReturn : EBangoOp::Halt);
 			}
 			else if (Ast->bReturnsVoid)
 			{
@@ -1152,6 +1160,11 @@ namespace BangoCompilerPrivate
 				const FLabel* Label = Labels.Find(Goto.Name);
 				if (!Label)
 				{
+					if (const int32* DisabledLine = DisabledLabels.Find(Goto.Name))
+					{
+						return Fail(Goto.Loc, FString::Printf(TEXT("Label '%s' (line %d) is disabled, so 'goto %s' has nowhere to go. Enable the label, or disable this goto too."),
+							*Goto.Name, *DisabledLine, *Goto.Name));
+					}
 					return Fail(Goto.Loc, FString::Printf(TEXT("There is no label '%s' in this %s."), *Goto.Name, FnAst ? TEXT("function") : TEXT("script's top level")));
 				}
 				// The label's block must contain the goto: jumping out of blocks is fine, jumping into one isn't.
@@ -1235,8 +1248,50 @@ namespace BangoCompilerPrivate
 			return true;
 		}
 
+		/** Remembers the labels in a disabled statement (and in its blocks), for ResolveGotos' error. */
+		void NoteDisabledLabels(const FBangoStmt& Stmt)
+		{
+			if (const FBangoLabelStmt* Label = Stmt.As<FBangoLabelStmt>())
+			{
+				if (!DisabledLabels.Find(Label->Name))
+				{
+					DisabledLabels.Add(Label->Name, Label->Loc.Line);
+				}
+			}
+			const auto NoteBlock = [this](const FBangoBlock& Block)
+			{
+				for (const FBangoStmtPtr& Inner : Block)
+				{
+					NoteDisabledLabels(*Inner);
+				}
+			};
+			if (const FBangoIfStmt* If = Stmt.As<FBangoIfStmt>())
+			{
+				NoteBlock(If->Then);
+				NoteBlock(If->Else);
+			}
+			else if (const FBangoWhileStmt* While = Stmt.As<FBangoWhileStmt>())
+			{
+				NoteBlock(While->Body);
+			}
+			else if (const FBangoForStmt* For = Stmt.As<FBangoForStmt>())
+			{
+				NoteBlock(For->Body);
+			}
+			else if (const FBangoForEachStmt* ForEach = Stmt.As<FBangoForEachStmt>())
+			{
+				NoteBlock(ForEach->Body);
+			}
+		}
+
 		bool CompileStmt(const FBangoStmt& Stmt)
 		{
+			if (Stmt.bDisabled)
+			{
+				// A disabled node: no code, so execution goes straight on to the next statement (spec section 1).
+				NoteDisabledLabels(Stmt);
+				return true;
+			}
 			CurrentStmt = &Stmt;
 			CurrentLoc = Stmt.Loc;
 			const int32 Begin = Here();
@@ -1622,6 +1677,23 @@ namespace BangoCompilerPrivate
 
 		bool CompileReturn(const FBangoReturnStmt& Return)
 		{
+			if (!FnAst && bCondition)
+			{
+				// A condition's main graph returns its answer.
+				if (!Return.Value)
+				{
+					return Fail(Return.Loc, TEXT("A condition must return true or false, like 'return _count > 3;'."));
+				}
+				const FBangoType Bool = FBangoType::Bool();
+				FExprType ValueType;
+				if (!CompileExpr(*Return.Value, &Bool, ValueType) || !CanAssign(Bool, ValueType, Return.Value->Loc, TEXT("The condition")))
+				{
+					return false;
+				}
+				EmitConvertIfNeeded(Bool, ValueType);
+				Emit(EBangoOp::ReturnValue);
+				return true;
+			}
 			if (!FnAst)
 			{
 				if (Return.Value)
@@ -2650,5 +2722,143 @@ namespace Bango
 			return false;
 		}
 		return CompileScript(Script, Commands, OutProgram, OutError);
+	}
+
+	namespace
+	{
+		bool IsSpaceChar(TCHAR Char)
+		{
+			return Char == TEXT(' ') || Char == TEXT('\t') || Char == TEXT('\r');
+		}
+
+		/**
+		 * For CompileCondition: if Source's code is a single expression on one line (other lines being blank, comments or
+		 * # lines, and no ; { or } outside strings and comments), where it is: the line (from 1), the start of the
+		 * expression and the end of it (before any comment after it), as indices into Source.
+		 */
+		bool FindConditionExpression(const FString& Source, int32& OutLine, int32& OutBegin, int32& OutEnd)
+		{
+			bool bFound = false;
+			int32 Line = 1;
+			int32 LineStart = 0;
+			const int32 Length = Source.Len();
+			while (LineStart <= Length)
+			{
+				int32 LineEnd = LineStart;
+				while (LineEnd < Length && Source[LineEnd] != TEXT('\n'))
+				{
+					++LineEnd;
+				}
+				int32 First = LineStart;
+				while (First < LineEnd && IsSpaceChar(Source[First]))
+				{
+					++First;
+				}
+				const bool bComment = First + 1 < LineEnd && Source[First] == TEXT('/') && Source[First + 1] == TEXT('/');
+				if (First < LineEnd && !bComment && Source[First] != TEXT('#'))
+				{
+					if (bFound)
+					{
+						return false; // more than one line of code
+					}
+					// Where the code ends (a // outside a string starts a comment), and whether it's a statement.
+					int32 CodeEnd = LineEnd;
+					bool bInString = false;
+					for (int32 i = First; i < LineEnd; ++i)
+					{
+						const TCHAR Char = Source[i];
+						if (bInString)
+						{
+							if (Char == TEXT('\\'))
+							{
+								++i;
+							}
+							else if (Char == TEXT('"'))
+							{
+								bInString = false;
+							}
+						}
+						else if (Char == TEXT('"'))
+						{
+							bInString = true;
+						}
+						else if (Char == TEXT('/') && i + 1 < LineEnd && Source[i + 1] == TEXT('/'))
+						{
+							CodeEnd = i;
+							break;
+						}
+						else if (Char == TEXT(';') || Char == TEXT('{') || Char == TEXT('}'))
+						{
+							return false;
+						}
+					}
+					while (CodeEnd > First && IsSpaceChar(Source[CodeEnd - 1]))
+					{
+						--CodeEnd;
+					}
+					bFound = true;
+					OutLine = Line;
+					OutBegin = First;
+					OutEnd = CodeEnd;
+				}
+				LineStart = LineEnd + 1;
+				++Line;
+			}
+			return bFound;
+		}
+	}
+
+	bool CompileCondition(const FString& Source, const FString& FileName, const IBangoCommandLookup& Commands, FBangoProgram& OutProgram, FBangoCompileError& OutError)
+	{
+		// A single expression is compiled as `return <expression>;`.
+		static const FString ReturnPrefix = TEXT("return ");
+		int32 ExprLine = 0;
+		int32 ExprBegin = 0;
+		int32 ExprEnd = 0;
+		const bool bExpression = FindConditionExpression(Source, ExprLine, ExprBegin, ExprEnd);
+		const FString Text = bExpression
+			? Source.Left(ExprBegin) + ReturnPrefix + Source.Mid(ExprBegin, ExprEnd - ExprBegin) + TEXT(";") + Source.Mid(ExprEnd, Source.Len() - ExprEnd)
+			: Source;
+
+		FBangoScript Script;
+		bool bOk = ParseScript(Text, FileName, Script, OutError);
+		if (bOk)
+		{
+			OutError = FBangoCompileError();
+			OutError.FileName = Script.FileName;
+			BangoCompilerPrivate::FCompiler Compiler(Script, Commands, OutProgram, OutError);
+			Compiler.bCondition = true;
+			bOk = Compiler.Run();
+		}
+		if (!bExpression)
+		{
+			return bOk;
+		}
+		// Errors (now, and while it runs) point into the expression as it was written, without the added `return `.
+		int32 ExprColumn = 1;
+		for (int32 i = ExprBegin - 1; i >= 0 && Source[i] != TEXT('\n'); --i)
+		{
+			++ExprColumn;
+		}
+		auto FixColumn = [ExprLine, ExprColumn](int32 Line, int32& Column)
+		{
+			if (Line == ExprLine && Column > ExprColumn)
+			{
+				Column = FMath::Max(ExprColumn, Column - ReturnPrefix.Len());
+			}
+		};
+		if (!bOk)
+		{
+			FixColumn(OutError.Line, OutError.Column);
+			return false;
+		}
+		for (FBangoFunctionCode& Function : OutProgram.Functions)
+		{
+			for (FBangoDebugLoc& Loc : Function.Debug)
+			{
+				FixColumn(Loc.Line, Loc.Column);
+			}
+		}
+		return true;
 	}
 }

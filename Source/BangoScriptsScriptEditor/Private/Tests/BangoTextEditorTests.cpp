@@ -16,18 +16,23 @@ namespace BangoLineTokenizerTests
 			TEXT("Type"), TEXT("Constant"), TEXT("Nil"), TEXT("Preprocessor"), TEXT("Local"), TEXT("Global"), TEXT("Entity"),
 			TEXT("Number"), TEXT("String"), TEXT("StringEscape"), TEXT("Placeholder"), TEXT("LocMacro"), TEXT("LocKey"),
 			TEXT("LocNotes"), TEXT("VectorPart"), TEXT("Call"), TEXT("Builtin"), TEXT("Comment"), TEXT("Metadata"),
-			TEXT("DisconnectedMarker"), TEXT("Structure"), TEXT("Operator"), TEXT("Punctuation"), TEXT("Error"),
+			TEXT("DisconnectedMarker"), TEXT("DisabledMarker"), TEXT("Structure"), TEXT("Operator"), TEXT("Punctuation"), TEXT("Error"),
 			TEXT("Command"), TEXT("Function"), TEXT("Parameter"), TEXT("UndeclaredGlobal"),
 		};
 		static_assert(UE_ARRAY_COUNT(Names) == static_cast<int32>(EBangoSyntaxKind::Count), "Update the names");
 		return Names[static_cast<int32>(Kind)];
 	}
 
-	/** "Kind[text] Kind~[text] ..." where ~ marks a disconnected token. */
-	static FString Describe(const FString& Line)
+	/** "Kind[text] Kind~[text] Kind-[text] ..." where ~ marks a disconnected token and - a disabled one. */
+	static FString Describe(const FString& Line, int32* InOutDisabledDepth = nullptr)
 	{
 		TArray<FBangoSyntaxToken> Tokens;
-		FBangoLineTokenizer::TokenizeLine(FStringView(Line), Tokens);
+		int32 Depth = InOutDisabledDepth ? *InOutDisabledDepth : 0;
+		FBangoLineTokenizer::TokenizeLine(FStringView(Line), Tokens, Depth);
+		if (InOutDisabledDepth)
+		{
+			*InOutDisabledDepth = Depth;
+		}
 
 		FString Result;
 		int32 PreviousEnd = 0;
@@ -38,7 +43,7 @@ namespace BangoLineTokenizerTests
 				Result += TEXT("!!OVERLAP ");
 			}
 			PreviousEnd = Token.Start + Token.Len;
-			Result += FString::Printf(TEXT("%s%s[%s] "), KindName(Token.Kind), Token.bDisconnected ? TEXT("~") : TEXT(""), *Line.Mid(Token.Start, Token.Len));
+			Result += FString::Printf(TEXT("%s%s%s[%s] "), KindName(Token.Kind), Token.bDisconnected ? TEXT("~") : TEXT(""), Token.bDisabled ? TEXT("-") : TEXT(""), *Line.Mid(Token.Start, Token.Len));
 		}
 		return Result;
 	}
@@ -95,6 +100,28 @@ bool FBangoLineTokenizerTest::RunTest(const FString& Parameters)
 	Check(TEXT("vector3 _p = [1, 2, 3];"), TEXT("Type[vector3] Global[_p]"));
 	Check(TEXT("bool _b = !_c != false;"), TEXT("Operator[!] Global[_c] Operator[!=] Constant[false]"));
 	Check(TEXT(""), TEXT(""));
+
+	// Disabled nodes: the markers, then code as usual but marked disabled; markers in strings and comments don't count.
+	Check(TEXT("/* Log(\"b\"); */    //@2(4, 0)"), TEXT("DisabledMarker[/*] Call-[Log] Punctuation-[(] String-[\"b\"] Punctuation-[)] Punctuation-[;] DisabledMarker[*/] Metadata[//@2(4, 0)]"));
+	Check(TEXT("/* /* a(); */ */"), TEXT("DisabledMarker[/*] DisabledMarker[/*] Call-[a]"));
+	Check(TEXT("Log(\"/* not */\"); // or /* this"), TEXT("Call[Log] Punctuation[(] String[\"/* not */\"] Punctuation[)] Punctuation[;] Comment[// or /* this]"));
+	Check(TEXT("_x = 2 */ 3;"), TEXT("Operator[=] Number[2] DisabledMarker[*/] Number[3]"));
+	{
+		// A disabled block: the depth carries from line to line.
+		int32 Depth = 0;
+		const TCHAR* const Lines[] = { TEXT("/*"), TEXT("if (x)"), TEXT("\t/* y(); */"), TEXT("\tz();"), TEXT("*/"), TEXT("w();") };
+		const TCHAR* const Expected[] = { TEXT("DisabledMarker[/*]"), TEXT("Keyword-[if] Punctuation-[(] Global-[x] Punctuation-[)]"),
+			TEXT("DisabledMarker[/*] Call-[y]"), TEXT("Call-[z] Punctuation-[(]"), TEXT("DisabledMarker[*/]"), TEXT("Call[w] Punctuation[(]") };
+		for (int32 i = 0; i < UE_ARRAY_COUNT(Lines); ++i)
+		{
+			const FString Got = BangoLineTokenizerTests::Describe(Lines[i], &Depth);
+			if (!Got.Contains(Expected[i], ESearchCase::CaseSensitive))
+			{
+				AddError(FString::Printf(TEXT("Disabled block, line %d: %s\n  want: %s\n  got:  %s"), i + 1, Lines[i], Expected[i], *Got));
+			}
+		}
+		TestEqual(TEXT("Disabled block: closed at the end"), Depth, 0);
+	}
 
 	return true;
 }

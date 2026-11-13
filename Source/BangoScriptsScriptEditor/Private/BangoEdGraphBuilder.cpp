@@ -37,6 +37,10 @@ namespace BangoScriptEditor
 			Node->NodePosX = Source.X * BangoGraphGridSize;
 			Node->NodePosY = Source.Y * BangoGraphGridSize;
 			Node->NodeComment = Source.Comment;
+			if (Source.bDisabled && Node->CanBeDisabled())
+			{
+				Node->SetEnabledState(ENodeEnabledState::Disabled, /*bUserAction*/ false);
+			}
 			Node->bCommentBubbleVisible = !Source.Comment.IsEmpty();
 			Node->bCommentBubblePinned = Node->bCommentBubbleVisible;
 			if (Source.Kind == EBangoGraphNodeKind::Entry)
@@ -207,6 +211,7 @@ namespace BangoScriptEditor
 				Out.Y = Node->IsEntry() ? 0 : FMath::RoundToInt((float)Node->NodePosY / BangoGraphGridSize);
 				Out.Text = Node->Text;
 				Out.Comment = Node->NodeComment;
+				Out.bDisabled = Node->IsDisabledNode();
 				Out.Next = Target(Node->GetNextPin(), Index);
 				for (int32 Branch = 0; Branch < Bango::GetGraphNodeBranchCount(Out.Kind); ++Branch)
 				{

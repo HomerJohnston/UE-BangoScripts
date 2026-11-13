@@ -73,6 +73,12 @@ struct BANGOSCRIPTS_API FBangoGraphNode
 	/** If: [Do, Else]. While, For, ForEach: [Do]. Unused entries are INDEX_NONE. */
 	int32 Branches[2] = { INDEX_NONE, INDEX_NONE };
 
+	/**
+	 * A disabled node (written between slash-star and star-slash): it does nothing, and execution goes
+	 * straight on to Next. A disabled If or loop skips its blocks. The nodes in those blocks keep their own setting.
+	 */
+	bool bDisabled = false;
+
 	bool operator==(const FBangoGraphNode& Other) const;
 	bool operator!=(const FBangoGraphNode& Other) const { return !(*this == Other); }
 };

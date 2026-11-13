@@ -19,6 +19,7 @@ public class BangoScriptsScriptEditor : ModuleRules
 				"SlateCore",
 				"UnrealEd",
 				"GraphEditor",
+				"ToolMenus",
 				"WorkspaceMenuStructure",
 				"Projects",
 				"BangoScripts",

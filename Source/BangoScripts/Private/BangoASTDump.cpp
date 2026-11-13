@@ -138,7 +138,15 @@ namespace BangoDumpPrivate
 		return Expr ? Bango::DumpExpr(*Expr) : FString(TEXT("_"));
 	}
 
+	static FString DumpStmtInner(const FBangoStmt& Stmt);
+
+	/** A disabled statement is dumped as (disabled <statement>). */
 	static FString DumpStmt(const FBangoStmt& Stmt)
+	{
+		return Stmt.bDisabled ? FString(TEXT("(disabled ")) + DumpStmtInner(Stmt) + TEXT(")") : DumpStmtInner(Stmt);
+	}
+
+	static FString DumpStmtInner(const FBangoStmt& Stmt)
 	{
 		switch (Stmt.Kind)
 		{

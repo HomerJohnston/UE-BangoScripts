@@ -536,6 +536,14 @@ namespace BangoLineTokenizerPrivate
 				return;
 			}
 
+			// The markers around disabled nodes (TokenizeLine counts them).
+			if ((C == TEXT('/') && N == TEXT('*')) || (C == TEXT('*') && N == TEXT('/')))
+			{
+				Emit(EBangoSyntaxKind::DisabledMarker, Pos, 2);
+				Pos += 2;
+				return;
+			}
+
 			// Two-character operators.
 			const bool bDouble =
 				(C == TEXT('&') && N == TEXT('&')) ||
@@ -567,6 +575,27 @@ namespace BangoLineTokenizerPrivate
 
 void FBangoLineTokenizer::TokenizeLine(FStringView Line, TArray<FBangoSyntaxToken>& OutTokens)
 {
+	int32 DisabledDepth = 0;
+	TokenizeLine(Line, OutTokens, DisabledDepth);
+}
+
+void FBangoLineTokenizer::TokenizeLine(FStringView Line, TArray<FBangoSyntaxToken>& OutTokens, int32& InOutDisabledDepth)
+{
+	const int32 First = OutTokens.Num();
 	BangoLineTokenizerPrivate::FLexer Lexer(Line, OutTokens);
 	Lexer.Run();
+
+	// Regions nest (unlike C++ comments), and the markers in strings and comments were never tokens.
+	for (int32 i = First; i < OutTokens.Num(); ++i)
+	{
+		FBangoSyntaxToken& Token = OutTokens[i];
+		if (Token.Kind == EBangoSyntaxKind::DisabledMarker)
+		{
+			InOutDisabledDepth = Line[Token.Start] == TEXT('/') ? InOutDisabledDepth + 1 : FMath::Max(InOutDisabledDepth - 1, 0);
+		}
+		else
+		{
+			Token.bDisabled = InOutDisabledDepth > 0;
+		}
+	}
 }

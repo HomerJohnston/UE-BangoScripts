@@ -415,12 +415,55 @@ namespace BangoGraphWriterPrivate
 			return true;
 		}
 
+		/** True if the node is written disabled: between slash-star and star-slash (reroutes have nothing to disable). */
+		static bool IsWrittenDisabled(const FBangoGraphNode& Node)
+		{
+			return Node.bDisabled && Node.Kind != EBangoGraphNodeKind::Reroute && Node.Kind != EBangoGraphNodeKind::Entry;
+		}
+
+		static bool IsBlockKind(EBangoGraphNodeKind Kind)
+		{
+			return Kind == EBangoGraphNodeKind::If || Kind == EBangoGraphNodeKind::While
+				|| Kind == EBangoGraphNodeKind::For || Kind == EBangoGraphNodeKind::ForEach;
+		}
+
+		/**
+		 * A simple disabled node is written on its line: the code between the markers, then its //@ comment.
+		 * A disabled block node gets the markers on lines of their own, above and below the whole block.
+		 */
 		bool WriteNode(const FBangoGraph& Graph, int32 Index, int32 Indent, int32 Detached, int32 Depth, bool bElseIf)
 		{
 			Written[Index] = true;
 			const FBangoGraphNode& Node = Graph.Nodes[Index];
 			AddComment(Node.Comment, Indent, Detached);
 
+			const bool bDisabled = !bElseIf && IsWrittenDisabled(Node);
+			if (bDisabled && IsBlockKind(Node.Kind))
+			{
+				AddCode(Indent, Detached, TEXT("/*"), nullptr);
+				if (!WriteNodeCode(Graph, Index, Indent, Detached, Depth, false))
+				{
+					return false;
+				}
+				AddCode(Indent, Detached, TEXT("*/"), nullptr);
+				return true;
+			}
+			const int32 FirstLine = Out.Num();
+			if (!WriteNodeCode(Graph, Index, Indent, Detached, Depth, bElseIf))
+			{
+				return false;
+			}
+			if (bDisabled && Out.Num() == FirstLine + 1)
+			{
+				Out.Last().Code = FString(TEXT("/* ")) + Out.Last().Code + TEXT(" */");
+			}
+			return true;
+		}
+
+		/** The node's own lines, without its comment. */
+		bool WriteNodeCode(const FBangoGraph& Graph, int32 Index, int32 Indent, int32 Detached, int32 Depth, bool bElseIf)
+		{
+			const FBangoGraphNode& Node = Graph.Nodes[Index];
 			const FString& Text = Node.Text;
 			switch (Node.Kind)
 			{
@@ -483,7 +526,7 @@ namespace BangoGraphWriterPrivate
 				AddCode(Indent, Detached, TEXT("}"), nullptr);
 
 				const FBangoGraphNode& FalseNode = Graph.Nodes[FalseBranch];
-				if (FalseNode.Kind == EBangoGraphNodeKind::If && FalseNode.Next == INDEX_NONE)
+				if (FalseNode.Kind == EBangoGraphNodeKind::If && FalseNode.Next == INDEX_NONE && !IsWrittenDisabled(FalseNode))
 				{
 					// A False branch that is just another if, with nothing after it, is written as `else if`.
 					if (Depth + 1 > MaxNestingDepth)

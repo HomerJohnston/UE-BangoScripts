@@ -265,11 +265,12 @@ void FBangoSyntaxMarshaller::SetText(const FString& SourceString, FTextLayout& T
 	TArray<TArray<FBangoSyntaxToken>> LineTokens;
 	Lines.Reserve(LineRanges.Num());
 	LineTokens.SetNum(LineRanges.Num());
+	int32 DisabledDepth = 0; // disabled regions open so far (they can run over several lines)
 	for (int32 LineIndex = 0; LineIndex < LineRanges.Num(); ++LineIndex)
 	{
 		const FTextRange& LineRange = LineRanges[LineIndex];
 		Lines.Add(SourceString.Mid(LineRange.BeginIndex, LineRange.Len()));
-		FBangoLineTokenizer::TokenizeLine(FStringView(Lines[LineIndex]), LineTokens[LineIndex]);
+		FBangoLineTokenizer::TokenizeLine(FStringView(Lines[LineIndex]), LineTokens[LineIndex], DisabledDepth);
 	}
 
 	ScriptNames.Build(Lines, LineTokens);
@@ -326,7 +327,7 @@ void FBangoSyntaxMarshaller::SetText(const FString& SourceString, FTextLayout& T
 		{
 			AddRun(DefaultStyle, Cursor, Token.Start);
 			const EBangoSyntaxKind Kind = bMetadataIsError && Token.Kind == EBangoSyntaxKind::Metadata ? EBangoSyntaxKind::Error : Token.Kind;
-			AddRun(Style->GetStyle(Kind, Token.bDisconnected), Token.Start, Token.Start + Token.Len);
+			AddRun(Style->GetStyle(Kind, Token.bDisconnected, Token.bDisabled), Token.Start, Token.Start + Token.Len);
 			Cursor = Token.Start + Token.Len;
 		}
 		AddRun(DefaultStyle, Cursor, LineText->Len());

@@ -278,6 +278,14 @@ struct FBangoStmt
 	 */
 	FBangoNodeInfo Node;
 
+	/**
+	 * True if the statement is between slash-star and star-slash: a disabled node (spec section 1). It's
+	 * parsed but never compiled, so it does nothing and execution goes on to the next statement; a
+	 * disabled if, while, for or forEach skips its whole block. Only the statements written directly
+	 * in the region are marked: those in their blocks keep their own setting.
+	 */
+	bool bDisabled = false;
+
 	virtual ~FBangoStmt() = default;
 
 	template<typename T> T* As() { return Kind == T::StaticKind ? static_cast<T*>(this) : nullptr; }

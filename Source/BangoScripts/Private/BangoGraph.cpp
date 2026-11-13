@@ -12,7 +12,7 @@ bool FBangoGraphNode::operator==(const FBangoGraphNode& Other) const
 {
 	return Kind == Other.Kind && NodeID == Other.NodeID && X == Other.X && Y == Other.Y
 		&& Text.Equals(Other.Text, ESearchCase::CaseSensitive) && Comment.Equals(Other.Comment, ESearchCase::CaseSensitive) && Next == Other.Next
-		&& Branches[0] == Other.Branches[0] && Branches[1] == Other.Branches[1];
+		&& Branches[0] == Other.Branches[0] && Branches[1] == Other.Branches[1] && bDisabled == Other.bDisabled;
 }
 
 bool FBangoGraphDecl::operator==(const FBangoGraphDecl& Other) const
@@ -621,6 +621,7 @@ namespace BangoGraphPrivate
 				FBangoGraphNode& Node = GraphAt(Graph).Nodes.AddDefaulted_GetRef();
 				Node.Kind = NodeKindFor(Stmt.Kind);
 				Node.Text = NodeText(Stmt);
+				Node.bDisabled = Stmt.bDisabled;
 				if (Stmt.Node.bHasMetadata)
 				{
 					Node.NodeID = Stmt.Node.NodeID;

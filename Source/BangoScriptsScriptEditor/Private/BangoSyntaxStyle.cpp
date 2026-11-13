@@ -44,6 +44,7 @@ namespace BangoSyntaxStylePrivate
 		case EBangoSyntaxKind::Comment:            return { TEXT("6A9955"), false, true  };
 		case EBangoSyntaxKind::Metadata:           return { TEXT("3A3A3A"), false, false };
 		case EBangoSyntaxKind::DisconnectedMarker: return { TEXT("6A9955"), false, false };
+		case EBangoSyntaxKind::DisabledMarker:     return { TEXT("6A9955"), true,  false };
 		case EBangoSyntaxKind::Structure:          return { TEXT("808080"), false, false };
 		case EBangoSyntaxKind::Operator:           return { TEXT("D4D4D4"), false, false };
 		case EBangoSyntaxKind::Punctuation:        return { TEXT("A0A0A0"), false, false };
@@ -78,30 +79,37 @@ FBangoSyntaxStyle::FBangoSyntaxStyle(float FontSize, const UObject* FontObject)
 		const FKindStyle KindStyle = GetDefaultKindStyle(static_cast<EBangoSyntaxKind>(KindIndex));
 		const FLinearColor Colour = FLinearColor::FromSRGBColor(FColor::FromHex(KindStyle.Hex));
 
-		for (int32 Disconnected = 0; Disconnected < 2; ++Disconnected)
+		for (int32 Variant = 0; Variant < 4; ++Variant)
 		{
-			// Disconnected code is faded and in italics, whatever its kind.
-			const bool bItalic = KindStyle.bItalic || Disconnected == 1;
+			// Disconnected code is faded and in italics, whatever its kind. Disabled code (between the markers) is
+			// faded more, but not italic, so the two can be told apart; code that's both is both.
+			const bool bDisconnectedVariant = (Variant & 1) != 0;
+			const bool bDisabledVariant = (Variant & 2) != 0;
+			const bool bItalic = KindStyle.bItalic || bDisconnectedVariant;
 
 			FSlateFontInfo Font = FontObject != nullptr
 				? FSlateFontInfo(FontObject, FontSize, GetTypefaceName(KindStyle.bBold, bItalic))
 				: FCoreStyle::GetDefaultFontStyle(TEXT("Mono"), FontSize);
 
 			FLinearColor RunColour = Colour;
-			if (Disconnected == 1)
+			if (bDisconnectedVariant)
 			{
 				RunColour.A *= 0.5f;
 			}
+			if (bDisabledVariant)
+			{
+				RunColour.A *= 0.4f;
+			}
 
-			Styles[KindIndex][Disconnected] = FTextBlockStyle(Base)
+			Styles[KindIndex][Variant] = FTextBlockStyle(Base)
 				.SetFont(Font)
 				.SetColorAndOpacity(FSlateColor(RunColour));
 		}
 	}
 }
 
-const FTextBlockStyle& FBangoSyntaxStyle::GetStyle(EBangoSyntaxKind Kind, bool bDisconnected) const
+const FTextBlockStyle& FBangoSyntaxStyle::GetStyle(EBangoSyntaxKind Kind, bool bDisconnected, bool bDisabled) const
 {
 	const int32 KindIndex = FMath::Clamp(static_cast<int32>(Kind), 0, NumKinds - 1);
-	return Styles[KindIndex][bDisconnected ? 1 : 0];
+	return Styles[KindIndex][(bDisconnected ? 1 : 0) | (bDisabled ? 2 : 0)];
 }

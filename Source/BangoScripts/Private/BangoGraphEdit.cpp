@@ -57,6 +57,22 @@ namespace Bango
 			OutError = TEXT("A node's text must be one line.");
 			return false;
 		}
+		{
+			// Disabling is the node's own setting (Disable Node), not part of its text.
+			FBangoLexResult Lexed;
+			FBangoCompileError LexError;
+			if (Lex(Text, Lexed, LexError))
+			{
+				for (const FBangoToken& Token : Lexed.Tokens)
+				{
+					if (Token.Kind == EBangoTokenKind::DisabledBegin || Token.Kind == EBangoTokenKind::DisabledEnd)
+					{
+						OutError = TEXT("A node's text can't contain '/*' or '*/'. To turn a node off, right-click it and pick Disable Node.");
+						return false;
+					}
+				}
+			}
+		}
 
 		FString Source;
 		switch (Kind)

@@ -167,6 +167,14 @@ namespace BangoParserPrivate
 					}
 					continue;
 				}
+				if (Check(EBangoTokenKind::DisabledBegin))
+				{
+					if (!ParseDisabled(Script.TopLevel))
+					{
+						return false;
+					}
+					continue;
+				}
 				if (Check(EBangoTokenKind::KwFunction))
 				{
 					TUniquePtr<FBangoFunction> Function = ParseFunction();
@@ -491,6 +499,8 @@ namespace BangoParserPrivate
 
 		int32 Pos = 0;
 		int32 Depth = 0;
+		/** How many disabled regions are open where the parser is. */
+		int32 DisabledDepth = 0;
 		bool bFailed = false;
 		/** True only while parsing the first top-level statement, where `params` may appear. */
 		bool bParamsAllowed = false;
@@ -530,9 +540,74 @@ namespace BangoParserPrivate
 				bFailed = true;
 				Error.Line = Loc.Line;
 				Error.Column = Loc.Column;
-				Error.Message = Message;
+				Error.Message = DisabledDepth > 0 ? Message + Bango::GetDisabledCodeNote() : Message;
 			}
 			return false;
+		}
+
+		/** Fail without the disabled-code note, for errors about the disabled region itself. */
+		bool FailPlain(const FBangoSourceLocation& Loc, const FString& Message)
+		{
+			DisabledDepth = 0;
+			return Fail(Loc, Message);
+		}
+
+		/**
+		 * A disabled region, from its slash-star to its star-slash: each statement written directly in it is
+		 * disabled. Regions can be nested (unlike C++ comments), and can hold reroutes and comments.
+		 */
+		bool ParseDisabled(FBangoBlock& Block)
+		{
+			const FBangoSourceLocation OpenLoc = Advance().Loc;
+			if (!EnterNesting())
+			{
+				return false;
+			}
+			++DisabledDepth;
+			while (true)
+			{
+				if (!TakeReroutes(Block))
+				{
+					return false;
+				}
+				const FBangoToken& Next = Cur();
+				switch (Next.Kind)
+				{
+				case EBangoTokenKind::DisabledEnd:
+					Advance();
+					--DisabledDepth;
+					LeaveNesting();
+					return true;
+				case EBangoTokenKind::DisabledBegin:
+					if (!ParseDisabled(Block))
+					{
+						return false;
+					}
+					continue;
+				case EBangoTokenKind::EndOfFile:
+					return FailPlain(OpenLoc, FString::Printf(TEXT("The '/*' on line %d is never closed with '*/'. '/*' and '*/' go around disabled nodes; write notes as // comments."), OpenLoc.Line));
+				case EBangoTokenKind::RBrace:
+					return FailPlain(Next.Loc, FString::Printf(TEXT("This '}' closes a block that was opened before the '/*' on line %d. A disabled part must end with '*/' in the same block it starts in."), OpenLoc.Line));
+				case EBangoTokenKind::KwFunction:
+					return FailPlain(Next.Loc, TEXT("A function can't be disabled with '/*' and '*/': only statements can. Disable the nodes inside it instead."));
+				case EBangoTokenKind::HashDefine:
+				case EBangoTokenKind::HashUndef:
+					return FailPlain(Next.Loc, TEXT("A '#define' or '#undef' line can't be disabled with '/*' and '*/': only statements can."));
+				default:
+					break;
+				}
+				if (IsTypeKeyword(Next.Kind) || Next.Kind == EBangoTokenKind::KwGlobal)
+				{
+					return FailPlain(Next.Loc, TEXT("A declaration can't be disabled with '/*' and '*/': it isn't a graph node. Only statements can be disabled."));
+				}
+				FBangoStmtPtr Stmt = ParseStatement();
+				if (!Stmt)
+				{
+					return false;
+				}
+				Stmt->bDisabled = true;
+				Block.Add(MoveTemp(Stmt));
+			}
 		}
 
 		bool Expect(EBangoTokenKind Kind, const FString& Context)
@@ -778,6 +853,18 @@ namespace BangoParserPrivate
 				{
 					return Fail(Cur().Loc, TEXT("Functions can only be defined at the top level of a script, not inside a block."));
 				}
+				if (Check(EBangoTokenKind::DisabledBegin))
+				{
+					if (!ParseDisabled(OutBlock))
+					{
+						return false;
+					}
+					continue;
+				}
+				if (Check(EBangoTokenKind::RBrace))
+				{
+					break; // reroutes and a disabled part can end the block
+				}
 				FBangoStmtPtr Stmt = ParseStatement();
 				if (!Stmt)
 				{
@@ -823,6 +910,9 @@ namespace BangoParserPrivate
 				return nullptr;
 			case EBangoTokenKind::Semicolon:
 				Fail(First.Loc, TEXT("Unexpected ';'."));
+				return nullptr;
+			case EBangoTokenKind::DisabledEnd:
+				Fail(First.Loc, TEXT("This '*/' has no '/*' before it in this block. '/*' and '*/' go around disabled nodes, and both must be in the same block."));
 				return nullptr;
 			default:
 				break;

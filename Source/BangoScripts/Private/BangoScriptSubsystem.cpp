@@ -2,6 +2,7 @@
 
 #include "Bango.h"
 #include "BangoActorRegistry.h"
+#include "BangoCompiler.h"
 #include "BangoGlobalsSubsystem.h"
 #include "BangoLog.h"
 #include "BangoSettings.h"
@@ -13,7 +14,7 @@
 namespace BangoScriptSubsystemPrivate
 {
 	constexpr int32 SaveMagic = 0x4F474E42; // "BNGO"
-	constexpr int32 SaveVersion = 2; // 2: ints are 32-bit
+	constexpr int32 SaveVersion = 3; // 2: ints are 32-bit; 3: scripts spawned from text are saved with their text
 
 	class FWorldEntityResolver : public IBangoEntityResolver
 	{
@@ -174,9 +175,9 @@ void UBangoScriptSubsystem::ReloadChangedScripts()
 	for (TPair<int64, TSharedPtr<FRunningScript>>& Pair : Scripts)
 	{
 		FRunningScript& Script = *Pair.Value;
-		if (!Script.Instance.IsRunning())
+		if (!Script.Instance.IsRunning() || Script.bFromSource)
 		{
-			continue;
+			continue; // a script spawned from text has no file to reload from
 		}
 		TSharedPtr<const FBangoProgram>* Found = Latest.Find(Script.Path);
 		if (!Found)
@@ -227,16 +228,51 @@ FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FString& ScriptPath, const
 		Bango::ReportError(Error);
 		return FBangoScriptHandle();
 	}
+	TSharedPtr<FRunningScript> Script = MakeShared<FRunningScript>();
+	Script->Path = DisplayPath;
+	return StartScript(Program, Script, Args);
+}
 
+bool UBangoScriptSubsystem::CompileFromSource(const FString& Source, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError)
+{
+	TSharedPtr<FBangoProgram> Compiled = MakeShared<FBangoProgram>();
+	FBangoCompileError CompileError;
+	if (!Bango::CompileSource(Source, Name, FBangoModule::Get().GetCommands(), *Compiled, CompileError))
+	{
+		OutError = CompileError.ToString();
+		return false;
+	}
+	OutProgram = Compiled;
+	return true;
+}
+
+FBangoScriptHandle UBangoScriptSubsystem::SpawnFromSource(const FString& Source, const FString& Name, const TArray<FBangoValue>& Args)
+{
+	const FString ScriptName = Name.IsEmpty() ? FString(TEXT("Script")) : Name;
+	TSharedPtr<const FBangoProgram> Program;
+	FString Error;
+	if (!CompileFromSource(Source, ScriptName, Program, Error))
+	{
+		Bango::ReportError(Error);
+		return FBangoScriptHandle();
+	}
+	TSharedPtr<FRunningScript> Script = MakeShared<FRunningScript>();
+	Script->Path = ScriptName;
+	Script->bFromSource = true;
+	Script->Source = Source;
+	return StartScript(Program, Script, Args);
+}
+
+FBangoScriptHandle UBangoScriptSubsystem::StartScript(const TSharedPtr<const FBangoProgram>& Program, TSharedPtr<FRunningScript> Script, const TArray<FBangoValue>& Args)
+{
+	FBangoModule& Module = FBangoModule::Get();
 	UBangoGlobalsSubsystem* Globals = UBangoGlobalsSubsystem::Get(this);
 	if (!Globals)
 	{
-		Bango::ReportError(FString::Printf(TEXT("Can't spawn '%s': there is no game instance for global variables."), *DisplayPath));
+		Bango::ReportError(FString::Printf(TEXT("Can't spawn '%s': there is no game instance for global variables."), *Script->Path));
 		return FBangoScriptHandle();
 	}
 
-	TSharedPtr<FRunningScript> Script = MakeShared<FRunningScript>();
-	Script->Path = DisplayPath;
 #if WITH_EDITOR
 	Script->Instance.SetRecordTrail(true); // for the editor's debugger
 #endif
@@ -257,6 +293,77 @@ FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FString& ScriptPath, const
 	FBangoScriptHandle Handle;
 	Handle.Id = Id;
 	return Handle;
+}
+
+bool UBangoScriptSubsystem::EvaluateBoolCondition(FBangoConditionHandle Condition, bool& bOutResult, FString& OutError, const TArray<FBangoValue>& Args)
+{
+	bOutResult = false;
+	const TSharedPtr<const FBangoProgram> Program = Bango::FindCondition(Condition);
+	if (!Program.IsValid())
+	{
+		OutError = FString::Printf(TEXT("Condition %lld isn't registered (or has been unregistered)."), Condition.Id);
+		return false;
+	}
+	return RunCondition(Program, Args, bOutResult, OutError);
+}
+
+bool UBangoScriptSubsystem::EvaluateBoolCondition(const FString& Source, bool& bOutResult, FString& OutError,
+	const TArray<FBangoValue>& Args, const FString& Name)
+{
+	bOutResult = false;
+	TSharedPtr<const FBangoProgram> Program;
+	if (!Bango::CompileConditionProgram(Source, Name, Program, OutError))
+	{
+		return false;
+	}
+	return RunCondition(Program, Args, bOutResult, OutError);
+}
+
+bool UBangoScriptSubsystem::RunCondition(const TSharedPtr<const FBangoProgram>& Program, const TArray<FBangoValue>& Args, bool& bOutResult, FString& OutError)
+{
+	bOutResult = false;
+	FBangoModule& Module = FBangoModule::Get();
+	const FString& ConditionName = Program->FileName;
+	UBangoGlobalsSubsystem* Globals = UBangoGlobalsSubsystem::Get(this);
+	FBangoExecContext Context;
+	if (!Globals || !MakeContext(0.0f, Context))
+	{
+		OutError = FString::Printf(TEXT("Can't check '%s': there is no game instance for global variables."), *ConditionName);
+		return false;
+	}
+
+	FBangoInstance Instance;
+	FBangoRuntimeError StartError;
+	if (!Instance.Start(Program, Module.GetCommands(), Globals->GetStore(), NextId++, StartError, Args))
+	{
+		OutError = StartError.ToString();
+		return false;
+	}
+	switch (Instance.Resume(Context))
+	{
+	case EBangoInstanceStatus::Finished:
+		break;
+	case EBangoInstanceStatus::Waiting:
+	{
+		const FString Command = Instance.GetWaitingCommandName();
+		const FBangoDebugLoc Where = Instance.GetCurrentLocation();
+		Instance.Terminate();
+		OutError = FString::Printf(TEXT("%s(%d:%d): A condition must give its answer straight away, but it called '%s', which waits."),
+			*ConditionName, Where.Line, Where.Column, *Command);
+		return false;
+	}
+	default:
+		OutError = Instance.GetError().ToString();
+		return false;
+	}
+	const FBangoValue& Result = Instance.GetResult();
+	if (Result.IsNil() || !(Result.GetType() == FBangoType::Bool()))
+	{
+		OutError = FString::Printf(TEXT("%s: the condition didn't return true or false."), *ConditionName);
+		return false;
+	}
+	bOutResult = Result.GetBool();
+	return true;
 }
 
 void UBangoScriptSubsystem::Terminate(FBangoScriptHandle Handle)
@@ -369,6 +476,11 @@ bool UBangoScriptSubsystem::SaveState(TArray<uint8>& OutData)
 	{
 		FRunningScript& Script = *Scripts.FindRef(Id);
 		Writer << Script.Path;
+		Writer << Script.bFromSource;
+		if (Script.bFromSource)
+		{
+			Writer << Script.Source; // it has no file to compile it from again
+		}
 		Script.Instance.Serialize(Writer);
 	}
 	return !Writer.IsError();
@@ -411,6 +523,11 @@ bool UBangoScriptSubsystem::LoadState(const TArray<uint8>& Data)
 	{
 		TSharedPtr<FRunningScript> Script = MakeShared<FRunningScript>();
 		Reader << Script->Path;
+		Reader << Script->bFromSource;
+		if (Script->bFromSource)
+		{
+			Reader << Script->Source;
+		}
 		Script->Instance.Serialize(Reader);
 		if (Reader.IsError())
 		{
@@ -420,8 +537,10 @@ bool UBangoScriptSubsystem::LoadState(const TArray<uint8>& Data)
 		TSharedPtr<const FBangoProgram> Program;
 		FString DisplayPath;
 		FString Error;
-		if (!Module.GetScriptCache().GetProgram(Script->Path, Module.GetCommands(), Program, DisplayPath, Error)
-			|| !Script->Instance.Bind(Program, Module.GetCommands(), Error))
+		const bool bCompiled = Script->bFromSource
+			? CompileFromSource(Script->Source, Script->Path, Program, Error)
+			: Module.GetScriptCache().GetProgram(Script->Path, Module.GetCommands(), Program, DisplayPath, Error);
+		if (!bCompiled || !Script->Instance.Bind(Program, Module.GetCommands(), Error))
 		{
 			Bango::ReportError(FString::Printf(TEXT("Couldn't restore saved script '%s': %s"), *Script->Path, *Error));
 			continue;

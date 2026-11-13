@@ -1489,6 +1489,7 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 			Frames.Pop();
 			if (Frames.Num() == 0)
 			{
+				ConditionResult = MoveTemp(ReturnValue); // a condition's answer (GetResult)
 				Status = EBangoInstanceStatus::Finished;
 				break;
 			}
@@ -1505,6 +1506,10 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 			break;
 
 		case EBangoOp::ErrorMissingReturn:
+			if (Function.Name.IsEmpty())
+			{
+				return RuntimeFail(TEXT("The condition reached its end without returning true or false."));
+			}
 			return RuntimeFail(FString::Printf(TEXT("Function '%s' reached its end without returning a value."), *Function.Name));
 
 		case EBangoOp::ArrayCount:

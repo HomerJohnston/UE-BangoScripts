@@ -39,6 +39,9 @@ enum class EBangoTokenKind : uint8
 	AndAnd, OrOr,
 	PlusAssign, MinusAssign, StarAssign, SlashAssign,
 	PlusPlus, MinusMinus,
+
+	// Slash-star and star-slash around disabled nodes (spec section 1). Not comments: what's between them must be statements.
+	DisabledBegin, DisabledEnd,
 };
 
 struct FBangoToken
@@ -74,4 +77,7 @@ namespace Bango
 	/** Text for error messages: "';'", "identifier 'john'", "end of file" */
 	FString DescribeToken(const FBangoToken& Token);
 	FString DescribeTokenKind(EBangoTokenKind Kind);
+
+	// Added to errors inside a disabled region (slash-star ... star-slash): what's there is disabled code, not a comment.
+	const TCHAR* GetDisabledCodeNote();
 }

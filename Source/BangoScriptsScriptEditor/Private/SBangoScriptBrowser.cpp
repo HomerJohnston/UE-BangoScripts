@@ -163,7 +163,7 @@ void SBangoScriptBrowser::Construct(const FArguments& InArgs)
 			+ SOverlay::Slot()
 			.HAlign(HAlign_Center)
 			.VAlign(VAlign_Center)
-			.Padding(16.0f)
+			.Padding(16, 48, 16, 16)
 			[
 				SNew(STextBlock)
 				.Visibility_Lambda([this]() { return Tabs.Num() == 0 ? EVisibility::HitTestInvisible : EVisibility::Collapsed; })

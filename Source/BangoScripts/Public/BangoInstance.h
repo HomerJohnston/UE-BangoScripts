@@ -135,6 +135,9 @@ public:
 	/** Where the instance is: the statement it's running or paused on. For highlighting the graph node. */
 	FBangoDebugLoc GetCurrentLocation() const;
 
+	/** Once a condition (Bango::CompileCondition) has finished: the bool it returned. Nil otherwise. */
+	const FBangoValue& GetResult() const { return ConditionResult; }
+
 	/** For the debugger: the calls in progress, the main graph first and the innermost (where it is) last. */
 	void GetCallStack(TArray<FBangoCallFrameInfo>& OutFrames) const;
 
@@ -237,6 +240,9 @@ private:
 	/** The instruction being run, for error locations. */
 	int32 CurrentFunction = 0;
 	int32 CurrentIP = 0;
+
+	/** A condition's answer, once it has returned (GetResult). */
+	FBangoValue ConditionResult;
 
 	// The debugger's trail (SetRecordTrail). Not saved.
 	bool bRecordTrail = false;

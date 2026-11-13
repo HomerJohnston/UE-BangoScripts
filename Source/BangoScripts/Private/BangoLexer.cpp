@@ -90,6 +90,8 @@ namespace BangoLexerPrivate
 		TSet<int64> SeenNodeIDs;
 		/** Line of the most recent token, to tell trailing comments from comments on their own line. */
 		int32 LastTokenLine = 0;
+		// How many disabled regions (slash-star) are open: inside one, errors add a note that disabled nodes must still be code.
+		int32 DisabledDepth = 0;
 
 		bool AtEnd() const { return Pos >= Source.Len(); }
 		TCHAR Peek(int32 Offset = 0) const { return Pos + Offset < Source.Len() ? Source[Pos + Offset] : TEXT('\0'); }
@@ -112,7 +114,7 @@ namespace BangoLexerPrivate
 				bFailed = true;
 				Error.Line = Loc.Line;
 				Error.Column = Loc.Column;
-				Error.Message = Message;
+				Error.Message = DisabledDepth > 0 ? Message + Bango::GetDisabledCodeNote() : Message;
 			}
 			return false;
 		}
@@ -158,10 +160,6 @@ namespace BangoLexerPrivate
 						Comment.Text = Source.Mid(TextStart, Pos - TextStart).Replace(TEXT("\r"), TEXT(""), ESearchCase::CaseSensitive);
 						Result.Comments.Add(MoveTemp(Comment));
 					}
-				}
-				else if (C == TEXT('/') && Peek(1) == TEXT('*'))
-				{
-					Fail(CurrentLoc(), TEXT("Block comments (/* */) are not supported. Use // comments."));
 				}
 				else
 				{
@@ -552,9 +550,19 @@ namespace BangoLexerPrivate
 				if (N == TEXT('=')) return Emit(EBangoTokenKind::MinusAssign, Loc, 2);
 				return Emit(EBangoTokenKind::Minus, Loc, 1);
 			case TEXT('*'):
+				if (N == TEXT('/'))
+				{
+					--DisabledDepth;
+					return Emit(EBangoTokenKind::DisabledEnd, Loc, 2);
+				}
 				if (N == TEXT('=')) return Emit(EBangoTokenKind::StarAssign, Loc, 2);
 				return Emit(EBangoTokenKind::Star, Loc, 1);
 			case TEXT('/'):
+				if (N == TEXT('*'))
+				{
+					++DisabledDepth;
+					return Emit(EBangoTokenKind::DisabledBegin, Loc, 2);
+				}
 				if (N == TEXT('=')) return Emit(EBangoTokenKind::SlashAssign, Loc, 2);
 				return Emit(EBangoTokenKind::Slash, Loc, 1);
 			case TEXT('!'):
@@ -621,6 +629,8 @@ namespace Bango
 		case EBangoTokenKind::Dot: return TEXT("'.'");
 		case EBangoTokenKind::Assign: return TEXT("'='");
 		case EBangoTokenKind::KwIn: return TEXT("'in'");
+		case EBangoTokenKind::DisabledBegin: return TEXT("'/*'");
+		case EBangoTokenKind::DisabledEnd: return TEXT("'*/'");
 		default: break;
 		}
 		for (const BangoLexerPrivate::FKeyword& Keyword : BangoLexerPrivate::Keywords)
@@ -631,6 +641,11 @@ namespace Bango
 			}
 		}
 		return TEXT("an operator");
+	}
+
+	const TCHAR* GetDisabledCodeNote()
+	{
+		return TEXT(" (This is between /* and */, which mark disabled nodes: what's between them must still be Bango statements. Write notes as // comments.)");
 	}
 
 	FString DescribeToken(const FBangoToken& Token)

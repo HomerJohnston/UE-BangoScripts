@@ -21,6 +21,7 @@
 #include "GraphEditor.h"
 #include "GraphEditorDragDropAction.h"
 #include "BangoEdGraphSchema.h"
+#include "BangoGraphCommands.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "InputCoreTypes.h"
@@ -108,6 +109,9 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 	GraphCommands->MapAction(FGenericCommands::Get().Duplicate,
 		FExecuteAction::CreateSP(this, &SBangoScriptEditor::DuplicateSelectedNodes),
 		FCanExecuteAction::CreateSP(this, &SBangoScriptEditor::CanCopySelectedNodes));
+	GraphCommands->MapAction(FBangoGraphCommands::Get().ToggleNodesDisabled,
+		FExecuteAction::CreateSP(this, &SBangoScriptEditor::ToggleSelectedNodesDisabled),
+		FCanExecuteAction::CreateSP(this, &SBangoScriptEditor::CanToggleSelectedNodesDisabled));
 	GraphCommands->MapAction(FGenericCommands::Get().Undo, FExecuteAction::CreateSP(this, &SBangoScriptEditor::Undo));
 	GraphCommands->MapAction(FGenericCommands::Get().Redo, FExecuteAction::CreateSP(this, &SBangoScriptEditor::Redo));
 	GraphCommands->MapAction(FGenericCommands::Get().SelectAll, FExecuteAction::CreateLambda([this]()
@@ -3948,6 +3952,58 @@ void SBangoScriptEditor::DeleteSelectedNodes()
 	// Each removal already tells the panel (DestroyNode removes the node's widget), and wires are drawn from the
 	// pins, so there's nothing else to refresh.
 	GraphEditor->ClearSelectionSet();
+}
+
+void SBangoScriptEditor::ToggleSelectedNodesDisabled()
+{
+	if (!GraphEditor.IsValid())
+	{
+		return;
+	}
+	TArray<UBangoEdGraphNode*> Nodes;
+	bool bAnyEnabled = false;
+	for (UObject* Selected : GraphEditor->GetSelectedNodes())
+	{
+		UBangoEdGraphNode* Node = Cast<UBangoEdGraphNode>(Selected);
+		if (Node && Node->CanBeDisabled())
+		{
+			Nodes.Add(Node);
+			bAnyEnabled |= !Node->IsDisabledNode();
+		}
+	}
+	if (Nodes.Num() == 0)
+	{
+		return;
+	}
+	// Off unless they're all off already, like Blueprint's: then a mixed selection goes all off with one press.
+	const FScopedTransaction Transaction(bAnyEnabled ? LOCTEXT("DisableNodesTransaction", "Disable Bango Nodes") : LOCTEXT("EnableNodesTransaction", "Enable Bango Nodes"));
+	for (UBangoEdGraphNode* Node : Nodes)
+	{
+		Node->Modify();
+		Node->SetEnabledState(bAnyEnabled ? ENodeEnabledState::Disabled : ENodeEnabledState::Enabled);
+		if (UEdGraph* Graph = Node->GetGraph())
+		{
+			Graph->NotifyNodeChanged(Node); // rebuilds its widget, with or without the Disabled banner
+		}
+	}
+	// The poll sees the change: the text pane and the * follow.
+}
+
+bool SBangoScriptEditor::CanToggleSelectedNodesDisabled() const
+{
+	if (!GraphEditor.IsValid())
+	{
+		return false;
+	}
+	for (UObject* Selected : GraphEditor->GetSelectedNodes())
+	{
+		const UBangoEdGraphNode* Node = Cast<UBangoEdGraphNode>(Selected);
+		if (Node && Node->CanBeDisabled())
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 void SBangoScriptEditor::CopySelectedNodes()

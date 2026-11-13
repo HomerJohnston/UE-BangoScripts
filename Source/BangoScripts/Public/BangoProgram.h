@@ -166,6 +166,8 @@ struct FBangoGlobalDecl
 struct FBangoProgram
 {
 	FString FileName;
+	/** A condition (Bango::CompileCondition): the main graph returns a bool, which FBangoInstance::GetResult gives. */
+	bool bIsCondition = false;
 
 	TArray<FBangoValue> Constants;
 	/** Global names and command names. */

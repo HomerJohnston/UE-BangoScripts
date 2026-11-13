@@ -380,6 +380,9 @@ private:
 
 	void DeleteSelectedNodes();
 	bool CanDeleteSelectedNodes() const;
+	/** Disable Node / Enable Node (Ctrl+/): turns the selected nodes off, or back on if they're all off already. */
+	void ToggleSelectedNodesDisabled();
+	bool CanToggleSelectedNodesDisabled() const;
 
 	/** Copy, Cut, Paste and Duplicate (Ctrl+C, X, V, W). The clipboard holds Unreal's text form of the nodes, as in Blueprint. */
 	void CopySelectedNodes();

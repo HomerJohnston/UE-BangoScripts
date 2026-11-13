@@ -7,7 +7,8 @@ namespace BangoScriptNamesPrivate
 {
 	static bool IsCode(EBangoSyntaxKind Kind)
 	{
-		return Kind != EBangoSyntaxKind::Comment && Kind != EBangoSyntaxKind::Metadata && Kind != EBangoSyntaxKind::DisconnectedMarker;
+		return Kind != EBangoSyntaxKind::Comment && Kind != EBangoSyntaxKind::Metadata && Kind != EBangoSyntaxKind::DisconnectedMarker
+			&& Kind != EBangoSyntaxKind::DisabledMarker;
 	}
 
 	static bool TokenIs(const FString& Line, const FBangoSyntaxToken& Token, EBangoSyntaxKind Kind, const TCHAR* Text)
