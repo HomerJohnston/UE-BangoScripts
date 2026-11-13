@@ -15,6 +15,8 @@ struct BANGOSCRIPTS_API FBangoNodeMenuEntry
 	FString Description;
 	/** Extra words the menu's search matches. */
 	FString Keywords;
+	/** Built into Bango (flow control, variables, arrays, the plugin's commands), not the project's own commands or the script's own functions. */
+	bool bBuiltIn = true;
 
 	/** The new node: its kind and text. Fields start empty, so most new nodes don't compile until they're filled in. */
 	EBangoGraphNodeKind Kind = EBangoGraphNodeKind::Call;

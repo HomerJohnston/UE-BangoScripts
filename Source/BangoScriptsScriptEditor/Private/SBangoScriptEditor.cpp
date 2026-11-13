@@ -44,6 +44,8 @@
 #include "Widgets/Input/SComboButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SSearchBox.h"
+#include "Widgets/Input/SSegmentedControl.h"
+#include "Widgets/Layout/SWidgetSwitcher.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "SBangoTextEditor.h"
@@ -549,7 +551,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 						MakeTextTab()
 					]
 
-					// The Commands tab, the same on the graph's right edge, for the COMMAND REFERENCE pane.
+					// The Commands tab, the same on the graph's right edge, for the reference pane (COMMANDS and NODES).
 					+ SOverlay::Slot()
 					.HAlign(HAlign_Right)
 					.VAlign(VAlign_Top)
@@ -559,7 +561,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 					]
 				]
 
-				// The COMMAND REFERENCE pane, on the right: hidden to start with, and slid out by its tab like the text pane.
+				// The reference pane (COMMANDS and NODES), on the right: hidden to start with, and slid out by its tab like the text pane.
 				+ SSplitter::Slot()
 				.SizeRule(SSplitter::SizeToContent)
 				.Resizable(true) // a sized-to-content slot is only dragged if it says so (and has OnSlotResized)
@@ -1050,6 +1052,82 @@ namespace BangoScriptEditorPrivate
 				[
 					SNew(SImage)
 					.Image(FCoreStyle::Get().GetBrush("VerticalBoxDragIndicatorShort"))
+				]
+			];
+		}
+
+		virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
+		{
+			return MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton
+				? FReply::Handled().DetectDrag(SharedThis(this), EKeys::LeftMouseButton)
+				: FReply::Unhandled();
+		}
+
+		virtual FReply OnDragDetected(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
+		{
+			return DragDetected.IsBound() ? DragDetected.Execute(MyGeometry, MouseEvent) : FReply::Unhandled();
+		}
+
+	private:
+		FOnDragDetected DragDetected;
+	};
+
+	/**
+	 * A line of the reference pane's NODES list: a small card with a grab handle and the node's name, which lights up
+	 * under the mouse and can be dragged onto the graph to place the node (onto a pin, it's wired to it).
+	 */
+	class SBangoNodeReferenceRow : public SCompoundWidget
+	{
+	public:
+		SLATE_BEGIN_ARGS(SBangoNodeReferenceRow) {}
+			SLATE_ARGUMENT(FText, Name)
+			SLATE_ARGUMENT(FText, ToolTipText)
+			SLATE_EVENT(FOnDragDetected, OnDragDetected)
+		SLATE_END_ARGS()
+
+		void Construct(const FArguments& InArgs)
+		{
+			static const FSlateRoundedBoxBrush CardBrush(FLinearColor::White, 4.0f, FSlateColor(FStyleColors::InputOutline), 1.0f);
+			DragDetected = InArgs._OnDragDetected;
+			SetCursor(EMouseCursor::GrabHand);
+			SetToolTipText(InArgs._ToolTipText);
+			ChildSlot
+			[
+				SNew(SBorder)
+				.BorderImage(&CardBrush)
+				.BorderBackgroundColor_Lambda([this]()
+				{
+					return IsHovered() ? FSlateColor(FStyleColors::Hover) : FSlateColor(FStyleColors::Dropdown);
+				})
+				.Padding(FMargin(2.0f, 2.0f, 6.0f, 2.0f))
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					.Padding(0.0f, 0.0f, 4.0f, 0.0f)
+					[
+						SNew(SBox)
+						.WidthOverride(14.0f)
+						.HAlign(HAlign_Center)
+						.VAlign(VAlign_Center)
+						[
+							SNew(SImage)
+							.Image(FCoreStyle::Get().GetBrush("VerticalBoxDragIndicatorShort"))
+							.ColorAndOpacity_Lambda([this]()
+							{
+								return IsHovered() ? FSlateColor::UseForeground() : FSlateColor::UseSubduedForeground();
+							})
+						]
+					]
+					+ SHorizontalBox::Slot()
+					.FillWidth(1.0f)
+					.VAlign(VAlign_Center)
+					[
+						SNew(STextBlock)
+						.Text(InArgs._Name)
+						.Font(FCoreStyle::GetDefaultFontStyle("Mono", 9))
+					]
 				]
 			];
 		}
@@ -2389,6 +2467,7 @@ void SBangoScriptEditor::ShowDocument(const FBangoGraphDocument& Document)
 	RebuildFunctionItems();
 	ShowGraph(0);
 	UpdateDescriptionBox();
+	RefreshNodeList();
 }
 
 void SBangoScriptEditor::ShowGraph(int32 GraphIndex, bool bZoomToFit)
@@ -2465,7 +2544,7 @@ void SBangoScriptEditor::ShowMessage(const FText& Message)
 		]);
 }
 
-// ---- The left pane's foldouts, and the COMMAND REFERENCE list ----
+// ---- The left pane's foldouts, and the reference pane's COMMANDS and NODES lists ----
 
 TSharedRef<SWidget> SBangoScriptEditor::MakeFoldout(const FText& Title, bool* bExpanded, TSharedRef<SWidget> Body, TSharedPtr<SWidget> Extra)
 {
@@ -2542,27 +2621,20 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeFoldout(const FText& Title, bool* bE
 
 void SBangoScriptEditor::RefreshCommandList()
 {
-	if (!CommandListBox.IsValid())
+	if (!CommandReference.ListBox.IsValid())
 	{
 		return;
 	}
 	// Every command a script can call: the registered ones (the plugin's and the game's) and the array commands built
 	// into the compiler.
-	struct FEntry
-	{
-		FString Name;
-		FString Category;
-		FString Tooltip;
-		bool bBuiltIn = true;
-	};
 	const FBangoCommandTable& Table = FBangoModule::Get().GetCommands();
 	TArray<FString> Names;
 	Table.GetCommandNames(Names);
-	TArray<FEntry> Entries;
+	TArray<FReferenceEntry> Entries;
 	for (const FString& Name : Names)
 	{
 		const FBangoCommandSignature* Signature = Table.FindCommand(Name);
-		FEntry Entry;
+		FReferenceEntry Entry;
 		Entry.Name = Name;
 		Entry.Category = Signature && !Signature->CategoryName.IsEmpty() ? Signature->CategoryName : FString(TEXT("Other"));
 		Entry.bBuiltIn = !Signature || Signature->bBuiltIn;
@@ -2582,41 +2654,81 @@ void SBangoScriptEditor::RefreshCommandList()
 	{
 		if (!Table.FindCommand(Builtin))
 		{
-			FEntry Entry;
+			FReferenceEntry Entry;
 			Entry.Name = Builtin;
 			Entry.Category = TEXT("Arrays");
 			Entry.Tooltip = LOCTEXT("BuiltinCommandTooltip", "An array command, built into Bango: called on an array, as in _list Push(_x).").ToString();
 			Entries.Add(MoveTemp(Entry));
 		}
 	}
+	FillReferenceList(CommandReference, Entries, TArray<FString>{ FString(TEXT("Other")) },
+		LOCTEXT("NoCommandsMatch", "No command names contain \"{0}\"."));
+}
 
-	// Only the names that contain what's typed in the search box.
-	if (!CommandFilter.IsEmpty())
+void SBangoScriptEditor::RefreshNodeList()
+{
+	if (!NodeReference.ListBox.IsValid() || !LayoutContext.IsValid())
 	{
-		Entries.RemoveAll([this](const FEntry& Entry) { return !Entry.Name.Contains(CommandFilter, ESearchCase::IgnoreCase); });
+		return;
+	}
+	// The same nodes the graph's right-click menu offers: flow control, variables, arrays, every command that can be a
+	// line of its own (not the ones whose value must be used), and this script's functions.
+	TArray<FBangoNodeMenuEntry> MenuEntries;
+	Bango::GetNodeMenuEntries(FBangoGraphDocument(), *LayoutContext, MenuEntries);
+	TArray<FReferenceEntry> Entries;
+	for (const FBangoNodeMenuEntry& MenuEntry : MenuEntries)
+	{
+		FReferenceEntry Entry;
+		Entry.Name = MenuEntry.Title;
+		Entry.Category = MenuEntry.Category;
+		Entry.bBuiltIn = MenuEntry.bBuiltIn;
+		Entry.Tooltip = MenuEntry.Description;
+		const FString Origin = MenuEntry.Category == TEXT("This Script") ? FString(TEXT("(This script's own function)"))
+			: MenuEntry.bBuiltIn ? FString(TEXT("(Built into Bango)")) : FString(TEXT("(This project's own command)"));
+		Entry.Tooltip += (Entry.Tooltip.IsEmpty() ? TEXT("") : TEXT("\n\n")) + Origin;
+		Entry.Tooltip += TEXT("\n\nDrag it onto the graph to place it, or onto a pin to wire it there.");
+		Entry.Node = MakeShared<FBangoNodeMenuEntry>(MenuEntry);
+		Entries.Add(MoveTemp(Entry));
+	}
+	FillReferenceList(NodeReference, Entries, TArray<FString>{ FString(TEXT("Commands")), FString(TEXT("This Script")) },
+		LOCTEXT("NoNodesMatch", "No node names contain \"{0}\"."));
+}
+
+void SBangoScriptEditor::FillReferenceList(FReferenceList& List, TArray<FReferenceEntry>& Entries, const TArray<FString>& Trailing, const FText& NoMatch)
+{
+	// Only the names that contain what's typed in the search box.
+	if (!List.Filter.IsEmpty())
+	{
+		const FString Filter = List.Filter;
+		Entries.RemoveAll([&Filter](const FReferenceEntry& Entry) { return !Entry.Name.Contains(Filter, ESearchCase::IgnoreCase); });
 	}
 	const auto ByName = [](const FString& A, const FString& B)
 	{
 		const int32 IgnoringCase = A.Compare(B, ESearchCase::IgnoreCase);
 		return IgnoringCase != 0 ? IgnoringCase < 0 : A.Compare(B, ESearchCase::CaseSensitive) < 0;
 	};
-	// Each entry's group: by category, or (Alphabetical) Native for the plugin's commands and Game for the project's own.
-	const bool bByCategory = bCommandsByCategory;
-	const auto GroupOf = [bByCategory](const FEntry& Entry) -> FString
+	// Each entry's group: by category, or (Alphabetical) Native for what's built into Bango and Game for the rest.
+	const bool bByCategory = List.bByCategory;
+	const auto GroupOf = [bByCategory](const FReferenceEntry& Entry) -> FString
 	{
 		return bByCategory ? Entry.Category : FString(Entry.bBuiltIn ? TEXT("Native") : TEXT("Game"));
 	};
-	const auto GroupOrder = [bByCategory, &ByName](const FString& A, const FString& B)
+	const auto GroupOrder = [bByCategory, &ByName, &Trailing](const FString& A, const FString& B)
 	{
 		if (!bByCategory)
 		{
 			return A == TEXT("Native") && B != TEXT("Native"); // Native first, then Game
 		}
-		const bool bAOther = A == TEXT("Other");
-		const bool bBOther = B == TEXT("Other");
-		return bAOther != bBOther ? bBOther : ByName(A, B); // categories by name, Other last
+		const int32 TrailA = Trailing.IndexOfByKey(A);
+		const int32 TrailB = Trailing.IndexOfByKey(B);
+		if (TrailA != TrailB)
+		{
+			// Categories by name, then the trailing ones in their order.
+			return TrailA == INDEX_NONE || (TrailB != INDEX_NONE && TrailA < TrailB);
+		}
+		return ByName(A, B);
 	};
-	Entries.Sort([&ByName, &GroupOf, &GroupOrder](const FEntry& A, const FEntry& B)
+	Entries.Sort([&ByName, &GroupOf, &GroupOrder](const FReferenceEntry& A, const FReferenceEntry& B)
 	{
 		const FString GroupA = GroupOf(A);
 		const FString GroupB = GroupOf(B);
@@ -2627,15 +2739,15 @@ void SBangoScriptEditor::RefreshCommandList()
 		return ByName(A.Name, B.Name);
 	});
 
-	CommandListBox->ClearChildren();
+	List.ListBox->ClearChildren();
 	if (Entries.Num() == 0)
 	{
-		CommandListBox->AddSlot()
+		List.ListBox->AddSlot()
 		.AutoHeight()
-		.Padding(0.0f, 4.0f)
+		.Padding(8.0f, 4.0f)
 		[
 			SNew(STextBlock)
-			.Text(FText::Format(LOCTEXT("NoCommandsMatch", "No command names contain \"{0}\"."), FText::FromString(CommandFilter)))
+			.Text(List.Filter.IsEmpty() ? LOCTEXT("ReferenceEmpty", "Nothing to list.") : FText::Format(NoMatch, FText::FromString(List.Filter)))
 			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 			.AutoWrapText(true)
 		];
@@ -2651,7 +2763,18 @@ void SBangoScriptEditor::RefreshCommandList()
 		int32 Count = 0;
 		for (; Index < Entries.Num() && GroupOf(Entries[Index]) == Group; ++Index, ++Count)
 		{
-			const FEntry& Entry = Entries[Index];
+			const FReferenceEntry& Entry = Entries[Index];
+			if (Entry.Node.IsValid())
+			{
+				// A node: a card that can be dragged onto the graph.
+				Rows->AddSlot()
+				.AutoHeight()
+				.Padding(6.0f, 1.0f, 6.0f, 1.0f)
+				[
+					MakeNodeReferenceRow(Entry)
+				];
+				continue;
+			}
 			Rows->AddSlot()
 			.AutoHeight()
 			.Padding(8.0f, 1.0f, 0.0f, 1.0f)
@@ -2663,16 +2786,16 @@ void SBangoScriptEditor::RefreshCommandList()
 			];
 		}
 		const FString Key = FString(bByCategory ? TEXT("Category:") : TEXT("Alphabetical:")) + Group;
-		TSharedPtr<bool>& bExpanded = CommandGroupsExpanded.FindOrAdd(Key);
+		TSharedPtr<bool>& bExpanded = List.GroupsExpanded.FindOrAdd(Key);
 		if (!bExpanded.IsValid())
 		{
 			bExpanded = MakeShared<bool>(true);
 		}
-		CommandListBox->AddSlot()
+		List.ListBox->AddSlot()
 		.AutoHeight()
 		.Padding(0.0f, 0.0f, 0.0f, 2.0f)
 		[
-			MakeFoldout(FText::Format(LOCTEXT("CommandGroupTitle", "{0}  ({1})"), FText::FromString(Group.ToUpper()), FText::AsNumber(Count)),
+			MakeFoldout(FText::Format(LOCTEXT("ReferenceGroupTitle", "{0}  ({1})"), FText::FromString(Group.ToUpper()), FText::AsNumber(Count)),
 				bExpanded.Get(),
 				SNew(SBox)
 				.Padding(FMargin(0.0f, 2.0f, 0.0f, 4.0f))
@@ -2681,6 +2804,44 @@ void SBangoScriptEditor::RefreshCommandList()
 				])
 		];
 	}
+}
+
+TSharedRef<SWidget> SBangoScriptEditor::MakeNodeReferenceRow(const FReferenceEntry& Entry)
+{
+	using namespace BangoScriptEditorPrivate;
+	const TSharedPtr<FBangoNodeMenuEntry> Node = Entry.Node;
+	return SNew(SBangoNodeReferenceRow)
+		.Name(FText::FromString(Entry.Name))
+		.ToolTipText(FText::FromString(Entry.Tooltip))
+		.OnDragDetected_Lambda([this, Node](const FGeometry&, const FPointerEvent& MouseEvent)
+		{
+			if (!Node.IsValid() || !MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+			{
+				return FReply::Unhandled();
+			}
+			// The list was made without the script's names, so take the entry again now, from the right-click menu's
+			// entries for the script as it is: its made-up names (like the For's _i) then don't clash with any.
+			FBangoNodeMenuEntry Placed = *Node;
+			FBangoGraphDocument Current;
+			FString Error;
+			if (LayoutContext.IsValid() && BuildCurrentDocument(Current, nullptr, Error))
+			{
+				TArray<FBangoNodeMenuEntry> Fresh;
+				Bango::GetNodeMenuEntries(Current, *LayoutContext, Fresh);
+				if (const FBangoNodeMenuEntry* Match = Fresh.FindByPredicate([&Placed](const FBangoNodeMenuEntry& Candidate)
+					{
+						return Candidate.Kind == Placed.Kind && Candidate.Category == Placed.Category && Candidate.Title == Placed.Title;
+					}))
+				{
+					Placed = *Match;
+				}
+			}
+			// The same action as the right-click menu's entry, so dropping it works the same way.
+			TSharedPtr<FEdGraphSchemaAction> Action = MakeShared<FBangoSchemaAction_NewNode>(
+				FText::FromString(Placed.Category), FText::FromString(Placed.Title), FText::FromString(Placed.Description),
+				FText::FromString(Placed.Keywords), (uint8)Placed.Kind, Placed.Text);
+			return FReply::Handled().BeginDragDrop(FGraphSchemaActionDragDropAction::New(Action));
+		});
 }
 
 // ---- SCRIPT DESCRIPTION ----
@@ -2997,13 +3158,94 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeCommandsTab()
 		];
 }
 
-TSharedRef<SWidget> SBangoScriptEditor::MakeCommandsPane()
+TSharedRef<SWidget> SBangoScriptEditor::MakeReferenceTab(FReferenceList& List, const TCHAR* ConfigKey, const FText& SearchHint, const FText& CategoryTooltip, TFunction<void()> Refresh)
 {
 	// How the list is ordered is remembered between sessions, like the script browser's settings.
 	FString Order;
-	if (GConfig->GetString(TEXT("BangoScriptEditor"), TEXT("CommandReferenceOrder"), Order, GEditorPerProjectIni))
+	if (GConfig->GetString(TEXT("BangoScriptEditor"), ConfigKey, Order, GEditorPerProjectIni))
 	{
-		bCommandsByCategory = Order == TEXT("Category");
+		List.bByCategory = Order == TEXT("Category");
+	}
+	FReferenceList* ListPtr = &List;
+	const FString Key = ConfigKey;
+
+	return SNew(SVerticalBox)
+		// A search box (by name), and how the list is ordered.
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(8.0f, 4.0f, 8.0f, 4.0f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot()
+			.FillWidth(1.0f)
+			.VAlign(VAlign_Center)
+			[
+				SNew(SSearchBox)
+				.HintText(SearchHint)
+				.ToolTipText(LOCTEXT("ReferenceSearchTooltip", "Shows only the names that contain this."))
+				.OnTextChanged_Lambda([ListPtr, Refresh](const FText& NewText)
+				{
+					ListPtr->Filter = NewText.ToString().TrimStartAndEnd();
+					Refresh();
+				})
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(4.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(SComboButton)
+				.ToolTipText(LOCTEXT("ReferenceOrderTooltip", "How the list is grouped: Native and Game, by name, or by category."))
+				.ButtonContent()
+				[
+					SNew(STextBlock)
+					.Text_Lambda([ListPtr]()
+					{
+						return ListPtr->bByCategory ? LOCTEXT("ReferenceOrderCategory", "Category") : LOCTEXT("ReferenceOrderAlphabetical", "Alphabetical");
+					})
+				]
+				.OnGetMenuContent_Lambda([ListPtr, Key, Refresh, CategoryTooltip]()
+				{
+					FMenuBuilder Menu(/*bShouldCloseWindowAfterMenuSelection*/ true, nullptr);
+					const auto AddOrder = [ListPtr, &Key, &Refresh, &Menu](bool bByCategory, const FText& Label, const FText& Tooltip)
+					{
+						Menu.AddMenuEntry(Label, Tooltip, FSlateIcon(),
+							FUIAction(
+								FExecuteAction::CreateLambda([ListPtr, Key, Refresh, bByCategory]()
+								{
+									ListPtr->bByCategory = bByCategory;
+									GConfig->SetString(TEXT("BangoScriptEditor"), *Key, bByCategory ? TEXT("Category") : TEXT("Alphabetical"), GEditorPerProjectIni);
+									Refresh();
+								}),
+								FCanExecuteAction(),
+								FIsActionChecked::CreateLambda([ListPtr, bByCategory]() { return ListPtr->bByCategory == bByCategory; })),
+							NAME_None, EUserInterfaceActionType::RadioButton);
+					};
+					AddOrder(false, LOCTEXT("ReferenceOrderAlphabetical", "Alphabetical"),
+						LOCTEXT("ReferenceOrderAlphabeticalTooltip", "Two groups, each by name: Native (built into Bango) and Game (the project's own)."));
+					AddOrder(true, LOCTEXT("ReferenceOrderCategory", "Category"), CategoryTooltip);
+					return Menu.MakeWidget();
+				})
+			]
+		]
+		+ SVerticalBox::Slot()
+		.FillHeight(1.0f)
+		[
+			SNew(SScrollBox)
+			+ SScrollBox::Slot()
+			.Padding(0.0f, 0.0f, 0.0f, 6.0f)
+			[
+				SAssignNew(List.ListBox, SVerticalBox)
+			]
+		];
+}
+
+TSharedRef<SWidget> SBangoScriptEditor::MakeCommandsPane()
+{
+	int32 Tab = 0;
+	if (GConfig->GetInt(TEXT("BangoScriptEditor"), TEXT("ReferenceTab"), Tab, GEditorPerProjectIni))
+	{
+		ReferenceTab = Tab == 1 ? 1 : 0;
 	}
 
 	return SNew(SBorder)
@@ -3011,80 +3253,50 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeCommandsPane()
 		.Padding(0.0f)
 		[
 			SNew(SVerticalBox)
+			// The tabs: COMMANDS and NODES.
 			+ SVerticalBox::Slot()
 			.AutoHeight()
-			.Padding(8.0f, 6.0f, 8.0f, 4.0f)
+			.Padding(8.0f, 6.0f, 8.0f, 2.0f)
 			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("CommandReferenceHeading", "COMMAND REFERENCE"))
-				.Font(FAppStyle::GetFontStyle("BoldFont"))
-				.ToolTipText(LOCTEXT("CommandReferenceTooltip", "Every command a script can call. Hover one to see how it's called and what it does."))
-			]
-			// A search box (by name), and how the list is ordered.
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(8.0f, 0.0f, 8.0f, 4.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.FillWidth(1.0f)
-				.VAlign(VAlign_Center)
-				[
-					SNew(SSearchBox)
-					.HintText(LOCTEXT("CommandSearchHint", "Search commands"))
-					.ToolTipText(LOCTEXT("CommandSearchTooltip", "Shows only the commands whose names contain this."))
-					.OnTextChanged_Lambda([this](const FText& NewText)
+				SNew(SSegmentedControl<int32>)
+				.Value_Lambda([this]() { return ReferenceTab; })
+				.OnValueChanged_Lambda([this](int32 NewTab)
+				{
+					ReferenceTab = NewTab;
+					GConfig->SetInt(TEXT("BangoScriptEditor"), TEXT("ReferenceTab"), NewTab, GEditorPerProjectIni);
+					// Read again, so what other modules (or this script's functions) have added since shows up.
+					if (NewTab == 1)
 					{
-						CommandFilter = NewText.ToString().TrimStartAndEnd();
+						RefreshNodeList();
+					}
+					else
+					{
 						RefreshCommandList();
-					})
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Center)
-				.Padding(4.0f, 0.0f, 0.0f, 0.0f)
-				[
-					SNew(SComboButton)
-					.ToolTipText(LOCTEXT("CommandOrderTooltip", "How the commands are listed: by name, or in groups by category."))
-					.ButtonContent()
-					[
-						SNew(STextBlock)
-						.Text_Lambda([this]()
-						{
-							return bCommandsByCategory ? LOCTEXT("CommandOrderCategory", "Category") : LOCTEXT("CommandOrderAlphabetical", "Alphabetical");
-						})
-					]
-					.OnGetMenuContent_Lambda([this]()
-					{
-						FMenuBuilder Menu(/*bShouldCloseWindowAfterMenuSelection*/ true, nullptr);
-						const auto AddOrder = [this, &Menu](bool bByCategory, const FText& Label, const FText& Tooltip)
-						{
-							Menu.AddMenuEntry(Label, Tooltip, FSlateIcon(),
-								FUIAction(
-									FExecuteAction::CreateLambda([this, bByCategory]()
-									{
-										bCommandsByCategory = bByCategory;
-										GConfig->SetString(TEXT("BangoScriptEditor"), TEXT("CommandReferenceOrder"), bByCategory ? TEXT("Category") : TEXT("Alphabetical"), GEditorPerProjectIni);
-										RefreshCommandList();
-									}),
-									FCanExecuteAction(),
-									FIsActionChecked::CreateLambda([this, bByCategory]() { return bCommandsByCategory == bByCategory; })),
-								NAME_None, EUserInterfaceActionType::RadioButton);
-						};
-						AddOrder(false, LOCTEXT("CommandOrderAlphabetical", "Alphabetical"), LOCTEXT("CommandOrderAlphabeticalTooltip", "All the commands, by name."));
-						AddOrder(true, LOCTEXT("CommandOrderCategory", "Category"), LOCTEXT("CommandOrderCategoryTooltip", "In groups (Actors, Flow Control, Math, Text, ...), each by name."));
-						return Menu.MakeWidget();
-					})
-				]
+					}
+				})
+				+ SSegmentedControl<int32>::Slot(0)
+				.Text(LOCTEXT("CommandsTabLabel", "COMMANDS"))
+				.ToolTip(LOCTEXT("CommandsTabTooltip", "Every command a script can call. Hover one to see how it's called and what it does."))
+				+ SSegmentedControl<int32>::Slot(1)
+				.Text(LOCTEXT("NodesTabLabel", "NODES"))
+				.ToolTip(LOCTEXT("NodesTabTooltip", "Every node you can place in the graph (commands whose value must be used aren't nodes). Hover one to see what it does."))
 			]
 			+ SVerticalBox::Slot()
 			.FillHeight(1.0f)
 			[
-				SNew(SScrollBox)
-				+ SScrollBox::Slot()
-				.Padding(0.0f, 0.0f, 0.0f, 6.0f)
+				SNew(SWidgetSwitcher)
+				.WidgetIndex_Lambda([this]() { return ReferenceTab; })
+				+ SWidgetSwitcher::Slot()
 				[
-					SAssignNew(CommandListBox, SVerticalBox)
+					MakeReferenceTab(CommandReference, TEXT("CommandReferenceOrder"), LOCTEXT("CommandSearchHint", "Search commands"),
+						LOCTEXT("CommandOrderCategoryTooltip", "In groups (Actors, Flow Control, Math, Text, ...), each by name."),
+						[this]() { RefreshCommandList(); })
+				]
+				+ SWidgetSwitcher::Slot()
+				[
+					MakeReferenceTab(NodeReference, TEXT("NodeReferenceOrder"), LOCTEXT("NodeSearchHint", "Search nodes"),
+						LOCTEXT("NodeOrderCategoryTooltip", "In groups like the graph's right-click menu (Flow Control, Variables, Math, ...), each by name."),
+						[this]() { RefreshNodeList(); })
 				]
 			]
 		];
@@ -3095,7 +3307,9 @@ void SBangoScriptEditor::SetCommandsPaneOpen(bool bOpen, bool bAnimate)
 	bCommandsPaneOpen = bOpen;
 	if (bOpen)
 	{
-		RefreshCommandList(); // other modules may have added commands since it was last shown
+		// Read again, so commands other modules have added (and this script's new functions) show up.
+		RefreshCommandList();
+		RefreshNodeList();
 	}
 	if (!bAnimate)
 	{
@@ -3139,6 +3353,13 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeTextPane()
 		.OnTextChanged_Lambda([this](const FText& NewText)
 		{
 			bTextEdited = !NewText.ToString().Equals(TextShown, ESearchCase::CaseSensitive);
+			// Typed back to the text the graphs show (Apply and Revert grey out): an error from applying something
+			// else no longer applies. Not when there are no graphs: then the text shown is a file that didn't read,
+			// and its error still stands.
+			if (!bTextEdited && EdGraphs.Num() > 0)
+			{
+				TextError.Reset();
+			}
 			UpdateLineNumbers(NewText.ToString());
 		})
 		.OnKeyDownHandler_Lambda([this](const FGeometry&, const FKeyEvent& KeyEvent)
@@ -4050,6 +4271,7 @@ EActiveTimerReturnType SBangoScriptEditor::OnPoll(double CurrentTime, float Delt
 			GraphItems[i]->Label = Current.Functions[i - 1].Name;
 		}
 		RefreshAllNodes();
+		RefreshNodeList(); // a function was added, removed or renamed
 	}
 	UpdateInputs();
 	UpdateVariables(Current, Fresh);

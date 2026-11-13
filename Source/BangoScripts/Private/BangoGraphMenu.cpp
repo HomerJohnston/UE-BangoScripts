@@ -225,7 +225,7 @@ namespace Bango
 					continue;
 				}
 				Menu.Add(Signature->CategoryName.IsEmpty() ? FString(TEXT("Commands")) : Signature->CategoryName,
-					EBangoGraphNodeKind::Call, Name + TEXT("()"), TEXT("command"));
+					EBangoGraphNodeKind::Call, Name + TEXT("()"), TEXT("command")).bBuiltIn = Signature->bBuiltIn;
 			}
 		}
 
@@ -233,6 +233,7 @@ namespace Bango
 		for (const FBangoCommandSignature& Function : Context.Functions)
 		{
 			FBangoNodeMenuEntry& Entry = Menu.Add(TEXT("This Script"), EBangoGraphNodeKind::Call, Function.Name + TEXT("()"), TEXT("function call"));
+			Entry.bBuiltIn = false;
 			if (Entry.Description.IsEmpty())
 			{
 				Entry.Description = FString::Printf(TEXT("Calls this script's function %s."), *Function.ToString());

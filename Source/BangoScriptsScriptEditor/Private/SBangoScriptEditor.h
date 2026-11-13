@@ -29,6 +29,7 @@ class ITableRow;
 class STableViewBase;
 class UEdGraph;
 struct FBangoNodeLayoutContext;
+struct FBangoNodeMenuEntry;
 
 /**
  * The editor for one script: its graphs (the main graph and its functions) listed on the left, and the picked graph
@@ -143,15 +144,35 @@ private:
 	bool bInputsExpanded = true;
 	bool bGlobalsExpanded = true;
 	bool bLocalsExpanded = true;
-	/** COMMAND REFERENCE's list: one line per command name (under a heading per category, if listed that way). */
-	TSharedPtr<SVerticalBox> CommandListBox;
-	/** What's typed in COMMAND REFERENCE's search box: only names that contain it are listed. */
-	FString CommandFilter;
-	/** COMMAND REFERENCE lists commands in groups by category, instead of all by name (remembered between sessions). */
-	bool bCommandsByCategory = false;
-	/** Whether each of COMMAND REFERENCE's group foldouts is open, by "Order:Group" (shared, so the foldouts can point at them). */
-	TMap<FString, TSharedPtr<bool>> CommandGroupsExpanded;
-	/** The COMMAND REFERENCE pane on the right, shown or hidden with its Commands tab, like the text pane on the left. */
+	/** One of the reference pane's tabs (COMMANDS or NODES): a search box, an order, and a list in group foldouts. */
+	struct FReferenceList
+	{
+		/** The list: a foldout per group, one line per name. */
+		TSharedPtr<SVerticalBox> ListBox;
+		/** What's typed in the tab's search box: only names that contain it are listed. */
+		FString Filter;
+		/** Listed in groups by category, instead of Native and Game (remembered between sessions). */
+		bool bByCategory = false;
+		/** Whether each group foldout is open, by "Order:Group" (shared, so the foldouts can point at them). */
+		TMap<FString, TSharedPtr<bool>> GroupsExpanded;
+	};
+	/** One line of a reference list. */
+	struct FReferenceEntry
+	{
+		FString Name;
+		FString Category;
+		FString Tooltip;
+		/** Built into Bango (the Native group), or the project's or script's own (the Game group). */
+		bool bBuiltIn = true;
+		/** For the NODES tab: the node it places when it's dragged onto the graph. */
+		TSharedPtr<FBangoNodeMenuEntry> Node;
+	};
+	/** The reference pane's tabs: every command a script can call, and every node that can be placed in the graph. */
+	FReferenceList CommandReference;
+	FReferenceList NodeReference;
+	/** Which tab the reference pane shows: 0 COMMANDS, 1 NODES (remembered between sessions). */
+	int32 ReferenceTab = 0;
+	/** The reference pane on the right (COMMANDS and NODES), shown or hidden with its Commands tab, like the text pane on the left. */
 	bool bCommandsPaneOpen = false;
 	float CommandsPaneOpenness = 0.0f;
 	bool bCommandsPaneSliding = false;
@@ -360,7 +381,7 @@ private:
 	TSharedRef<SWidget> MakeTextTab();
 	/** Opens or closes the text pane, sliding it (bAnimate) or at once. */
 	void SetTextPaneOpen(bool bOpen, bool bAnimate);
-	/** The Commands tab on the graph's right edge, and the COMMAND REFERENCE pane it pulls out. */
+	/** The Commands tab on the graph's right edge, and the reference pane (COMMANDS and NODES tabs) it pulls out. */
 	TSharedRef<SWidget> MakeCommandsTab();
 	TSharedRef<SWidget> MakeCommandsPane();
 	void SetCommandsPaneOpen(bool bOpen, bool bAnimate);
@@ -414,8 +435,19 @@ private:
 	 * + Add button) at its right if given. bExpanded is the member that says whether it's open.
 	 */
 	TSharedRef<SWidget> MakeFoldout(const FText& Title, bool* bExpanded, TSharedRef<SWidget> Body, TSharedPtr<SWidget> Extra = nullptr);
-	/** Fills COMMAND REFERENCE: every command whose name contains CommandFilter, by name or in groups by category. */
+	/** Fills the COMMANDS tab: every command a script can call whose name contains its filter. */
 	void RefreshCommandList();
+	/** Fills the NODES tab: every node the graph's add-node menu offers whose title contains its filter. */
+	void RefreshNodeList();
+	/**
+	 * Fills List's box with Entries that contain its filter, a foldout per group: Native and Game, or (by category) a
+	 * group per category, by name with Trailing's categories last. NoMatch is shown when none do ({0} is the filter).
+	 */
+	void FillReferenceList(FReferenceList& List, TArray<FReferenceEntry>& Entries, const TArray<FString>& Trailing, const FText& NoMatch);
+	/** A NODES line: a card that can be dragged onto the graph to place Entry's node. */
+	TSharedRef<SWidget> MakeNodeReferenceRow(const FReferenceEntry& Entry);
+	/** A reference tab's contents: its search box and order dropdown, and its list. ConfigKey remembers the order. */
+	TSharedRef<SWidget> MakeReferenceTab(FReferenceList& List, const TCHAR* ConfigKey, const FText& SearchHint, const FText& CategoryTooltip, TFunction<void()> Refresh);
 
 	void DeleteSelectedNodes();
 	bool CanDeleteSelectedNodes() const;
