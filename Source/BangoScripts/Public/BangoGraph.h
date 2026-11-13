@@ -166,12 +166,12 @@ namespace Bango
 
 	/**
 	 * The section headings the writer puts in a file (the text after the //): SCRIPT INPUT above the #define lines,
-	 * GLOBAL VARS and SCRIPT VARS above the declarations, SCRIPT BODY above the main graph's code, and FUNCTIONS
+	 * GLOBAL VARS and LOCAL VARS above the declarations, SCRIPT BODY above the main graph's code, and FUNCTIONS
 	 * above the first function. Every heading starts with "====".
 	 */
 	BANGOSCRIPTS_API const TCHAR* GetScriptInputHeadingComment();
 	BANGOSCRIPTS_API const TCHAR* GetGlobalVarsHeadingComment();
-	BANGOSCRIPTS_API const TCHAR* GetScriptVarsHeadingComment();
+	BANGOSCRIPTS_API const TCHAR* GetLocalVarsHeadingComment();
 	BANGOSCRIPTS_API const TCHAR* GetScriptBodyHeadingComment();
 	BANGOSCRIPTS_API const TCHAR* GetFunctionsHeadingComment();
 	/** The line the writer puts between functions. */

@@ -21,6 +21,8 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
+#include "Widgets/Input/SMenuAnchor.h"
+#include "BangoCommand.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SGridPanel.h"
@@ -167,6 +169,9 @@ TSharedRef<SWidget> SBangoGraphNode::MakeFieldsArea()
 		return SNew(SSpacer).Size(29);
 	}
 	EditBoxes.SetNum(BangoNode->Layout.Fields.Num());
+	CompletionAnchors.Reset();
+	CompletionAnchors.SetNum(BangoNode->Layout.Fields.Num());
+	CloseCompletion();
 
 	// Like the details panel, with each row's type icon first: icons, then names, then values filling the rest.
 	// The icon column is left out when no row has an icon (like a For node's Init, Condition and Step).
@@ -393,7 +398,7 @@ TSharedRef<SWidget> SBangoGraphNode::MakeFieldValue(int32 FieldIndex)
 	}
 	if (Field.bReadOnly)
 	{
-		ValueTip += (ValueTip.IsEmpty() ? FString() : FString(TEXT("\n\n"))) + LOCTEXT("ReadOnlyDefaultTip", "Edit parameters and their defaults in the INPUTS panel.").ToString();
+		ValueTip += (ValueTip.IsEmpty() ? FString() : FString(TEXT("\n\n"))) + LOCTEXT("ReadOnlyDefaultTip", "Edit parameters and their defaults in the SCRIPT INPUT panel.").ToString();
 	}
 	const FText OutlineTip = bHasError ? FText::FromString(BangoNode->ErrorMsg)
 		: Warning ? FText::FromString(Warning->Message)
@@ -429,8 +434,33 @@ TSharedRef<SWidget> SBangoGraphNode::MakeFieldValue(int32 FieldIndex)
 			.Font(ValueFont)
 			.SelectAllTextWhenFocused(true)
 			.RevertTextOnEscape(true)
-			.OnTextCommitted(this, &SBangoGraphNode::OnValueCommitted, FieldIndex);
+			.OnTextCommitted(this, &SBangoGraphNode::OnValueCommitted, FieldIndex)
+			// Autocomplete: typing may open the list; moving the cursor off the word closes it.
+			.OnTextChanged_Lambda([this, FieldIndex](const FText&)
+			{
+				if (!bCompletionAccepting)
+				{
+					QueueCompletionUpdate(FieldIndex, true);
+				}
+			})
+			.OnCursorMovedWithSelection_Lambda([this, FieldIndex](const FTextLocation& Location, const FTextSelection&)
+			{
+				CompletionCursor = Location.GetOffset();
+				if (IsCompletionOpen() && !bCompletionAccepting)
+				{
+					QueueCompletionUpdate(FieldIndex, false);
+				}
+			})
+			.OnKeyDownHandler(this, &SBangoGraphNode::OnEditBoxKeyDown, FieldIndex);
 		EditBoxes[FieldIndex] = EditBox;
+
+		TSharedRef<SMenuAnchor> Anchor = SNew(SMenuAnchor)
+			.Placement(MenuPlacement_BelowAnchor)
+			.Method(EPopupMethod::UseCurrentWindow) // drawn in this window, so clicking an entry doesn't move focus off the box
+			[
+				EditBox
+			];
+		CompletionAnchors[FieldIndex] = Anchor;
 
 		Content = SNew(SWidgetSwitcher)
 			.WidgetIndex_Lambda([this, FieldIndex]() { return EditingField == FieldIndex ? 1 : 0; })
@@ -440,7 +470,7 @@ TSharedRef<SWidget> SBangoGraphNode::MakeFieldValue(int32 FieldIndex)
 			]
 			+ SWidgetSwitcher::Slot()
 			[
-				EditBox
+				Anchor
 			];
 	}
 
@@ -808,6 +838,7 @@ void SBangoGraphNode::OnValueCommitted(const FText& NewText, ETextCommit::Type C
 		return; // not being edited (focus left a box that was never opened)
 	}
 	EditingField = INDEX_NONE;
+	CloseCompletion();
 	if (CommitType == ETextCommit::OnCleared || !BangoNode)
 	{
 		return; // Escape: keep the old value
@@ -854,6 +885,395 @@ TSharedPtr<SGraphNode> FBangoGraphNodeFactory::CreateNode(UEdGraphNode* Node) co
 		return SNew(SBangoGraphNode, BangoNode);
 	}
 	return nullptr;
+}
+
+// ---- Autocomplete in node fields ----
+
+namespace BangoNodeCompletionPrivate
+{
+	static FLinearColor KindColor(EBangoCompletionKind Kind)
+	{
+		switch (Kind)
+		{
+		case EBangoCompletionKind::Parameter:
+		case EBangoCompletionKind::Local:    return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("9CDCFE")));
+		case EBangoCompletionKind::Global:   return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("4FC1FF")));
+		case EBangoCompletionKind::Function: return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("DCDCAA")));
+		case EBangoCompletionKind::Builtin:  return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("C586C0")));
+		default:                             return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("4EC9B0")));
+		}
+	}
+
+	static const TCHAR* KindLetter(EBangoCompletionKind Kind)
+	{
+		switch (Kind)
+		{
+		case EBangoCompletionKind::Parameter: return TEXT("P");
+		case EBangoCompletionKind::Local:     return TEXT("L");
+		case EBangoCompletionKind::Global:    return TEXT("G");
+		case EBangoCompletionKind::Function:  return TEXT("F");
+		case EBangoCompletionKind::Builtin:   return TEXT("B");
+		default:                              return TEXT("C");
+		}
+	}
+}
+
+bool SBangoGraphNode::FieldTakesCompletion(int32 FieldIndex, const FString& Typed) const
+{
+	if (!BangoNode || !BangoNode->Layout.Fields.IsValidIndex(FieldIndex))
+	{
+		return false;
+	}
+	const FBangoNodeField& Field = BangoNode->Layout.Fields[FieldIndex];
+	// A text field's box holds the plain text being shown, unless it starts with = (then it's an expression).
+	return !Bango::IsTextField(Field) || Typed.StartsWith(TEXT("="));
+}
+
+void SBangoGraphNode::QueueCompletionUpdate(int32 FieldIndex, bool bMayOpen)
+{
+	bCompletionMayOpen |= bMayOpen;
+	if (bCompletionQueued)
+	{
+		return;
+	}
+	bCompletionQueued = true;
+	// Next frame: by then the box's cursor has moved for the change too.
+	RegisterActiveTimer(0.0f, FWidgetActiveTimerDelegate::CreateLambda([this, FieldIndex](double, float)
+	{
+		bCompletionQueued = false;
+		const bool bOpen = bCompletionMayOpen;
+		bCompletionMayOpen = false;
+		UpdateCompletion(FieldIndex, bOpen);
+		return EActiveTimerReturnType::Stop;
+	}));
+}
+
+void SBangoGraphNode::UpdateCompletion(int32 FieldIndex, bool bMayOpen)
+{
+	const TSharedPtr<SEditableTextBox> Box = EditBoxes.IsValidIndex(FieldIndex) ? EditBoxes[FieldIndex] : nullptr;
+	const TSharedPtr<SMenuAnchor> Anchor = CompletionAnchors.IsValidIndex(FieldIndex) ? CompletionAnchors[FieldIndex] : nullptr;
+	if (!Box.IsValid() || !Anchor.IsValid() || EditingField != FieldIndex || !Box->HasKeyboardFocus())
+	{
+		CloseCompletion();
+		return;
+	}
+	const FString Typed = Box->GetText().ToString();
+	const int32 CursorColumn = FMath::Clamp(CompletionCursor, 0, Typed.Len());
+	int32 WordStart = INDEX_NONE;
+	if (!FieldTakesCompletion(FieldIndex, Typed) || !FBangoCompletion::FindWordBeforeCursor(Typed, CursorColumn, WordStart))
+	{
+		CloseCompletion();
+		return;
+	}
+	const bool bSameWord = IsCompletionOpen() && CompletionWordStart == WordStart;
+	if (!bSameWord && !bMayOpen)
+	{
+		CloseCompletion();
+		return;
+	}
+	if (!IsCompletionOpen())
+	{
+		GatherCompletionItems();
+	}
+
+	const FString Prefix = Typed.Mid(WordStart, CursorColumn - WordStart);
+	const int32 WasSelected = CompletionShown.IsValidIndex(CompletionSelected) ? CompletionShown[CompletionSelected] : INDEX_NONE;
+	FBangoCompletion::Filter(CompletionItems, Prefix, CompletionShown);
+	// Nothing to offer, or the name is already typed in full: no list.
+	if (CompletionShown.Num() == 0 || (CompletionShown.Num() == 1 && CompletionItems[CompletionShown[0]].Name.Equals(Prefix, ESearchCase::CaseSensitive)))
+	{
+		CloseCompletion();
+		return;
+	}
+	CompletionSelected = FMath::Max(0, CompletionShown.IndexOfByKey(WasSelected));
+	CompletionTop = FMath::Clamp(CompletionTop, FMath::Max(0, CompletionSelected - CompletionVisibleRows + 1), CompletionSelected);
+	CompletionWordStart = WordStart;
+	if (!Anchor->IsOpen())
+	{
+		Anchor->SetMenuContent(MakeCompletionPopup(FieldIndex));
+		Anchor->SetIsOpen(true, /*bFocusMenu*/ false);
+	}
+	RebuildCompletionRows();
+}
+
+void SBangoGraphNode::GatherCompletionItems()
+{
+	CompletionItems.Reset();
+	CompletionShown.Reset();
+	CompletionSelected = 0;
+	CompletionTop = 0;
+	if (!BangoNode)
+	{
+		return;
+	}
+	TSet<FString> Seen;
+	auto AddItem = [this, &Seen](const FBangoCompletionItem& Item)
+	{
+		if (!Seen.Contains(Item.Name))
+		{
+			Seen.Add(Item.Name);
+			CompletionItems.Add(Item);
+		}
+	};
+
+	const FBangoNodeLayoutContext* Context = BangoNode->LayoutContext.Get();
+	if (Context)
+	{
+		// The variables this node can see: its graph's parameters and locals (named _x) and the file's globals.
+		if (const TMap<FString, FString>* Visible = Context->VisibleVariables.Find(BangoNode->NodeID))
+		{
+			for (const TPair<FString, FString>& Variable : *Visible)
+			{
+				FBangoCompletionItem Item;
+				Item.Name = Variable.Key;
+				Item.Detail = Variable.Value;
+				Item.Kind = Variable.Key.StartsWith(TEXT("_")) ? EBangoCompletionKind::Local : EBangoCompletionKind::Global;
+				AddItem(Item);
+			}
+		}
+		for (const FBangoCommandSignature& Function : Context->Functions)
+		{
+			FBangoCompletionItem Item;
+			Item.Name = Function.Name;
+			Item.Detail = Function.ToString();
+			Item.Kind = EBangoCompletionKind::Function;
+			Item.bCallable = true;
+			AddItem(Item);
+		}
+		if (Context->Commands)
+		{
+			TArray<FString> Names;
+			Context->Commands->GetCommandNames(Names);
+			for (const FString& Name : Names)
+			{
+				FBangoCompletionItem Item;
+				Item.Name = Name;
+				Item.Kind = EBangoCompletionKind::Command;
+				Item.bCallable = true;
+				if (const FBangoCommandSignature* Signature = Context->Commands->FindCommand(Name))
+				{
+					Item.Detail = Signature->ToString();
+					Item.Description = Signature->CommandDescription;
+				}
+				AddItem(Item);
+			}
+		}
+	}
+	TArray<FBangoCompletionItem> Builtins;
+	FBangoCompletion::GetBuiltinItems(Builtins);
+	for (const FBangoCompletionItem& Item : Builtins)
+	{
+		AddItem(Item);
+	}
+	CompletionItems.Sort([](const FBangoCompletionItem& A, const FBangoCompletionItem& B)
+	{
+		const int32 IgnoringCase = A.Name.Compare(B.Name, ESearchCase::IgnoreCase);
+		return IgnoringCase != 0 ? IgnoringCase < 0 : A.Name.Compare(B.Name, ESearchCase::CaseSensitive) < 0;
+	});
+}
+
+void SBangoGraphNode::CloseCompletion()
+{
+	CompletionWordStart = INDEX_NONE;
+	CompletionShown.Reset();
+	for (const TSharedPtr<SMenuAnchor>& Anchor : CompletionAnchors)
+	{
+		if (Anchor.IsValid() && Anchor->IsOpen())
+		{
+			Anchor->SetIsOpen(false, false);
+		}
+	}
+}
+
+void SBangoGraphNode::MoveCompletionSelection(int32 Delta)
+{
+	if (CompletionShown.Num() == 0)
+	{
+		return;
+	}
+	CompletionSelected = FMath::Clamp(CompletionSelected + Delta, 0, CompletionShown.Num() - 1);
+	if (CompletionSelected < CompletionTop)
+	{
+		CompletionTop = CompletionSelected;
+	}
+	else if (CompletionSelected >= CompletionTop + CompletionVisibleRows)
+	{
+		CompletionTop = CompletionSelected - CompletionVisibleRows + 1;
+	}
+	RebuildCompletionRows();
+}
+
+void SBangoGraphNode::AcceptCompletion(int32 FieldIndex)
+{
+	const TSharedPtr<SEditableTextBox> Box = EditBoxes.IsValidIndex(FieldIndex) ? EditBoxes[FieldIndex] : nullptr;
+	if (!Box.IsValid() || !IsCompletionOpen() || !CompletionShown.IsValidIndex(CompletionSelected))
+	{
+		CloseCompletion();
+		return;
+	}
+	const FBangoCompletionItem& Item = CompletionItems[CompletionShown[CompletionSelected]];
+	const FString Typed = Box->GetText().ToString();
+	const int32 CursorColumn = FMath::Clamp(CompletionCursor, CompletionWordStart, Typed.Len());
+	// The word typed so far becomes the whole name; commands and functions get their ( too, unless one's there.
+	FString Insert = Item.Name;
+	if (Item.bCallable && !(CursorColumn < Typed.Len() && Typed[CursorColumn] == TEXT('(')))
+	{
+		Insert += TEXT("(");
+	}
+	const FString NewText = Typed.Left(CompletionWordStart) + Insert + Typed.Mid(CursorColumn);
+	const int32 NewCursor = CompletionWordStart + Insert.Len();
+	CloseCompletion();
+
+	bCompletionAccepting = true;
+	Box->SetText(FText::FromString(NewText));
+	Box->GoTo(FTextLocation(0, NewCursor));
+	bCompletionAccepting = false;
+	CompletionCursor = NewCursor;
+}
+
+void SBangoGraphNode::RebuildCompletionRows()
+{
+	using namespace BangoNodeCompletionPrivate;
+	if (!CompletionRows.IsValid())
+	{
+		return;
+	}
+	CompletionRows->ClearChildren();
+	const FSlateFontInfo NameFont = FCoreStyle::GetDefaultFontStyle("Mono", 9);
+	const FSlateFontInfo DetailFont = FCoreStyle::GetDefaultFontStyle("Regular", 8);
+	const int32 End = FMath::Min(CompletionShown.Num(), CompletionTop + CompletionVisibleRows);
+	for (int32 Row = CompletionTop; Row < End; ++Row)
+	{
+		const FBangoCompletionItem& Item = CompletionItems[CompletionShown[Row]];
+		const bool bSelected = Row == CompletionSelected;
+		const int32 FieldIndex = EditingField;
+		CompletionRows->AddSlot()
+		.AutoHeight()
+		[
+			SNew(SBorder)
+			.BorderImage(FAppStyle::GetBrush(bSelected ? "WhiteBrush" : "NoBorder"))
+			.BorderBackgroundColor(bSelected ? FAppStyle::GetSlateColor("SelectionColor") : FSlateColor(FLinearColor::Transparent))
+			.Padding(0.0f)
+			[
+				SNew(SButton)
+				.ButtonStyle(FAppStyle::Get(), "NoBorder")
+				.IsFocusable(false) // the field keeps keyboard focus
+				.ContentPadding(FMargin(4.0f, 1.0f))
+				.OnClicked_Lambda([this, Row, FieldIndex]()
+				{
+					CompletionSelected = Row;
+					AcceptCompletion(FieldIndex);
+					return FReply::Handled();
+				})
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					.Padding(0.0f, 0.0f, 6.0f, 0.0f)
+					[
+						SNew(SBox)
+						.WidthOverride(10.0f)
+						[
+							SNew(STextBlock)
+							.Text(FText::FromString(KindLetter(Item.Kind)))
+							.Font(DetailFont)
+							.ColorAndOpacity(FSlateColor(KindColor(Item.Kind)))
+						]
+					]
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString(Item.Name))
+						.Font(NameFont)
+						.ColorAndOpacity(FSlateColor(KindColor(Item.Kind)))
+					]
+					+ SHorizontalBox::Slot()
+					.FillWidth(1.0f)
+					.VAlign(VAlign_Center)
+					.Padding(10.0f, 0.0f, 0.0f, 0.0f)
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString(Item.Detail))
+						.Font(DetailFont)
+						.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+						.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+					]
+				]
+			]
+		];
+	}
+	// The selected entry's description, if it has one, and how many more there are.
+	const FBangoCompletionItem* Selected = CompletionShown.IsValidIndex(CompletionSelected) ? &CompletionItems[CompletionShown[CompletionSelected]] : nullptr;
+	FString Footer = Selected ? Selected->Description : FString();
+	if (CompletionShown.Num() > CompletionVisibleRows)
+	{
+		Footer += FString::Printf(TEXT("%s%d of %d"), Footer.IsEmpty() ? TEXT("") : TEXT("\n"), CompletionSelected + 1, CompletionShown.Num());
+	}
+	if (!Footer.IsEmpty())
+	{
+		CompletionRows->AddSlot()
+		.AutoHeight()
+		.Padding(FMargin(6.0f, 3.0f))
+		[
+			SNew(STextBlock)
+			.Text(FText::FromString(Footer))
+			.AutoWrapText(true)
+			.Font(DetailFont)
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+		];
+	}
+}
+
+TSharedRef<SWidget> SBangoGraphNode::MakeCompletionPopup(int32 FieldIndex)
+{
+	return SNew(SBorder)
+		.BorderImage(FAppStyle::GetBrush("Menu.Background"))
+		.Padding(FMargin(2.0f))
+		[
+			SNew(SBox)
+			.WidthOverride(380.0f)
+			[
+				SAssignNew(CompletionRows, SVerticalBox)
+			]
+		];
+}
+
+FReply SBangoGraphNode::OnEditBoxKeyDown(const FGeometry& Geometry, const FKeyEvent& KeyEvent, int32 FieldIndex)
+{
+	const FKey Key = KeyEvent.GetKey();
+	if (Key == EKeys::SpaceBar && KeyEvent.IsControlDown())
+	{
+		QueueCompletionUpdate(FieldIndex, true); // Ctrl+Space: open the list for the word at the cursor
+		return FReply::Handled();
+	}
+	if (!IsCompletionOpen() || KeyEvent.IsControlDown() || KeyEvent.IsAltDown() || KeyEvent.IsCommandDown())
+	{
+		return FReply::Unhandled();
+	}
+	if (Key == EKeys::Up || Key == EKeys::Down)
+	{
+		MoveCompletionSelection(Key == EKeys::Up ? -1 : 1);
+		return FReply::Handled();
+	}
+	if (Key == EKeys::PageUp || Key == EKeys::PageDown)
+	{
+		MoveCompletionSelection(Key == EKeys::PageUp ? -CompletionVisibleRows : CompletionVisibleRows);
+		return FReply::Handled();
+	}
+	if (Key == EKeys::Enter || Key == EKeys::Tab)
+	{
+		AcceptCompletion(FieldIndex); // and the field stays open for more typing; Enter again applies it
+		return FReply::Handled();
+	}
+	if (Key == EKeys::Escape)
+	{
+		CloseCompletion(); // just the list: a second Escape cancels the edit, as before
+		return FReply::Handled();
+	}
+	return FReply::Unhandled();
 }
 
 #undef LOCTEXT_NAMESPACE

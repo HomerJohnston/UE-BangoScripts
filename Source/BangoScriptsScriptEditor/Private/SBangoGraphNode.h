@@ -3,8 +3,11 @@
 #include "CoreMinimal.h"
 #include "EdGraphUtilities.h"
 #include "SGraphNode.h"
+#include "BangoCompletion.h"
 
 class SEditableTextBox;
+class SMenuAnchor;
+class SVerticalBox;
 class UBangoEdGraphNode;
 struct FBangoNodeField;
 struct FBangoTextLiteral;
@@ -20,6 +23,10 @@ struct FBangoTextLiteral;
  * A localized text field (type text, written as LOCTEXT(...) or INVTEXT(...)) shows its source text, plus an arrow
  * that opens a Translated checkbox and, for a translated text, Key, Namespace and Notes rows under it, like an FText
  * property's advanced options.
+ *
+ * Typing a name in a field opens an autocomplete list under it, like the script text pane's: the variables the node
+ * can see, this script's functions, the commands and the built-ins. Up/Down pick, Enter or Tab accept, Escape closes it,
+ * Ctrl+Space opens it.
  *
  * A For node has a (Simple) / (Complex) toggle right after its title: lit, as (Complex), while the whole header is shown as one row.
  * A simple counting loop can switch between that and Var / First / Last; any other header always shows it.
@@ -52,6 +59,43 @@ private:
 	int32 EditingField = INDEX_NONE;
 	/** One edit box per field (null for fields that can't be edited). */
 	TArray<TSharedPtr<SEditableTextBox>> EditBoxes;
+
+	// ---- Autocomplete in the field being edited (FBangoCompletion) ----
+
+	/** One per edit box: where the list opens, under the box. */
+	TArray<TSharedPtr<SMenuAnchor>> CompletionAnchors;
+	/** Everything the field can use, sorted by name; gathered when the list opens. */
+	TArray<FBangoCompletionItem> CompletionItems;
+	/** The items that start with the word being typed (indices into CompletionItems). */
+	TArray<int32> CompletionShown;
+	/** Into CompletionShown, and the first one shown (the list shows CompletionVisibleRows at a time). */
+	int32 CompletionSelected = 0;
+	int32 CompletionTop = 0;
+	/** Where the word being typed starts in the box's text, or INDEX_NONE while the list is closed. */
+	int32 CompletionWordStart = INDEX_NONE;
+	/** The edit box's cursor column, from its cursor-moved event. */
+	int32 CompletionCursor = 0;
+	/** The rows, rebuilt when the shown items or the selection change. */
+	TSharedPtr<SVerticalBox> CompletionRows;
+	/** An update is queued for the next frame (the cursor may move after the text changes). */
+	bool bCompletionQueued = false;
+	bool bCompletionMayOpen = false;
+	/** Set while accepting, so the text change it makes doesn't reopen the list. */
+	bool bCompletionAccepting = false;
+	static constexpr int32 CompletionVisibleRows = 8;
+
+	bool IsCompletionOpen() const { return CompletionWordStart != INDEX_NONE; }
+	/** True for a field whose box holds code: not a plain string or text being typed (one that starts with = is code). */
+	bool FieldTakesCompletion(int32 FieldIndex, const FString& Typed) const;
+	void QueueCompletionUpdate(int32 FieldIndex, bool bMayOpen);
+	void UpdateCompletion(int32 FieldIndex, bool bMayOpen);
+	void GatherCompletionItems();
+	void CloseCompletion();
+	void MoveCompletionSelection(int32 Delta);
+	void AcceptCompletion(int32 FieldIndex);
+	void RebuildCompletionRows();
+	TSharedRef<SWidget> MakeCompletionPopup(int32 FieldIndex);
+	FReply OnEditBoxKeyDown(const FGeometry& Geometry, const FKeyEvent& KeyEvent, int32 FieldIndex);
 
 	/** Which part of a text literal a Key / Namespace / Notes row edits. */
 	enum class ETextPart : uint8 { Key, Namespace, Notes };

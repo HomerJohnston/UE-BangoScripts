@@ -474,7 +474,7 @@ namespace BangoGraphLayoutPrivate
 		// A command whose value must be used is never a node of its own: it goes in a Value, like `_s = Format(...)`.
 		if (Callee.bMustUseResult)
 		{
-			Out.Error = FString::Printf(TEXT("%s gives a value that must be used, so it can't be a node of its own. Use it in the Value of a Set node, like '_x = %s(...)'."), *Call->Name, *Call->Name);
+			Out.Error = FString::Printf(TEXT("%s gives a value that must be used, so it can't be a node of its own. Use it in the To of a Set node, like '_x = %s(...)'."), *Call->Name, *Call->Name);
 		}
 		return true;
 	}
@@ -939,8 +939,9 @@ namespace BangoGraphLayoutPrivate
 			case EBangoTokenKind::SlashAssign: Out.Title = TEXT("Divide"); break;
 			default:                           Out.Title = TEXT("Set"); break;
 			}
-			// Multiply and Divide read as "Var By 3"; the others as "Var" and "Value".
+			// Set reads as "Var To 5"; Multiply and Divide as "Var By 3"; Add To and Subtract From as "Var" and "Value".
 			const bool bScales = Tok.T[Op].Kind == EBangoTokenKind::StarAssign || Tok.T[Op].Kind == EBangoTokenKind::SlashAssign;
+			const bool bSet = Tok.T[Op].Kind == EBangoTokenKind::Assign;
 			FBangoNodeField Var = Tok.Field(TEXT("Var"), FString(), 0, Op);
 			Var.bVariable = true;
 			// The variable's type, if this node can see its declaration; the value then has the same type.
@@ -948,7 +949,7 @@ namespace BangoGraphLayoutPrivate
 			Var.VariableType = Visible ? ResolveVariableType(Var.Text, *Visible) : FString();
 			Var.InsertSuffix = TEXT(" "); // `= 5` (a new node) becomes `_x = 5`
 			Out.Fields.Add(Var);
-			FBangoNodeField Value = Tok.Field(bScales ? TEXT("By") : TEXT("Value"), Var.VariableType, Op + 1, N);
+			FBangoNodeField Value = Tok.Field(bScales ? TEXT("By") : (bSet ? TEXT("To") : TEXT("Value")), Var.VariableType, Op + 1, N);
 			Value.InsertPrefix = TEXT(" "); // `_x =` becomes `_x = 5`
 			Out.Fields.Add(Value);
 			return;

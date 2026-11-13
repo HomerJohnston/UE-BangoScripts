@@ -6,14 +6,18 @@
 #include "BangoInstance.h"
 #include "BangoScriptSubsystem.generated.h"
 
-/** Refers to a spawned script instance. A default (zero) handle refers to nothing. */
+/**
+ * Refers to a spawned script instance. A default (zero) handle refers to nothing. Ids are given out in order, from 1,
+ * by each world's UBangoScriptSubsystem, so two running scripts never share one. It's an int32, like a Bango int, so a
+ * script can keep the handle Exec gives it.
+ */
 USTRUCT(BlueprintType)
 struct BANGOSCRIPTS_API FBangoScriptHandle
 {
 	GENERATED_BODY()
 
 	UPROPERTY()
-	int64 Id = 0;
+	int32 Id = 0;
 
 	bool IsValid() const { return Id != 0; }
 };
@@ -66,6 +70,12 @@ public:
 	 * one of its globals conflicts with an existing global.
 	 */
 	FBangoScriptHandle Spawn(const FString& ScriptPath, const TArray<FBangoValue>& Args = TArray<FBangoValue>());
+
+	/**
+	 * Spawn, for callers that report errors themselves (the Exec command): an error starting the script is put in
+	 * OutError instead of being shown. An error the script hits once it's running is reported as usual.
+	 */
+	FBangoScriptHandle Spawn(const FString& ScriptPath, const TArray<FBangoValue>& Args, FString& OutError);
 
 	/**
 	 * Compiles Source, the text of a script, and starts it, like Spawn does with a file. Name is what errors show in
@@ -171,8 +181,11 @@ private:
 	};
 
 	bool MakeContext(float DeltaSeconds, FBangoExecContext& OutContext);
-	/** Starts a compiled script (Spawn and SpawnFromSource). */
-	FBangoScriptHandle StartScript(const TSharedPtr<const FBangoProgram>& Program, TSharedPtr<FRunningScript> Script, const TArray<FBangoValue>& Args);
+	/** Starts a compiled script (Spawn and SpawnFromSource). An error starting it goes in OutError if given, else it's shown. */
+	FBangoScriptHandle StartScript(const TSharedPtr<const FBangoProgram>& Program, TSharedPtr<FRunningScript> Script, const TArray<FBangoValue>& Args,
+		FString* OutError = nullptr);
+	/** The next id for a script (or a condition's run): in order, skipping any still in use if they ever wrap around. */
+	int32 AllocateId();
 	/** Compiles a script's text (SpawnFromSource, and loading one that was saved). */
 	static bool CompileFromSource(const FString& Source, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError);
 	/** Resumes one script. Returns false once it has ended (for any reason). */
@@ -196,7 +209,10 @@ private:
 	static constexpr int32 MaxEndedScripts = 32;
 
 	TMap<int64, TSharedPtr<FRunningScript>> Scripts;
-	int64 NextId = 1;
+	int32 NextId = 1;
+	/** How many scripts are being started inside each other (a script that Execs a script that Execs ...), to stop runaway recursion. */
+	int32 StartDepth = 0;
+	static constexpr int32 MaxStartDepth = 32;
 	/** Checks entity names against this world's UBangoActorRegistry. */
 	TUniquePtr<IBangoEntityResolver> EntityResolver;
 };

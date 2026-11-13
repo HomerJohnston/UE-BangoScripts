@@ -137,11 +137,21 @@ private:
 	TSharedPtr<SListView<TSharedPtr<FDeclEntry>>> GlobalList;
 	TSharedPtr<SListView<TSharedPtr<FDeclEntry>>> LocalList;
 
-	/** The left pane's foldouts: SCRIPT DATA (description, functions, inputs, globals, locals) and SCRIPTING COMMANDS. */
-	bool bScriptDataExpanded = true;
-	bool bScriptingCommandsExpanded = true;
+	/** The left pane's foldouts, open or closed. */
+	bool bDescriptionExpanded = true;
+	bool bFunctionsExpanded = true;
+	bool bInputsExpanded = true;
+	bool bGlobalsExpanded = true;
+	bool bLocalsExpanded = true;
 	/** SCRIPTING COMMANDS' list: one line per command name. */
 	TSharedPtr<SVerticalBox> CommandListBox;
+	/** The SCRIPTING COMMANDS pane on the right, shown or hidden with its Commands tab, like the text pane on the left. */
+	bool bCommandsPaneOpen = false;
+	float CommandsPaneOpenness = 0.0f;
+	bool bCommandsPaneSliding = false;
+	/** Its share of the width when it's open (the splitter beside it sets this). */
+	float CommandsPaneValue = 0.2f;
+	TSharedPtr<SButton> CommandsTabButton;
 	/** What the lists show, so they're only made again when it changes. */
 	FString DeclsShown;
 	/** After + Add: the declaration to start renaming once its row exists. */
@@ -341,6 +351,11 @@ private:
 	TSharedRef<SWidget> MakeTextTab();
 	/** Opens or closes the text pane, sliding it (bAnimate) or at once. */
 	void SetTextPaneOpen(bool bOpen, bool bAnimate);
+	/** The Commands tab on the graph's right edge, and the SCRIPTING COMMANDS pane it pulls out. */
+	TSharedRef<SWidget> MakeCommandsTab();
+	TSharedRef<SWidget> MakeCommandsPane();
+	void SetCommandsPaneOpen(bool bOpen, bool bAnimate);
+	EActiveTimerReturnType AnimateCommandsPane(double InCurrentTime, float InDeltaTime);
 	/** Every frame while the pane is sliding: moves TextPaneOpenness toward bTextPaneOpen. */
 	EActiveTimerReturnType AnimateTextPane(double InCurrentTime, float InDeltaTime);
 	/** Shows a number for each line of Text beside the script text. */
@@ -386,10 +401,10 @@ private:
 	void WriteRecoveryCopy() const;
 
 	/**
-	 * A foldout for the left pane: a header that shows or hides Body when clicked. bExpanded is the member that
-	 * says whether it's open (the splitter slot holding it reads it too).
+	 * A foldout for the left pane: a header (arrow and title) that shows or hides Body when clicked, with Extra (like a
+	 * + Add button) at its right if given. bExpanded is the member that says whether it's open.
 	 */
-	TSharedRef<SWidget> MakeFoldout(const FText& Title, bool* bExpanded, TSharedRef<SWidget> Body);
+	TSharedRef<SWidget> MakeFoldout(const FText& Title, bool* bExpanded, TSharedRef<SWidget> Body, TSharedPtr<SWidget> Extra = nullptr);
 	/** Fills SCRIPTING COMMANDS with every command's name, sorted alphabetically. */
 	void RefreshCommandList();
 

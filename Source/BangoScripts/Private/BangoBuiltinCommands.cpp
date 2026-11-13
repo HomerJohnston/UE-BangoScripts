@@ -789,6 +789,41 @@ namespace Bango
 				return EBangoCommandResult::Done;
 			});
 
+		// Exec(path, args...) -> int: spawns a script file, like UBangoScriptSubsystem::Spawn; the result is its handle's id.
+		{
+			FBangoCommand Command;
+			Command.Signature = FBangoCommandSignature::Make(TEXT("Exec")).Param(TEXT("Path"), String, TEXT("The script, like \"Quest/Intro\" for Content/Bango/Quest/Intro.bango"))
+				.Variadic(TEXT("Arg "), 1).Returns(Int).Discardable().InCategory(TEXT("Scripts"))
+				.Describe(TEXT("Starts another script, which runs on its own alongside this one. The extra values are its parameters, in order. It runs straight away until it first pauses; then this script carries on. Gives back the new script's id."));
+			Command.Start = [](FBangoCommandCall& Call)
+			{
+				if (!RequireArgs(Call, 1))
+				{
+					return EBangoCommandResult::Failed;
+				}
+				UBangoScriptSubsystem* Subsystem = UBangoScriptSubsystem::Get(Call.WorldContext);
+				if (!Subsystem)
+				{
+					return Call.Fail(TEXT("Exec needs a game world to start the script in."));
+				}
+				TArray<FBangoValue> ScriptArgs;
+				for (int32 i = 1; i < Call.Args.Num(); ++i)
+				{
+					ScriptArgs.Add(Call.Args[i]);
+				}
+				const FString Path = Call.Args[0].GetString();
+				FString Error;
+				const FBangoScriptHandle Handle = Subsystem->Spawn(Path, ScriptArgs, Error);
+				if (!Handle.IsValid())
+				{
+					return Call.Fail(FString::Printf(TEXT("Couldn't start '%s': %s"), *Path, Error.IsEmpty() ? TEXT("it didn't start.") : *Error));
+				}
+				Call.Result = FBangoValue::MakeInt(Handle.Id);
+				return EBangoCommandResult::Done;
+			};
+			Add(Commands, Command);
+		}
+
 		// Time() -> float: the world's time, GetWorld()->GetTimeSeconds() (seconds since the level started; pauses with the game).
 		{
 			FBangoCommand Command;

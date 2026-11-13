@@ -14,7 +14,7 @@
 namespace BangoScriptSubsystemPrivate
 {
 	constexpr int32 SaveMagic = 0x4F474E42; // "BNGO"
-	constexpr int32 SaveVersion = 3; // 2: ints are 32-bit; 3: scripts spawned from text are saved with their text
+	constexpr int32 SaveVersion = 4; // 2: ints are 32-bit; 3: scripts spawned from text are saved with their text; 4: script ids are 32-bit
 
 	class FWorldEntityResolver : public IBangoEntityResolver
 	{
@@ -128,7 +128,7 @@ void UBangoScriptSubsystem::ReportFailure(const FRunningScript& Script)
 	const FString Message = Script.Instance.GetError().ToString();
 	Bango::ReportError(Message);
 	FBangoScriptHandle Handle;
-	Handle.Id = Script.Instance.GetId();
+	Handle.Id = (int32)Script.Instance.GetId();
 	OnScriptFailed.Broadcast(Handle, Message);
 }
 
@@ -217,6 +217,39 @@ void UBangoScriptSubsystem::ReloadChangedScripts()
 	}
 }
 
+FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FString& ScriptPath, const TArray<FBangoValue>& Args, FString& OutError)
+{
+	OutError.Reset();
+	FBangoModule& Module = FBangoModule::Get();
+	TSharedPtr<const FBangoProgram> Program;
+	FString DisplayPath;
+	if (!Module.GetScriptCache().GetProgram(ScriptPath, Module.GetCommands(), Program, DisplayPath, OutError))
+	{
+		return FBangoScriptHandle();
+	}
+	TSharedPtr<FRunningScript> Script = MakeShared<FRunningScript>();
+	Script->Path = DisplayPath;
+	return StartScript(Program, Script, Args, &OutError);
+}
+
+int32 UBangoScriptSubsystem::AllocateId()
+{
+	// Two billion ids won't run out, but if they ever did, start again from 1 and skip any still running.
+	for (int32 Tries = 0; Tries < 1000; ++Tries)
+	{
+		if (NextId <= 0 || NextId == MAX_int32)
+		{
+			NextId = 1;
+		}
+		const int32 Id = NextId++;
+		if (!Scripts.Contains(Id))
+		{
+			return Id;
+		}
+	}
+	return NextId++;
+}
+
 FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FString& ScriptPath, const TArray<FBangoValue>& Args)
 {
 	FBangoModule& Module = FBangoModule::Get();
@@ -263,29 +296,51 @@ FBangoScriptHandle UBangoScriptSubsystem::SpawnFromSource(const FString& Source,
 	return StartScript(Program, Script, Args);
 }
 
-FBangoScriptHandle UBangoScriptSubsystem::StartScript(const TSharedPtr<const FBangoProgram>& Program, TSharedPtr<FRunningScript> Script, const TArray<FBangoValue>& Args)
+FBangoScriptHandle UBangoScriptSubsystem::StartScript(const TSharedPtr<const FBangoProgram>& Program, TSharedPtr<FRunningScript> Script, const TArray<FBangoValue>& Args,
+	FString* OutError)
 {
+	const auto Report = [OutError](const FString& Message)
+	{
+		if (OutError)
+		{
+			*OutError = Message;
+		}
+		else
+		{
+			Bango::ReportError(Message);
+		}
+	};
 	FBangoModule& Module = FBangoModule::Get();
 	UBangoGlobalsSubsystem* Globals = UBangoGlobalsSubsystem::Get(this);
 	if (!Globals)
 	{
-		Bango::ReportError(FString::Printf(TEXT("Can't spawn '%s': there is no game instance for global variables."), *Script->Path));
+		Report(FString::Printf(TEXT("Can't spawn '%s': there is no game instance for global variables."), *Script->Path));
+		return FBangoScriptHandle();
+	}
+	if (StartDepth >= MaxStartDepth)
+	{
+		// A new script runs straight away, so a script that starts itself would start copies forever, all inside each other.
+		Report(FString::Printf(TEXT("Can't spawn '%s': %d scripts are already being started inside each other (each spawned by the one before, before it paused). Is a script spawning itself?"),
+			*Script->Path, MaxStartDepth));
 		return FBangoScriptHandle();
 	}
 
 #if WITH_EDITOR
 	Script->Instance.SetRecordTrail(true); // for the editor's debugger
 #endif
-	const int64 Id = NextId++;
+	const int32 Id = AllocateId();
 	FBangoRuntimeError StartError;
 	if (!Script->Instance.Start(Program, Module.GetCommands(), Globals->GetStore(), Id, StartError, Args))
 	{
-		Bango::ReportError(StartError.ToString());
+		Report(StartError.ToString());
 		return FBangoScriptHandle();
 	}
 
 	Scripts.Add(Id, Script);
-	if (!ResumeScript(*Script, 0.0f))
+	++StartDepth;
+	const bool bStillRunning = ResumeScript(*Script, 0.0f);
+	--StartDepth;
+	if (!bStillRunning)
 	{
 		Scripts.Remove(Id);
 	}
@@ -334,7 +389,7 @@ bool UBangoScriptSubsystem::RunCondition(const TSharedPtr<const FBangoProgram>& 
 
 	FBangoInstance Instance;
 	FBangoRuntimeError StartError;
-	if (!Instance.Start(Program, Module.GetCommands(), Globals->GetStore(), NextId++, StartError, Args))
+	if (!Instance.Start(Program, Module.GetCommands(), Globals->GetStore(), AllocateId(), StartError, Args))
 	{
 		OutError = StartError.ToString();
 		return false;

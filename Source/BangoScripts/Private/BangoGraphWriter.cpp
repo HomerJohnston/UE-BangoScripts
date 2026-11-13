@@ -87,7 +87,7 @@ namespace BangoGraphWriterPrivate
 			}
 			if (Doc.Main.Locals.Num() > 0)
 			{
-				AddHeading(Bango::GetScriptVarsHeadingComment());
+				AddHeading(Bango::GetLocalVarsHeadingComment());
 				WriteDecls(Doc.Main.Locals, false, 0);
 			}
 

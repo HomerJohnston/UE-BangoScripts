@@ -994,9 +994,9 @@ namespace Bango
 		return TEXT(" ============ GLOBAL VARS =====================");
 	}
 
-	const TCHAR* GetScriptVarsHeadingComment()
+	const TCHAR* GetLocalVarsHeadingComment()
 	{
-		return TEXT(" ============ SCRIPT VARS =====================");
+		return TEXT(" ============ LOCAL VARS ======================");
 	}
 
 	const TCHAR* GetScriptBodyHeadingComment()

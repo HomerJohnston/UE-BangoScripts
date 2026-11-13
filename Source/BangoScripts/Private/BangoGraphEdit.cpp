@@ -189,7 +189,7 @@ namespace Bango
 		if (!CanEditField(Layout, FieldIndex))
 		{
 			OutError = Field.bLocked ? TEXT("Fill in the values before this one first.")
-				: Field.bReadOnly ? TEXT("A parameter's default is edited in the INPUTS panel.")
+				: Field.bReadOnly ? TEXT("A parameter's default is edited in the SCRIPT INPUT panel.")
 				: TEXT("This can't be edited here.");
 			return false;
 		}

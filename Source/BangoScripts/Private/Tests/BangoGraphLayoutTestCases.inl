@@ -69,9 +69,9 @@ static const FBangoLayoutTestCase GBangoLayoutTestCases[] =
 	{ EBangoGraphNodeKind::Call, false, TEXT("Speak(\"x\")"), TEXT("Speak (Command) | Target <entity>: - | text <string>: `\"x\"`") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("AwaitSpeak()"), TEXT("AwaitSpeak (Command) | pause <float>: -?") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("QuitGame()"), TEXT("QuitGame (Command)") },
-	{ EBangoGraphNodeKind::Call, false, TEXT("Random(1.0, 2.0)"), TEXT("Random (Command) | min <float>: `1.0` | max <float>: `2.0` !! Random gives a value that must be used, so it can't be a node of its own. Use it in the Value of a Set node, like '_x = Random(...)'.") },
-	{ EBangoGraphNodeKind::Assign, false, TEXT("_x = boss GetName()"), TEXT("Set (Generic) | Var (x): `_x` | Value: `boss GetName()`") },
-	{ EBangoGraphNodeKind::Assign, false, TEXT("_a[F(1)] = Sleep(2.0)"), TEXT("Set (Generic) | Var (x): `_a[F(1)]` | Value: `Sleep(2.0)`") },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Random(1.0, 2.0)"), TEXT("Random (Command) | min <float>: `1.0` | max <float>: `2.0` !! Random gives a value that must be used, so it can't be a node of its own. Use it in the To of a Set node, like '_x = Random(...)'.") },
+	{ EBangoGraphNodeKind::Assign, false, TEXT("_x = boss GetName()"), TEXT("Set (Generic) | Var (x): `_x` | To: `boss GetName()`") },
+	{ EBangoGraphNodeKind::Assign, false, TEXT("_a[F(1)] = Sleep(2.0)"), TEXT("Set (Generic) | Var (x): `_a[F(1)]` | To: `Sleep(2.0)`") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(Format(\"{0}\", 1))"), TEXT("Hint (Command) | text <string>: `Format(\"{0}\", 1)`") },
 
 	// Problems the node shows straight away
@@ -80,7 +80,7 @@ static const FBangoLayoutTestCase GBangoLayoutTestCases[] =
 	{ EBangoGraphNodeKind::Call, false, TEXT("Foo(1)"), TEXT("Foo (Generic) | Call: `Foo(1)` !! Unknown command or function 'Foo'.") },
 
 	// Expressions around a call are generic nodes
-	{ EBangoGraphNodeKind::Assign, false, TEXT("_x = Random(1.0, 2.0) * 2"), TEXT("Set (Generic) | Var (x): `_x` | Value: `Random(1.0, 2.0) * 2`") },
+	{ EBangoGraphNodeKind::Assign, false, TEXT("_x = Random(1.0, 2.0) * 2"), TEXT("Set (Generic) | Var (x): `_x` | To: `Random(1.0, 2.0) * 2`") },
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_x += Random(1.0, 2.0)"), TEXT("Add To (Generic) | Var (x): `_x` | Value: `Random(1.0, 2.0)`") },
 
 	// ---- Script functions (Twice is defined in the test document) ----
@@ -91,10 +91,10 @@ static const FBangoLayoutTestCase GBangoLayoutTestCases[] =
 	{ EBangoGraphNodeKind::Call, false, TEXT("_a Push(3)"), TEXT("Push (ArrayCommand) | Target (x array) <array>: `_a` | Value <element>: `3`") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("_g[1] InsertAt(4, 0)"), TEXT("InsertAt (ArrayCommand) | Target (x array) <array>: `_g[1]` | Value <element>: `4` | Index <int>: `0`") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("_a Pop()"), TEXT("Pop (ArrayCommand) | Target (x array) <array>: `_a`") },
-	{ EBangoGraphNodeKind::Assign, false, TEXT("_first = _a RemoveAt(0)"), TEXT("Set (Generic) | Var (x): `_first` | Value: `_a RemoveAt(0)`") },
+	{ EBangoGraphNodeKind::Assign, false, TEXT("_first = _a RemoveAt(0)"), TEXT("Set (Generic) | Var (x): `_first` | To: `_a RemoveAt(0)`") },
 
 	// ---- Other kinds ----
-	{ EBangoGraphNodeKind::Assign, false, TEXT("_x = 1"), TEXT("Set (Generic) | Var (x): `_x` | Value: `1`") },
+	{ EBangoGraphNodeKind::Assign, false, TEXT("_x = 1"), TEXT("Set (Generic) | Var (x): `_x` | To: `1`") },
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_g[1][2] *= 3"), TEXT("Multiply (Generic) | Var (x): `_g[1][2]` | By: `3`") },
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_d /= 2.0"), TEXT("Divide (Generic) | Var (x): `_d` | By: `2.0`") },
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_n -= 1"), TEXT("Subtract From (Generic) | Var (x): `_n` | Value: `1`") },
@@ -132,7 +132,7 @@ static const FBangoLayoutTestCase GBangoLayoutTestCases[] =
 	{ EBangoGraphNodeKind::Entry, true, TEXT("void Greet()"), TEXT("Greet (FunctionEntry) | Returns: `void`") },
 
 	// Values that must be used: such a command can't be a node of its own. Others can.
-	{ EBangoGraphNodeKind::Call, false, TEXT("Count(_a)"), TEXT("Count (ArrayCommand) | Array <array>: `_a` !! Count gives a value that must be used, so it can't be a node of its own. Use it in the Value of a Set node, like '_x = Count(...)'.") },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Count(_a)"), TEXT("Count (ArrayCommand) | Array <array>: `_a` !! Count gives a value that must be used, so it can't be a node of its own. Use it in the To of a Set node, like '_x = Count(...)'.") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("AskChoice(\"A\", \"B\")"), TEXT("AskChoice (Command) | a <string>: `\"A\"` | b <string>: `\"B\"`") },
 
 	// Text that doesn't lex
@@ -582,21 +582,21 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 		struct FVarCase { int64 NodeID; const TCHAR* Expected; };
 		const FVarCase VarCases[] =
 		{
-			{ 3,  TEXT("Set (Generic) | Var (x string): `_title` | Value <string>: `\"y\"`") },
+			{ 3,  TEXT("Set (Generic) | Var (x string): `_title` | To <string>: `\"y\"`") },
 			{ 4,  TEXT("Multiply (Generic) | Var (x float): `speed` | By <float>: `2`") },
 			{ 7,  TEXT("Add To (Generic) | Var (x int): `_n` | Value <int>: `2`") },
-			{ 9,  TEXT("Set (Generic) | Var (x int): `_n` | Value <int>: `4`") },
-			{ 10, TEXT("Set (Generic) | Var (x): `_name` | Value: `3`") },
-			{ 12, TEXT("Set (Generic) | Var (x string): `_names[_i]` | Value <string>: `\"z\"`") },
+			{ 9,  TEXT("Set (Generic) | Var (x int): `_n` | To <int>: `4`") },
+			{ 10, TEXT("Set (Generic) | Var (x): `_name` | To: `3`") },
+			{ 12, TEXT("Set (Generic) | Var (x string): `_names[_i]` | To <string>: `\"z\"`") },
 			{ 13, TEXT("For Each (Generic) | Variable (x string): `_name` | Array <array>: `_names`") },
-			{ 14, TEXT("Set (Generic) | Var (x string): `_name` | Value <string>: `\"q\"`") },
-			{ 16, TEXT("Set (Generic) | Var (x): `other` | Value: `1`") },
-			{ 18, TEXT("Set (Generic) | Var (x float): `_pos.z` | Value <float>: `5`") },
+			{ 14, TEXT("Set (Generic) | Var (x string): `_name` | To <string>: `\"q\"`") },
+			{ 16, TEXT("Set (Generic) | Var (x): `other` | To: `1`") },
+			{ 18, TEXT("Set (Generic) | Var (x float): `_pos.z` | To <float>: `5`") },
 			{ 19, TEXT("Add To (Generic) | Var (x vector3): `_pos` | Value <vector3>: `[0, 0, 1]`") },
-			{ 30, TEXT("Set (Generic) | Var (x int): `_count` | Value <int>: `5`") },
-			{ 20, TEXT("Set (Generic) | Var (x int[]): `_g[0]` | Value <int[]>: `[1]`") },
-			{ 21, TEXT("Set (Generic) | Var (x float): `speed` | Value <float>: `2.0`") },
-			{ 22, TEXT("Set (Generic) | Var (x): `_title` | Value: `\"no\"`") },
+			{ 30, TEXT("Set (Generic) | Var (x int): `_count` | To <int>: `5`") },
+			{ 20, TEXT("Set (Generic) | Var (x int[]): `_g[0]` | To <int[]>: `[1]`") },
+			{ 21, TEXT("Set (Generic) | Var (x float): `speed` | To <float>: `2.0`") },
+			{ 22, TEXT("Set (Generic) | Var (x): `_title` | To: `\"no\"`") },
 		};
 		FBangoGraphDocument VarDoc;
 		if (!Bango::BuildGraph(Source, TEXT("vars.bango"), VarDoc, Error))
@@ -655,7 +655,7 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 			if (Node.NodeID == 3)
 			{
 				const FString Got = BangoDescribeLayout(Bango::GetNodeLayout(Node, false, RenamedContext));
-				if (!Got.Equals(TEXT("Set (Generic) | Var (x int): `_title` | Value <int>: `\"y\"`"), ESearchCase::CaseSensitive))
+				if (!Got.Equals(TEXT("Set (Generic) | Var (x int): `_title` | To <int>: `\"y\"`"), ESearchCase::CaseSensitive))
 				{
 					OutFailures.Add(FString(TEXT("variable types: after retyping the declaration: ")) + Got);
 				}
