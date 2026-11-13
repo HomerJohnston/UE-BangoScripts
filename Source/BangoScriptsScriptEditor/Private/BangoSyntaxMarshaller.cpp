@@ -56,6 +56,37 @@ namespace BangoSyntaxMarshallerPrivate
 		FLinearColor Color;
 	};
 
+	/** Draws nothing: records where its characters are, for FBangoSyntaxMarshaller::SetProbe. */
+	class FBangoProbeHighlighter : public ISlateLineHighlighter
+	{
+	public:
+		explicit FBangoProbeHighlighter(const TSharedRef<FBangoTextProbe>& InProbe)
+			: Probe(InProbe)
+		{
+		}
+
+		virtual int32 OnPaint(const FPaintArgs& Args, const FTextLayout::FLineView& Line, const FVector2D Offset, const float Width,
+			const FTextBlockStyle& DefaultStyle, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect,
+			FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
+		{
+			// The same position the bracket boxes are drawn at, in the text widget's space, then in desktop space.
+			const float InverseScale = Inverse(AllottedGeometry.Scale);
+			const FVector2D Location(Line.Offset.X + Offset.X, Line.Offset.Y + Offset.Y);
+			const FVector2D LocalTopLeft = TransformPoint(InverseScale, Location);
+			const FVector2D LocalSize = TransformVector(InverseScale, FVector2D(Width, FMath::Max(Line.Size.Y, Line.TextHeight)));
+			const FVector2D AbsoluteTopLeft = AllottedGeometry.LocalToAbsolute(LocalTopLeft);
+			Probe->AbsolutePosition = AbsoluteTopLeft;
+			Probe->AbsoluteSize = FVector2D(AllottedGeometry.LocalToAbsolute(LocalTopLeft + LocalSize)) - AbsoluteTopLeft;
+			Probe->bValid = true;
+			return LayerId;
+		}
+
+	private:
+		TSharedRef<FBangoTextProbe> Probe;
+	};
+
+	static constexpr int32 ProbeZOrder = -7;
+
 	/** Above the selection (-10) and search results (-9), below the text. */
 	static constexpr int32 BracketHighlightZOrder = -8;
 
@@ -181,6 +212,45 @@ FBangoSyntaxMarshaller::FBangoSyntaxMarshaller(TSharedRef<const FBangoSyntaxStyl
 	using namespace BangoSyntaxMarshallerPrivate;
 	MatchHighlighter = MakeShared<FBangoBracketHighlighter>(FLinearColor(1.0f, 1.0f, 1.0f, 0.16f));
 	UnmatchedHighlighter = MakeShared<FBangoBracketHighlighter>(FLinearColor(0.9f, 0.1f, 0.1f, 0.45f));
+	ProbeHighlighter = MakeShared<FBangoProbeHighlighter>(Probe);
+}
+
+void FBangoSyntaxMarshaller::SetProbe(int32 Line, int32 BeginColumn, int32 EndColumn)
+{
+	// A word growing as it's typed keeps its top-left corner, so only a new start forgets where it was.
+	if (Line != ProbeLine || ProbeRange.BeginIndex != BeginColumn)
+	{
+		Probe->bValid = false;
+	}
+	ProbeLine = Line;
+	ProbeRange = FTextRange(BeginColumn, FMath::Max(EndColumn, BeginColumn));
+	UpdateProbeHighlight();
+}
+
+void FBangoSyntaxMarshaller::ClearProbe()
+{
+	ProbeLine = INDEX_NONE;
+	Probe->bValid = false;
+	UpdateProbeHighlight();
+}
+
+void FBangoSyntaxMarshaller::UpdateProbeHighlight()
+{
+	if (LastLayout == nullptr)
+	{
+		return;
+	}
+	for (const FTextLineHighlight& Highlight : ProbeHighlights)
+	{
+		LastLayout->RemoveLineHighlight(Highlight);
+	}
+	ProbeHighlights.Reset();
+	if (ProbeLine >= 0 && ProbeLine < LastLayout->GetLineModels().Num() && !ProbeRange.IsEmpty())
+	{
+		FTextLineHighlight Highlight(ProbeLine, ProbeRange, BangoSyntaxMarshallerPrivate::ProbeZOrder, ProbeHighlighter.ToSharedRef());
+		LastLayout->AddLineHighlight(Highlight);
+		ProbeHighlights.Add(Highlight);
+	}
 }
 
 void FBangoSyntaxMarshaller::SetCursor(const FBangoTextPosition& InCursor)
@@ -347,6 +417,8 @@ void FBangoSyntaxMarshaller::SetText(const FString& SourceString, FTextLayout& T
 	LastLayout = &TargetTextLayout;
 	BracketHighlights.Reset();
 	UpdateBracketHighlights();
+	ProbeHighlights.Reset();
+	UpdateProbeHighlight();
 }
 
 void FBangoSyntaxMarshaller::GetText(FString& TargetString, const FTextLayout& SourceTextLayout)

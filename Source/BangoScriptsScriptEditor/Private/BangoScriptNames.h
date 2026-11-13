@@ -18,6 +18,18 @@
 #include "CoreMinimal.h"
 #include "BangoLineTokenizer.h"
 
+/** A name a line can use, for autocomplete: a parameter, local or loop variable of its graph, a global, or a function. */
+struct FBangoVisibleName
+{
+	FString Name;
+
+	/** The declared type (`int`, `string[]`), or empty if unknown (a forEach loop's variable). For a function, its signature. */
+	FString Type;
+
+	/** Parameter, Local, Global or Function. */
+	EBangoSyntaxKind Kind = EBangoSyntaxKind::Local;
+};
+
 class FBangoScriptNames
 {
 public:
@@ -42,6 +54,12 @@ public:
 	/** The entry line of the main graph (FunctionName empty) or of the function with that name, or INDEX_NONE. */
 	int32 FindEntryLine(const FString& FunctionName) const;
 
+	/**
+	 * The names a line can use: its graph's parameters and locals (loop variables included), the file's globals that
+	 * aren't hidden by them, and the file's functions. In that order.
+	 */
+	void GetVisibleNames(int32 LineIndex, TArray<FBangoVisibleName>& OutNames) const;
+
 	/** Gives each Global token on a line its kind from Classify. */
 	void RefineTokens(int32 LineIndex, const FString& Line, TArray<FBangoSyntaxToken>& InOutTokens) const;
 
@@ -49,13 +67,17 @@ private:
 	struct FGraphNames
 	{
 		TArray<FString> Params;
+		TArray<FString> ParamTypes;
 		TArray<FString> Locals;
+		TArray<FString> LocalTypes;
 		FString FunctionName;
+		FString ReturnType;
 		int32 EntryLine = INDEX_NONE;
 	};
 
 	static bool Contains(const TArray<FString>& Names, const FString& Name);
 	static void AddUnique(TArray<FString>& Names, const FString& Name);
+	static void AddUnique(TArray<FString>& Names, TArray<FString>& Types, const FString& Name, const FString& Type);
 
 	/** Graph 0 is the main graph; then one per function, in file order. */
 	TArray<FGraphNames> Graphs;
@@ -64,4 +86,5 @@ private:
 	TArray<int32> LineGraph;
 
 	TArray<FString> Globals;
+	TArray<FString> GlobalTypes;
 };

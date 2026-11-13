@@ -428,4 +428,92 @@ bool FBangoEditingAidsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// ---- Autocomplete (FBangoCompletion) ----
+
+#include "BangoCompletion.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoCompletionTest, "Bango.ScriptEditor.TextEditor.Completion",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FBangoCompletionTest::RunTest(const FString& Parameters)
+{
+	using namespace BangoTextMetadataTests; // UV: '>' is a tab, '|' a line break
+
+	// The word before the cursor: where it starts, or INDEX_NONE where nothing should be offered.
+	auto Word = [this](const TCHAR* Line, int32 Column, int32 WantStart)
+	{
+		int32 Start = INDEX_NONE;
+		const bool bFound = FBangoCompletion::FindWordBeforeCursor(UV(Line), Column, Start);
+		const int32 Got = bFound ? Start : INDEX_NONE;
+		if (Got != WantStart)
+		{
+			AddError(FString::Printf(TEXT("FindWordBeforeCursor('%s', %d): want %d, got %d"), Line, Column, WantStart, Got));
+		}
+	};
+	Word(TEXT("Lo"), 2, 0);
+	Word(TEXT(">Log(co"), 7, 5);
+	Word(TEXT(">x = Ra"), 7, 5);
+	Word(TEXT(">"), 1, INDEX_NONE);              // nothing typed
+	Word(TEXT("x = 12"), 6, INDEX_NONE);         // a number
+	Word(TEXT("@jo"), 3, INDEX_NONE);            // a Bango ID
+	Word(TEXT("_pos.x"), 6, INDEX_NONE);         // a vector part
+	Word(TEXT("Log(\"He"), 7, INDEX_NONE);       // in a string
+	Word(TEXT("// Lo"), 5, INDEX_NONE);          // in a comment
+	Word(TEXT("int coun"), 8, INDEX_NONE);       // a name being declared
+	Word(TEXT("goto Hu"), 7, INDEX_NONE);        // a label
+	Word(TEXT("questLog Pu"), 11, 9);            // a targeted command
+	Word(TEXT("//~ Lo"), 6, 4);                  // a disconnected line
+
+	FBangoMetadataTracker Tracker;
+	Tracker.Reset(UV(TEXT("#define params (entity speaker, int rounds = 3)|global int foundThings;|global string count;|int count = 0;|fo|function int AddScore(int amount,|>entity who)|{|>am|};")));
+	TArray<TArray<FBangoSyntaxToken>> Tokens;
+	Tokens.SetNum(Tracker.GetLines().Num());
+	for (int32 I = 0; I < Tracker.GetLines().Num(); ++I)
+	{
+		FBangoLineTokenizer::TokenizeLine(FStringView(Tracker.GetLines()[I]), Tokens[I]);
+	}
+	FBangoScriptNames Names;
+	Names.Build(Tracker.GetLines(), Tokens);
+
+	TArray<FBangoCompletionItem> Commands;
+	const TCHAR* const CommandNames[] = { TEXT("Log"), TEXT("Format"), TEXT("foo") };
+	for (const TCHAR* Name : CommandNames)
+	{
+		FBangoCompletionItem Item;
+		Item.Name = Name;
+		Item.Kind = EBangoCompletionKind::Command;
+		Item.bCallable = true;
+		Commands.Add(Item);
+	}
+
+	// In the main graph (line 5): "fo" is the command foo, the command Format and the global foundThings, by name.
+	TArray<FBangoCompletionItem> Items;
+	FBangoCompletion::GatherItems(Names, 4, Commands, Items);
+	TArray<int32> Shown;
+	FBangoCompletion::Filter(Items, TEXT("fo"), Shown);
+	FString Got;
+	for (const int32 Index : Shown)
+	{
+		Got += Items[Index].Name + TEXT(" ");
+	}
+	TestEqual(TEXT("'fo' in the main graph"), Got, FString(TEXT("foo Format foundThings ")));
+
+	// The local count hides the global count; the function is listed with its signature.
+	const FBangoCompletionItem* Count = Items.FindByPredicate([](const FBangoCompletionItem& Item) { return Item.Name.Equals(TEXT("count"), ESearchCase::CaseSensitive); });
+	TestTrue(TEXT("count is the local"), Count != nullptr && Count->Kind == EBangoCompletionKind::Local && Count->Detail.Equals(TEXT("int"), ESearchCase::CaseSensitive));
+	const FBangoCompletionItem* AddScore = Items.FindByPredicate([](const FBangoCompletionItem& Item) { return Item.Name.Equals(TEXT("AddScore"), ESearchCase::CaseSensitive); });
+	TestTrue(TEXT("AddScore is a function"), AddScore != nullptr && AddScore->Kind == EBangoCompletionKind::Function && AddScore->bCallable
+		&& AddScore->Detail.Equals(TEXT("int AddScore(int amount, entity who)"), ESearchCase::CaseSensitive));
+
+	// In the function (line 9): its parameter, but not the script's.
+	FBangoCompletion::GatherItems(Names, 8, Commands, Items);
+	FBangoCompletion::Filter(Items, TEXT("am"), Shown);
+	TestTrue(TEXT("'am' in the function is its parameter"), Shown.Num() == 1 && Items[Shown[0]].Name.Equals(TEXT("amount"), ESearchCase::CaseSensitive)
+		&& Items[Shown[0]].Kind == EBangoCompletionKind::Parameter);
+	FBangoCompletion::Filter(Items, TEXT("spea"), Shown);
+	TestEqual(TEXT("The script's parameter isn't visible in a function"), Shown.Num(), 0);
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

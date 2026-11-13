@@ -13,6 +13,17 @@
 class FBangoSyntaxStyle;
 class ISlateLineHighlighter;
 
+/**
+ * Where some characters were last drawn, in paint space (Slate's "absolute" space while painting, which is relative to
+ * the window). Filled while the text is painted; convert it with a widget's GetPaintSpaceGeometry().
+ */
+struct FBangoTextProbe
+{
+	bool bValid = false;
+	FVector2D AbsolutePosition = FVector2D::ZeroVector;
+	FVector2D AbsoluteSize = FVector2D::ZeroVector;
+};
+
 class FBangoSyntaxMarshaller : public FBaseTextLayoutMarshaller
 {
 public:
@@ -37,6 +48,14 @@ public:
 	 */
 	void SetCursor(const FBangoTextPosition& InCursor);
 
+	/**
+	 * Watches where characters BeginColumn to EndColumn of a line are drawn (for placing the autocomplete list beside
+	 * the word being typed). Nothing is drawn; GetProbe says where they were, once the text has been painted.
+	 */
+	void SetProbe(int32 Line, int32 BeginColumn, int32 EndColumn);
+	void ClearProbe();
+	const FBangoTextProbe& GetProbe() const { return *Probe; }
+
 	/** The text's locals, parameters, globals and graphs, as of the last layout. */
 	const FBangoScriptNames& GetScriptNames() const { return ScriptNames; }
 
@@ -53,6 +72,9 @@ protected:
 private:
 	/** Puts the bracket boxes on the layout for the current cursor, replacing the ones there. */
 	void UpdateBracketHighlights();
+
+	/** Puts the probe's highlight on the layout, replacing the one there. */
+	void UpdateProbeHighlight();
 
 	TSharedRef<const FBangoSyntaxStyle> Style;
 
@@ -72,6 +94,12 @@ private:
 	TArray<FTextLineHighlight> BracketHighlights;
 	TSharedPtr<ISlateLineHighlighter> MatchHighlighter;
 	TSharedPtr<ISlateLineHighlighter> UnmatchedHighlighter;
+
+	TSharedRef<FBangoTextProbe> Probe = MakeShared<FBangoTextProbe>();
+	TSharedPtr<ISlateLineHighlighter> ProbeHighlighter;
+	int32 ProbeLine = INDEX_NONE;
+	FTextRange ProbeRange;
+	TArray<FTextLineHighlight> ProbeHighlights;
 
 	int32 TabSize = 4;
 	bool bMetadataIsError = false;

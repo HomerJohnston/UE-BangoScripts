@@ -15,12 +15,16 @@
 #include "Styling/SlateTypes.h"
 #include "Widgets/Text/SMultiLineEditableText.h"
 #include "BangoTextMetadata.h"
+#include "BangoCompletion.h"
 
 class FBangoSyntaxMarshaller;
 class FBangoSyntaxStyle;
 class SScrollBar;
 class SBangoScrollFollower;
 class SButton;
+class ITableRow;
+class STableViewBase;
+template <typename ItemType> class SListView;
 class STextBlock;
 struct FTextLocation;
 
@@ -95,6 +99,9 @@ public:
 	bool IsMetadataShown() const { return bMetadataShown; }
 
 	// SWidget
+	/** Opens, filters or closes the autocomplete list once the text and cursor have settled. */
+	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
+
 	/** The mouse wheel over the gutter or the divider scrolls the text too. */
 	virtual FReply OnMouseWheel(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 
@@ -118,6 +125,21 @@ private:
 
 	/** Shows a line's metadata in white in the gutter. */
 	void UpdateGutterHighlight(int32 Line);
+
+	// Autocomplete (FBangoCompletion)
+	/** Opens the list for the word before the cursor (only if bMayOpen), filters it, or closes it. */
+	void UpdateCompletion(bool bMayOpen);
+	/** Everything the line can use: its graph's names, the file's globals and functions, the commands and built-ins. */
+	void GatherCompletionItems(int32 Line);
+	void CloseCompletion();
+	void MoveCompletionSelection(int32 Delta);
+	/** Replaces the word with the selected entry's name (and '(' for a call). */
+	void AcceptCompletion();
+	TSharedPtr<FBangoCompletionItem> GetSelectedCompletion() const;
+	/** Where the list goes: under the word being typed (FBangoSyntaxMarshaller::SetProbe), or above it near the bottom. */
+	FMargin GetCompletionPadding() const;
+	TSharedRef<SWidget> MakeCompletionPopup();
+	TSharedRef<ITableRow> MakeCompletionRow(TSharedPtr<FBangoCompletionItem> Item, const TSharedRef<STableViewBase>& OwnerTable);
 	void HandleTextChanged(const FText& NewVisibleText);
 	void HandleTextCommitted(const FText& NewVisibleText, ETextCommit::Type CommitType);
 
@@ -161,6 +183,25 @@ private:
 	/** The cursor's line's metadata, in white, over the gutter's grey text. */
 	TSharedPtr<STextBlock> GutterHighlightText;
 	int32 GutterHighlightLine = INDEX_NONE;
+
+	/** Autocomplete: the list's entries, the ones shown for the word typed so far, and where that word is. */
+	TArray<FBangoCompletionItem> CompletionItems;
+	TArray<TSharedPtr<FBangoCompletionItem>> CompletionItemPtrs;
+	TArray<TSharedPtr<FBangoCompletionItem>> CompletionShown;
+	TSharedPtr<SListView<TSharedPtr<FBangoCompletionItem>>> CompletionList;
+	TSharedPtr<SWidget> CompletionPopup;
+	bool bCompletionOpen = false;
+	int32 CompletionLine = INDEX_NONE;
+	int32 CompletionStart = INDEX_NONE;
+	/** The text or cursor changed: update the list next Tick. */
+	bool bCompletionDirty = false;
+	/** A name's character was typed since the last update, so the list may open. */
+	bool bTypedNameChar = false;
+	/** Tab put in an entry: the tab character that follows it isn't typed. */
+	bool bSwallowTab = false;
+	static constexpr float CompletionWidth = 460.0f;
+	static constexpr float CompletionRowHeight = 18.0f;
+	static constexpr int32 CompletionVisibleRows = 8;
 
 	/** Whether the gutter is shown (the divider toggles it). */
 	bool bMetadataShown = true;

@@ -21,6 +21,11 @@
 #include "BangoEditingAids.h"
 #include "BangoSyntaxStyle.h"
 #include "SBangoScrollFollower.h"
+#include "Bango.h"
+#include "BangoCommand.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Widgets/Views/SListView.h"
+#include "Widgets/Views/STableRow.h"
 
 void SBangoTextEditor::Construct(const FArguments& InArgs)
 {
@@ -61,167 +66,182 @@ void SBangoTextEditor::Construct(const FArguments& InArgs)
 
 	ChildSlot
 	[
-		SNew(SHorizontalBox)
+		SNew(SOverlay)
 
-		+ SHorizontalBox::Slot()
-		.FillWidth(1.0f)
+		+ SOverlay::Slot()
 		[
-			// The frame, like a text box's, around the text, the divider and the gutter.
-			SNew(SBorder)
-			.BorderImage(this, &SBangoTextEditor::GetFrameBrush)
-			.BorderBackgroundColor(SyntaxStyle->GetBackgroundColor())
-			.Padding(0.0f)
+			SNew(SHorizontalBox)
+
+			+ SHorizontalBox::Slot()
+			.FillWidth(1.0f)
 			[
-				SNew(SHorizontalBox)
-
-				// The text, with its horizontal scrollbar under it.
-				+ SHorizontalBox::Slot()
-				.FillWidth(1.0f)
+				// The frame, like a text box's, around the text, the divider and the gutter.
+				SNew(SBorder)
+				.BorderImage(this, &SBangoTextEditor::GetFrameBrush)
+				.BorderBackgroundColor(SyntaxStyle->GetBackgroundColor())
+				.Padding(0.0f)
 				[
-					SNew(SBox)
-					.Padding(TextPadding)
+					SNew(SHorizontalBox)
+
+					// The text, with its horizontal scrollbar under it.
+					+ SHorizontalBox::Slot()
+					.FillWidth(1.0f)
 					[
-						SNew(SVerticalBox)
-
-						+ SVerticalBox::Slot()
-						.FillHeight(1.0f)
-						[
-							SAssignNew(TextBox, SMultiLineEditableText)
-							.Text(FText::FromString(VisibleText))
-							.Marshaller(Marshaller)
-							.TextStyle(&SyntaxStyle->GetDefaultStyle()) // the text the marshaller doesn't colour, like an empty line, and the cursor's height
-							.AutoWrapText(false)
-							.IsReadOnly(InArgs._IsReadOnly)
-							.HScrollBar(HScrollBar)
-							.VScrollBar(VScrollBar)
-							.OnTextChanged(this, &SBangoTextEditor::HandleTextChanged)
-							.OnTextCommitted(this, &SBangoTextEditor::HandleTextCommitted)
-							.OnKeyDownHandler(this, &SBangoTextEditor::HandleKeyDown)
-							.OnIsTypedCharValid(this, &SBangoTextEditor::HandleIsTypedCharValid)
-							.OnCursorMoved(this, &SBangoTextEditor::HandleCursorMoved)
-						]
-
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						[
-							HScrollBar.ToSharedRef()
-						]
-					]
-				]
-
-				// The divider: a thin button the full height of the pane, drawn as a 1 px line, that shows and hides the
-				// gutter. With the gutter hidden it sits at the right edge, beside the scrollbar.
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				[
-					SAssignNew(DividerButton, SButton)
-					.ButtonStyle(FAppStyle::Get(), "InvisibleButton")
-					.ContentPadding(0.0f)
-					.Visibility_Lambda([this]() { return bGutterHasMetadata ? EVisibility::Visible : EVisibility::Collapsed; })
-					.ToolTipText_Lambda([this]()
-					{
-						return bMetadataShown
-							? NSLOCTEXT("BangoTextEditor", "HideMetadata", "Hide the node metadata")
-							: NSLOCTEXT("BangoTextEditor", "ShowMetadata", "Show the node metadata");
-					})
-					.OnClicked_Lambda([this]()
-					{
-						SetMetadataShown(!bMetadataShown);
-						return FReply::Handled();
-					})
-					[
-						// Wider than the line, so it's easy to hit.
 						SNew(SBox)
-						.WidthOverride(DividerHitWidth)
-						.HAlign(HAlign_Center)
+						.Padding(TextPadding)
 						[
-							SNew(SBox)
-							.WidthOverride(1.0f)
+							SNew(SVerticalBox)
+
+							+ SVerticalBox::Slot()
+							.FillHeight(1.0f)
 							[
-								SNew(SImage)
-								.Image(FAppStyle::GetBrush("WhiteBrush"))
-								.ColorAndOpacity_Lambda([this]()
-								{
-									const bool bLit = DividerButton.IsValid() && (DividerButton->IsHovered() || DividerButton->IsPressed());
-									return bLit ? FStyleColors::Highlight : FSlateColor(DividerColor);
-								})
+								SAssignNew(TextBox, SMultiLineEditableText)
+								.Text(FText::FromString(VisibleText))
+								.Marshaller(Marshaller)
+								.TextStyle(&SyntaxStyle->GetDefaultStyle()) // the text the marshaller doesn't colour, like an empty line, and the cursor's height
+								.AutoWrapText(false)
+								.IsReadOnly(InArgs._IsReadOnly)
+								.HScrollBar(HScrollBar)
+								.VScrollBar(VScrollBar)
+								.OnTextChanged(this, &SBangoTextEditor::HandleTextChanged)
+								.OnTextCommitted(this, &SBangoTextEditor::HandleTextCommitted)
+								.OnKeyDownHandler(this, &SBangoTextEditor::HandleKeyDown)
+								.OnIsTypedCharValid(this, &SBangoTextEditor::HandleIsTypedCharValid)
+								.OnCursorMoved(this, &SBangoTextEditor::HandleCursorMoved)
+							]
+
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							[
+								HScrollBar.ToSharedRef()
 							]
 						]
 					]
-				]
 
-				// Node metadata, one line per line of text, scrolled along with it as it's painted, after the text
-				// (SBangoScrollFollower). Not editable: the graph editor writes it.
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				[
-					SNew(SBox)
-					.Visibility_Lambda([this]() { return bGutterHasMetadata && bMetadataShown ? EVisibility::Visible : EVisibility::Collapsed; })
-					// As far down as the text starts, so each entry is level with its line.
-					.Padding_Lambda([TextPadding]() { const FMargin Pad = TextPadding.Get(); return FMargin(6.0f, Pad.Top, 6.0f, Pad.Bottom); })
+					// The divider: a thin button the full height of the pane, drawn as a 1 px line, that shows and hides the
+					// gutter. With the gutter hidden it sits at the right edge, beside the scrollbar.
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
 					[
-						SNew(SOverlay)
-
-						+ SOverlay::Slot()
+						SAssignNew(DividerButton, SButton)
+						.ButtonStyle(FAppStyle::Get(), "InvisibleButton")
+						.ContentPadding(0.0f)
+						.Visibility_Lambda([this]() { return bGutterHasMetadata ? EVisibility::Visible : EVisibility::Collapsed; })
+						.ToolTipText_Lambda([this]()
+						{
+							return bMetadataShown
+								? NSLOCTEXT("BangoTextEditor", "HideMetadata", "Hide the node metadata")
+								: NSLOCTEXT("BangoTextEditor", "ShowMetadata", "Show the node metadata");
+						})
+						.OnClicked_Lambda([this]()
+						{
+							SetMetadataShown(!bMetadataShown);
+							return FReply::Handled();
+						})
 						[
-							SAssignNew(GutterScroll, SBangoScrollFollower)
-							.ScrollBar(VScrollBar)
-							[
-								SNew(SOverlay)
-
-								+ SOverlay::Slot()
-								.HAlign(HAlign_Left)
-								.VAlign(VAlign_Top)
-								[
-									SAssignNew(GutterText, STextBlock)
-									.Font(SyntaxStyle->GetDefaultStyle().Font) // the text's own font, so each entry is level with its line
-									.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-									.ToolTipText(NSLOCTEXT("BangoTextEditor", "GutterTooltip", "Node metadata: each line's node ID and position in the graph. The graph editor keeps these up to date, so they can't be edited here."))
-								]
-
-								// The cursor's line, in white, exactly over its grey copy: the same font, and blank lines above it.
-								+ SOverlay::Slot()
-								.HAlign(HAlign_Left)
-								.VAlign(VAlign_Top)
-								[
-									SAssignNew(GutterHighlightText, STextBlock)
-									.Font(SyntaxStyle->GetDefaultStyle().Font)
-									.ColorAndOpacity(FLinearColor::White)
-									.Visibility(EVisibility::HitTestInvisible)
-								]
-							]
-						]
-
-						// Sync Graph: whether the cursor's line selects its node in the graph, and the other way round.
-						+ SOverlay::Slot()
-						.HAlign(HAlign_Fill)
-						.VAlign(VAlign_Top)
-						.Padding(0, 7, 3, 0)
-						[
-							SNew(SCheckBox)
-							.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
-							.IsChecked_Lambda([this]() { return bGraphSync ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-							.OnCheckStateChanged_Lambda([this](ECheckBoxState NewState) { SetGraphSyncEnabled(NewState == ECheckBoxState::Checked); })
-							.ToolTipText(NSLOCTEXT("BangoTextEditor", "SyncGraphTooltip", "While on, the line the cursor is on selects its node in the graph, and selecting a node in the graph moves the cursor to its line."))
+							// Wider than the line, so it's easy to hit.
+							SNew(SBox)
+							.WidthOverride(DividerHitWidth)
+							.HAlign(HAlign_Center)
 							[
 								SNew(SBox)
-								.Padding(FMargin(6.0f, 1.0f))
+								.WidthOverride(1.0f)
 								[
-									SNew(STextBlock)
-									.Text(NSLOCTEXT("BangoTextEditor", "SyncGraph", "Sync Graph"))
-									// .Font(FAppStyle::GetFontStyle("SmallFont"))
+									SNew(SImage)
+									.Image(FAppStyle::GetBrush("WhiteBrush"))
+									.ColorAndOpacity_Lambda([this]()
+									{
+										const bool bLit = DividerButton.IsValid() && (DividerButton->IsHovered() || DividerButton->IsPressed());
+										return bLit ? FStyleColors::Highlight : FSlateColor(DividerColor);
+									})
+								]
+							]
+						]
+					]
+
+					// Node metadata, one line per line of text, scrolled along with it as it's painted, after the text
+					// (SBangoScrollFollower). Not editable: the graph editor writes it.
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					[
+						SNew(SBox)
+						.Visibility_Lambda([this]() { return bGutterHasMetadata && bMetadataShown ? EVisibility::Visible : EVisibility::Collapsed; })
+						// As far down as the text starts, so each entry is level with its line.
+						.Padding_Lambda([TextPadding]() { const FMargin Pad = TextPadding.Get(); return FMargin(6.0f, Pad.Top, 6.0f, Pad.Bottom); })
+						[
+							SNew(SOverlay)
+
+							+ SOverlay::Slot()
+							[
+								SAssignNew(GutterScroll, SBangoScrollFollower)
+								.ScrollBar(VScrollBar)
+								[
+									SNew(SOverlay)
+
+									+ SOverlay::Slot()
+									.HAlign(HAlign_Left)
+									.VAlign(VAlign_Top)
+									[
+										SAssignNew(GutterText, STextBlock)
+										.Font(SyntaxStyle->GetDefaultStyle().Font) // the text's own font, so each entry is level with its line
+										.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+										.ToolTipText(NSLOCTEXT("BangoTextEditor", "GutterTooltip", "Node metadata: each line's node ID and position in the graph. The graph editor keeps these up to date, so they can't be edited here."))
+									]
+
+									// The cursor's line, in white, exactly over its grey copy: the same font, and blank lines above it.
+									+ SOverlay::Slot()
+									.HAlign(HAlign_Left)
+									.VAlign(VAlign_Top)
+									[
+										SAssignNew(GutterHighlightText, STextBlock)
+										.Font(SyntaxStyle->GetDefaultStyle().Font)
+										.ColorAndOpacity(FLinearColor::White)
+										.Visibility(EVisibility::HitTestInvisible)
+									]
+								]
+							]
+
+							// Sync Graph: whether the cursor's line selects its node in the graph, and the other way round.
+							+ SOverlay::Slot()
+							.HAlign(HAlign_Fill)
+							.VAlign(VAlign_Top)
+							.Padding(0, 7, 3, 0)
+							[
+								SNew(SCheckBox)
+								.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+								.IsChecked_Lambda([this]() { return bGraphSync ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+								.OnCheckStateChanged_Lambda([this](ECheckBoxState NewState) { SetGraphSyncEnabled(NewState == ECheckBoxState::Checked); })
+								.ToolTipText(NSLOCTEXT("BangoTextEditor", "SyncGraphTooltip", "While on, the line the cursor is on selects its node in the graph, and selecting a node in the graph moves the cursor to its line."))
+								[
+									SNew(SBox)
+									.Padding(FMargin(6.0f, 1.0f))
+									[
+										SNew(STextBlock)
+										.Text(NSLOCTEXT("BangoTextEditor", "SyncGraph", "Sync Graph"))
+										// .Font(FAppStyle::GetFontStyle("SmallFont"))
+									]
 								]
 							]
 						]
 					]
 				]
 			]
+
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			[
+				OwnScrollBar
+			]
 		]
 
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
+		// Autocomplete: the list of names, beside the word being typed. Drawn here, over the text, rather than in a pop-up
+		// window, so the text keeps keyboard focus (FBangoCompletion).
+		+ SOverlay::Slot()
+		.HAlign(HAlign_Left)
+		.VAlign(VAlign_Top)
+		.Padding(TAttribute<FMargin>::CreateSP(this, &SBangoTextEditor::GetCompletionPadding))
 		[
-			OwnScrollBar
+			MakeCompletionPopup()
 		]
 	];
 
@@ -308,6 +328,21 @@ void SBangoTextEditor::InsertNewLine()
 
 bool SBangoTextEditor::HandleIsTypedCharValid(const TCHAR Character)
 {
+	// The Tab that accepted an autocomplete entry isn't typed as well.
+	if (Character == TEXT('\t') && bSwallowTab)
+	{
+		bSwallowTab = false;
+		return false;
+	}
+	bSwallowTab = false;
+
+	// Typing a name's character may open the autocomplete list (UpdateCompletion, next Tick).
+	if ((Character >= TEXT('a') && Character <= TEXT('z')) || (Character >= TEXT('A') && Character <= TEXT('Z'))
+		|| (Character >= TEXT('0') && Character <= TEXT('9')) || Character == TEXT('_'))
+	{
+		bTypedNameChar = true;
+	}
+
 	// A '}' typed on a line that's only indentation takes one tab off first, so it lines up with its block's start.
 	if (Character != TEXT('}') || !TextBox.IsValid() || TextBox->IsTextReadOnly() || TextBox->AnyTextSelected())
 	{
@@ -342,6 +377,7 @@ void SBangoTextEditor::HandleCursorMoved(const FTextLocation& Location)
 
 	UpdateGutterHighlight(Location.GetLineIndex());
 	ReportCursorNodes(false);
+	bCompletionDirty = true;
 }
 
 void SBangoTextEditor::SetGraphSyncEnabled(bool bEnabled)
@@ -504,6 +540,38 @@ void SBangoTextEditor::UpdateGutterHighlight(int32 Line)
 
 FReply SBangoTextEditor::HandleKeyDown(const FGeometry& Geometry, const FKeyEvent& KeyEvent)
 {
+	// While the autocomplete list is open: Up and Down move through it, Tab puts in the entry, Escape closes it.
+	// Anything else is typed as usual (and filters the list).
+	if (bCompletionOpen && !KeyEvent.IsControlDown() && !KeyEvent.IsAltDown() && !KeyEvent.IsCommandDown())
+	{
+		const FKey Key = KeyEvent.GetKey();
+		if (Key == EKeys::Up || Key == EKeys::Down)
+		{
+			MoveCompletionSelection(Key == EKeys::Up ? -1 : 1);
+			return FReply::Handled();
+		}
+		if (Key == EKeys::PageUp || Key == EKeys::PageDown)
+		{
+			MoveCompletionSelection(Key == EKeys::PageUp ? -CompletionVisibleRows : CompletionVisibleRows);
+			return FReply::Handled();
+		}
+		if (Key == EKeys::Tab && !KeyEvent.IsShiftDown())
+		{
+			AcceptCompletion();
+			bSwallowTab = true; // the tab character that follows this key
+			return FReply::Handled();
+		}
+		if (Key == EKeys::Escape)
+		{
+			CloseCompletion();
+			return FReply::Handled();
+		}
+		if (Key == EKeys::Enter)
+		{
+			CloseCompletion(); // and a new line, as usual
+		}
+	}
+
 	// Tab indents (Bango uses one tab per block level) instead of moving focus
 	// to the next widget. Handling the key down stops Slate's focus navigation;
 	// the tab character itself is typed by the key-char event that follows.
@@ -542,6 +610,7 @@ void SBangoTextEditor::HandleTextChanged(const FText& NewVisibleText)
 	const int32 CursorLine = TextBox.IsValid() ? TextBox->GetCursorLocation().GetLineIndex() : INDEX_NONE;
 	Metadata.OnVisibleTextChanged(NewVisibleText.ToString(), CursorLine);
 	UpdateGutter();
+	bCompletionDirty = true;
 	OnTextChangedHandler.ExecuteIfBound(FText::FromString(Metadata.GetFullText()));
 }
 
@@ -566,4 +635,342 @@ void SBangoTextEditor::UpdateGutter()
 		GutterText->SetText(FText::FromString(Metadata.GetGutterText()));
 	}
 	UpdateGutterHighlight(GutterHighlightLine);
+}
+
+// ---- Autocomplete ----
+
+void SBangoTextEditor::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
+{
+	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+
+	// The list belongs to the text being typed in: it closes when the text loses keyboard focus.
+	if (bCompletionOpen && (!TextBox.IsValid() || !TextBox->HasKeyboardFocus()))
+	{
+		CloseCompletion();
+	}
+
+	// Once per frame, after the text and the cursor have settled: open, filter or close the list.
+	if (bCompletionDirty)
+	{
+		bCompletionDirty = false;
+		UpdateCompletion(bTypedNameChar);
+		bTypedNameChar = false;
+	}
+}
+
+void SBangoTextEditor::UpdateCompletion(bool bMayOpen)
+{
+	if (!TextBox.IsValid() || !TextBox->HasKeyboardFocus() || TextBox->IsTextReadOnly() || TextBox->AnyTextSelected())
+	{
+		CloseCompletion();
+		return;
+	}
+
+	const FTextLocation Cursor = TextBox->GetCursorLocation();
+	const TArray<FString>& Lines = Metadata.GetLines();
+	if (!Lines.IsValidIndex(Cursor.GetLineIndex()))
+	{
+		CloseCompletion();
+		return;
+	}
+	const FString& Line = Lines[Cursor.GetLineIndex()];
+
+	int32 WordStart = INDEX_NONE;
+	if (!FBangoCompletion::FindWordBeforeCursor(Line, Cursor.GetOffset(), WordStart))
+	{
+		CloseCompletion();
+		return;
+	}
+
+	// Opens only when a name's character is typed; once open, it follows the word as it's typed or deleted.
+	const bool bSameWord = bCompletionOpen && CompletionLine == Cursor.GetLineIndex() && CompletionStart == WordStart;
+	if (!bSameWord)
+	{
+		if (!bMayOpen)
+		{
+			CloseCompletion();
+			return;
+		}
+		GatherCompletionItems(Cursor.GetLineIndex());
+	}
+
+	const FString Prefix = Line.Mid(WordStart, Cursor.GetOffset() - WordStart);
+	TArray<int32> Indices;
+	FBangoCompletion::Filter(CompletionItems, Prefix, Indices);
+
+	// Nothing left, or only the word itself as typed: nothing to put in.
+	if (Indices.Num() == 0 || (Indices.Num() == 1 && CompletionItems[Indices[0]].Name.Equals(Prefix, ESearchCase::CaseSensitive)))
+	{
+		CloseCompletion();
+		return;
+	}
+
+	// Keep the selected entry if it's still listed.
+	const TSharedPtr<FBangoCompletionItem> WasSelected = GetSelectedCompletion();
+	CompletionShown.Reset();
+	TSharedPtr<FBangoCompletionItem> Select;
+	for (const int32 Index : Indices)
+	{
+		TSharedPtr<FBangoCompletionItem> Item = CompletionItemPtrs[Index];
+		CompletionShown.Add(Item);
+		if (Item == WasSelected)
+		{
+			Select = Item;
+		}
+	}
+	if (!Select.IsValid())
+	{
+		Select = CompletionShown[0];
+	}
+
+	bCompletionOpen = true;
+	CompletionLine = Cursor.GetLineIndex();
+	CompletionStart = WordStart;
+	Marshaller->SetProbe(CompletionLine, CompletionStart, Cursor.GetOffset());
+
+	if (CompletionList.IsValid())
+	{
+		CompletionList->RequestListRefresh();
+		CompletionList->SetSelection(Select, ESelectInfo::Direct);
+		CompletionList->RequestScrollIntoView(Select);
+	}
+}
+
+void SBangoTextEditor::GatherCompletionItems(int32 Line)
+{
+	// The registered commands, asked for each time the list opens (game modules may add commands after this widget is made).
+	TArray<FBangoCompletionItem> Commands;
+	const FBangoCommandTable& Table = FBangoModule::Get().GetCommands();
+	TArray<FString> Names;
+	Table.GetCommandNames(Names);
+	for (const FString& Name : Names)
+	{
+		FBangoCompletionItem Item;
+		Item.Name = Name;
+		Item.Kind = EBangoCompletionKind::Command;
+		Item.bCallable = true;
+		if (const FBangoCommandSignature* Signature = Table.FindCommand(Name))
+		{
+			Item.Detail = Signature->ToString();
+			Item.Description = Signature->CommandDescription;
+		}
+		Commands.Add(Item);
+	}
+
+	FBangoCompletion::GatherItems(Marshaller->GetScriptNames(), Line, Commands, CompletionItems);
+	CompletionItemPtrs.Reset();
+	for (const FBangoCompletionItem& Item : CompletionItems)
+	{
+		CompletionItemPtrs.Add(MakeShared<FBangoCompletionItem>(Item));
+	}
+}
+
+void SBangoTextEditor::CloseCompletion()
+{
+	if (!bCompletionOpen)
+	{
+		return;
+	}
+	bCompletionOpen = false;
+	CompletionLine = INDEX_NONE;
+	CompletionStart = INDEX_NONE;
+	CompletionShown.Reset();
+	Marshaller->ClearProbe();
+	if (CompletionList.IsValid())
+	{
+		CompletionList->RequestListRefresh();
+	}
+}
+
+TSharedPtr<FBangoCompletionItem> SBangoTextEditor::GetSelectedCompletion() const
+{
+	if (!CompletionList.IsValid())
+	{
+		return nullptr;
+	}
+	const TArray<TSharedPtr<FBangoCompletionItem>> Selected = CompletionList->GetSelectedItems();
+	return Selected.Num() > 0 ? Selected[0] : nullptr;
+}
+
+void SBangoTextEditor::MoveCompletionSelection(int32 Delta)
+{
+	if (!CompletionList.IsValid() || CompletionShown.Num() == 0)
+	{
+		return;
+	}
+	const int32 Current = CompletionShown.IndexOfByKey(GetSelectedCompletion());
+	const int32 Next = FMath::Clamp((Current == INDEX_NONE ? 0 : Current) + Delta, 0, CompletionShown.Num() - 1);
+	CompletionList->SetSelection(CompletionShown[Next], ESelectInfo::OnNavigation);
+	CompletionList->RequestScrollIntoView(CompletionShown[Next]);
+}
+
+void SBangoTextEditor::AcceptCompletion()
+{
+	const TSharedPtr<FBangoCompletionItem> Item = GetSelectedCompletion();
+	if (!Item.IsValid() || !TextBox.IsValid() || CompletionLine == INDEX_NONE)
+	{
+		CloseCompletion();
+		return;
+	}
+
+	// The word typed so far is replaced by the whole name; commands and functions get their '(' too (unless one's there).
+	const FTextLocation Cursor = TextBox->GetCursorLocation();
+	const TArray<FString>& Lines = Metadata.GetLines();
+	const FString Line = Lines.IsValidIndex(CompletionLine) ? Lines[CompletionLine] : FString();
+	FString Insert = Item->Name;
+	if (Item->bCallable && !(Cursor.GetOffset() < Line.Len() && Line[Cursor.GetOffset()] == TEXT('(')))
+	{
+		Insert += TEXT("(");
+	}
+
+	const int32 WordLine = CompletionLine;
+	const int32 WordStart = CompletionStart;
+	CloseCompletion();
+
+	SMultiLineEditableText::FScopedEditableTextTransaction Transaction(TextBox);
+	TextBox->SelectText(FTextLocation(WordLine, WordStart), FTextLocation(WordLine, Cursor.GetOffset()));
+	TextBox->DeleteSelectedText();
+	TextBox->InsertTextAtCursor(Insert);
+}
+
+FMargin SBangoTextEditor::GetCompletionPadding() const
+{
+	// Under the word being typed (above it, if there's no room below), kept inside this widget.
+	const FBangoTextProbe& Probe = Marshaller->GetProbe();
+	if (!bCompletionOpen || !Probe.bValid || !CompletionPopup.IsValid())
+	{
+		return FMargin(0.0f);
+	}
+	// The probe was recorded while painting, so its "absolute" position is in paint space (relative to the window):
+	// convert it with this widget's paint-space geometry. (The tick-space geometry is relative to the desktop, which put
+	// the list off by the window's own position on screen.)
+	const FGeometry& Geometry = GetPaintSpaceGeometry();
+	const FVector2D WordTopLeft = Geometry.AbsoluteToLocal(Probe.AbsolutePosition);
+	const FVector2D WordBottomRight = Geometry.AbsoluteToLocal(Probe.AbsolutePosition + Probe.AbsoluteSize);
+	const FVector2D PopupSize = CompletionPopup->GetDesiredSize();
+	const FVector2D Size = Geometry.GetLocalSize();
+
+	const float X = FMath::Clamp<float>(WordTopLeft.X, 0.0f, FMath::Max<float>(0.0f, Size.X - PopupSize.X));
+	float Y = WordBottomRight.Y;
+	if (Y + PopupSize.Y > Size.Y && WordTopLeft.Y - PopupSize.Y >= 0.0f)
+	{
+		Y = WordTopLeft.Y - PopupSize.Y;
+	}
+	return FMargin(X, Y, 0.0f, 0.0f);
+}
+
+TSharedRef<SWidget> SBangoTextEditor::MakeCompletionPopup()
+{
+	return SAssignNew(CompletionPopup, SBorder)
+		.Visibility_Lambda([this]() { return bCompletionOpen && Marshaller->GetProbe().bValid ? EVisibility::Visible : EVisibility::Collapsed; })
+		.BorderImage(FAppStyle::GetBrush("Menu.Background"))
+		.Padding(FMargin(2.0f))
+		[
+			SNew(SBox)
+			.WidthOverride(CompletionWidth)
+			[
+				SNew(SVerticalBox)
+
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				[
+					SNew(SBox)
+					.MaxDesiredHeight(CompletionRowHeight * CompletionVisibleRows)
+					[
+						SAssignNew(CompletionList, SListView<TSharedPtr<FBangoCompletionItem>>)
+						.ListItemsSource(&CompletionShown)
+						.OnGenerateRow(this, &SBangoTextEditor::MakeCompletionRow)
+						.SelectionMode(ESelectionMode::Single)
+						.IsFocusable(false) // the text keeps keyboard focus
+						.OnMouseButtonClick_Lambda([this](TSharedPtr<FBangoCompletionItem> Item)
+						{
+							CompletionList->SetSelection(Item, ESelectInfo::OnMouseClick);
+							AcceptCompletion();
+							FSlateApplication::Get().SetKeyboardFocus(TextBox, EFocusCause::SetDirectly);
+						})
+					]
+				]
+
+				// The selected entry's description, if it has one.
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(FMargin(6.0f, 3.0f))
+				[
+					SNew(STextBlock)
+					.AutoWrapText(true)
+					.Font(FAppStyle::GetFontStyle("SmallFont"))
+					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+					.Visibility_Lambda([this]()
+					{
+						const TSharedPtr<FBangoCompletionItem> Item = GetSelectedCompletion();
+						return Item.IsValid() && !Item->Description.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed;
+					})
+					.Text_Lambda([this]()
+					{
+						const TSharedPtr<FBangoCompletionItem> Item = GetSelectedCompletion();
+						return Item.IsValid() ? FText::FromString(Item->Description) : FText::GetEmpty();
+					})
+				]
+			]
+		];
+}
+
+TSharedRef<ITableRow> SBangoTextEditor::MakeCompletionRow(TSharedPtr<FBangoCompletionItem> Item, const TSharedRef<STableViewBase>& OwnerTable)
+{
+	// The kind as one letter and the name in the text's colours for it, then the type or signature.
+	EBangoSyntaxKind Kind = EBangoSyntaxKind::Command;
+	const TCHAR* Letter = TEXT("C");
+	switch (Item->Kind)
+	{
+	case EBangoCompletionKind::Parameter: Kind = EBangoSyntaxKind::Parameter; Letter = TEXT("P"); break;
+	case EBangoCompletionKind::Local:     Kind = EBangoSyntaxKind::Local;     Letter = TEXT("L"); break;
+	case EBangoCompletionKind::Global:    Kind = EBangoSyntaxKind::Global;    Letter = TEXT("G"); break;
+	case EBangoCompletionKind::Function:  Kind = EBangoSyntaxKind::Function;  Letter = TEXT("F"); break;
+	case EBangoCompletionKind::Builtin:   Kind = EBangoSyntaxKind::Builtin;   Letter = TEXT("B"); break;
+	case EBangoCompletionKind::Command:   Kind = EBangoSyntaxKind::Command;   Letter = TEXT("C"); break;
+	}
+	const FTextBlockStyle& KindStyle = SyntaxStyle->GetStyle(Kind, false);
+
+	return SNew(STableRow<TSharedPtr<FBangoCompletionItem>>, OwnerTable)
+		.Padding(FMargin(4.0f, 1.0f))
+		[
+			SNew(SHorizontalBox)
+
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(0.0f, 0.0f, 6.0f, 0.0f)
+			[
+				SNew(SBox)
+				.WidthOverride(12.0f)
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(Letter))
+					.Font(FAppStyle::GetFontStyle("SmallFont"))
+					.ColorAndOpacity(KindStyle.ColorAndOpacity)
+				]
+			]
+
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(Item->Name))
+				.Font(SyntaxStyle->GetDefaultStyle().Font)
+				.ColorAndOpacity(KindStyle.ColorAndOpacity)
+			]
+
+			+ SHorizontalBox::Slot()
+			.FillWidth(1.0f)
+			.VAlign(VAlign_Center)
+			.Padding(10.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(Item->Detail))
+				.Font(FAppStyle::GetFontStyle("SmallFont"))
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+			]
+		];
 }

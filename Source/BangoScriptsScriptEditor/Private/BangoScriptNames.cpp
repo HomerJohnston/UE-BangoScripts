@@ -54,6 +54,15 @@ void FBangoScriptNames::AddUnique(TArray<FString>& Names, const FString& Name)
 	}
 }
 
+void FBangoScriptNames::AddUnique(TArray<FString>& Names, TArray<FString>& Types, const FString& Name, const FString& Type)
+{
+	if (!Contains(Names, Name))
+	{
+		Names.Add(Name);
+		Types.Add(Type);
+	}
+}
+
 void FBangoScriptNames::Build(const TArray<FString>& Lines, const TArray<TArray<FBangoSyntaxToken>>& LineTokens)
 {
 	using namespace BangoScriptNamesPrivate;
@@ -62,6 +71,7 @@ void FBangoScriptNames::Build(const TArray<FString>& Lines, const TArray<TArray<
 	Graphs.SetNum(1);
 	LineGraph.Reset();
 	Globals.Reset();
+	GlobalTypes.Reset();
 
 	int32 Graph = 0;            // the graph being read
 	int32 Depth = 0;            // { } depth
@@ -109,11 +119,19 @@ void FBangoScriptNames::Build(const TArray<FString>& Lines, const TArray<TArray<
 				continue;
 			}
 
-			// function <type> Name(: the function's name is the header's first call.
-			if (bInFunctionHeader && Token.Kind == EBangoSyntaxKind::Call && Graphs[Graph].FunctionName.IsEmpty())
+			// function <type> Name(: the function's name is the header's first call, and the type before it its return type.
+			if (bInFunctionHeader && Graphs[Graph].FunctionName.IsEmpty())
 			{
-				Graphs[Graph].FunctionName = TokenText(Line, Token);
-				continue;
+				if (Token.Kind == EBangoSyntaxKind::Type && Next != nullptr && Next->Kind == EBangoSyntaxKind::Call)
+				{
+					Graphs[Graph].ReturnType = TokenText(Line, Token);
+					continue;
+				}
+				if (Token.Kind == EBangoSyntaxKind::Call)
+				{
+					Graphs[Graph].FunctionName = TokenText(Line, Token);
+					continue;
+				}
 			}
 
 			if (TokenIs(Line, Token, EBangoSyntaxKind::Structure, TEXT("{")))
@@ -137,21 +155,22 @@ void FBangoScriptNames::Build(const TArray<FString>& Lines, const TArray<TArray<
 			if (Token.Kind == EBangoSyntaxKind::Type && Next != nullptr && Next->Kind == EBangoSyntaxKind::Global)
 			{
 				const FString Name = TokenText(Line, *Next);
+				const FString Type = TokenText(Line, Token);
 				if (bGlobalLine)
 				{
-					AddUnique(Globals, Name);
+					AddUnique(Globals, GlobalTypes, Name, Type);
 				}
 				else if (bParamsLine)
 				{
-					AddUnique(Graphs[0].Params, Name);
+					AddUnique(Graphs[0].Params, Graphs[0].ParamTypes, Name, Type);
 				}
 				else if (bInFunctionHeader)
 				{
-					AddUnique(Graphs[Graph].Params, Name);
+					AddUnique(Graphs[Graph].Params, Graphs[Graph].ParamTypes, Name, Type);
 				}
 				else
 				{
-					AddUnique(Graphs[Graph].Locals, Name);
+					AddUnique(Graphs[Graph].Locals, Graphs[Graph].LocalTypes, Name, Type);
 				}
 				++I;
 				continue;
@@ -163,7 +182,7 @@ void FBangoScriptNames::Build(const TArray<FString>& Lines, const TArray<TArray<
 				&& TokenIs(Line, Code[I + 1], EBangoSyntaxKind::Punctuation, TEXT("("))
 				&& Code[I + 2].Kind == EBangoSyntaxKind::Global)
 			{
-				AddUnique(Graphs[Graph].Locals, TokenText(Line, Code[I + 2]));
+				AddUnique(Graphs[Graph].Locals, Graphs[Graph].LocalTypes, TokenText(Line, Code[I + 2]), FString());
 				I += 2;
 				continue;
 			}
@@ -231,4 +250,58 @@ int32 FBangoScriptNames::FindEntryLine(const FString& FunctionName) const
 		}
 	}
 	return INDEX_NONE;
+}
+
+void FBangoScriptNames::GetVisibleNames(int32 LineIndex, TArray<FBangoVisibleName>& OutNames) const
+{
+	TArray<FString> Seen;
+	auto Add = [&OutNames, &Seen](const FString& Name, const FString& Type, EBangoSyntaxKind Kind)
+	{
+		if (!Name.IsEmpty() && !Contains(Seen, Name))
+		{
+			Seen.Add(Name);
+			FBangoVisibleName Visible;
+			Visible.Name = Name;
+			Visible.Type = Type;
+			Visible.Kind = Kind;
+			OutNames.Add(Visible);
+		}
+	};
+
+	const int32 Graph = GetLineGraph(LineIndex);
+	if (Graphs.IsValidIndex(Graph))
+	{
+		const FGraphNames& Names = Graphs[Graph];
+		for (int32 I = 0; I < Names.Params.Num(); ++I)
+		{
+			Add(Names.Params[I], Names.ParamTypes.IsValidIndex(I) ? Names.ParamTypes[I] : FString(), EBangoSyntaxKind::Parameter);
+		}
+		for (int32 I = 0; I < Names.Locals.Num(); ++I)
+		{
+			Add(Names.Locals[I], Names.LocalTypes.IsValidIndex(I) ? Names.LocalTypes[I] : FString(), EBangoSyntaxKind::Local);
+		}
+	}
+
+	// A local of the same name hides a global (Seen skips it).
+	for (int32 I = 0; I < Globals.Num(); ++I)
+	{
+		Add(Globals[I], GlobalTypes.IsValidIndex(I) ? GlobalTypes[I] : FString(), EBangoSyntaxKind::Global);
+	}
+
+	// Functions, with their signature as the "type": `int AddScore(int amount, entity who)`.
+	for (int32 G = 1; G < Graphs.Num(); ++G)
+	{
+		const FGraphNames& Function = Graphs[G];
+		FString Signature = (Function.ReturnType.IsEmpty() ? FString(TEXT("void")) : Function.ReturnType) + TEXT(" ") + Function.FunctionName + TEXT("(");
+		for (int32 I = 0; I < Function.Params.Num(); ++I)
+		{
+			if (I > 0)
+			{
+				Signature += TEXT(", ");
+			}
+			Signature += (Function.ParamTypes.IsValidIndex(I) ? Function.ParamTypes[I] + TEXT(" ") : FString()) + Function.Params[I];
+		}
+		Signature += TEXT(")");
+		Add(Function.FunctionName, Signature, EBangoSyntaxKind::Function);
+	}
 }
