@@ -3,20 +3,27 @@
 #include "CoreMinimal.h"
 #include "BangoCommand.h"
 #include "BangoProgram.h"
+#include "BangoScriptPath.h"
+
+class UBangoScriptAsset;
 
 /**
- * Loads .bango files from Content/<ScriptDirectory> and compiles them on first use.
- * A compiled script is reused until its file changes on disk, then it is recompiled.
+ * Compiles Bango Script assets (Bango spec section 15) on first use. A compiled script is reused until its asset's
+ * text changes (in the editor: saved in the graph editor, or its linked .bango file changed), then it's recompiled.
  */
 class BANGOSCRIPTS_API FBangoScriptCache
 {
 public:
 	/**
-	 * Gets the compiled program for ScriptPath ("Quest/Intro" or "Quest/Intro.bango").
-	 * OutDisplayPath is the normalized path used in errors and saves ("Quest/Intro.bango").
-	 * Returns false with OutError set if the path is invalid, the file is missing, or it doesn't compile.
+	 * Gets the compiled program for the script at ScriptPath: a full asset path ("/Game/Quests/Intro") or one relative
+	 * to /Game ("Quests/Intro"); see Bango::ResolveScriptPath. Its asset is loaded if it isn't (a synchronous load).
+	 * OutDisplayPath is its name as errors and saves show it ("/Game/Quests/Intro.bango").
+	 * Returns false with OutError set if the path is invalid, there's no Bango Script asset there, or it doesn't compile.
 	 */
 	bool GetProgram(const FString& ScriptPath, const IBangoCommandLookup& Commands, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutDisplayPath, FString& OutError);
+
+	/** GetProgram, for a script asset already in hand. */
+	bool GetProgram(const UBangoScriptAsset& Asset, const IBangoCommandLookup& Commands, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutDisplayPath, FString& OutError);
 
 	/** Forgets every compiled script, so each is recompiled on next use. */
 	void Clear();
@@ -25,19 +32,24 @@ private:
 	struct FEntry
 	{
 		TSharedPtr<const FBangoProgram> Program;
-		FDateTime TimeStamp;
+		/** The text it was compiled from: the asset's text being different means it changed. */
+		FString Source;
 	};
+	/** By script name ("/Game/Quests/Intro"). */
 	TMap<FString, FEntry> Entries;
 };
 
 namespace Bango
 {
+	// Legacy: script files in Content/<ScriptDirectory>, which the graph editor still opens until it uses script assets
+	// (spec section 15, stage 3). The runtime doesn't use these.
+
 	/**
-	 * Turns a script path into its canonical form: forward slashes, no leading slash, ".bango" added if missing.
+	 * Turns a script file path into its canonical form: forward slashes, no leading slash, ".bango" added if missing.
 	 * Rejects empty paths, absolute paths, drive letters and ".." segments.
 	 */
 	BANGOSCRIPTS_API bool NormalizeScriptPath(const FString& ScriptPath, FString& OutPath, FString& OutError);
 
-	/** The full file path for a normalized script path. */
+	/** The full file path for a normalized script file path. */
 	BANGOSCRIPTS_API FString GetScriptFilePath(const FString& NormalizedPath);
 }

@@ -1242,3 +1242,48 @@ AwaitSpeak();                            //@25(0, 19)
 ```
 
 `@john` is the actor whose Bango ID component is named `john`; the script fails at that line if no such actor is in the level. `Speak` and `AwaitSpeak` are example game-specific commands, not built-ins.
+
+---
+
+## 15. Script assets (planned, not built yet)
+
+*This section is a design. It replaces script files in `Content/Bango` (section 11, "Script files") once it's built; until then, section 11 describes how scripts work.*
+
+Scripts become assets: a **Bango Script** asset (`UBangoScriptAsset`, a `.uasset`) can live anywhere in Content, is found by the Asset Registry, is packaged like any asset, and can be referenced like one (renaming or moving it in the Content Browser keeps the references). A script asset is one of two kinds:
+
+- **Embedded:** the script's text is stored in the asset. Made with the Content Browser's **Add > Bango Script**. Edited only in the editor.
+- **Linked:** the script's text is a `.bango` file next to the asset, with the same name (`Quest/Intro.uasset` and `Quest/Intro.bango`). **The file always wins:** it is the script; the asset keeps a copy of its text (for packaged games and the runtime), refreshed whenever the file changes. The file can be edited in the graph editor or anything else (VS Code).
+
+### Linking
+- **Importing:** a `.bango` file that appears in Content, while the editor runs (saved from another editor, copied in) or since it last ran, is **imported automatically**: a linked asset is made next to it, and a notification says so. Dragging a `.bango` into the Content Browser does the same.
+- **Keeping the copy current:** the editor watches Content for changes to `.bango` files. When a linked file changes, its asset's copy is refreshed from it (and the asset saved). When the editor starts, every linked asset whose file changed while it was closed is refreshed the same way. A hash of the file's text, kept in the asset, tells a real change from the editor's own save.
+- **Saving in the graph editor:** for a linked script, Save writes the `.bango` file, then refreshes the asset's copy and saves the asset. For an embedded script, Save writes the text into the asset and saves it. With source control, Save checks out what it writes (both files for a linked script).
+- **Moving and renaming:** moving or renaming a linked asset in the Content Browser moves or renames its `.bango` file too, so they stay side by side.
+- **Deleting the file:** when a linked asset's `.bango` file is deleted, the asset isn't deleted: it becomes embedded (keeping its last copy of the text), and a notification says so. Deleting the asset leaves the file, which would then be imported again: so deleting the asset asks whether to delete its file as well.
+- **Commands** (the asset's right-click menu): **Export to .bango** (embedded → linked: writes the file next to it), **Unlink** (linked → embedded: keeps the text, leaves the file, which is then ignored for this asset), and, for a linked asset, **Show .bango File** (in the file browser) and **Edit in External Editor** (opens the file with the system's editor for `.bango` files).
+- A `.bango` file that isn't next to an asset of the same name is always a new script to import; a file next to an embedded asset (after Unlink) is left alone.
+
+### Naming scripts
+- A script's name is its **asset path**, without the asset name repeated: `/Game/Quests/Intro`. Errors show it with `.bango` (`/Game/Quests/Intro.bango(12:5)`).
+- **From a script** (`Exec`): a path is **relative to the calling script's folder**: in `/Game/Quests/Start`, `Exec("Intro")` starts `/Game/Quests/Intro` and `Exec("../Shared/Greet")` starts `/Game/Shared/Greet`. A path starting with `/` is a full asset path (`Exec("/Game/Shared/Greet")`). `..` can't go above the content root (`/Game`, or a plugin's).
+- **From Blueprint and C++** (the Dynamic Path spawn node, `UBangoScriptSubsystem::Spawn` with a string): a path starting with `/` is a full asset path; one without is relative to `/Game` (`"Quests/Intro"` is `/Game/Quests/Intro`).
+- **The Spawn Bango Script node** picks its script with an asset picker (a Bango Script asset reference), instead of a typed path. C++ can also spawn an asset directly (`Spawn(UBangoScriptAsset*, Args)`).
+- Backslashes and a trailing `.bango` are still accepted in paths.
+
+### Runtime
+- Spawning loads the asset if it isn't loaded (a synchronous load), then compiles its text on first use, as now. The compiled script is cached per asset and reused until the asset's text changes.
+- **Hot reload** (section 11) works from the asset: when a script's asset changes in the editor (saved in the graph editor, or its linked file changed and was refreshed), running copies switch to the new version as now.
+- **Save Bango State** stores each running script's asset path (saves from before this change can't be loaded).
+- The **Script Directory** project setting, and the packaging setting for `Content/Bango`, go away.
+
+### Translation
+The asset keeps the script's localized texts (every `LOCTEXT` / `NSLOCTEXT` / `NOTELOCTEXT`, with its namespace, key and notes) as real text properties, updated when its text changes, so Unreal's normal asset gathering picks them up, for embedded and linked scripts alike. Gathering `.bango` files as text files (section 11) is no longer needed, and would gather linked scripts twice.
+
+### The graph editor
+- The script browser lists Bango Script assets from the Asset Registry (by folder), and opening a script asset (double-clicking it in the Content Browser) opens it in the graph editor.
+- A linked script shows its file's path under the toolbar, and the editor's existing changed-on-disk handling (section 12) watches the `.bango` file. For an embedded script it watches the asset instead (changed by source control, say).
+
+### Building it, in stages
+1. **Runtime** *(built)*: the asset class (text, link data, localized texts), the script cache by asset, path resolution (relative paths for `Exec`), the Blueprint/C++ spawn functions, saved state, hot reload from assets. Spawning by asset path works; the K2 node still takes a typed path.
+2. **Editor import and linking** *(built)*: the factories (import a `.bango`, Add > Bango Script), the Content watcher, the startup scan (in the background, skipping World Partition's `__External…` folders), moving/renaming, copying (Duplicate writes the copy's own file), deleting, and the right-click commands. Assets are saved as soon as they're imported or refreshed (while playing in the editor, once play ends). The engine's own Auto Reimport, if it's turned on, may import a new `.bango` first, through the same importer; the watcher then finds the asset already there.
+3. **The graph editor and nodes:** opening a script asset in the graph editor, loading and saving through the asset (linked: the file), the script browser from the Asset Registry, the Spawn Bango Script node's asset picker, the localized-text properties, examples as assets, tests, and removing the Script Directory setting.

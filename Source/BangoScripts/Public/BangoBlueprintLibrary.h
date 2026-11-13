@@ -64,7 +64,7 @@ public:
 	/**
 	 * Starts a Bango script whose path is computed at runtime, with no arguments. For a fixed script, use the
 	 * Spawn Bango Script node instead: it shows a pin for each of the script's parameters.
-	 * ScriptPath is relative to Content/Bango, without the extension: "Quest/Intro".
+	 * ScriptPath is a Bango Script asset's path: full ("/Game/Quests/Intro") or relative to /Game ("Quests/Intro").
 	 * The script runs straight away until it first pauses. Errors are shown on screen and return an invalid handle.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Bango", meta = (WorldContext = "WorldContextObject", DisplayName = "Spawn Bango Script (Dynamic Path)"))

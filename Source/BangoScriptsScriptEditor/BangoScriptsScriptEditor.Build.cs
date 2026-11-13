@@ -22,6 +22,11 @@ public class BangoScriptsScriptEditor : ModuleRules
 				"ToolMenus",
 				"WorkspaceMenuStructure",
 				"Projects",
+				"AssetRegistry",
+				"AssetDefinition",
+				"ContentBrowser",
+				"DirectoryWatcher",
+				"SourceControl",
 				"BangoScripts",
 			}
 		);

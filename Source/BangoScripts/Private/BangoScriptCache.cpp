@@ -1,6 +1,9 @@
 #include "BangoScriptCache.h"
 
 #include "BangoCompiler.h"
+#include "BangoScriptAsset.h"
+#include "Misc/PackageName.h"
+#include "UObject/SoftObjectPath.h"
 #include "BangoSettings.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
@@ -53,47 +56,64 @@ namespace Bango
 
 bool FBangoScriptCache::GetProgram(const FString& ScriptPath, const IBangoCommandLookup& Commands, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutDisplayPath, FString& OutError)
 {
-	if (!Bango::NormalizeScriptPath(ScriptPath, OutDisplayPath, OutError))
+	FString PackagePath;
+	if (!Bango::ResolveScriptPath(ScriptPath, Bango::DefaultScriptFolder(), PackagePath, OutError))
 	{
 		return false;
 	}
-
-	const FString FilePath = Bango::GetScriptFilePath(OutDisplayPath);
-	const FDateTime TimeStamp = IFileManager::Get().GetTimeStamp(*FilePath);
-	if (TimeStamp == FDateTime::MinValue())
+	OutDisplayPath = PackagePath + TEXT(".bango");
+	FText Reason;
+	if (!FPackageName::IsValidLongPackageName(PackagePath, /*bIncludeReadOnlyRoots*/ false, &Reason))
 	{
-		OutError = FString::Printf(TEXT("Script '%s' not found (looked for %s)."), *OutDisplayPath, *FPaths::ConvertRelativePathToFull(FilePath));
+		OutError = FString::Printf(TEXT("Script path '%s' isn't an asset path: %s"), *ScriptPath, *Reason.ToString());
 		return false;
 	}
 
-	if (const FEntry* Entry = Entries.Find(OutDisplayPath))
+	// Loaded already, or on disk (checked first, so a missing script doesn't log the engine's load warning).
+	const FSoftObjectPath ObjectPath(PackagePath + TEXT(".") + FPackageName::GetLongPackageAssetName(PackagePath));
+	UObject* Object = ObjectPath.ResolveObject();
+	if (!Object && FPackageName::DoesPackageExist(PackagePath))
 	{
-		if (Entry->TimeStamp == TimeStamp)
+		Object = ObjectPath.TryLoad();
+	}
+	if (!Object)
+	{
+		OutError = FString::Printf(TEXT("Script '%s' not found: there's no Bango Script asset at %s."), *ScriptPath, *PackagePath);
+		return false;
+	}
+	const UBangoScriptAsset* Asset = Cast<UBangoScriptAsset>(Object);
+	if (!Asset)
+	{
+		OutError = FString::Printf(TEXT("'%s' isn't a Bango Script (it's a %s)."), *PackagePath, *Object->GetClass()->GetName());
+		return false;
+	}
+	return GetProgram(*Asset, Commands, OutProgram, OutDisplayPath, OutError);
+}
+
+bool FBangoScriptCache::GetProgram(const UBangoScriptAsset& Asset, const IBangoCommandLookup& Commands, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutDisplayPath, FString& OutError)
+{
+	const FString Name = Asset.GetScriptName();
+	OutDisplayPath = Name + TEXT(".bango");
+	if (const FEntry* Entry = Entries.Find(Name))
+	{
+		if (Entry->Source.Equals(Asset.Source, ESearchCase::CaseSensitive))
 		{
 			OutProgram = Entry->Program;
 			return true;
 		}
 	}
 
-	FString Source;
-	if (!FFileHelper::LoadFileToString(Source, *FilePath))
-	{
-		OutError = FString::Printf(TEXT("Couldn't read script '%s'."), *OutDisplayPath);
-		return false;
-	}
-
 	TSharedPtr<FBangoProgram> Program = MakeShared<FBangoProgram>();
 	FBangoCompileError CompileError;
-	if (!Bango::CompileSource(Source, OutDisplayPath, Commands, *Program, CompileError))
+	if (!Bango::CompileSource(Asset.Source, OutDisplayPath, Commands, *Program, CompileError))
 	{
 		OutError = CompileError.ToString();
 		return false;
 	}
 
-	FEntry NewEntry;
+	FEntry& NewEntry = Entries.FindOrAdd(Name);
 	NewEntry.Program = Program;
-	NewEntry.TimeStamp = TimeStamp;
-	Entries.Add(OutDisplayPath, NewEntry);
+	NewEntry.Source = Asset.Source;
 	OutProgram = Program;
 	return true;
 }

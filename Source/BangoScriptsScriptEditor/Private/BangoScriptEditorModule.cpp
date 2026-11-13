@@ -1,6 +1,7 @@
 #include "BangoConnectionDrawingPolicy.h"
 #include "BangoEditorStyle.h"
 #include "BangoGraphCommands.h"
+#include "BangoScriptSync.h"
 #include "BangoEdGraphSchema.h"
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphUtilities.h"
@@ -42,6 +43,10 @@ public:
 		FBangoEditorStyle::Initialize();
 		FBangoGraphCommands::Register();
 
+		// Bango Script assets and their linked .bango files (spec section 15).
+		ScriptSync = MakeUnique<FBangoScriptSync>();
+		ScriptSync->Startup();
+
 		PinFactory = MakeShared<FBangoGraphPinFactory>();
 		FEdGraphUtilities::RegisterVisualPinFactory(PinFactory);
 		ConnectionFactory = MakeShared<FBangoConnectionDrawingPolicyFactory>();
@@ -77,11 +82,17 @@ public:
 			FEdGraphUtilities::UnregisterVisualNodeFactory(NodeFactory);
 			NodeFactory.Reset();
 		}
+		if (ScriptSync.IsValid())
+		{
+			ScriptSync->Shutdown();
+			ScriptSync.Reset();
+		}
 		FBangoGraphCommands::Unregister();
 		FBangoEditorStyle::Shutdown();
 	}
 
 private:
+	TUniquePtr<FBangoScriptSync> ScriptSync;
 	TSharedPtr<FBangoGraphPinFactory> PinFactory;
 	TSharedPtr<FBangoConnectionDrawingPolicyFactory> ConnectionFactory;
 	TSharedPtr<FBangoGraphNodeFactory> NodeFactory;

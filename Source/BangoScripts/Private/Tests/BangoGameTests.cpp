@@ -8,12 +8,29 @@
 #include "BangoBuiltinCommands.h"
 #include "BangoCompiler.h"
 #include "BangoInstance.h"
+#include "BangoScriptAsset.h"
 #include "BangoScriptCache.h"
+#include "UObject/Package.h"
 
 // Run from the editor: Tools > Session Frontend > Automation, filter "Bango".
 
 namespace BangoGameTestsPrivate
 {
+	/** A script asset for a test, in memory only: /Temp/BangoTests/<Name>, with Source as its text. */
+	UBangoScriptAsset* MakeTestScript(const TCHAR* Name, const TCHAR* Source)
+	{
+		const FString PackageName = FString(TEXT("/Temp/BangoTests/")) + Name;
+		UPackage* Package = CreatePackage(*PackageName);
+		Package->SetFlags(RF_Transient);
+		UBangoScriptAsset* Asset = FindObject<UBangoScriptAsset>(Package, Name);
+		if (!Asset)
+		{
+			Asset = NewObject<UBangoScriptAsset>(Package, Name, RF_Public | RF_Transient);
+		}
+		Asset->Source = Source;
+		return Asset;
+	}
+
 	/** Runs Source against Commands with no game world. Returns the final status; fills OutError on failure. */
 	static EBangoInstanceStatus RunWithoutWorld(const TCHAR* Source, const FBangoCommandTable& Commands, FBangoGlobalStore& Globals, FString& OutError)
 	{
@@ -51,16 +68,32 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoScriptPathTest, "Bango.Game.ScriptPaths",
 
 bool FBangoScriptPathTest::RunTest(const FString& Parameters)
 {
-	FString Path;
-	FString Error;
-	TestTrue(TEXT("plain"), Bango::NormalizeScriptPath(TEXT("Quest/Intro"), Path, Error) && Path == TEXT("Quest/Intro.bango"));
-	TestTrue(TEXT("with extension"), Bango::NormalizeScriptPath(TEXT("Quest/Intro.bango"), Path, Error) && Path == TEXT("Quest/Intro.bango"));
-	TestTrue(TEXT("backslashes and spaces"), Bango::NormalizeScriptPath(TEXT("  Quest\\Sub\\Intro "), Path, Error) && Path == TEXT("Quest/Sub/Intro.bango"));
-	TestTrue(TEXT("doubled slashes"), Bango::NormalizeScriptPath(TEXT("Quest//Intro"), Path, Error) && Path == TEXT("Quest/Intro.bango"));
-	TestFalse(TEXT("empty"), Bango::NormalizeScriptPath(TEXT(""), Path, Error));
-	TestFalse(TEXT("absolute"), Bango::NormalizeScriptPath(TEXT("/Quest/Intro"), Path, Error));
-	TestFalse(TEXT("drive letter"), Bango::NormalizeScriptPath(TEXT("C:/Quest/Intro"), Path, Error));
-	TestFalse(TEXT("parent folder"), Bango::NormalizeScriptPath(TEXT("Quest/../../Secrets"), Path, Error));
+	const auto Resolves = [](const TCHAR* Path, const TCHAR* Folder, const TCHAR* Expected)
+	{
+		FString Resolved;
+		FString Error;
+		return Bango::ResolveScriptPath(Path, Folder, Resolved, Error) && Resolved == Expected;
+	};
+	const auto Rejects = [](const TCHAR* Path, const TCHAR* Folder)
+	{
+		FString Resolved;
+		FString Error;
+		return !Bango::ResolveScriptPath(Path, Folder, Resolved, Error) && !Error.IsEmpty();
+	};
+	TestTrue(TEXT("relative to the script's folder"), Resolves(TEXT("Intro"), TEXT("/Game/Quests"), TEXT("/Game/Quests/Intro")));
+	TestTrue(TEXT("up a folder"), Resolves(TEXT("../Shared/Greet"), TEXT("/Game/Quests"), TEXT("/Game/Shared/Greet")));
+	TestTrue(TEXT("full path"), Resolves(TEXT("/Game/Shared/Greet"), TEXT("/Game/Quests"), TEXT("/Game/Shared/Greet")));
+	TestTrue(TEXT("relative to /Game"), Resolves(TEXT("Quests/Intro"), TEXT("/Game"), TEXT("/Game/Quests/Intro")));
+	TestTrue(TEXT("backslashes, spaces and .bango"), Resolves(TEXT("  Quests\\Sub\\Intro.bango "), TEXT("/Game"), TEXT("/Game/Quests/Sub/Intro")));
+	TestTrue(TEXT("doubled slashes and ."), Resolves(TEXT("Quests//./Intro"), TEXT("/Game"), TEXT("/Game/Quests/Intro")));
+	TestTrue(TEXT("object path"), Resolves(TEXT("/Game/Quests/Intro.Intro"), TEXT("/Game"), TEXT("/Game/Quests/Intro")));
+	TestTrue(TEXT("a plugin's content"), Resolves(TEXT("/MyPlugin/Scripts/A"), TEXT("/Game"), TEXT("/MyPlugin/Scripts/A")));
+	TestTrue(TEXT("empty"), Rejects(TEXT(""), TEXT("/Game")));
+	TestTrue(TEXT("drive letter"), Rejects(TEXT("C:/Quest/Intro"), TEXT("/Game")));
+	TestTrue(TEXT("above the content root"), Rejects(TEXT("../../Secrets"), TEXT("/Game/Quests")));
+	TestTrue(TEXT("no name"), Rejects(TEXT("/Game"), TEXT("/Game")));
+	TestTrue(TEXT("a dot in the name"), Rejects(TEXT("/Game/A.B"), TEXT("/Game")));
+	TestEqual(TEXT("a script's folder"), Bango::GetScriptPathFolder(TEXT("/Game/Quests/Intro.bango")), FString(TEXT("/Game/Quests")));
 	return true;
 }
 
@@ -189,7 +222,7 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 		{ TEXT("vector3 _x;\n_x = Normalize([0, 0, 0]);"), TEXT("no direction") },
 		{ TEXT("float _x;\n_x = MapRange(1, 2, 2, 0, 1);"), TEXT("no range to map from") },
 		{ TEXT("float _t;\n_t = Time();"), TEXT("needs a game world") },
-		{ TEXT("Exec(\"Examples/Hello\");"), TEXT("needs a game world") },
+		{ TEXT("Exec(\"Intro\");"), TEXT("needs a game world") },
 		{ TEXT("int _x;\n_x = Floor(1e300);"), TEXT("too large to convert") },
 		{ TEXT("int _x;\n_x = Abs(-2147483647 - 1);"), TEXT("has no positive int") },
 		{ TEXT("int _x;\n_x = Clamp(5, 10, 1);"), TEXT("Min (10) is greater than Max (1)") },
@@ -222,31 +255,38 @@ bool FBangoModuleTest::RunTest(const FString& Parameters)
 	FBangoModule& Module = FBangoModule::Get();
 	TestNotNull(TEXT("module has built-in commands"), Module.GetCommands().FindCommandImpl(TEXT("Hint")));
 
-	// The example script ships with the project in Content/Bango/Examples/Hello.bango.
+	// A script asset made for the test (in memory, under /Temp), found by its path.
+	UBangoScriptAsset* Asset = BangoGameTestsPrivate::MakeTestScript(TEXT("Hello"), TEXT("#define params (string _name = \"you\")\nHint(ToText(_name));"));
 	TSharedPtr<const FBangoProgram> Program;
 	FString DisplayPath;
 	FString Error;
-	const bool bCompiled = Module.GetScriptCache().GetProgram(TEXT("Examples/Hello"), Module.GetCommands(), Program, DisplayPath, Error);
-	TestTrue(TEXT("example script loads and compiles"), bCompiled);
+	const bool bCompiled = Module.GetScriptCache().GetProgram(TEXT("/Temp/BangoTests/Hello"), Module.GetCommands(), Program, DisplayPath, Error);
+	TestTrue(TEXT("script asset loads and compiles"), bCompiled);
 	if (!bCompiled)
 	{
 		AddError(Error);
 	}
-	TestEqual(TEXT("display path"), DisplayPath, FString(TEXT("Examples/Hello.bango")));
+	TestEqual(TEXT("display path"), DisplayPath, FString(TEXT("/Temp/BangoTests/Hello.bango")));
 
 	TSharedPtr<const FBangoProgram> Again;
-	Module.GetScriptCache().GetProgram(TEXT("Examples\\Hello.bango"), Module.GetCommands(), Again, DisplayPath, Error);
+	Module.GetScriptCache().GetProgram(TEXT("\\Temp\\BangoTests\\Hello.bango"), Module.GetCommands(), Again, DisplayPath, Error);
 	TestTrue(TEXT("second load comes from the cache"), Again.IsValid() && Again == Program);
 
-	// The example's contents may change, so only check that GetScriptParams matches what the compiler produced.
+	// Changing the asset's text (as the editor does) compiles it again.
+	Asset->Source = TEXT("Hint(ToText(\"changed\"));");
+	TSharedPtr<const FBangoProgram> Changed;
+	TestTrue(TEXT("changed script compiles"), Module.GetScriptCache().GetProgram(*Asset, Module.GetCommands(), Changed, DisplayPath, Error));
+	TestTrue(TEXT("changed text is compiled again"), Changed.IsValid() && Changed != Program);
+	Asset->Source = TEXT("#define params (string _name = \"you\")\nHint(ToText(_name));");
+
 	TArray<FBangoScriptParamInfo> Params;
-	TestTrue(TEXT("GetScriptParams succeeds"), Module.GetScriptParams(TEXT("Examples/Hello"), Params, Error));
-	TestEqual(TEXT("GetScriptParams matches the compiled program"), Params.Num(), Program.IsValid() ? Program->Params.Num() : -1);
+	TestTrue(TEXT("GetScriptParams succeeds"), Module.GetScriptParams(TEXT("/Temp/BangoTests/Hello"), Params, Error));
+	TestEqual(TEXT("GetScriptParams matches the script"), Params.Num(), 1);
 
 	FBangoValue Entity;
 	TestTrue(TEXT("null actor becomes nil"), Bango::ActorToEntity(nullptr, Entity, Error) && Entity.IsNil() && Entity.GetType() == FBangoType::Entity());
 
-	TestFalse(TEXT("missing script fails"), Module.GetScriptCache().GetProgram(TEXT("Examples/DoesNotExist"), Module.GetCommands(), Program, DisplayPath, Error));
+	TestFalse(TEXT("missing script fails"), Module.GetScriptCache().GetProgram(TEXT("/Temp/BangoTests/DoesNotExist"), Module.GetCommands(), Program, DisplayPath, Error));
 	TestTrue(TEXT("missing script error"), Error.Contains(TEXT("not found"), ESearchCase::CaseSensitive));
 	return true;
 }
@@ -259,7 +299,8 @@ bool FBangoBlueprintArgsTest::RunTest(const FString& Parameters)
 	// params (string _name, int _times = 3, double _delay = 0.5, entity _who = nil)
 	TArray<FBangoScriptParamInfo> Params;
 	FString Error;
-	TestTrue(TEXT("Greet example has parameters"), FBangoModule::Get().GetScriptParams(TEXT("Examples/Greet"), Params, Error) && Params.Num() == 4);
+	BangoGameTestsPrivate::MakeTestScript(TEXT("Greet"), TEXT("#define params (string _name, int _times = 3, float _delay = 0.5, entity _who = nil)\nSleep(_delay);"));
+	TestTrue(TEXT("Greet has parameters"), FBangoModule::Get().GetScriptParams(TEXT("/Temp/BangoTests/Greet"), Params, Error) && Params.Num() == 4);
 	if (Params.Num() != 4)
 	{
 		AddError(Error);

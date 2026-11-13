@@ -4,6 +4,8 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "BangoConditions.h"
 #include "BangoInstance.h"
+class UBangoScriptAsset;
+
 #include "BangoScriptSubsystem.generated.h"
 
 /**
@@ -63,7 +65,8 @@ public:
 	static UBangoScriptSubsystem* Get(const UObject* WorldContext);
 
 	/**
-	 * Compiles (if needed) and starts the script at ScriptPath ("Quest/Intro" means Content/Bango/Quest/Intro.bango).
+	 * Compiles (if needed) and starts the script at ScriptPath: a Bango Script asset's path, full ("/Game/Quests/Intro")
+	 * or relative to /Game ("Quests/Intro"). Its asset is loaded if it isn't (a synchronous load).
 	 * Args are matched to the script's params line in order (see FBangoInstance::Start); use Bango::ActorToEntity
 	 * for entity arguments. The script runs straight away until it first pauses. Returns an invalid handle and
 	 * shows an error if the script can't be found, doesn't compile, the arguments don't fit its parameters, or
@@ -76,6 +79,18 @@ public:
 	 * OutError instead of being shown. An error the script hits once it's running is reported as usual.
 	 */
 	FBangoScriptHandle Spawn(const FString& ScriptPath, const TArray<FBangoValue>& Args, FString& OutError);
+
+	/** Spawn, for a script asset already in hand (like a Spawn Bango Script node's). Null shows an error. */
+	FBangoScriptHandle Spawn(const UBangoScriptAsset* Script, const TArray<FBangoValue>& Args = TArray<FBangoValue>());
+
+	/** Spawn of a script asset, for callers that report errors themselves (OutError, as above). */
+	FBangoScriptHandle Spawn(const UBangoScriptAsset* Script, const TArray<FBangoValue>& Args, FString& OutError);
+
+	/**
+	 * The name of the running script with this id ("/Game/Quests/Intro.bango"), for paths relative to it (Exec).
+	 * Empty if there's none, or it was spawned from text (SpawnFromSource).
+	 */
+	FString GetScriptPath(int64 InstanceId) const;
 
 	/**
 	 * Compiles Source, the text of a script, and starts it, like Spawn does with a file. Name is what errors show in

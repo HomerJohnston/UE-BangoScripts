@@ -1,5 +1,7 @@
 #include "BangoScriptSubsystem.h"
 
+#include "BangoScriptAsset.h"
+
 #include "Bango.h"
 #include "BangoActorRegistry.h"
 #include "BangoCompiler.h"
@@ -230,6 +232,43 @@ FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FString& ScriptPath, const
 	TSharedPtr<FRunningScript> Script = MakeShared<FRunningScript>();
 	Script->Path = DisplayPath;
 	return StartScript(Program, Script, Args, &OutError);
+}
+
+FBangoScriptHandle UBangoScriptSubsystem::Spawn(const UBangoScriptAsset* ScriptAsset, const TArray<FBangoValue>& Args, FString& OutError)
+{
+	OutError.Reset();
+	if (!ScriptAsset)
+	{
+		OutError = TEXT("No Bango Script was given to spawn.");
+		return FBangoScriptHandle();
+	}
+	FBangoModule& Module = FBangoModule::Get();
+	TSharedPtr<const FBangoProgram> Program;
+	FString DisplayPath;
+	if (!Module.GetScriptCache().GetProgram(*ScriptAsset, Module.GetCommands(), Program, DisplayPath, OutError))
+	{
+		return FBangoScriptHandle();
+	}
+	TSharedPtr<FRunningScript> Script = MakeShared<FRunningScript>();
+	Script->Path = DisplayPath;
+	return StartScript(Program, Script, Args, &OutError);
+}
+
+FBangoScriptHandle UBangoScriptSubsystem::Spawn(const UBangoScriptAsset* ScriptAsset, const TArray<FBangoValue>& Args)
+{
+	FString Error;
+	const FBangoScriptHandle Handle = Spawn(ScriptAsset, Args, Error);
+	if (!Handle.IsValid() && !Error.IsEmpty())
+	{
+		Bango::ReportError(Error);
+	}
+	return Handle;
+}
+
+FString UBangoScriptSubsystem::GetScriptPath(int64 InstanceId) const
+{
+	const TSharedPtr<FRunningScript>* Found = Scripts.Find(InstanceId);
+	return Found && Found->IsValid() && !(*Found)->bFromSource ? (*Found)->Path : FString();
 }
 
 int32 UBangoScriptSubsystem::AllocateId()

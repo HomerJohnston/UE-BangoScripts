@@ -1,5 +1,7 @@
 #include "BangoBuiltinCommands.h"
 
+#include "BangoScriptPath.h"
+
 #include "BangoActorRegistry.h"
 #include "BangoLog.h"
 #include "BangoScriptSubsystem.h"
@@ -795,7 +797,7 @@ namespace Bango
 		// Exec(path, args...) -> int: spawns a script file, like UBangoScriptSubsystem::Spawn; the result is its handle's id.
 		{
 			FBangoCommand Command;
-			Command.Signature = FBangoCommandSignature::Make(TEXT("Exec")).Param(TEXT("Path"), String, TEXT("The script, like \"Quest/Intro\" for Content/Bango/Quest/Intro.bango"))
+			Command.Signature = FBangoCommandSignature::Make(TEXT("Exec")).Param(TEXT("Path"), String, TEXT("The script: relative to this script's folder (\"Intro\", \"../Shared/Greet\"), or a full asset path (\"/Game/Quests/Intro\")"))
 				.Variadic(TEXT("Arg "), 1).Returns(Int).Discardable().InCategory(TEXT("Flow Control"))
 				.Describe(TEXT("Starts another script, which runs on its own alongside this one. The extra values are its parameters, in order. It runs straight away until it first pauses; then this script carries on. Gives back the new script's id."));
 			Command.Start = [](FBangoCommandCall& Call)
@@ -814,9 +816,17 @@ namespace Bango
 				{
 					ScriptArgs.Add(Call.Args[i]);
 				}
+				// Relative to the calling script's folder (a script spawned from text has none: then relative to /Game).
 				const FString Path = Call.Args[0].GetString();
+				const FString Caller = Subsystem->GetScriptPath(Call.InstanceId);
+				const FString Folder = Caller.IsEmpty() ? FString(Bango::DefaultScriptFolder()) : Bango::GetScriptPathFolder(Caller);
+				FString Resolved;
 				FString Error;
-				const FBangoScriptHandle Handle = Subsystem->Spawn(Path, ScriptArgs, Error);
+				if (!Bango::ResolveScriptPath(Path, Folder, Resolved, Error))
+				{
+					return Call.Fail(Error);
+				}
+				const FBangoScriptHandle Handle = Subsystem->Spawn(Resolved, ScriptArgs, Error);
 				if (!Handle.IsValid())
 				{
 					return Call.Fail(FString::Printf(TEXT("Couldn't start '%s': %s"), *Path, Error.IsEmpty() ? TEXT("it didn't start.") : *Error));
