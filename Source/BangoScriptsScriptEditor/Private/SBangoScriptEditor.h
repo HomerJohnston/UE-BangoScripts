@@ -12,6 +12,7 @@
 #include "Widgets/DeclarativeSyntaxSupport.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/SListView.h"
+#include "Animation/CurveSequence.h"
 
 class FUICommandList;
 class SBox;
@@ -172,7 +173,7 @@ private:
 	FReferenceList NodeReference;
 	/** Which tab the reference pane shows: 0 COMMANDS, 1 NODES (remembered between sessions). */
 	int32 ReferenceTab = 0;
-	/** The reference pane on the right (COMMANDS and NODES), shown or hidden with its Commands tab, like the text pane on the left. */
+	/** The reference pane on the right (COMMANDS and NODES), shown or hidden with its Command Palette tab, like the text pane on the left. */
 	bool bCommandsPaneOpen = false;
 	float CommandsPaneOpenness = 0.0f;
 	bool bCommandsPaneSliding = false;
@@ -219,6 +220,10 @@ private:
 	bool bTextEdited = false;
 	/** Why the text in the box couldn't be shown as a graph (from Apply, or opening a file that doesn't read). Empty if it can. */
 	FString TextError;
+	/** Flashes the error under the text once each time it's set (SetTextError), so a new (or the same) error is noticed. */
+	FCurveSequence TextErrorFlash;
+	/** Sets TextError, and flashes it if there is one. */
+	void SetTextError(const FString& Error);
 	TSharedPtr<SBox> GraphHost;
 	TSharedPtr<SGraphEditor> GraphEditor;
 	TSharedPtr<FUICommandList> GraphCommands;
@@ -338,6 +343,8 @@ private:
 	/** Shows one of EdGraphs. With bZoomToFit, the view fits the whole graph; otherwise it's left for the caller to set. */
 	void ShowGraph(int32 GraphIndex, bool bZoomToFit = true);
 
+	/** Whether Node's top-left corner is in the part of the graph that's shown (safe for reroute nodes, unlike IsNodeTitleVisible). */
+	bool IsNodeInView(const UEdGraphNode* Node) const;
 	/** Sync Graph (SBangoTextEditor): the text's cursor moved to these nodes, so select them in their graph. */
 	void OnTextCursorNodes(const FString& FunctionName, const TArray<int64>& NodeIDs);
 
@@ -381,7 +388,7 @@ private:
 	TSharedRef<SWidget> MakeTextTab();
 	/** Opens or closes the text pane, sliding it (bAnimate) or at once. */
 	void SetTextPaneOpen(bool bOpen, bool bAnimate);
-	/** The Commands tab on the graph's right edge, and the reference pane (COMMANDS and NODES tabs) it pulls out. */
+	/** The Command Palette tab on the graph's right edge, and the reference pane (COMMANDS and NODES tabs) it pulls out. */
 	TSharedRef<SWidget> MakeCommandsTab();
 	TSharedRef<SWidget> MakeCommandsPane();
 	void SetCommandsPaneOpen(bool bOpen, bool bAnimate);

@@ -46,6 +46,7 @@
 #include "Widgets/Input/SSearchBox.h"
 #include "Widgets/Input/SSegmentedControl.h"
 #include "Widgets/Layout/SWidgetSwitcher.h"
+#include "Widgets/Layout/SSeparator.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "SBangoTextEditor.h"
@@ -551,7 +552,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 						MakeTextTab()
 					]
 
-					// The Commands tab, the same on the graph's right edge, for the reference pane (COMMANDS and NODES).
+					// The Command Palette tab, the same on the graph's right edge, for the reference pane (COMMANDS and NODES).
 					+ SOverlay::Slot()
 					.HAlign(HAlign_Right)
 					.VAlign(VAlign_Top)
@@ -2427,7 +2428,7 @@ void SBangoScriptEditor::LoadScript(const FString& Script)
 		ShowMessage(FText::Format(LOCTEXT("CantOpen", "This script can't be shown as a graph until its text is fixed. Fix it in the script text pane (the Source Editor tab on the left) and Apply, or elsewhere and Reload:\n\n{0}"), FText::FromString(Error.ToString())));
 		SetScriptText(Source);
 		SetTextPaneOpen(true, false); // at once: there's nothing else to show
-		TextError = Error.ToString();
+		SetTextError(Error.ToString());
 		if (Error.Line > 0)
 		{
 			TextBox->GoTo(FTextLocation(Error.Line - 1, FMath::Max(Error.Column - 1, 0))); // the pane shows the file as it is
@@ -3122,8 +3123,8 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeCommandsTab()
 		.ToolTipText_Lambda([this]()
 		{
 			return bCommandsPaneOpen
-				? LOCTEXT("HideCommandsTooltip", "Put the list of scripting commands away.")
-				: LOCTEXT("ShowCommandsTooltip", "Pull out the list of every scripting command, beside the graph.");
+				? LOCTEXT("HideCommandsTooltip", "Put the Command Palette (commands and nodes) away.")
+				: LOCTEXT("ShowCommandsTooltip", "Pull out the Command Palette beside the graph: every command a script can call, and every node you can drag onto the graph.");
 		})
 		.OnClicked_Lambda([this]()
 		{
@@ -3147,7 +3148,7 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeCommandsTab()
 				.bClockwise(true)
 				[
 					SNew(STextBlock)
-					.Text(LOCTEXT("CommandsTab", "Commands"))
+					.Text(LOCTEXT("CommandsTab", "Command Palette"))
 					.Font(FAppStyle::GetFontStyle("BoldFont"))
 					.ColorAndOpacity_Lambda([this]() -> FSlateColor
 					{
@@ -3435,17 +3436,6 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeTextPane()
 					})
 				]
 			]
-			// Why the text doesn't read. (That it's been edited is shown beside the heading.)
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(2.0f, 0.0f, 2.0f, 4.0f)
-			[
-				SNew(STextBlock)
-				.AutoWrapText(true)
-				.Visibility_Lambda([this]() { return !TextError.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed; })
-				.Text_Lambda([this]() { return FText::FromString(TextError); })
-				.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.4f, 0.35f)))
-			]
 			+ SVerticalBox::Slot()
 			.FillHeight(1.0f)
 			[
@@ -3494,7 +3484,70 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeTextPane()
 					TextVScrollBar.ToSharedRef()
 				]
 			]
+			// Why the text doesn't read, under the text (so the text doesn't move down when it shows), below a line. It
+			// flashes once each time it's set. That the text has been edited is shown beside the heading.
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 4.0f, 0.0f, 0.0f)
+			[
+				SNew(SVerticalBox)
+				.Visibility_Lambda([this]() { return !TextError.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed; })
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(0.0f, 0.0f, 0.0f, 4.0f)
+				[
+					SNew(SSeparator)
+					.Orientation(Orient_Horizontal)
+					.Thickness(1.0f)
+				]
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				[
+					SNew(SBorder)
+					.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+					.BorderBackgroundColor_Lambda([this]()
+					{
+						// The panel's recessed colour, lit up red when the error's just been set, fading back.
+						const FLinearColor Base = FStyleColors::Recessed.GetColor(FWidgetStyle());
+						const FLinearColor Lit(0.55f, 0.08f, 0.06f);
+						const float Flash = TextErrorFlash.IsPlaying() ? 1.0f - TextErrorFlash.GetLerp() : 0.0f;
+						return FSlateColor(FMath::Lerp(Base, Lit, Flash));
+					})
+					.Padding(FMargin(6.0f, 4.0f))
+					[
+						SNew(SVerticalBox)
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(0.0f, 0.0f, 0.0f, 2.0f)
+						[
+							SNew(STextBlock)
+							.Text(LOCTEXT("TextErrorHeading", "ERROR:"))
+							.Font(FAppStyle::GetFontStyle("BoldFont"))
+							.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.25f, 0.2f)))
+						]
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						[
+							SNew(STextBlock)
+							.AutoWrapText(true)
+							.Text_Lambda([this]() { return FText::FromString(TextError); })
+							.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.4f, 0.35f)))
+						]
+					]
+				]
+			]
 		];
+}
+
+void SBangoScriptEditor::SetTextError(const FString& Error)
+{
+	TextError = Error;
+	if (!TextError.IsEmpty())
+	{
+		// One flash, fading out; playing it on this widget keeps it drawing until the flash is over.
+		TextErrorFlash = FCurveSequence(0.0f, 0.6f, ECurveEaseFunction::QuadOut);
+		TextErrorFlash.Play(AsShared());
+	}
 }
 
 void SBangoScriptEditor::SetScriptText(const FString& Text)
@@ -3588,7 +3641,7 @@ bool SBangoScriptEditor::ApplyScriptText()
 	if (!Bango::HoistLateLocals(Typed, Text, Error))
 	{
 		Error.FileName = OpenScript + TEXT(".bango");
-		TextError = Error.ToString();
+		SetTextError(Error.ToString());
 		if (Error.Line > 0)
 		{
 			TextBox->GoTo(FTextLocation(Error.Line - 1, FMath::Max(Error.Column - 1, 0)));
@@ -3598,7 +3651,7 @@ bool SBangoScriptEditor::ApplyScriptText()
 	FBangoGraphDocument Document;
 	if (!Bango::BuildGraph(Text, OpenScript + TEXT(".bango"), Document, Error))
 	{
-		TextError = Error.ToString();
+		SetTextError(Error.ToString());
 		if (Error.Line > 0)
 		{
 			TextBox->GoTo(FTextLocation(Error.Line - 1, FMath::Max(Error.Column - 1, 0)));
@@ -4972,10 +5025,38 @@ void SBangoScriptEditor::OnTextCursorNodes(const FString& FunctionName, const TA
 		GraphEditor->SetNodeSelection(Node, true);
 	}
 	// Pan only when the node isn't in view, so moving through the text line by line doesn't keep moving the graph.
-	if (bSwitched || !GraphEditor->IsNodeTitleVisible(Found[0], /*bRequestRename*/ false))
+	// (Not IsNodeTitleVisible: it reads the node's title widget, which a reroute node doesn't have, and crashes.)
+	if (bSwitched || !IsNodeInView(Found[0]))
 	{
 		GraphEditor->JumpToNode(Found[0], /*bRequestRename*/ false, /*bSelectNode*/ false);
 	}
+}
+
+bool SBangoScriptEditor::IsNodeInView(const UEdGraphNode* Node) const
+{
+	if (!GraphEditor.IsValid() || !Node)
+	{
+		return false;
+	}
+	// The node's box in graph space, and the part of the graph that's shown: from the view's top-left corner, as wide
+	// and tall as the graph editor divided by the zoom.
+	FSlateRect NodeRect;
+	if (!GraphEditor->GetBoundsForNode(Node, NodeRect, 0.0f))
+	{
+		return false;
+	}
+	FVector2f ViewLocation(0.0f, 0.0f);
+	float ViewZoom = 1.0f;
+	GraphEditor->GetViewLocation(ViewLocation, ViewZoom);
+	const FVector2f ViewSize = FVector2f(GraphEditor->GetTickSpaceGeometry().GetLocalSize()) / FMath::Max(ViewZoom, 0.01f);
+	if (ViewSize.X <= 0.0f || ViewSize.Y <= 0.0f)
+	{
+		return false; // not laid out yet
+	}
+	// In view if its top-left corner is (a reroute is small; a big node's top is where its title is).
+	const FVector2f Corner(NodeRect.Left, NodeRect.Top);
+	return Corner.X >= ViewLocation.X && Corner.Y >= ViewLocation.Y
+		&& Corner.X <= ViewLocation.X + ViewSize.X && Corner.Y <= ViewLocation.Y + ViewSize.Y;
 }
 
 void SBangoScriptEditor::OnGraphSelectionChanged(const TSet<UObject*>& Selection)
