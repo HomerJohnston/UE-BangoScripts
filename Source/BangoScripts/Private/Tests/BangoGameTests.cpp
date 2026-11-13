@@ -72,8 +72,11 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 	using namespace BangoGameTestsPrivate;
 	FBangoCommandTable Commands;
 	Bango::RegisterBuiltinCommands(Commands);
-	for (const TCHAR* Name : { TEXT("Hint"), TEXT("Log"), TEXT("Format"), TEXT("FormatText"), TEXT("ToText"), TEXT("ToString"), TEXT("Sleep"), TEXT("Random"), TEXT("RandomInt"), TEXT("Floor"), TEXT("Round"),
-		TEXT("Min"), TEXT("Max"), TEXT("Abs"), TEXT("Clamp"), TEXT("Sin"), TEXT("Cos"), TEXT("SinDegrees"), TEXT("CosDegrees"), TEXT("Time"), TEXT("ToEntity"), TEXT("SetPos"), TEXT("GetPos"), TEXT("SetHidden"), TEXT("DistanceTo"), TEXT("IsNull") })
+	for (const TCHAR* Name : { TEXT("Hint"), TEXT("WriteLog"), TEXT("Format"), TEXT("FormatText"), TEXT("ToText"), TEXT("ToString"), TEXT("Sleep"), TEXT("Random"), TEXT("RandomInt"), TEXT("Floor"), TEXT("Round"),
+		TEXT("Min"), TEXT("Max"), TEXT("Abs"), TEXT("Clamp"), TEXT("Sin"), TEXT("Cos"), TEXT("SinDegrees"), TEXT("CosDegrees"), TEXT("Time"), TEXT("ToEntity"), TEXT("SetPos"), TEXT("GetPos"), TEXT("SetHidden"), TEXT("DistanceTo"), TEXT("IsNull"),
+		TEXT("Ceil"), TEXT("Sign"), TEXT("Sqrt"), TEXT("Pow"), TEXT("Log"), TEXT("Ln"), TEXT("Lerp"), TEXT("MapRange"), TEXT("InterpTo"), TEXT("DeltaTime"),
+		TEXT("Tan"), TEXT("TanDegrees"), TEXT("Asin"), TEXT("AsinDegrees"), TEXT("Acos"), TEXT("AcosDegrees"), TEXT("Atan"), TEXT("AtanDegrees"), TEXT("Atan2"), TEXT("Atan2Degrees"),
+		TEXT("Pi"), TEXT("RandomBool"), TEXT("Chance"), TEXT("IsNearlyEqual"), TEXT("Length"), TEXT("Distance"), TEXT("Normalize"), TEXT("Dot"), TEXT("Cross"), TEXT("LerpVector") })
 	{
 		TestNotNull(FString::Printf(TEXT("registered: %s"), Name), Commands.FindCommandImpl(Name));
 	}
@@ -84,6 +87,7 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 		TEXT("#define LOCTEXT_NAMESPACE \"Bango.Tests\"\n")
 		TEXT("global float r;\nglobal int ri;\nglobal int fl;\nglobal int ro;\nglobal int rn;\nglobal string fm;\nglobal string en;\nglobal bool same;\n")
 		TEXT("global text tf;\nglobal string ts;\nglobal bool teq;\nglobal bool nobody;\nglobal bool nilnull;\nglobal bool done;\nentity _ne;\n")
+		TEXT("global int ce;\nglobal int sgi;\nglobal float sqr;\nglobal float pw;\nglobal float lg;\nglobal float lg2;\nglobal float lne;\nglobal float lp;\nglobal float mr;\nglobal float a2;\nglobal bool ch;\nglobal bool ne;\nglobal float ln3;\nglobal vector3 nv;\nglobal vector3 cr;\n")
 		TEXT("global int mxi;\nglobal float mxf;\nglobal int mni;\nglobal float mnf;\nglobal int absi;\nglobal float absf;\nglobal int cli;\nglobal float clf;\nglobal float sn;\nglobal float cs;\nglobal float snd;\nglobal float csd;\n")
 		TEXT("r = Random(1.0, 2.0);\n")
 		TEXT("ri = RandomInt(3, 3);\n")
@@ -102,12 +106,15 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 		TEXT("cs = Cos(0);\n")
 		TEXT("snd = SinDegrees(30);\n")
 		TEXT("csd = CosDegrees(180.0);\n")
+		TEXT("ce = Ceil(1.25);\nsgi = Sign(-7);\nsqr = Sqrt(16);\npw = Pow(2, 10);\nlg = Log(1000);\nlg2 = Log(8, 2);\nlne = Ln(1);\nlp = Lerp(0, 10, 0.25);\n")
+		TEXT("mr = MapRange(5, 0, 10, 100, 200);\na2 = Atan2Degrees(1, 1);\nch = Chance(1);\nne = IsNearlyEqual(0.1 + 0.2, 0.3);\nln3 = Length([1, 2, 2]) + Distance([0, 0, 0], [0, 3, 4]) + Dot([1, 0, 0], [2, 0, 0]);\n")
+		TEXT("nv = Normalize([0, 0, 5]);\ncr = Cross([1, 0, 0], [0, 1, 0]);\n")
 		TEXT("fm = Format(\"{0}-{1}-{2}\", 1, \"a\", [1.5]);\n")
 		TEXT("en = Format(\"{0} {1}\", ToEntity(\"door17\"), [@john, ToEntity(\"_x\")]);\n")
 		TEXT("same = ToEntity(\"john\") == @john;\n")
 		TEXT("Sleep(0.5);\n")
 		TEXT("Sleep(0);\n")
-		TEXT("Log(\"logged {0}\", 1);\n")
+		TEXT("WriteLog(\"logged {0}\", 1);\n")
 		TEXT("Hint(LOCTEXT(\"NoWorld\", \"a hint with no world goes to the log, {0}\"), 1);\n")
 		TEXT("tf = FormatText(LOCTEXT(\"Count\", \"{1}: {0}\"), 2, ToText(\"x\"));\n")
 		TEXT("ts = ToString(NSLOCTEXT(\"Bango.Other\", \"Hello\", \"Hello\"));\n")
@@ -140,6 +147,21 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Cos of 0 (an int becomes a float)"), FMath::IsNearlyEqual(Globals.Find(TEXT("cs"))->GetDouble(), 1.0, 1e-9));
 	TestTrue(TEXT("SinDegrees of 30"), FMath::IsNearlyEqual(Globals.Find(TEXT("snd"))->GetDouble(), 0.5, 1e-9));
 	TestTrue(TEXT("CosDegrees of 180"), FMath::IsNearlyEqual(Globals.Find(TEXT("csd"))->GetDouble(), -1.0, 1e-9));
+	TestEqual(TEXT("Ceil"), Globals.Find(TEXT("ce"))->GetInt(), 2);
+	TestEqual(TEXT("Sign of an int is an int"), Globals.Find(TEXT("sgi"))->GetInt(), -1);
+	TestEqual(TEXT("Sqrt"), Globals.Find(TEXT("sqr"))->GetDouble(), 4.0);
+	TestEqual(TEXT("Pow"), Globals.Find(TEXT("pw"))->GetDouble(), 1024.0);
+	TestTrue(TEXT("Log (base 10)"), FMath::IsNearlyEqual(Globals.Find(TEXT("lg"))->GetDouble(), 3.0, 1e-9));
+	TestTrue(TEXT("Log with a base"), FMath::IsNearlyEqual(Globals.Find(TEXT("lg2"))->GetDouble(), 3.0, 1e-9));
+	TestEqual(TEXT("Ln of 1"), Globals.Find(TEXT("lne"))->GetDouble(), 0.0);
+	TestEqual(TEXT("Lerp"), Globals.Find(TEXT("lp"))->GetDouble(), 2.5);
+	TestEqual(TEXT("MapRange"), Globals.Find(TEXT("mr"))->GetDouble(), 150.0);
+	TestTrue(TEXT("Atan2Degrees"), FMath::IsNearlyEqual(Globals.Find(TEXT("a2"))->GetDouble(), 45.0, 1e-9));
+	TestTrue(TEXT("Chance(1) is always true"), Globals.Find(TEXT("ch"))->GetBool());
+	TestTrue(TEXT("IsNearlyEqual"), Globals.Find(TEXT("ne"))->GetBool());
+	TestTrue(TEXT("Length, Distance and Dot"), FMath::IsNearlyEqual(Globals.Find(TEXT("ln3"))->GetDouble(), 10.0, 1e-9));
+	TestEqual(TEXT("Normalize"), Globals.Find(TEXT("nv"))->GetVectorPart(2), 1.0);
+	TestEqual(TEXT("Cross"), Globals.Find(TEXT("cr"))->GetVectorPart(2), 1.0);
 	TestEqual(TEXT("Format"), Globals.Find(TEXT("fm"))->GetString(), FString(TEXT("1-a-[1.5]")));
 	TestEqual(TEXT("ToEntity and entities in Format"), Globals.Find(TEXT("en"))->GetString(), FString(TEXT("door17 [john, _x]")));
 	TestTrue(TEXT("ToEntity equals the @ literal"), Globals.Find(TEXT("same"))->GetBool());
@@ -156,6 +178,13 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 		{ TEXT("int _x;\n_x = RandomInt(5, 1);"), TEXT("Min (5) is greater than Max (1)") },
 		{ TEXT("float _x;\n_x = Random(2.0, 1.0);"), TEXT("Min (2.0) is greater than Max (1.0)") },
 		{ TEXT("Sleep(-1.0);"), TEXT("negative time") },
+		{ TEXT("float _x;\n_x = Sqrt(-1);"), TEXT("square root of a negative number") },
+		{ TEXT("float _x;\n_x = Log(0);"), TEXT("greater than 0") },
+		{ TEXT("float _x;\n_x = Pow(-8, 0.5);"), TEXT("isn't a whole number") },
+		{ TEXT("float _x;\n_x = Asin(2);"), TEXT("from -1 to 1") },
+		{ TEXT("bool _x;\n_x = Chance(1.5);"), TEXT("from 0 to 1") },
+		{ TEXT("vector3 _x;\n_x = Normalize([0, 0, 0]);"), TEXT("no direction") },
+		{ TEXT("float _x;\n_x = MapRange(1, 2, 2, 0, 1);"), TEXT("no range to map from") },
 		{ TEXT("float _t;\n_t = Time();"), TEXT("needs a game world") },
 		{ TEXT("int _x;\n_x = Floor(1e300);"), TEXT("too large to convert") },
 		{ TEXT("int _x;\n_x = Abs(-2147483647 - 1);"), TEXT("has no positive int") },

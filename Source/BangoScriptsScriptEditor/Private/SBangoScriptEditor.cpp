@@ -212,200 +212,222 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 			+ SSplitter::Slot()
 			.Value(0.18f)
 			[
-				// FUNCTIONS, INPUTS, GLOBALS and LOCALS, one after another in a single scrolling pane. Each list is as
-				// tall as its rows, so only the pane scrolls.
-				SNew(SScrollBox)
-				+ SScrollBox::Slot()
+				// Two foldouts, one above the other: SCRIPT DATA (the script's own lists) and SCRIPTING COMMANDS (a
+				// reference list of every command). An open one shares the height; a closed one is just its header.
+				SNew(SSplitter)
+				.Orientation(Orient_Vertical)
+				+ SSplitter::Slot()
+				.Value(0.65f)
+				.SizeRule_Lambda([this]() { return bScriptDataExpanded ? SSplitter::FractionOfParent : SSplitter::SizeToContent; })
 				[
-					SNew(SVerticalBox)
-
-					// SCRIPT DESCRIPTION: the comment lines at the top of the file. Not shown in the graph.
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(6.0f, 4.0f)
-					[
-						Heading(LOCTEXT("DescriptionHeading", "SCRIPT DESCRIPTION"))
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(6.0f, 0.0f, 6.0f, 4.0f)
-					[
-						SAssignNew(DescriptionBox, SMultiLineEditableTextBox)
-						.AutoWrapText(true)
-						.HintText(LOCTEXT("DescriptionHint", "Describe what this script does."))
-						.ToolTipText(LOCTEXT("DescriptionTooltip", "A description of the script, for designers. It's saved as the comment lines at the very top of the file, and isn't shown in the graph. Enter starts a new line; clicking elsewhere applies it. (A line starting with ==== would be read as a section heading, and lost.)"))
-						.IsReadOnly_Lambda([this]() { return EdGraphs.Num() == 0; })
-						.OnTextCommitted_Lambda([this](const FText& NewText, ETextCommit::Type CommitType)
-						{
-							SetScriptDescription(NewText.ToString());
-						})
-					]
-
-					// FUNCTIONS
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(6.0f, 10.0f, 6.0f, 4.0f)
-					[
-						SectionHeader(LOCTEXT("FunctionsHeading", "FUNCTIONS"),
-							SNew(SButton)
-							.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-							.ContentPadding(FMargin(4.0f, 0.0f))
-							.ToolTipText(LOCTEXT("AddFunctionTooltip", "Add a function to this script."))
-							.IsEnabled_Lambda([this]() { return EdGraphs.Num() > 0; })
-							.OnClicked(this, &SBangoScriptEditor::OnAddFunctionClicked)
-							[
-								SNew(STextBlock).Text(LOCTEXT("AddFunction", "+ Add"))
-							])
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-						SNew(SBox)
-						.HeightOverride_Lambda([this]() { return VariableListHeight(FunctionItems.Num()); })
+					MakeFoldout(LOCTEXT("ScriptDataHeading", "SCRIPT DATA"), &bScriptDataExpanded,
+						// FUNCTIONS, INPUTS, GLOBALS and LOCALS, one after another in a single scrolling pane. Each list is as
+						// tall as its rows, so only the pane scrolls.
+						SNew(SScrollBox)
+						+ SScrollBox::Slot()
 						[
-							SAssignNew(FunctionList, SListView<TSharedPtr<FGraphEntry>>)
-							.ListItemsSource(&FunctionItems)
-							.SelectionMode(ESelectionMode::Single)
-							.ScrollbarVisibility(EVisibility::Collapsed)
-							.ConsumeMouseWheel(EConsumeMouseWheel::Never)
-							.AllowOverscroll(EAllowOverscroll::No)
-							.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateFunctionRow)
-							.OnSelectionChanged(this, &SBangoScriptEditor::OnFunctionSelected)
-							.OnMouseButtonClick(this, &SBangoScriptEditor::OnFunctionClicked)
-							.OnMouseButtonDoubleClick_Lambda([](TSharedPtr<FGraphEntry> Item)
-							{
-								if (TSharedPtr<SInlineEditableTextBlock> Name = Item.IsValid() ? Item->NameWidget.Pin() : nullptr)
-								{
-									Name->EnterEditingMode(); // double-click renames
-								}
-							})
-						]
-					]
+							SNew(SVerticalBox)
 
-					// INPUTS
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(6.0f, 10.0f, 6.0f, 4.0f)
-					[
-						SectionHeader(LOCTEXT("InputsHeading", "INPUTS"),
-							SNew(SButton)
-							.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-							.ContentPadding(FMargin(4.0f, 0.0f))
-							.ToolTipText_Lambda([this]()
-							{
-								return ShownGraph > 0
-									? LOCTEXT("AddFunctionInputTooltip", "Add a parameter to this function. Calls to it need a value for it.")
-									: LOCTEXT("AddScriptInputTooltip", "Add a parameter to this script (#define params): a value it's spawned with.");
-							})
-							.IsEnabled_Lambda([this]() { return GetShownEntryNode() != nullptr; })
-							.OnClicked(this, &SBangoScriptEditor::OnAddInputClicked)
+							// SCRIPT DESCRIPTION: the comment lines at the top of the file. Not shown in the graph.
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							.Padding(6.0f, 4.0f)
 							[
-								SNew(STextBlock).Text(LOCTEXT("AddInput", "+ Add"))
-							])
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-						SNew(SBox)
-						.HeightOverride_Lambda([this]() { return VariableListHeight(InputItems.Num()); })
-						[
-							SAssignNew(InputList, SListView<TSharedPtr<FInputEntry>>)
-							.ListItemsSource(&InputItems)
-							.SelectionMode(ESelectionMode::Single)
-							.ScrollbarVisibility(EVisibility::Collapsed)
-							.ConsumeMouseWheel(EConsumeMouseWheel::Never)
-							.AllowOverscroll(EAllowOverscroll::No)
-							.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateInputRow)
-							.OnMouseButtonDoubleClick_Lambda([](TSharedPtr<FInputEntry> Item)
-							{
-								if (TSharedPtr<SInlineEditableTextBlock> Name = Item.IsValid() ? Item->NameWidget.Pin() : nullptr)
+								Heading(LOCTEXT("DescriptionHeading", "SCRIPT DESCRIPTION"))
+							]
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							.Padding(6.0f, 0.0f, 6.0f, 4.0f)
+							[
+								SAssignNew(DescriptionBox, SMultiLineEditableTextBox)
+								.AutoWrapText(true)
+								.HintText(LOCTEXT("DescriptionHint", "Describe what this script does."))
+								.ToolTipText(LOCTEXT("DescriptionTooltip", "A description of the script, for designers. It's saved as the comment lines at the very top of the file, and isn't shown in the graph. Enter starts a new line; clicking elsewhere applies it. (A line starting with ==== would be read as a section heading, and lost.)"))
+								.IsReadOnly_Lambda([this]() { return EdGraphs.Num() == 0; })
+								.OnTextCommitted_Lambda([this](const FText& NewText, ETextCommit::Type CommitType)
 								{
-									Name->EnterEditingMode(); // double-click renames
-								}
-							})
-						]
-					]
+									SetScriptDescription(NewText.ToString());
+								})
+							]
 
-					// GLOBALS
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(6.0f, 10.0f, 6.0f, 4.0f)
-					[
-						SectionHeader(LOCTEXT("GlobalsHeading", "GLOBALS"),
-							SNew(SButton)
-							.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-							.ContentPadding(FMargin(4.0f, 0.0f))
-							.ToolTipText(LOCTEXT("GlobalsHeadingAddTooltip", "Declare a global: a variable shared by every script, which keeps its value between levels. It starts as nil until something sets it."))
-							.IsEnabled_Lambda([this]() { return GetShownEntryNode() != nullptr; })
-							.OnClicked_Lambda([this]() { return OnAddDeclClicked(true); })
+							// FUNCTIONS
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							.Padding(6.0f, 10.0f, 6.0f, 4.0f)
 							[
-								SNew(STextBlock).Text(LOCTEXT("GlobalsHeadingAdd", "+ Add"))
-							])
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-						SNew(SBox)
-						.HeightOverride_Lambda([this]() { return VariableListHeight(GlobalItems.Num()); })
-						[
-							SAssignNew(GlobalList, SListView<TSharedPtr<FDeclEntry>>)
-							.ListItemsSource(&GlobalItems)
-							.SelectionMode(ESelectionMode::Single)
-							.ScrollbarVisibility(EVisibility::Collapsed)
-							.ConsumeMouseWheel(EConsumeMouseWheel::Never)
-							.AllowOverscroll(EAllowOverscroll::No)
-							.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateDeclRow)
-							.OnMouseButtonClick(this, &SBangoScriptEditor::OnDeclClicked)
-							.OnMouseButtonDoubleClick_Lambda([](TSharedPtr<FDeclEntry> Item)
-							{
-								if (TSharedPtr<SInlineEditableTextBlock> Name = Item.IsValid() ? Item->NameWidget.Pin() : nullptr)
-								{
-									Name->EnterEditingMode(); // double-click renames
-								}
-							})
-						]
-					]
+								SectionHeader(LOCTEXT("FunctionsHeading", "FUNCTIONS"),
+									SNew(SButton)
+									.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+									.ContentPadding(FMargin(4.0f, 0.0f))
+									.ToolTipText(LOCTEXT("AddFunctionTooltip", "Add a function to this script."))
+									.IsEnabled_Lambda([this]() { return EdGraphs.Num() > 0; })
+									.OnClicked(this, &SBangoScriptEditor::OnAddFunctionClicked)
+									[
+										SNew(STextBlock).Text(LOCTEXT("AddFunction", "+ Add"))
+									])
+							]
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							[
+								SNew(SBox)
+								.HeightOverride_Lambda([this]() { return VariableListHeight(FunctionItems.Num()); })
+								[
+									SAssignNew(FunctionList, SListView<TSharedPtr<FGraphEntry>>)
+									.ListItemsSource(&FunctionItems)
+									.SelectionMode(ESelectionMode::Single)
+									.ScrollbarVisibility(EVisibility::Collapsed)
+									.ConsumeMouseWheel(EConsumeMouseWheel::Never)
+									.AllowOverscroll(EAllowOverscroll::No)
+									.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateFunctionRow)
+									.OnSelectionChanged(this, &SBangoScriptEditor::OnFunctionSelected)
+									.OnMouseButtonClick(this, &SBangoScriptEditor::OnFunctionClicked)
+									.OnMouseButtonDoubleClick_Lambda([](TSharedPtr<FGraphEntry> Item)
+									{
+										if (TSharedPtr<SInlineEditableTextBlock> Name = Item.IsValid() ? Item->NameWidget.Pin() : nullptr)
+										{
+											Name->EnterEditingMode(); // double-click renames
+										}
+									})
+								]
+							]
 
-					// LOCALS
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(6.0f, 10.0f, 6.0f, 4.0f)
-					[
-						SectionHeader(LOCTEXT("LocalsHeading", "LOCALS"),
-							SNew(SButton)
-							.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-							.ContentPadding(FMargin(4.0f, 0.0f))
-							.ToolTipText(LOCTEXT("LocalsHeadingAddTooltip", "Add a local to this graph, with the value it starts with."))
-							.IsEnabled_Lambda([this]() { return GetShownEntryNode() != nullptr; })
-							.OnClicked_Lambda([this]() { return OnAddDeclClicked(false); })
+							// INPUTS
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							.Padding(6.0f, 10.0f, 6.0f, 4.0f)
 							[
-								SNew(STextBlock).Text(LOCTEXT("LocalsHeadingAdd", "+ Add"))
-							])
-					]
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					.Padding(0.0f, 0.0f, 0.0f, 6.0f)
-					[
-						SNew(SBox)
-						.HeightOverride_Lambda([this]() { return VariableListHeight(LocalItems.Num()); })
+								SectionHeader(LOCTEXT("InputsHeading", "INPUTS"),
+									SNew(SButton)
+									.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+									.ContentPadding(FMargin(4.0f, 0.0f))
+									.ToolTipText_Lambda([this]()
+									{
+										return ShownGraph > 0
+											? LOCTEXT("AddFunctionInputTooltip", "Add a parameter to this function. Calls to it need a value for it.")
+											: LOCTEXT("AddScriptInputTooltip", "Add a parameter to this script (#define params): a value it's spawned with.");
+									})
+									.IsEnabled_Lambda([this]() { return GetShownEntryNode() != nullptr; })
+									.OnClicked(this, &SBangoScriptEditor::OnAddInputClicked)
+									[
+										SNew(STextBlock).Text(LOCTEXT("AddInput", "+ Add"))
+									])
+							]
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							[
+								SNew(SBox)
+								.HeightOverride_Lambda([this]() { return VariableListHeight(InputItems.Num()); })
+								[
+									SAssignNew(InputList, SListView<TSharedPtr<FInputEntry>>)
+									.ListItemsSource(&InputItems)
+									.SelectionMode(ESelectionMode::Single)
+									.ScrollbarVisibility(EVisibility::Collapsed)
+									.ConsumeMouseWheel(EConsumeMouseWheel::Never)
+									.AllowOverscroll(EAllowOverscroll::No)
+									.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateInputRow)
+									.OnMouseButtonDoubleClick_Lambda([](TSharedPtr<FInputEntry> Item)
+									{
+										if (TSharedPtr<SInlineEditableTextBlock> Name = Item.IsValid() ? Item->NameWidget.Pin() : nullptr)
+										{
+											Name->EnterEditingMode(); // double-click renames
+										}
+									})
+								]
+							]
+
+							// GLOBALS
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							.Padding(6.0f, 10.0f, 6.0f, 4.0f)
+							[
+								SectionHeader(LOCTEXT("GlobalsHeading", "GLOBALS"),
+									SNew(SButton)
+									.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+									.ContentPadding(FMargin(4.0f, 0.0f))
+									.ToolTipText(LOCTEXT("GlobalsHeadingAddTooltip", "Declare a global: a variable shared by every script, which keeps its value between levels. It starts as nil until something sets it."))
+									.IsEnabled_Lambda([this]() { return GetShownEntryNode() != nullptr; })
+									.OnClicked_Lambda([this]() { return OnAddDeclClicked(true); })
+									[
+										SNew(STextBlock).Text(LOCTEXT("GlobalsHeadingAdd", "+ Add"))
+									])
+							]
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							[
+								SNew(SBox)
+								.HeightOverride_Lambda([this]() { return VariableListHeight(GlobalItems.Num()); })
+								[
+									SAssignNew(GlobalList, SListView<TSharedPtr<FDeclEntry>>)
+									.ListItemsSource(&GlobalItems)
+									.SelectionMode(ESelectionMode::Single)
+									.ScrollbarVisibility(EVisibility::Collapsed)
+									.ConsumeMouseWheel(EConsumeMouseWheel::Never)
+									.AllowOverscroll(EAllowOverscroll::No)
+									.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateDeclRow)
+									.OnMouseButtonClick(this, &SBangoScriptEditor::OnDeclClicked)
+									.OnMouseButtonDoubleClick_Lambda([](TSharedPtr<FDeclEntry> Item)
+									{
+										if (TSharedPtr<SInlineEditableTextBlock> Name = Item.IsValid() ? Item->NameWidget.Pin() : nullptr)
+										{
+											Name->EnterEditingMode(); // double-click renames
+										}
+									})
+								]
+							]
+
+							// LOCALS
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							.Padding(6.0f, 10.0f, 6.0f, 4.0f)
+							[
+								SectionHeader(LOCTEXT("LocalsHeading", "LOCALS"),
+									SNew(SButton)
+									.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+									.ContentPadding(FMargin(4.0f, 0.0f))
+									.ToolTipText(LOCTEXT("LocalsHeadingAddTooltip", "Add a local to this graph, with the value it starts with."))
+									.IsEnabled_Lambda([this]() { return GetShownEntryNode() != nullptr; })
+									.OnClicked_Lambda([this]() { return OnAddDeclClicked(false); })
+									[
+										SNew(STextBlock).Text(LOCTEXT("LocalsHeadingAdd", "+ Add"))
+									])
+							]
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							.Padding(0.0f, 0.0f, 0.0f, 6.0f)
+							[
+								SNew(SBox)
+								.HeightOverride_Lambda([this]() { return VariableListHeight(LocalItems.Num()); })
+								[
+									SAssignNew(LocalList, SListView<TSharedPtr<FDeclEntry>>)
+									.ListItemsSource(&LocalItems)
+									.SelectionMode(ESelectionMode::Single)
+									.ScrollbarVisibility(EVisibility::Collapsed)
+									.ConsumeMouseWheel(EConsumeMouseWheel::Never)
+									.AllowOverscroll(EAllowOverscroll::No)
+									.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateDeclRow)
+									.OnMouseButtonClick(this, &SBangoScriptEditor::OnDeclClicked)
+									.OnMouseButtonDoubleClick_Lambda([](TSharedPtr<FDeclEntry> Item)
+									{
+										if (TSharedPtr<SInlineEditableTextBlock> Name = Item.IsValid() ? Item->NameWidget.Pin() : nullptr)
+										{
+											Name->EnterEditingMode(); // double-click renames
+										}
+									})
+								]
+							]
+						])
+				]
+				+ SSplitter::Slot()
+				.Value(0.35f)
+				.SizeRule_Lambda([this]() { return bScriptingCommandsExpanded ? SSplitter::FractionOfParent : SSplitter::SizeToContent; })
+				[
+					MakeFoldout(LOCTEXT("ScriptingCommandsHeading", "SCRIPTING COMMANDS"), &bScriptingCommandsExpanded,
+						SNew(SScrollBox)
+						+ SScrollBox::Slot()
+						.Padding(6.0f, 2.0f, 6.0f, 6.0f)
 						[
-							SAssignNew(LocalList, SListView<TSharedPtr<FDeclEntry>>)
-							.ListItemsSource(&LocalItems)
-							.SelectionMode(ESelectionMode::Single)
-							.ScrollbarVisibility(EVisibility::Collapsed)
-							.ConsumeMouseWheel(EConsumeMouseWheel::Never)
-							.AllowOverscroll(EAllowOverscroll::No)
-							.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateDeclRow)
-							.OnMouseButtonClick(this, &SBangoScriptEditor::OnDeclClicked)
-							.OnMouseButtonDoubleClick_Lambda([](TSharedPtr<FDeclEntry> Item)
-							{
-								if (TSharedPtr<SInlineEditableTextBlock> Name = Item.IsValid() ? Item->NameWidget.Pin() : nullptr)
-								{
-									Name->EnterEditingMode(); // double-click renames
-								}
-							})
-						]
-					]
+							SAssignNew(CommandListBox, SVerticalBox)
+						])
 				]
 			]
 
@@ -523,6 +545,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 	{
 		LoadScript(InArgs._Script);
 	}
+	RefreshCommandList();
 	RegisterActiveTimer(0.25f, FWidgetActiveTimerDelegate::CreateSP(this, &SBangoScriptEditor::OnPoll));
 	RegisterActiveTimer(0.0f, FWidgetActiveTimerDelegate::CreateSP(this, &SBangoScriptEditor::SyncLineNumbers)); // every frame
 	RegisterActiveTimer(0.1f, FWidgetActiveTimerDelegate::CreateSP(this, &SBangoScriptEditor::UpdateDebugging));
@@ -2395,6 +2418,102 @@ void SBangoScriptEditor::ShowMessage(const FText& Message)
 			.Text(Message)
 			.AutoWrapText(true)
 		]);
+}
+
+// ---- The left pane's foldouts: SCRIPT DATA and SCRIPTING COMMANDS ----
+
+TSharedRef<SWidget> SBangoScriptEditor::MakeFoldout(const FText& Title, bool* bExpanded, TSharedRef<SWidget> Body)
+{
+	return SNew(SVerticalBox)
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		[
+			SNew(SBorder)
+			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+			.Padding(0.0f)
+			[
+				SNew(SButton)
+				.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+				.ContentPadding(FMargin(4.0f, 4.0f))
+				.ToolTipText(LOCTEXT("FoldoutTooltip", "Click to show or hide this section."))
+				.OnClicked_Lambda([this, bExpanded]()
+				{
+					*bExpanded = !*bExpanded;
+					if (*bExpanded && bExpanded == &bScriptingCommandsExpanded)
+					{
+						RefreshCommandList(); // other modules may have added commands since
+					}
+					return FReply::Handled();
+				})
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					.Padding(0.0f, 0.0f, 4.0f, 0.0f)
+					[
+						SNew(SImage)
+						.Image_Lambda([bExpanded]()
+						{
+							return FAppStyle::GetBrush(*bExpanded ? "TreeArrow_Expanded" : "TreeArrow_Collapsed");
+						})
+						.ColorAndOpacity(FSlateColor::UseForeground())
+					]
+					+ SHorizontalBox::Slot()
+					.FillWidth(1.0f)
+					.VAlign(VAlign_Center)
+					[
+						SNew(STextBlock)
+						.Text(Title)
+						.Font(FAppStyle::GetFontStyle("BoldFont"))
+					]
+				]
+			]
+		]
+		+ SVerticalBox::Slot()
+		.FillHeight(1.0f)
+		[
+			SNew(SBox)
+			.Visibility_Lambda([bExpanded]() { return *bExpanded ? EVisibility::Visible : EVisibility::Collapsed; })
+			[
+				Body
+			]
+		];
+}
+
+void SBangoScriptEditor::RefreshCommandList()
+{
+	if (!CommandListBox.IsValid())
+	{
+		return;
+	}
+	// Every command a script can call: the registered ones and the array commands built into the compiler.
+	TArray<FString> Names;
+	FBangoModule::Get().GetCommands().GetCommandNames(Names);
+	for (const TCHAR* Builtin : { TEXT("Count"), TEXT("InsertAt"), TEXT("Pop"), TEXT("Push"), TEXT("RemoveAt") })
+	{
+		Names.AddUnique(Builtin);
+	}
+	Names.Sort([](const FString& A, const FString& B)
+	{
+		const int32 IgnoringCase = A.Compare(B, ESearchCase::IgnoreCase);
+		return IgnoringCase != 0 ? IgnoringCase < 0 : A.Compare(B, ESearchCase::CaseSensitive) < 0;
+	});
+
+	CommandListBox->ClearChildren();
+	for (const FString& Name : Names)
+	{
+		CommandListBox->AddSlot()
+		.AutoHeight()
+		.Padding(0.0f, 1.0f)
+		[
+			SNew(STextBlock)
+			.Text(FText::FromString(Name))
+			.ToolTipText(Bango::IsBuiltinCommandName(Name)
+				? LOCTEXT("BuiltinCommandTooltip", "An array command, built into Bango: called on an array, as in _list Push(_x).")
+				: FText::GetEmpty())
+		];
+	}
 }
 
 // ---- SCRIPT DESCRIPTION ----

@@ -228,12 +228,12 @@ bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 	// A placeholder without a value: a warning on its field (not an error), and a nil when saved.
 	{
 		FBangoGraphDocument HintDoc;
-		if (TestTrue(TEXT("build Log graph"), Bango::BuildGraph(TEXT("Log(\"a {0} {1}\", 1); //@1(0, 0)\n"), TEXT("hint.bango"), HintDoc, Error)))
+		if (TestTrue(TEXT("build WriteLog graph"), Bango::BuildGraph(TEXT("WriteLog(\"a {0} {1}\", 1); //@1(0, 0)\n"), TEXT("hint.bango"), HintDoc, Error)))
 		{
 			const TSharedPtr<FBangoNodeLayoutContext> HintContext = MakeShared<FBangoNodeLayoutContext>(Bango::MakeNodeLayoutContext(HintDoc, &FBangoModule::Get().GetCommands()));
 			TStrongObjectPtr<UEdGraph> HintGraph(BangoScriptEditor::CreateEdGraph(HintDoc.Main, HintContext));
 			UBangoEdGraphNode* HintNode = HintGraph->Nodes.Num() == 2 ? Cast<UBangoEdGraphNode>(HintGraph->Nodes[1]) : nullptr;
-			if (TestNotNull(TEXT("Log node"), HintNode))
+			if (TestNotNull(TEXT("WriteLog node"), HintNode))
 			{
 				TestEqual(TEXT("rows: text, {0}, {1}"), HintNode->Layout.Fields.Num(), 3);
 				TestEqual(TEXT("one warning"), HintNode->UpdateCompileWarnings(), 1);
@@ -247,8 +247,8 @@ bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 				TArray<UEdGraph*> HintGraphs = { HintGraph.Get() };
 				TestTrue(TEXT("read back"), BangoScriptEditor::BuildDocument(HintGraphs, Saved, nullptr, BuildError));
 				Bango::FillMissingPlaceholders(Saved, *HintContext);
-				TestEqual(TEXT("saved with a nil"), Saved.Main.Nodes.Num() == 2 ? Saved.Main.Nodes[1].Text : FString(), FString(TEXT("Log(\"a {0} {1}\", 1, nil)")));
-				TestEqual(TEXT("the node itself still shows {1} as missing"), HintNode->Text, FString(TEXT("Log(\"a {0} {1}\", 1)")));
+				TestEqual(TEXT("saved with a nil"), Saved.Main.Nodes.Num() == 2 ? Saved.Main.Nodes[1].Text : FString(), FString(TEXT("WriteLog(\"a {0} {1}\", 1, nil)")));
+				TestEqual(TEXT("the node itself still shows {1} as missing"), HintNode->Text, FString(TEXT("WriteLog(\"a {0} {1}\", 1)")));
 			}
 		}
 	}

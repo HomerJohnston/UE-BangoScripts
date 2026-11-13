@@ -969,6 +969,7 @@ bool FBangoInstance::CallCommand(int32 NameIndex, int32 ArgCount, bool bHasTarge
 	FBangoCommandCall Call;
 	Call.InstanceId = Id;
 	Call.WorldContext = Context.WorldContext;
+	Call.DeltaSeconds = Context.DeltaSeconds;
 	Call.Args.SetNum(ArgCount);
 	for (int32 i = ArgCount - 1; i >= 0; --i)
 	{

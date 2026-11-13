@@ -102,6 +102,63 @@ namespace BangoBuiltinPrivate
 		return true;
 	}
 
+	/** A float result: fails instead if it isn't a real number (NaN or infinite), so a bad value never reaches the script. */
+	static EBangoCommandResult SetFloatResult(FBangoCommandCall& Call, double Value, const TCHAR* What)
+	{
+		if (!FMath::IsFinite(Value))
+		{
+			return Call.Fail(FString::Printf(TEXT("%s isn't a number that can be used (the result is too large, or undefined)."), What));
+		}
+		Call.Result = FBangoValue::MakeDouble(Value);
+		return EBangoCommandResult::Done;
+	}
+
+	static FString FloatText(double Value)
+	{
+		return FString::SanitizeFloat(Value);
+	}
+
+	static FBangoValue MakeVector(const FVector& V)
+	{
+		return FBangoValue::MakeVector3(V.X, V.Y, V.Z);
+	}
+
+	static FVector GetVector(const FBangoValue& Value)
+	{
+		return FVector(Value.GetVectorPart(0), Value.GetVectorPart(1), Value.GetVectorPart(2));
+	}
+
+	/**
+	 * The frame's length in seconds: the world's, or (with no world, as in tests) the one the script was ticked with.
+	 * Pauses with the game and follows time dilation, like Time().
+	 */
+	static double GetFrameSeconds(const FBangoCommandCall& Call)
+	{
+		const UWorld* World = Call.WorldContext ? Call.WorldContext->GetWorld() : nullptr;
+		return World ? (double)World->GetDeltaSeconds() : (double)Call.DeltaSeconds;
+	}
+
+	/** Registers a command that takes only plain arguments and can't pause: Run gets them, checked not to be nil. */
+	static void AddSimple(FBangoCommandTable& Commands, const FBangoCommandSignature& Signature, int32 RequiredArgs,
+		TFunction<EBangoCommandResult(FBangoCommandCall&)> Run)
+	{
+		FBangoCommand Command;
+		Command.Signature = Signature;
+		Command.Start = [RequiredArgs, Run = MoveTemp(Run)](FBangoCommandCall& Call)
+		{
+			if (!RequireArgs(Call, RequiredArgs))
+			{
+				return EBangoCommandResult::Failed;
+			}
+			return Run(Call);
+		};
+		FString Error;
+		if (!Commands.Add(Command, Error))
+		{
+			Bango::ReportError(FString::Printf(TEXT("Couldn't register built-in command: %s"), *Error));
+		}
+	}
+
 	static void Add(FBangoCommandTable& Commands, const FBangoCommand& Command)
 	{
 		FString Error;
@@ -204,10 +261,10 @@ namespace Bango
 			Add(Commands, Command);
 		}
 
-		// Log(text, ...): writes to the output log only.
+		// WriteLog(text, ...): writes to the output log only. (Log is the logarithm.)
 		{
 			FBangoCommand Command;
-			Command.Signature = FBangoCommandSignature::Make(TEXT("Log")).Param(TEXT("Msg"), String).WithPlaceholders().Variadic(TEXT("{"), 0, TEXT("}")).InCategory(TEXT("Text")).Describe(TEXT("Writes text to the output log, with {0}, {1}, ... replaced by the extra values."));
+			Command.Signature = FBangoCommandSignature::Make(TEXT("WriteLog")).Param(TEXT("Msg"), String).WithPlaceholders().Variadic(TEXT("{"), 0, TEXT("}")).InCategory(TEXT("Text")).Describe(TEXT("Writes text to the output log, with {0}, {1}, ... replaced by the extra values."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{
 				FString Text;
@@ -442,6 +499,295 @@ namespace Bango
 				Add(Commands, Command);
 			}
 		}
+
+		// ---- More math (spec section 7) ----
+
+		// Ceil(value) -> int: rounds up.
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Ceil")).Param(TEXT("Value"), Double).Returns(Int)
+			.InCategory(TEXT("Math")).Describe(TEXT("Rounds up to an int.")), 1, [](FBangoCommandCall& Call)
+			{
+				int32 Result = 0;
+				if (!ToInt(Call, FMath::CeilToDouble(Call.Args[0].GetDouble()), Result))
+				{
+					return EBangoCommandResult::Failed;
+				}
+				Call.Result = FBangoValue::MakeInt(Result);
+				return EBangoCommandResult::Done;
+			});
+
+		// Sign(value) -> number: -1, 0 or 1, an int for an int and a float for a float.
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Sign")).NumberParam(TEXT("Value")).ReturnsNumber()
+			.InCategory(TEXT("Math")).Describe(TEXT("-1 if the number is negative, 1 if it's positive, 0 if it's 0: an int for an int, a float for a float.")), 1,
+			[](FBangoCommandCall& Call)
+			{
+				const double Value = Call.Args[0].GetNumberAsDouble();
+				SetNumberResult(Call, AllInts(Call), Value > 0.0 ? 1.0 : (Value < 0.0 ? -1.0 : 0.0));
+				return EBangoCommandResult::Done;
+			});
+
+		// Sqrt(value) -> float
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Sqrt")).Param(TEXT("Value"), Double).Returns(Double)
+			.InCategory(TEXT("Math")).Describe(TEXT("The square root. The number can't be negative.")), 1, [](FBangoCommandCall& Call)
+			{
+				const double Value = Call.Args[0].GetDouble();
+				if (Value < 0.0)
+				{
+					return Call.Fail(FString::Printf(TEXT("Can't take the square root of a negative number (%s)."), *FloatText(Value)));
+				}
+				return SetFloatResult(Call, FMath::Sqrt(Value), TEXT("The square root"));
+			});
+
+		// Pow(base, exponent) -> float. Always a float: 2 to the -1 is 0.5, and big powers don't fit an int.
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Pow")).Param(TEXT("Base"), Double).Param(TEXT("Exponent"), Double).Returns(Double)
+			.InCategory(TEXT("Math")).Describe(TEXT("The base raised to the power of the exponent (Pow(2, 3) is 8.0).")), 2, [](FBangoCommandCall& Call)
+			{
+				const double Base = Call.Args[0].GetDouble();
+				const double Exponent = Call.Args[1].GetDouble();
+				if (Base < 0.0 && Exponent != FMath::RoundToDouble(Exponent))
+				{
+					return Call.Fail(FString::Printf(TEXT("A negative base (%s) can't be raised to a power that isn't a whole number (%s)."), *FloatText(Base), *FloatText(Exponent)));
+				}
+				if (Base == 0.0 && Exponent < 0.0)
+				{
+					return Call.Fail(FString::Printf(TEXT("0 can't be raised to a negative power (%s): that divides by 0."), *FloatText(Exponent)));
+				}
+				return SetFloatResult(Call, FMath::Pow(Base, Exponent), TEXT("The power"));
+			});
+
+		// Log(value, base = 10) -> float, Ln(value) -> float
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Log")).Param(TEXT("Value"), Double).Optional().Param(TEXT("Base"), Double, TEXT("Base (none: 10)")).Returns(Double)
+			.InCategory(TEXT("Math")).Describe(TEXT("The logarithm: the power the base must be raised to to give the value. The base is 10 if none is given. To write to the output log, use WriteLog.")), 1,
+			[](FBangoCommandCall& Call)
+			{
+				const double Value = Call.Args[0].GetDouble();
+				const double Base = Call.Args.Num() > 1 && !Call.Args[1].IsNil() ? Call.Args[1].GetDouble() : 10.0;
+				if (Value <= 0.0)
+				{
+					return Call.Fail(FString::Printf(TEXT("The logarithm needs a number greater than 0, but this is %s."), *FloatText(Value)));
+				}
+				if (Base <= 0.0 || Base == 1.0)
+				{
+					return Call.Fail(FString::Printf(TEXT("A logarithm's base must be greater than 0 and not 1, but this is %s."), *FloatText(Base)));
+				}
+				return SetFloatResult(Call, FMath::Loge(Value) / FMath::Loge(Base), TEXT("The logarithm"));
+			});
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Ln")).Param(TEXT("Value"), Double).Returns(Double)
+			.InCategory(TEXT("Math")).Describe(TEXT("The natural logarithm (base e).")), 1, [](FBangoCommandCall& Call)
+			{
+				const double Value = Call.Args[0].GetDouble();
+				if (Value <= 0.0)
+				{
+					return Call.Fail(FString::Printf(TEXT("The natural logarithm needs a number greater than 0, but this is %s."), *FloatText(Value)));
+				}
+				return SetFloatResult(Call, FMath::Loge(Value), TEXT("The natural logarithm"));
+			});
+
+		// Lerp(a, b, alpha) -> float. Alpha isn't clamped: 2 goes past B, like Unreal's Lerp.
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Lerp")).Param(TEXT("A"), Double).Param(TEXT("B"), Double).Param(TEXT("Alpha"), Double, TEXT("0 gives A, 1 gives B"))
+			.Returns(Double).InCategory(TEXT("Math")).Describe(TEXT("Blends from A to B: Alpha 0 gives A, 1 gives B, 0.5 halfway between.")), 3,
+			[](FBangoCommandCall& Call)
+			{
+				const double A = Call.Args[0].GetDouble();
+				return SetFloatResult(Call, A + (Call.Args[1].GetDouble() - A) * Call.Args[2].GetDouble(), TEXT("Lerp's result"));
+			});
+
+		// MapRange(value, inMin, inMax, outMin, outMax) -> float, clamped to the out range (Unreal's MapRangeClamped).
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("MapRange")).Param(TEXT("Value"), Double).Param(TEXT("InMin"), Double).Param(TEXT("InMax"), Double)
+			.Param(TEXT("OutMin"), Double).Param(TEXT("OutMax"), Double).Returns(Double).InCategory(TEXT("Math"))
+			.Describe(TEXT("Where the value is from InMin to InMax, as the same place from OutMin to OutMax, kept in that range.")), 5,
+			[](FBangoCommandCall& Call)
+			{
+				const double InMin = Call.Args[1].GetDouble();
+				const double InMax = Call.Args[2].GetDouble();
+				if (InMin == InMax)
+				{
+					return Call.Fail(FString::Printf(TEXT("InMin and InMax are both %s, so there's no range to map from."), *FloatText(InMin)));
+				}
+				const double Alpha = FMath::Clamp((Call.Args[0].GetDouble() - InMin) / (InMax - InMin), 0.0, 1.0);
+				const double OutMin = Call.Args[3].GetDouble();
+				return SetFloatResult(Call, OutMin + (Call.Args[4].GetDouble() - OutMin) * Alpha, TEXT("MapRange's result"));
+			});
+
+		// InterpTo(current, target, speed) -> float: one frame's step towards the target (Unreal's FInterpTo).
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("InterpTo")).Param(TEXT("Current"), Double).Param(TEXT("Target"), Double)
+			.Param(TEXT("Speed"), Double, TEXT("How fast it closes in (0: jumps to the target)")).Returns(Double).InCategory(TEXT("Math"))
+			.Describe(TEXT("A step from Current towards Target for this frame, fast when far and slowing down as it gets close. Call it every frame (after Sleep()) to move smoothly.")), 3,
+			[](FBangoCommandCall& Call)
+			{
+				const double Speed = Call.Args[2].GetDouble();
+				if (Speed < 0.0)
+				{
+					return Call.Fail(FString::Printf(TEXT("The speed can't be negative (%s)."), *FloatText(Speed)));
+				}
+				return SetFloatResult(Call, FMath::FInterpTo(Call.Args[0].GetDouble(), Call.Args[1].GetDouble(), GetFrameSeconds(Call), Speed), TEXT("InterpTo's result"));
+			});
+
+		// DeltaTime() -> float: the frame's length in seconds.
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("DeltaTime")).Returns(Double).InCategory(TEXT("Time"))
+			.Describe(TEXT("How long the last frame took, in seconds. Multiply a speed by it to move the same distance per second at any frame rate.")), 0,
+			[](FBangoCommandCall& Call)
+			{
+				Call.Result = FBangoValue::MakeDouble(GetFrameSeconds(Call));
+				return EBangoCommandResult::Done;
+			});
+
+		// Tan, Asin, Acos, Atan, Atan2, and their ...Degrees versions (which take or give degrees).
+		{
+			enum class ETrig : uint8 { Tan, Asin, Acos, Atan, Atan2 };
+			struct FTrig2Command { const TCHAR* Name; ETrig Op; bool bDegrees; const TCHAR* Description; };
+			static const FTrig2Command Trig2Commands[] =
+			{
+				{ TEXT("Tan"),          ETrig::Tan,   false, TEXT("The tangent of an angle in radians.") },
+				{ TEXT("TanDegrees"),   ETrig::Tan,   true,  TEXT("The tangent of an angle in degrees.") },
+				{ TEXT("Asin"),         ETrig::Asin,  false, TEXT("The angle, in radians, whose sine is the value (from -1 to 1).") },
+				{ TEXT("AsinDegrees"),  ETrig::Asin,  true,  TEXT("The angle, in degrees, whose sine is the value (from -1 to 1).") },
+				{ TEXT("Acos"),         ETrig::Acos,  false, TEXT("The angle, in radians, whose cosine is the value (from -1 to 1).") },
+				{ TEXT("AcosDegrees"),  ETrig::Acos,  true,  TEXT("The angle, in degrees, whose cosine is the value (from -1 to 1).") },
+				{ TEXT("Atan"),         ETrig::Atan,  false, TEXT("The angle, in radians, whose tangent is the value.") },
+				{ TEXT("AtanDegrees"),  ETrig::Atan,  true,  TEXT("The angle, in degrees, whose tangent is the value.") },
+				{ TEXT("Atan2"),        ETrig::Atan2, false, TEXT("The angle, in radians, of the direction (X, Y) from the X axis: from -pi to pi. Note Y comes first.") },
+				{ TEXT("Atan2Degrees"), ETrig::Atan2, true,  TEXT("The angle, in degrees, of the direction (X, Y) from the X axis: from -180 to 180. Note Y comes first.") },
+			};
+			for (const FTrig2Command& Trig : Trig2Commands)
+			{
+				FBangoCommandSignature Signature = FBangoCommandSignature::Make(Trig.Name);
+				if (Trig.Op == ETrig::Atan2)
+				{
+					Signature.Param(TEXT("Y"), Double).Param(TEXT("X"), Double);
+				}
+				else if (Trig.Op == ETrig::Tan)
+				{
+					Signature.Param(Trig.bDegrees ? TEXT("Degrees") : TEXT("Rads"), Double, Trig.bDegrees ? TEXT("An angle in degrees") : TEXT("An angle in radians"));
+				}
+				else
+				{
+					Signature.Param(TEXT("Value"), Double);
+				}
+				Signature.Returns(Double).InCategory(TEXT("Math")).Describe(Trig.Description);
+				const ETrig Op = Trig.Op;
+				const bool bDegrees = Trig.bDegrees;
+				const FString Name = Trig.Name;
+				AddSimple(Commands, Signature, Op == ETrig::Atan2 ? 2 : 1, [Op, bDegrees, Name](FBangoCommandCall& Call)
+				{
+					const double Value = Call.Args[0].GetDouble();
+					if ((Op == ETrig::Asin || Op == ETrig::Acos) && (Value < -1.0 || Value > 1.0))
+					{
+						return Call.Fail(FString::Printf(TEXT("%s needs a value from -1 to 1, but this is %s."), *Name, *FloatText(Value)));
+					}
+					double Result = 0.0;
+					switch (Op)
+					{
+					case ETrig::Tan:   Result = FMath::Tan(bDegrees ? FMath::DegreesToRadians(Value) : Value); break;
+					case ETrig::Asin:  Result = FMath::Asin(Value); break;
+					case ETrig::Acos:  Result = FMath::Acos(Value); break;
+					case ETrig::Atan:  Result = FMath::Atan(Value); break;
+					case ETrig::Atan2: Result = FMath::Atan2(Value, Call.Args[1].GetDouble()); break;
+					}
+					if (bDegrees && Op != ETrig::Tan)
+					{
+						Result = FMath::RadiansToDegrees(Result);
+					}
+					return SetFloatResult(Call, Result, *Name);
+				});
+			}
+		}
+
+		// Pi() -> float
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Pi")).Returns(Double).InCategory(TEXT("Math"))
+			.Describe(TEXT("Pi, 3.14159...: half a turn in radians.")), 0, [](FBangoCommandCall& Call)
+			{
+				Call.Result = FBangoValue::MakeDouble(UE_DOUBLE_PI);
+				return EBangoCommandResult::Done;
+			});
+
+		// RandomBool() -> bool, Chance(probability) -> bool
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("RandomBool")).Returns(Bool).InCategory(TEXT("Math"))
+			.Describe(TEXT("true or false, at random (each half the time).")), 0, [](FBangoCommandCall& Call)
+			{
+				Call.Result = FBangoValue::MakeBool(FMath::RandBool());
+				return EBangoCommandResult::Done;
+			});
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Chance")).Param(TEXT("Probability"), Double, TEXT("From 0 (never) to 1 (always)")).Returns(Bool)
+			.InCategory(TEXT("Math")).Describe(TEXT("true at random, as often as the probability says: Chance(0.3) is true 30% of the time.")), 1,
+			[](FBangoCommandCall& Call)
+			{
+				const double Probability = Call.Args[0].GetDouble();
+				if (Probability < 0.0 || Probability > 1.0)
+				{
+					return Call.Fail(FString::Printf(TEXT("The probability must be from 0 to 1 (0.3 is 30%%), but this is %s."), *FloatText(Probability)));
+				}
+				// FRand is in [0, 1): 0 is never true and 1 always is.
+				Call.Result = FBangoValue::MakeBool(FMath::FRand() < Probability);
+				return EBangoCommandResult::Done;
+			});
+
+		// IsNearlyEqual(a, b, tolerance = 0.0001) -> bool
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("IsNearlyEqual")).Param(TEXT("A"), Double).Param(TEXT("B"), Double)
+			.Optional().Param(TEXT("Tolerance"), Double, TEXT("How far apart they can be (none: 0.0001)")).Returns(Bool).InCategory(TEXT("Math"))
+			.Describe(TEXT("True if the two numbers are at most the tolerance apart. Use it instead of == for floats that come from math.")), 2,
+			[](FBangoCommandCall& Call)
+			{
+				const double Tolerance = Call.Args.Num() > 2 && !Call.Args[2].IsNil() ? Call.Args[2].GetDouble() : 0.0001;
+				if (Tolerance < 0.0)
+				{
+					return Call.Fail(FString::Printf(TEXT("The tolerance can't be negative (%s)."), *FloatText(Tolerance)));
+				}
+				Call.Result = FBangoValue::MakeBool(FMath::Abs(Call.Args[0].GetDouble() - Call.Args[1].GetDouble()) <= Tolerance);
+				return EBangoCommandResult::Done;
+			});
+
+		// ---- Vectors (vector3) ----
+
+		// Length(v) -> float
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Length")).Param(TEXT("Vector"), Vector3).Returns(Double).InCategory(TEXT("Vectors"))
+			.Describe(TEXT("The vector's length.")), 1, [](FBangoCommandCall& Call)
+			{
+				return SetFloatResult(Call, GetVector(Call.Args[0]).Size(), TEXT("The length"));
+			});
+
+		// Distance(a, b) -> float
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Distance")).Param(TEXT("A"), Vector3).Param(TEXT("B"), Vector3).Returns(Double).InCategory(TEXT("Vectors"))
+			.Describe(TEXT("The distance between two points. For two actors, use DistanceTo.")), 2, [](FBangoCommandCall& Call)
+			{
+				return SetFloatResult(Call, FVector::Dist(GetVector(Call.Args[0]), GetVector(Call.Args[1])), TEXT("The distance"));
+			});
+
+		// Normalize(v) -> vector3
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Normalize")).Param(TEXT("Vector"), Vector3).Returns(Vector3).InCategory(TEXT("Vectors"))
+			.Describe(TEXT("The vector made 1 long, keeping its direction. [0, 0, 0] has no direction, so it's an error.")), 1, [](FBangoCommandCall& Call)
+			{
+				const FVector V = GetVector(Call.Args[0]);
+				const double Length = V.Size();
+				if (!(Length > UE_DOUBLE_SMALL_NUMBER) || !FMath::IsFinite(Length))
+				{
+					return Call.Fail(FString::Printf(TEXT("Can't normalize %s: it has no direction (it's [0, 0, 0], or too small)."), *Call.Args[0].ToDebugString()));
+				}
+				Call.Result = MakeVector(V / Length);
+				return EBangoCommandResult::Done;
+			});
+
+		// Dot(a, b) -> float, Cross(a, b) -> vector3
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Dot")).Param(TEXT("A"), Vector3).Param(TEXT("B"), Vector3).Returns(Double).InCategory(TEXT("Vectors"))
+			.Describe(TEXT("The dot product. For two directions 1 long: 1 if they're the same, 0 at right angles, -1 if opposite.")), 2, [](FBangoCommandCall& Call)
+			{
+				return SetFloatResult(Call, FVector::DotProduct(GetVector(Call.Args[0]), GetVector(Call.Args[1])), TEXT("The dot product"));
+			});
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Cross")).Param(TEXT("A"), Vector3).Param(TEXT("B"), Vector3).Returns(Vector3).InCategory(TEXT("Vectors"))
+			.Describe(TEXT("The cross product: a vector at right angles to both.")), 2, [](FBangoCommandCall& Call)
+			{
+				Call.Result = MakeVector(FVector::CrossProduct(GetVector(Call.Args[0]), GetVector(Call.Args[1])));
+				return EBangoCommandResult::Done;
+			});
+
+		// LerpVector(a, b, alpha) -> vector3
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("LerpVector")).Param(TEXT("A"), Vector3).Param(TEXT("B"), Vector3).Param(TEXT("Alpha"), Double, TEXT("0 gives A, 1 gives B"))
+			.Returns(Vector3).InCategory(TEXT("Vectors")).Describe(TEXT("Blends from A to B: Alpha 0 gives A, 1 gives B, 0.5 halfway between.")), 3,
+			[](FBangoCommandCall& Call)
+			{
+				const FVector A = GetVector(Call.Args[0]);
+				Call.Result = MakeVector(A + (GetVector(Call.Args[1]) - A) * Call.Args[2].GetDouble());
+				return EBangoCommandResult::Done;
+			});
 
 		// Time() -> float: the world's time, GetWorld()->GetTimeSeconds() (seconds since the level started; pauses with the game).
 		{

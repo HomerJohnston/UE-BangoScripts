@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.36)
+# Bango Language Spec (draft v0.37)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.37:** `Log` is renamed **`WriteLog`**, and `Log` is now the **logarithm**. A script that still calls `Log("...")` gets an error that says to use `WriteLog`. **More math commands**: `Ceil`, `Sign`, `Sqrt`, `Pow`, `Log`, `Ln`, `Lerp`, `MapRange`, `InterpTo`, `DeltaTime`, `Tan`, `Asin`, `Acos`, `Atan`, `Atan2` (each also as `...Degrees`), `Pi`, `RandomBool`, `Chance` and `IsNearlyEqual`, and **vector commands**: `Length`, `Distance`, `Normalize`, `Dot`, `Cross` and `LerpVector` (section 7).
 
 **Changes in v0.36:** **disabled nodes**. A node can be turned off without unwiring it: in the text it's written between `/*` and `*/`, and it does nothing when the script runs (execution goes straight on to the next node, and a disabled `if` or loop skips its block). What's between the markers is still code, not a comment, and the markers can be nested (section 1). In the graph, **Disable Node** / **Enable Node** in a node's right-click menu (or Ctrl+/) turns nodes off and on, and a disabled node is drawn faded with a **Disabled** banner (section 12).
 
@@ -79,7 +81,7 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
 - Node metadata goes in a trailing comment that the compiler ignores:
 
   ```
-  Log("Hello");   //@12(4, 7)
+  WriteLog("Hello");   //@12(4, 7)
   ```
   The format is `//@<NodeID>(<X>, <Y>)`. NodeID is a unique positive integer within the file (0 is reserved, see below). X and Y are integer grid coordinates and may be negative. One grid unit is 16 pixels in the graph editor (the Blueprint editor's snap grid).
 - **All whitespace inside the metadata comment is optional and ignored.** These are all equivalent:
@@ -91,12 +93,12 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
 - Metadata is optional, and the editor assigns it to lines that don't have it.
 - **A reroute node is a line with only metadata on it**, where a statement could go: between two statements, or at the start or end of a block. It's a point the graph editor bends a wire through; it does nothing when the script runs. Indentation before the `//@` doesn't matter:
   ```
-  Log("Hello");   //@12(4, 7)
+  WriteLog("Hello");   //@12(4, 7)
                   //@13(10, 7)
 
-  Log("World");   //@14(16, 7)
+  WriteLog("World");   //@14(16, 7)
   ```
-  Here node 13 is a reroute between the two `Log` nodes.
+  Here node 13 is a reroute between the two `WriteLog` nodes.
 - **Several reroutes in a row can share a line**: after the first entry, each further one starts with `@`, and they follow each other in that order:
   ```
                   //@7(4, 9) @8(8, 13) @9(23, 12)
@@ -118,25 +120,25 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
 - A statement between `/*` and `*/` is **disabled**: it's still a node in the graph, wired as before, but it does nothing when the script runs. Execution goes straight on to the statement after it, as if it were a reroute. A disabled `if`, `while`, `for` or `forEach` skips its whole block (and its `else`).
 - A disabled simple statement is written on its line, with its metadata after the `*/`:
   ```
-  Log("a");                   //@1(0, 0)
-  /* Log("b"); */             //@2(4, 0)
-  Log("c");                   //@3(8, 0)
+  WriteLog("a");                   //@1(0, 0)
+  /* WriteLog("b"); */             //@2(4, 0)
+  WriteLog("c");                   //@3(8, 0)
   ```
 - A disabled block statement has `/*` and `*/` on lines of their own, at its indentation, around the whole statement, from its `if (...)` line to its last `};`:
   ```
   /*
   if (_ready)                 //@4(12, 0)
   {
-  	/* Log("not yet"); */     //@5(16, 4)
-  	Log("go");                //@6(16, 8)
+  	/* WriteLog("not yet"); */     //@5(16, 4)
+  	WriteLog("go");                //@6(16, 8)
   };
   */
   ```
-- Unlike C++ comments, the markers **nest**: a statement inside a disabled block keeps its own setting (above, `Log("not yet")` stays disabled when the `if` is enabled again). Each `/*` must be closed by a `*/` in the same block. `/*` and `*/` inside strings and `//` comments don't count.
+- Unlike C++ comments, the markers **nest**: a statement inside a disabled block keeps its own setting (above, `WriteLog("not yet")` stays disabled when the `if` is enabled again). Each `/*` must be closed by a `*/` in the same block. `/*` and `*/` inside strings and `//` comments don't count.
 - What's between the markers is **read as code**: it must be statements, each on its own line as usual, and can have `//` comments and reroutes among them. Prose there is an error that says to write notes as `//` comments. Disabled statements are parsed but not compiled: their names, types and commands aren't checked, and they can use names that don't exist.
 - Only statements can be disabled. A declaration, a `#define` or `#undef` line or a `function` can't be: each is an error.
 - A disabled `label` isn't in the compiled script, so a `goto` to it (or to a label inside a disabled block) is a compile error that says the label is disabled. A disabled `goto`, `break`, `continue` or `return` does nothing.
-- `//~` lines are still only for disconnected nodes (section 12). A disconnected node can be disabled too: `//~ /* Log("x"); */`.
+- `//~` lines are still only for disconnected nodes (section 12). A disconnected node can be disabled too: `//~ /* WriteLog("x"); */`.
 - **Lines starting with `#` are the script's settings**, written like C++ preprocessor lines: `#define params (...)` (section 10), `#define LOCTEXT_NAMESPACE "Name"` and `#undef LOCTEXT_NAMESPACE` (section 3). They start their line, have a space after `#define` / `#undef`, don't end with `;`, aren't graph nodes and can't have metadata. Any other `#` line is a compile error. Future settings will use the same form.
 
 ### Statements that become nodes
@@ -179,15 +181,15 @@ A `goto` node **does not draw a wire** to its label. It shows the target label's
 ```
 if (globalBoolVariable)
 {
-	Log("true");
+	WriteLog("true");
 }
 else if (otherBool)
 {
-	Log("other");
+	WriteLog("other");
 }
 else
 {
-	Log("false");
+	WriteLog("false");
 };
 ```
 
@@ -238,7 +240,7 @@ _height = GetPos(_who).z;
 - A part is never `nil` on its own, so `IsNil(_v.x)` is a compile error; use `IsNil(_v)`.
 - `++` and `--` don't work on parts, since they are floats.
 - Vectors are values, like arrays: `_b = _a;` copies the vector.
-- `Format`, `Log` and `Hint` show a vector as `(1.0, 2.0, 3.0)`.
+- `Format`, `WriteLog` and `Hint` show a vector as `(1.0, 2.0, 3.0)`.
 
 ### Literals
 - Integers: `0`, `42`. A value larger than 2147483647 is a compile error; the message suggests writing it as a float (`2147483648.0`). Negative numbers are written with unary minus (`-5`). Because the minus is applied to `2147483648`, which is too large, the smallest int can't be written as a literal; use `-2147483647 - 1`.
@@ -290,7 +292,7 @@ Hint(NSLOCTEXT("Shared.UI", "Continue", "Continue"));
   _name = nil;
   _arr[2] = nil;
   ```
-- `nil` with no known type is a compile error, like `[nil]` passed where any array would do. The exception is an extra value of a variadic command: `Log("{0}", nil)` is allowed, and shows `nil`.
+- `nil` with no known type is a compile error, like `[nil]` passed where any array would do. The exception is an extra value of a variadic command: `WriteLog("{0}", nil)` is allowed, and shows `nil`.
 - The only way to test for `nil` is `IsNil(...)`. `x == nil` is a compile error, because comparing reads `x`.
 
 ### IsNil
@@ -552,12 +554,12 @@ Commands are defined in C++ at the project or engine level. Scripts can only use
 AwaitSpeak();
 AwaitSpeak(0.5);
 @door17 SetLocked(true);
-Log("There are {0} things left.", _thingCount);
+WriteLog("There are {0} things left.", _thingCount);
 _t = Random(3.0, 5.0);
 ```
 
 - Command names are written in PascalCase (`Hint`, `SetPos`, `RandomInt`), and so are their parameter names (`Msg`, `Time`, `Min`), since they label the fields of the command's graph node. A parameter can also have a short description, shown when hovering its value on the node: `.Param(TEXT("Time"), Double, TEXT("Seconds"))`. Registering a command with a parameter name that starts with a lowercase letter logs a warning.
-- For the graph editor, a signature can also have a category and a one-line description (`.InCategory(TEXT("Actors")).Describe(TEXT("Moves the actor."))`), and a variadic command can choose how its extra values are labelled (`.Variadic(TEXT("{"), 0, TEXT("}"))` gives `{0}`, `{1}`, ...; the default gives `Value 1`, `Value 2`, ...). `.WithPlaceholders()` after a parameter marks it as a text whose `{0}`, `{1}`, ... the extra values fill, as `Hint`, `Log` and `Format` do; the graph editor then shows a row for each placeholder (section 12).
+- For the graph editor, a signature can also have a category and a one-line description (`.InCategory(TEXT("Actors")).Describe(TEXT("Moves the actor."))`), and a variadic command can choose how its extra values are labelled (`.Variadic(TEXT("{"), 0, TEXT("}"))` gives `{0}`, `{1}`, ...; the default gives `Value 1`, `Value 2`, ...). `.WithPlaceholders()` after a parameter marks it as a text whose `{0}`, `{1}`, ... the extra values fill, as `Hint`, `WriteLog` and `Format` do; the graph editor then shows a row for each placeholder (section 12).
 - A command's signature declares:
   - **Target:** either none, or a required target of one type. A command with a target can't be called without one, and vice versa. *Guideline (not yet a fixed rule):* give a command a target only if it also takes at least one argument (`@john Speak("Hi")`, `_who SetPos(_p)`). A command that only needs the thing it works on takes it as its first and only argument instead (`GetPos(_who)`, `IsNull(_who)`).
   - **Parameters:** typed. Trailing parameters may be **optional**. Normally a `nil` variable passed to a command, or an entity naming no actor, stops the script before the command runs. `.MayBeNil()` after a `.Param(...)` hands the command that argument as it is instead, `nil` included, and leaves the actor check to the command (as `IsNull` does).
@@ -581,21 +583,21 @@ _t = Random(3.0, 5.0);
 ### Text formatting
 Strings and texts use the same placeholders, Unreal's: `{0}`, `{1}`, ..., with a backtick escaping the next character (`` `{ `` is a literal `{`, ``` `` ``` a backtick). `%` is just a character.
 
-- **Strings** (`Log`, `Format`): described below.
+- **Strings** (`WriteLog`, `Format`): described below.
 - **Texts** (`Hint`, `FormatText`): filled by `FText::Format`, so translators can move them around: `Hint(LOCTEXT("Left", "{0} things left"), _count)`. Ints and floats are formatted as numbers for the current language, texts are inserted as they are, and anything else (strings, entities, arrays, bools) is inserted as it would be by `Format`, untranslated. A backtick escapes the next character (`` `{ `` is a literal `{`). Named placeholders like `{Name}` aren't supported: they're a compile error when the text is a literal, and stop the script otherwise. Unreal's plural and gender forms (`{0}|plural(one=thing,other=things)`) work, since they're part of the translated text.
 
 The rules for which placeholders need values below apply to both kinds.
 
-`Log` and `Format` replace `{0}`, `{1}`, ... in their text with the extra arguments, in one pass, with `FText::Format`'s rules: a backtick makes the next character literal, and anything else that isn't a numbered placeholder (`{Name}`, a `{` with no `}`) is shown as it is. Strings appear without quotes, entities as their name, arrays as `[1, 2]`. A `nil` value shows as `nil`.
+`WriteLog` and `Format` replace `{0}`, `{1}`, ... in their text with the extra arguments, in one pass, with `FText::Format`'s rules: a backtick makes the next character literal, and anything else that isn't a numbered placeholder (`{Name}`, a `{` with no `}`) is shown as it is. Strings appear without quotes, entities as their name, arrays as `[1, 2]`. A `nil` value shows as `nil`.
 
-Every placeholder needs a value. When the text is written as a literal (`Log("{0} and {1}", _a);`, `Hint(LOCTEXT("K", "{0} and {1}"), _a);`), a placeholder with no value after it is a **compile error**: *"This text uses {1}, but only 1 value comes after it."* This applies to any command marked `.WithPlaceholders()`, wherever the call is (`_s = Format("{0}", _a) + Format("{1}", _b);` fails on the second). When the text is worked out while the script runs (`Log(_text, 1);`), a placeholder with no value stops the script. A `nil` value for a text placeholder stops the script too.
+Every placeholder needs a value. When the text is written as a literal (`WriteLog("{0} and {1}", _a);`, `Hint(LOCTEXT("K", "{0} and {1}"), _a);`), a placeholder with no value after it is a **compile error**: *"This text uses {1}, but only 1 value comes after it."* This applies to any command marked `.WithPlaceholders()`, wherever the call is (`_s = Format("{0}", _a) + Format("{1}", _b);` fails on the second). When the text is worked out while the script runs (`WriteLog(_text, 1);`), a placeholder with no value stops the script. A `nil` value for a text placeholder stops the script too.
 
 ### Built-in commands
 
 | Command | Effect |
 |---|---|
 | `Hint(text Msg, ...)` | Shows text to the player, with `{0}`, `{1}`, ... filled in. Games show it in their own UI by binding the script subsystem's **OnHint** event (which gets a Text); otherwise it appears as on-screen debug text. |
-| `Log(string Msg, ...)` | Writes text to the output log. |
+| `WriteLog(string Msg, ...)` | Writes text to the output log. |
 | `Format(string Text, ...)` → `string` | Returns the formatted text. Also the way to turn numbers into strings. |
 | `FormatText(text Text, ...)` → `text` | Returns the text with `{0}`, `{1}`, ... filled in, still translatable. |
 | `ToText(string Value)` → `text` | The string as a text that isn't translated. |
@@ -613,6 +615,30 @@ Every placeholder needs a value. When the text is written as a literal (`Log("{0
 | `Cos(float Rads)` → `float` | The cosine of an angle in radians. |
 | `SinDegrees(float Degrees)` → `float` | The sine of an angle in degrees. |
 | `CosDegrees(float Degrees)` → `float` | The cosine of an angle in degrees. |
+| `Ceil(float Value)` → `int` | Rounds up. A result outside the int range is an error. |
+| `Sign(number Value)` → `number` | -1 if the number is negative, 1 if it's positive, 0 if it's 0: an `int` for an int, a `float` for a float. |
+| `Sqrt(float Value)` → `float` | The square root. A negative number is an error. |
+| `Pow(float Base, float Exponent)` → `float` | The base raised to the power of the exponent: `Pow(2, 3)` is `8.0`. Always a float, since `Pow(2, -1)` is `0.5` and big powers don't fit an int. A negative base with an exponent that isn't a whole number, 0 to a negative power, and a result too large for a float are errors. |
+| `Log(float Value, float Base = optional)` → `float` | The logarithm: the power the base must be raised to to give the value. The base is 10 if none is given: `Log(1000)` is `3.0`, `Log(8, 2)` is `3.0`. A value of 0 or less, and a base of 0 or less or of 1, are errors. (To write to the output log, use `WriteLog`.) |
+| `Ln(float Value)` → `float` | The natural logarithm (base *e*). A value of 0 or less is an error. |
+| `Lerp(float A, float B, float Alpha)` → `float` | Blends from A to B: Alpha 0 gives A, 1 gives B, 0.5 halfway between. Alpha isn't clamped, so 2 goes as far past B again, like Unreal's Lerp. |
+| `MapRange(float Value, float InMin, float InMax, float OutMin, float OutMax)` → `float` | Where the value is from InMin to InMax, as the same place from OutMin to OutMax, kept in that range (Unreal's MapRangeClamped): `MapRange(_dist, 0, 1000, 1, 0)` is 1 up close and 0 from 1000 away. Either range can go down as well as up. InMin equal to InMax is an error. |
+| `InterpTo(float Current, float Target, float Speed)` → `float` | One frame's step from Current towards Target, fast when far and slowing as it gets close (Unreal's FInterpTo, with this frame's `DeltaTime()`). Call it once a frame, after `Sleep()`: `_x = InterpTo(_x, 100, 2);`. A speed of 0 jumps straight to the target; a negative speed is an error. |
+| `DeltaTime()` → `float` | How long the last frame took, in seconds (the world's delta time: it follows time dilation and is 0 while paused). Multiply a speed by it to move the same distance per second at any frame rate. |
+| `Tan(float Rads)` → `float`, `TanDegrees(float Degrees)` → `float` | The tangent of an angle in radians, or in degrees. |
+| `Asin(float Value)`, `Acos(float Value)` → `float` | The angle in radians whose sine, or cosine, is the value. The value must be from -1 to 1. `AsinDegrees` and `AcosDegrees` give the angle in degrees. |
+| `Atan(float Value)` → `float` | The angle in radians whose tangent is the value. `AtanDegrees` gives degrees. |
+| `Atan2(float Y, float X)` → `float` | The angle in radians of the direction (X, Y) from the X axis, from -pi to pi. Note that Y comes first, as in C++. `Atan2Degrees` gives degrees, from -180 to 180: the way to turn a direction into a facing angle. |
+| `Pi()` → `float` | 3.14159..., half a turn in radians. |
+| `RandomBool()` → `bool` | `true` or `false` at random, each half the time. |
+| `Chance(float Probability)` → `bool` | `true` at random, as often as the probability says: `if (Chance(0.3)) { ... }` runs 30% of the time. 0 is never and 1 is always; a probability outside 0 to 1 is an error. |
+| `IsNearlyEqual(float A, float B, float Tolerance = optional)` → `bool` | True if the two numbers are at most the tolerance apart (0.0001 if none is given). Use it rather than `==` for floats that come out of math, since `0.1 + 0.2 == 0.3` is false. A negative tolerance is an error. |
+| `Length(vector3 Vector)` → `float` | The vector's length. |
+| `Distance(vector3 A, vector3 B)` → `float` | The distance between two points. For two actors, use `DistanceTo`. |
+| `Normalize(vector3 Vector)` → `vector3` | The vector made 1 long, keeping its direction. `[0, 0, 0]` (or a vector too small to have a direction) is an error. |
+| `Dot(vector3 A, vector3 B)` → `float` | The dot product. For two directions 1 long, it's 1 if they're the same, 0 at right angles and -1 if they're opposite. |
+| `Cross(vector3 A, vector3 B)` → `vector3` | The cross product: a vector at right angles to both. |
+| `LerpVector(vector3 A, vector3 B, float Alpha)` → `vector3` | Blends from A to B, like `Lerp`. |
 | `Time()` → `float` | The world's time (`GetWorld()->GetTimeSeconds()`): seconds since the level started; stops while the game is paused. |
 | `ToEntity(string Name)` → `entity` | The entity with this Bango ID name, for names that come from data (`ToEntity("john")` is the same as `@john`). A name that isn't letters, digits and `_` (or starts with a digit) is an error. |
 | `entity SetPos(vector3 Pos)` | Moves the actor. |
@@ -980,13 +1006,13 @@ The graph editor shows a script as nodes and wires and saves it back as text. Th
 ### Disconnected nodes
 - A chain of nodes that nothing wires into (other than the entry's chain) is **disconnected**. It's kept in the file as `//~` comment lines, so the compiler ignores it but the graph keeps it:
   ```
-  Log("connected");           //@1(0, 0)
+  WriteLog("connected");           //@1(0, 0)
 
-  //~ Log("disconnected");    //@2(0, 20)
+  //~ WriteLog("disconnected");    //@2(0, 20)
   //~
   //~ if (true)               //@3(20, 20)
   //~ {
-  //~ 	Log("inside");        //@4(40, 30)
+  //~ 	WriteLog("inside");        //@4(40, 30)
   //~ };
   ```
 - `//~` lines are written at the end of their graph: after the main graph's code, or at the end of a function's body. A blank line separates one disconnected chain from the next.
@@ -1037,6 +1063,7 @@ The graph editor is the **Bango Scripts** tab (Tools menu). It doesn't need the 
   - **Script Description** (left, first): a box holding the script's description (section 12, Comments), as several lines of text. Enter starts a new line; clicking elsewhere applies it, as one undoable edit (trailing spaces and empty lines at the end are dropped). Saving while typing in it saves what's typed.
   - **Functions** (left, after Script Description): the script's functions, in the order they are in the file. Clicking one shows its graph. **+ Add** adds `function void NewFunction()` (numbered if that name is taken), shows it, and starts renaming it. Double-clicking a function, or clicking it again once it's selected, renames it: the name must be a valid identifier that no other function and no command has, and every call to it in the script is renamed too, as one undoable edit. Dragging a function onto a graph adds a call to it where it's dropped (dropped on a pin, the call is wired to it, as with a node from the add-node menu). Its × deletes it, after asking; calls to it are left alone and won't compile until they're removed. Deleting a function can't be undone with Undo (Reload brings it back while it's unsaved). An option to sort functions alphabetically is planned.
   - **Script Description**, **Functions**, **Inputs**, **Globals** and **Locals** are one after another in a single scrolling pane on the left. Each list is as tall as its rows, so only the pane scrolls; the splitter between the pane and the graph area sets its width.
+  - The left side has two **foldouts**, one above the other, each opened and closed by clicking its header: **SCRIPT DATA** holds that scrolling pane, and **SCRIPTING COMMANDS** holds a scrolling reference list of every command a script can call, by name, sorted alphabetically (the registered commands and the built-in array commands). When both are open they share the height, with a splitter between them; a closed one is just its header. The list is read again each time SCRIPTING COMMANDS is opened, so commands added by other modules show up.
   - **Inputs** (left, after Functions): the shown graph's parameters: the script's `#define params` in the main graph, or the function's in a function graph. Each row has a grab handle, its type's icon, its name and its type, and in the main graph a box for its default. **+ Add** adds a `bool` parameter at the end (`_newParam`, numbered if taken) and starts renaming it; after an optional script parameter it gets `= nil`, since required parameters come first. Dragging a row by its handle moves the parameter up or down (a script's required parameters must stay before its optional ones). Clicking the type icon opens a menu of the types and arrays of them (deeper arrays, like `int[][]`, aren't offered). Changing an optional parameter's type resets its default to `nil`. Double-clicking a name, or clicking it again once it's selected, renames it, and its uses in that graph are renamed too; the name must be a valid name (letters, digits and `_`, not starting with a digit, not a keyword) and not clash with another parameter or a local of the graph. The default box is typed like a node's field (a string without quotes); leaving it empty makes the parameter required, and `nil` makes it optional with no particular value. × removes a parameter; its uses are left alone, so they won't compile until changed. Each of these is one undoable edit. Calls to a function aren't changed when its parameters are; they show errors until their arguments match. The type and default columns have fixed widths, so rows line up. A required parameter's default box is locked unless every parameter after it is optional (required parameters come before optional ones). The Script Start node lists the parameters' names and types, but not their defaults, which are shown and edited only here.
   - **Globals** (left, below Inputs): the file's globals, the same in every graph. Each row has a grab handle, its type's icon (a button with the type menu, as in Inputs), its name and its type; a global has no value (section 4). **+ Add** adds `global bool newGlobal;` (numbered if taken) and starts renaming it. Dragging a row by its handle reorders the declarations. Renaming one (double-click, or click it again once it's selected) renames its uses everywhere in the file, as one undoable edit; the name must be a valid name and can't clash with another global; in a graph whose local or parameter has the old name, that graph's uses aren't renamed, since they're the local's. Its × removes the declaration, after asking if the script uses it; its uses are left alone. Under the list, **Used here, declared elsewhere** lists, greyed out and without a type, the globals the shown graph uses but the file doesn't declare (declared by another script or a Blueprint, or a typo); the + on one opens the type menu, and picking a type declares it here.
   - **Locals** (left, below Globals): the shown graph's locals. Each row is like an Inputs row: grab handle, type icon and menu, name, type, and a box for its starting value, typed like a node's field (a string without quotes, a text as its source text); empty means it starts as `nil`. Only fixed values are allowed there (section 4). **+ Add** adds `bool _newLocal` (numbered if taken) and starts renaming it. Renaming renames its uses in the graph; the name must be a valid name and not clash with another local, a parameter or a loop variable of the graph. × removes it; its uses are left alone. Changing its type clears its starting value (unless it's `nil`, which fits any type). Under the list, greyed out, are the graph's `for` and `forEach` loop variables, with their type; clicking one shows and selects its loop.
@@ -1075,7 +1102,7 @@ A statement that is exactly one call (`[target] Name(args);`) gets a **dedicated
 |---|---|
 | **Target** | the command takes a target (`@john Speak(...)`) |
 | one field per parameter | labelled with the parameter's name; optional ones may be left empty |
-| extra values | variadic commands; labelled from the signature (`{0}`, `{1}`, ... for `Log`, `Format`, `Hint` and `FormatText`; `Value 1`, `Value 2`, ... by default). For these commands (and others marked `.WithPlaceholders()`), when the text is a literal there is a row for every placeholder it uses, up to `{31}`, even if it has no value yet: changing `"Test {0} {1}"` to `"Test {0} {1} {2}"` adds a `{2}` row, shown as *missing* until it's filled in. A row left *missing* is **saved as `nil`** (`Log("Test {0} {1} {2}", 1, 2, nil);`), so the text shows `nil` there; after reopening, the row shows `nil`. Values beyond the placeholders still get rows. |
+| extra values | variadic commands; labelled from the signature (`{0}`, `{1}`, ... for `WriteLog`, `Format`, `Hint` and `FormatText`; `Value 1`, `Value 2`, ... by default). For these commands (and others marked `.WithPlaceholders()`), when the text is a literal there is a row for every placeholder it uses, up to `{31}`, even if it has no value yet: changing `"Test {0} {1}"` to `"Test {0} {1} {2}"` adds a `{2}` row, shown as *missing* until it's filled in. A row left *missing* is **saved as `nil`** (`WriteLog("Test {0} {1} {2}", 1, 2, nil);`), so the text shows `nil` there; after reopening, the row shows `nil`. Values beyond the placeholders still get rows. |
 
 This covers registered commands, this script's functions, and the array commands. A command whose value can be thrown away (`_a Pop();`, `AskChoice("A", "B");`, a script function) can be a node on its own; the node shows no row for the value.
 
@@ -1096,7 +1123,7 @@ Problems visible from the line alone show Blueprint's **ERROR!** banner on the n
 ### Editing
 - **Fields:** click a value to edit it. Enter or clicking elsewhere applies it; Escape cancels. Every edit is checked before it's applied: the node's text must still read as code for its kind (one line, valid syntax). A refused edit leaves the node alone and a notification says why. Types and names aren't checked until Compile.
   - Clearing an optional field removes it with its separator (`, ` or ` = `). Only the last argument can be removed. An optional argument after a missing one is locked ("fill in the values above first").
-  - **Text fields** (any field whose type is `string`, like Log's Msg or a string default) are typed as plain text, without quotes: typing `Say "hi"` saves `"Say \"hi\""`. The string escapes of section 3 are added when saving and removed for editing, so quotes never need escaping. Typing `\n` or `\t` gives a line break or tab, and `\\` a backslash; a backslash before anything else is just a backslash. The field shows the text itself in a normal font (line breaks and tabs as `\n` and `\t`), or *empty text* for `""`.
+  - **Text fields** (any field whose type is `string`, like WriteLog's Msg or a string default) are typed as plain text, without quotes: typing `Say "hi"` saves `"Say \"hi\""`. The string escapes of section 3 are added when saving and removed for editing, so quotes never need escaping. Typing `\n` or `\t` gives a line break or tab, and `\\` a backslash; a backslash before anything else is just a backslash. The field shows the text itself in a normal font (line breaks and tabs as `\n` and `\t`), or *empty text* for `""`.
   - **Localized text fields** (type `text`, like Hint's Msg) are typed the same way, and show the source text. Typing in an empty one makes a `LOCTEXT` with a new random key; retyping one keeps its key, namespace and notes (or keeps an `INVTEXT` an `INVTEXT`). The arrow at the end of the field opens rows under it, like an FText property's advanced options:
     - **Translated**: a checkbox. Unchecking it makes the text an `INVTEXT` (its key, namespace and notes are dropped, and the rows below are hidden); checking it makes it a `LOCTEXT` again, with a new key.
     - **Key**: can't be empty.
@@ -1128,9 +1155,11 @@ Problems visible from the line alone show Blueprint's **ERROR!** banner on the n
 - Spawning scripts from scripts (a `Spawn` command following section 10's argument rules), and a handle type in the language
 - A level-placed "Bango Script" component that shows a script's parameters as editable fields
 - Maps
-- Vector commands: length, distance between two vectors, normalize, dot and cross products, and maybe rotators
+- Rotators, and commands for them
 - A way to check whether a Bango ID's actor is in the level before using it
 - A shorthand for giving a global a starting value only if it's `nil` (like a "Set if not defined" node)
+- A deterministic random source, seedable and saved with the game, used by every random command (`Random`, `RandomInt`, `RandomBool`, `Chance`), so a run can be replayed exactly
+- The vector commands for `vector2` too (they take `vector3` for now)
 - Debugger: while following a copy that failed, keep a faint steady outline on the nodes that led to the error (its trail), instead of only flashing them
 - Graph editor: opening a script's editor in a window of its own, a pop-up for editing long text, updating a function's calls when its parameters change, an alphabetical-sort toggle for the function list, adding extra values to variadic commands, and asking before the tab closes with unsaved changes
 - Whether script files should be wrapped in Unreal assets (they are loose `.bango` files for now)
@@ -1185,7 +1214,7 @@ forEach (_entry in questLog)       //@19(0, 15)
 {
 	if (!IsNil(_entry))         //@22(1, 16)
 	{
-		Log(_entry);               //@23(2, 17)
+		WriteLog(_entry);               //@23(2, 17)
 	};
 };
 

@@ -24,6 +24,7 @@ class SBangoTextEditor;
 class SScrollBox;
 class SScrollBar;
 class STextBlock;
+class SVerticalBox;
 class ITableRow;
 class STableViewBase;
 class UEdGraph;
@@ -135,6 +136,12 @@ private:
 	TArray<TSharedPtr<FDeclEntry>> LocalItems;
 	TSharedPtr<SListView<TSharedPtr<FDeclEntry>>> GlobalList;
 	TSharedPtr<SListView<TSharedPtr<FDeclEntry>>> LocalList;
+
+	/** The left pane's foldouts: SCRIPT DATA (description, functions, inputs, globals, locals) and SCRIPTING COMMANDS. */
+	bool bScriptDataExpanded = true;
+	bool bScriptingCommandsExpanded = true;
+	/** SCRIPTING COMMANDS' list: one line per command name. */
+	TSharedPtr<SVerticalBox> CommandListBox;
 	/** What the lists show, so they're only made again when it changes. */
 	FString DeclsShown;
 	/** After + Add: the declaration to start renaming once its row exists. */
@@ -377,6 +384,14 @@ private:
 	bool Save();
 	/** If the editor goes away with unsaved changes, keeps a copy in Saved/Bango/Unsaved. */
 	void WriteRecoveryCopy() const;
+
+	/**
+	 * A foldout for the left pane: a header that shows or hides Body when clicked. bExpanded is the member that
+	 * says whether it's open (the splitter slot holding it reads it too).
+	 */
+	TSharedRef<SWidget> MakeFoldout(const FText& Title, bool* bExpanded, TSharedRef<SWidget> Body);
+	/** Fills SCRIPTING COMMANDS with every command's name, sorted alphabetically. */
+	void RefreshCommandList();
 
 	void DeleteSelectedNodes();
 	bool CanDeleteSelectedNodes() const;

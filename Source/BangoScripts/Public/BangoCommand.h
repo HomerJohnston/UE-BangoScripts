@@ -156,7 +156,7 @@ struct FBangoCommandCall
 	FBangoValue Target;
 	TArray<FBangoValue> Args;
 
-	/** Poll only: seconds since the last poll (or since Start). */
+	/** Poll: seconds since the last poll (or since Start). Start: the length of the frame the script is running in. */
 	float DeltaSeconds = 0.0f;
 
 	/**

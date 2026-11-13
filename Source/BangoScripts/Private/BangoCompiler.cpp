@@ -2460,6 +2460,15 @@ namespace BangoCompilerPrivate
 				return Fail(Call.NameLoc, FString::Printf(TEXT("Unknown command or function '%s'. Names are case-sensitive."), *Call.Name));
 			}
 
+			if (Call.Name == TEXT("Log") && Signature->Name == TEXT("Log"))
+			{
+				// Log used to write to the output log (spec v0.37): say so, rather than a puzzling type error.
+				const FBangoLiteralExpr* First = Call.Args.Num() > 0 ? Call.Args[0]->As<FBangoLiteralExpr>() : nullptr;
+				if ((!bValueNeeded && !bInferring) || (First && First->LiteralKind == EBangoLiteralKind::String))
+				{
+					return Fail(Call.NameLoc, TEXT("'Log' is the logarithm (Log(100) is 2.0). To write to the output log, use WriteLog(\"...\")."));
+				}
+			}
 			if (Signature->bHasTarget && !Call.Target)
 			{
 				return Fail(Call.NameLoc, FString::Printf(TEXT("'%s' needs a target: %s"), *Call.Name, *Signature->ToString()));
