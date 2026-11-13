@@ -910,4 +910,291 @@ namespace Bango
 		}
 		return MakeStringLiteral(TypedTextToString(Typed));
 	}
+
+	// ---- Locals declared in the middle of the text (HoistLateLocals) ----
+
+	namespace HoistPrivate
+	{
+		/** The declarations after a graph's leading ones, in its blocks too (not in a for's header: that's part of the For node). */
+		static void CollectLateDecls(const FBangoBlock& Block, bool bTop, int32 FirstLate, TArray<const FBangoVarDeclStmt*>& Out)
+		{
+			for (int32 i = bTop ? FirstLate : 0; i < Block.Num(); ++i)
+			{
+				const FBangoStmt& Stmt = *Block[i];
+				if (const FBangoVarDeclStmt* Decl = Stmt.As<FBangoVarDeclStmt>())
+				{
+					if (!Decl->bGlobal)
+					{
+						Out.Add(Decl);
+					}
+					continue;
+				}
+				if (const FBangoIfStmt* If = Stmt.As<FBangoIfStmt>())
+				{
+					CollectLateDecls(If->Then, false, 0, Out);
+					CollectLateDecls(If->Else, false, 0, Out);
+				}
+				else if (const FBangoWhileStmt* While = Stmt.As<FBangoWhileStmt>())
+				{
+					CollectLateDecls(While->Body, false, 0, Out);
+				}
+				else if (const FBangoForStmt* For = Stmt.As<FBangoForStmt>())
+				{
+					CollectLateDecls(For->Body, false, 0, Out);
+				}
+				else if (const FBangoForEachStmt* ForEach = Stmt.As<FBangoForEachStmt>())
+				{
+					CollectLateDecls(ForEach->Body, false, 0, Out);
+				}
+			}
+		}
+
+		/** Where the statement starting at Start ends: just after its ';' (not one in a string). INDEX_NONE if there's none on the line. */
+		static int32 FindStatementEnd(const FString& Line, int32 Start)
+		{
+			bool bInString = false;
+			for (int32 i = Start; i < Line.Len(); ++i)
+			{
+				const TCHAR C = Line[i];
+				if (bInString)
+				{
+					if (C == TEXT('\\'))
+					{
+						++i;
+					}
+					else if (C == TEXT('"'))
+					{
+						bInString = false;
+					}
+				}
+				else if (C == TEXT('"'))
+				{
+					bInString = true;
+				}
+				else if (C == TEXT(';'))
+				{
+					return i + 1;
+				}
+				else if (C == TEXT('/') && i + 1 < Line.Len() && Line[i + 1] == TEXT('/'))
+				{
+					return INDEX_NONE;
+				}
+			}
+			return INDEX_NONE;
+		}
+
+		/** Where the value starts in `type _name = value;` (just after the '='), or INDEX_NONE. */
+		static int32 FindInitStart(const FString& Line, int32 Start, int32 End, const FString& Name)
+		{
+			// The name comes right after the type, so its first appearance from Start is the one being declared.
+			for (int32 At = Start; At + Name.Len() <= End; ++At)
+			{
+				if (Line.Mid(At, Name.Len()) == Name)
+				{
+					for (int32 Eq = At + Name.Len(); Eq < End; ++Eq)
+					{
+						if (Line[Eq] == TEXT('='))
+						{
+							return Eq + 1;
+						}
+					}
+					return INDEX_NONE;
+				}
+			}
+			return INDEX_NONE;
+		}
+
+		static FString LeadingWhitespace(const FString& Line)
+		{
+			int32 i = 0;
+			while (i < Line.Len() && (Line[i] == TEXT(' ') || Line[i] == TEXT('\t')))
+			{
+				++i;
+			}
+			return Line.Left(i);
+		}
+	}
+
+	bool HoistLateLocals(const FString& Source, FString& OutSource, FBangoCompileError& OutError)
+	{
+		using namespace HoistPrivate;
+		OutSource = Source;
+		FBangoScript Script;
+		FBangoCompileError ParseError;
+		if (!ParseScript(Source, TEXT("text"), Script, ParseError))
+		{
+			return true; // nothing to do here: reading the text reports the error
+		}
+
+		// The lines, each without its line break (kept apart, so the text keeps its own).
+		TArray<FString> Lines;
+		TArray<FString> Breaks;
+		{
+			int32 Start = 0;
+			for (int32 i = 0; i <= Source.Len(); ++i)
+			{
+				if (i == Source.Len() || Source[i] == TEXT('\n'))
+				{
+					FString Line = Source.Mid(Start, i - Start);
+					FString Break = i < Source.Len() ? FString(TEXT("\n")) : FString();
+					if (Line.Len() > 0 && Line[Line.Len() - 1] == TEXT('\r'))
+					{
+						Line = Line.Left(Line.Len() - 1);
+						Break = FString(TEXT("\r")) + Break;
+					}
+					Lines.Add(Line);
+					Breaks.Add(Break);
+					Start = i + 1;
+				}
+			}
+		}
+
+		// Per line: its replacement (removed lines become INDEX_NONE in Keep), and lines to put after it.
+		TArray<bool> Keep;
+		Keep.Init(true, Lines.Num());
+		TArray<TArray<FString>> InsertAfter;
+		InsertAfter.SetNum(Lines.Num() + 1); // [0] is before the first line
+		bool bChanged = false;
+
+		auto HoistGraph = [&](const FBangoBlock& Body) -> bool
+		{
+			int32 FirstLate = 0;
+			TSet<FString> Names;
+			int32 AnchorLine = 0; // the hoisted declarations go after the last declaration, or before the first statement
+			bool bAfterAnchor = true;
+			// The graph's leading declarations, after its #define params line (a statement too) and any reroutes among them.
+			while (FirstLate < Body.Num() && (Body[FirstLate]->Kind == EBangoStmtKind::VarDecl || Body[FirstLate]->Kind == EBangoStmtKind::Reroute
+				|| Body[FirstLate]->Kind == EBangoStmtKind::Params))
+			{
+				if (const FBangoVarDeclStmt* Decl = Body[FirstLate]->As<FBangoVarDeclStmt>())
+				{
+					Names.Add(Decl->Name);
+					AnchorLine = Decl->Loc.Line;
+				}
+				++FirstLate;
+			}
+			TArray<const FBangoVarDeclStmt*> Late;
+			CollectLateDecls(Body, true, FirstLate, Late);
+			if (Late.Num() == 0)
+			{
+				return true;
+			}
+			if (AnchorLine == 0 && FirstLate < Body.Num())
+			{
+				// No declarations yet: they go just above the graph's first statement.
+				AnchorLine = Body[FirstLate]->Loc.Line;
+				bAfterAnchor = false;
+			}
+			int32 AnchorIndex = AnchorLine - 1;
+			if (!bAfterAnchor)
+			{
+				// Above the first statement's comment lines too, so they stay its comment bubble. (Comment lines that run up to
+				// the top of the file are its description: then the declarations go just above the statement.)
+				int32 Above = AnchorIndex;
+				while (Above > 0)
+				{
+					const FString Prev = Lines[Above - 1].TrimStartAndEnd();
+					if (!Prev.StartsWith(TEXT("//"), ESearchCase::CaseSensitive) || Prev.StartsWith(TEXT("//@"), ESearchCase::CaseSensitive) || Prev.StartsWith(TEXT("//~"), ESearchCase::CaseSensitive) || Bango::IsSectionHeadingComment(Prev.Mid(2, Prev.Len() - 2)))
+					{
+						break;
+					}
+					--Above;
+				}
+				if (Above > 0)
+				{
+					AnchorIndex = Above;
+				}
+			}
+			const FString Indent = Lines.IsValidIndex(AnchorIndex) ? LeadingWhitespace(Lines[AnchorIndex]) : FString();
+
+			for (const FBangoVarDeclStmt* Decl : Late)
+			{
+				const int32 LineIndex = Decl->Loc.Line - 1;
+				if (!Lines.IsValidIndex(LineIndex))
+				{
+					continue;
+				}
+				if (Names.Contains(Decl->Name))
+				{
+					OutError.Line = Decl->Loc.Line;
+					OutError.Column = Decl->Loc.Column;
+					OutError.Message = FString::Printf(TEXT("'%s' is declared twice in this graph. A graph's locals are all declared at its top (Apply moves this one there), so each name can be used once."), *Decl->Name);
+					return false;
+				}
+				Names.Add(Decl->Name);
+
+				const FString& Line = Lines[LineIndex];
+				const int32 Start = Decl->Loc.Column - 1;
+				const int32 End = FindStatementEnd(Line, Start);
+				if (End == INDEX_NONE)
+				{
+					continue; // not a one-line statement: leave it to the error the text gets anyway
+				}
+				const FString Before = Line.Left(Start);
+				const FString After = Line.Mid(End, Line.Len() - End);
+				const bool bFixed = !Decl->Init.IsValid() || Decl->Init->Kind == EBangoExprKind::Empty || GraphEditPrivate::IsFixedValueExpr(*Decl->Init);
+				FString Hoisted;
+				if (bFixed)
+				{
+					// `int _n = 3;` keeps its starting value, at the top.
+					Hoisted = Line.Mid(Start, End - Start);
+					Keep[LineIndex] = !Before.TrimStartAndEnd().IsEmpty() || !After.TrimStartAndEnd().IsEmpty();
+					if (Keep[LineIndex])
+					{
+						Lines[LineIndex] = Before + After;
+					}
+				}
+				else
+				{
+					// `float _d = Distance(...);` becomes `float _d;` at the top, and a Set node where it was.
+					const int32 InitStart = FindInitStart(Line, Start, End, Decl->Name);
+					if (InitStart == INDEX_NONE)
+					{
+						continue;
+					}
+					Hoisted = FString::Printf(TEXT("%s %s;"), *Decl->Type.ToString(), *Decl->Name);
+					const FString Value = Line.Mid(InitStart, End - 1 - InitStart).TrimStartAndEnd();
+					Lines[LineIndex] = Before + Decl->Name + TEXT(" = ") + Value + TEXT(";") + After;
+				}
+				const int32 InsertIndex = bAfterAnchor ? AnchorIndex + 1 : AnchorIndex;
+				InsertAfter[InsertIndex < 0 ? 0 : (InsertIndex > Lines.Num() ? Lines.Num() : InsertIndex)].Add(Indent + Hoisted);
+				bChanged = true;
+			}
+			return true;
+		};
+
+		if (!HoistGraph(Script.TopLevel))
+		{
+			return false;
+		}
+		for (const TUniquePtr<FBangoFunction>& Function : Script.Functions)
+		{
+			if (!HoistGraph(Function->Body))
+			{
+				return false;
+			}
+		}
+		if (!bChanged)
+		{
+			return true;
+		}
+
+		// InsertAfter[i] goes before line i (so after line i - 1).
+		FString Out;
+		for (int32 i = 0; i <= Lines.Num(); ++i)
+		{
+			for (const FString& Inserted : InsertAfter[i])
+			{
+				Out += Inserted;
+				Out += TEXT("\n");
+			}
+			if (i < Lines.Num() && Keep[i])
+			{
+				Out += Lines[i];
+				Out += Breaks[i];
+			}
+		}
+		OutSource = Out;
+		return true;
+	}
 }

@@ -678,15 +678,25 @@ namespace BangoParserPrivate
 			}
 		}
 
-		/** After the '}' of a block that ends a statement. */
+		/**
+		 * After the '}' of a block that ends a statement: an optional ';' (`}` and `};` both end it; the graph editor
+		 * writes `}`). Without one, the next statement must start on a new line, as any statement does.
+		 */
 		bool ExpectBlockTerminator()
 		{
+			const FBangoToken& Close = Previous();
 			if (Match(EBangoTokenKind::Semicolon))
 			{
 				return true;
 			}
-			return Fail(Previous().Loc, FString::Printf(TEXT("Expected ';' after '}', but found %s. A block that ends a statement closes with '};'."),
-				*Bango::DescribeToken(Cur())));
+			const FBangoToken& Next = Cur();
+			if (Next.Loc.Line == Close.Loc.Line && Next.Kind != EBangoTokenKind::EndOfFile && Next.Kind != EBangoTokenKind::RBrace
+				&& Next.Kind != EBangoTokenKind::DisabledEnd)
+			{
+				return Fail(Next.Loc, FString::Printf(TEXT("Expected a new line after '}', but found %s. Start the next statement on a line of its own."),
+					*Bango::DescribeToken(Next)));
+			}
+			return true;
 		}
 
 		// ---- Types and names ----

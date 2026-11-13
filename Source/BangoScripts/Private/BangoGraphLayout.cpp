@@ -1095,13 +1095,20 @@ namespace Bango
 		TArray<FBangoGraphVariable> Locals;
 		TArray<FBangoGraphVariable> Globals;
 		TSet<FString> Seen;
-		auto Add = [&Seen](TArray<FBangoGraphVariable>& To, const FString& Name, const FString& Type, FBangoGraphVariable::EKind Kind, int32 DeclGraph, int32 DeclIndex)
+		TSet<FString> SeenLoops;
+		auto Add = [&Seen, &SeenLoops](TArray<FBangoGraphVariable>& To, const FString& Name, const FString& Type, FBangoGraphVariable::EKind Kind, int32 DeclGraph, int32 DeclIndex)
 		{
-			if (Name.IsEmpty() || Seen.Contains(Name))
+			// A name is listed once, except that every loop gets its own row: two For loops can each have an `i`.
+			const bool bLoop = Kind == FBangoGraphVariable::EKind::Loop;
+			if (Name.IsEmpty() || (Seen.Contains(Name) && !(bLoop && SeenLoops.Contains(Name))))
 			{
 				return;
 			}
 			Seen.Add(Name);
+			if (bLoop)
+			{
+				SeenLoops.Add(Name);
+			}
 			FBangoGraphVariable& Variable = To.AddDefaulted_GetRef();
 			Variable.Name = Name;
 			Variable.Type = Type;
@@ -1124,7 +1131,7 @@ namespace Bango
 			Add(Locals, Graph->Locals[i].Name, Graph->Locals[i].Type, FBangoGraphVariable::EKind::Local, GraphIndex, i);
 		}
 
-		// Loop variables, in node order (a name used by two loops is listed once, for the first).
+		// Loop variables, in node order: one for each loop, even when two loops use the same name.
 		TArray<FBangoGraphVariable> Loops;
 		for (int32 i = 1; i < Graph->Nodes.Num(); ++i)
 		{

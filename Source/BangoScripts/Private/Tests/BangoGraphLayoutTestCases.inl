@@ -169,6 +169,9 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 			TEXT("{\n")
 			TEXT("\tbank = _who GetPos().x;   //@6(1, 5)\n")
 			TEXT("};\n")
+			TEXT("for (int _i = 9; _i > 0; _i--)    //@9(0, 6)\n")   // a second loop with an _i: it gets its own row
+			TEXT("{\n")
+			TEXT("};\n")
 			TEXT("function void F(int _n)\n")
 			TEXT("{\n")
 			TEXT("\tbool _done = false;\n")
@@ -197,7 +200,7 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 			Bango::GetGraphVariables(VarDoc, INDEX_NONE, VarContext, Vars);
 			// Parameters and locals in order, loop variables by node, the file's globals in order, then `bank`, which
 			// is used but declared nowhere in the file.
-			const FString ExpectedMain = TEXT("param _who:string @-1/0; param _times:int @-1/1; local _count:int @-1/0; local _rounds:int @-1/1; loop _name:string @-1/1; loop _i:int @-1/3; global gold:int @-1/0; global names:string[] @-1/1; global bank: @-1/-1; ");
+			const FString ExpectedMain = TEXT("param _who:string @-1/0; param _times:int @-1/1; local _count:int @-1/0; local _rounds:int @-1/1; loop _name:string @-1/1; loop _i:int @-1/3; loop _i:int @-1/5; global gold:int @-1/0; global names:string[] @-1/1; global bank: @-1/-1; ");
 			if (Describe(Vars) != ExpectedMain)
 			{
 				OutFailures.Add(TEXT("variables (main): expected ") + ExpectedMain + TEXT("\n got ") + Describe(Vars));

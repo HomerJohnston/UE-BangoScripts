@@ -126,7 +126,7 @@ bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 			TestTrue(TEXT("build document with the reroute"), BangoScriptEditor::BuildDocument(Graphs, WithReroute, nullptr, BuildError));
 			TestEqual(TEXT("the reroute gets the next free NodeID"), Reroute->NodeID, (int64)4);
 			TestTrue(TEXT("the reroute is saved as a line with only its //@"), Bango::WriteGraphText(WithReroute, Text, BuildError)
-				&& Text.Contains(FString(TEXT("};\n")) + FString::ChrN(19, TEXT(' ')) + TEXT("//@4(12, 2)\n\nwhile (false)")));
+				&& Text.Contains(FString(TEXT("}\n")) + FString::ChrN(19, TEXT(' ')) + TEXT("//@4(12, 2)\n\nwhile (false)")));
 			// Put the graph back as it was, for the checks below.
 			Reroute->BreakAllNodeLinks();
 			Graph->RemoveNode(Reroute);

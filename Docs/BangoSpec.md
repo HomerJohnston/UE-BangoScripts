@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.38)
+# Bango Language Spec (draft v0.39)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.39:** a block no longer needs a `;` after its `}`: `if`, `while`, `for`, `forEach` and `function` blocks end with `}` (`};` still reads the same). The graph editor writes `}` (section 2).
 
 **Changes in v0.38:** **`Exec(Path, ...)`** starts another script file from a script, with the extra values as its parameters, and gives back its id (section 7). Script handles (`FBangoScriptHandle`) are now 32-bit, like a Bango `int`; save data from earlier versions can't be loaded (section 11).
 
@@ -78,7 +80,7 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
 
 - **One statement line = one graph node.** So is a reroute line (below).
 - **A statement must fit on one line**, from its first token to its `;` (or, for `if`, `while`, `for` and `forEach`, to the `)` that ends the header). A statement that continues onto the next line is a compile error.
-- **Only one statement per line.** `a(); b();` is a compile error, and so is `if (x) { a(); };` written on one line.
+- **Only one statement per line.** `a(); b();` is a compile error, and so is `if (x) { a(); }` written on one line.
 - Lines that contain only `{`, `}`, `};` or `else` are structure. In the graph they become wires and pins, not nodes. Structure tokens may share a line with a statement (`if (a) {`, `} else if (b) {`).
 - Node metadata goes in a trailing comment that the compiler ignores:
 
@@ -113,7 +115,7 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
   - The same NodeID used twice in a file
   - NodeID 0 on any line
   - Metadata on a `#define` or `#undef` line, or on a declaration
-  - Metadata on a line with no statement, including a `function` line or a line with only `{` or `};`
+  - Metadata on a line with no statement, including a `function` line or a line with only `{`, `}` or `};`
   - A reroute line where a statement couldn't go
 - Errors about the `params` line, and argument errors for a script with no `params` line, show `[node 0]`.
 - Ordinary comments: `// ...`. A comment starting with `//@` is always metadata. There are no block comments: `/*` and `*/` mark **disabled nodes** (below), and what's between them must be code.
@@ -126,14 +128,14 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
   /* WriteLog("b"); */             //@2(4, 0)
   WriteLog("c");                   //@3(8, 0)
   ```
-- A disabled block statement has `/*` and `*/` on lines of their own, at its indentation, around the whole statement, from its `if (...)` line to its last `};`:
+- A disabled block statement has `/*` and `*/` on lines of their own, at its indentation, around the whole statement, from its `if (...)` line to its last `}`:
   ```
   /*
   if (_ready)                 //@4(12, 0)
   {
   	/* WriteLog("not yet"); */     //@5(16, 4)
   	WriteLog("go");                //@6(16, 8)
-  };
+  }
   */
   ```
 - Unlike C++ comments, the markers **nest**: a statement inside a disabled block keeps its own setting (above, `WriteLog("not yet")` stays disabled when the `if` is enabled again). Each `/*` must be closed by a `*/` in the same block. `/*` and `*/` inside strings and `//` comments don't count.
@@ -175,9 +177,9 @@ A `goto` node **does not draw a wire** to its label. It shows the target label's
 
 ## 2. Blocks and semicolons
 
-- A block that ends a statement closes with `};`. This applies to `if`, `while`, `for`, `forEach` and `function`. Whitespace between `}` and `;` is allowed.
+- A block that ends a statement (`if`, `while`, `for`, `forEach` and `function`) closes with `}`. A `;` after it is allowed (`};`, as earlier versions required) but not needed; the graph editor writes `}`. The next statement starts on a new line.
 - A `}` that is followed by `else` has no semicolon.
-- `else if` is allowed. A whole `if / else if / else` chain ends with a single `};`. In the graph, the inner `if` is the node on the outer if's Else pin.
+- `else if` is allowed. A whole `if / else if / else` chain ends with a single `}`. In the graph, the inner `if` is the node on the outer if's Else pin.
 - A `{` block on its own, not belonging to one of the statements above, is a compile error.
 
 ```
@@ -192,7 +194,7 @@ else if (otherBool)
 else
 {
 	WriteLog("false");
-};
+}
 ```
 
 ---
@@ -265,7 +267,7 @@ A text literal copies Unreal's macros. Each text has a **namespace**, a **key** 
 if (IsNil(_line))
 {
 	_line = LOCTEXT("GuardHello", "Halt! Who goes there?");
-};
+}
 Hint(_line);
 Hint(NOTELOCTEXT("GuardBye", "Move along.", "Said by the gate guard, annoyed"));
 Hint(NSLOCTEXT("Shared.UI", "Continue", "Continue"));
@@ -366,7 +368,7 @@ global string[] questLog;        // arrays can be global
   if (IsNil(foundThings))
   {
   	foundThings = 0;
-  };
+  }
   ```
 - **All of a script's global declarations take effect when an instance starts, before any of its code runs.** A global that already exists keeps its value.
 - Each global is declared once per file. Declaring the same global twice is a compile error.
@@ -658,10 +660,10 @@ Game-specific commands (`Speak`, `AwaitSpeak`, `SetLocked`, dialogue choices, ..
 
 ### if / while
 ```
-if (cond) { ... };
-if (cond) { ... } else { ... };
-if (cond) { ... } else if (cond2) { ... } else { ... };
-while (cond) { ... };
+if (cond) { ... }
+if (cond) { ... } else { ... }
+if (cond) { ... } else if (cond2) { ... } else { ... }
+while (cond) { ... }
 break;
 continue;
 ```
@@ -674,7 +676,7 @@ continue;
 for (int _i = 0; _i <= 8; _i++)
 {
 	// _i is a local, scoped to the loop
-};
+}
 ```
 - `init` is one local declaration or assignment (or empty). `cond` must be `bool` (or empty, meaning `true`). `step` is one assignment statement (`=`, `+=`, `++`, etc.) or empty. Calls and global declarations are not allowed in `init` or `step`.
 - A variable declared in `init` is local to the loop: it only exists inside it, and its value can be any expression (`for (int _i = Count(_a) - 1; _i >= 0; _i--)`). This and `forEach` are the only declarations allowed below the top of a graph (section 4). `init` can also assign a local declared at the top (`for (_i = 0; ...)`), which keeps its value after the loop.
@@ -686,7 +688,7 @@ for (int _i = 0; _i <= 8; _i++)
 forEach (_x in _myArray)
 {
 	// _x is a local holding the current element
-};
+}
 ```
 - Declares the local `_x`, whose type is the array's element type and which only exists inside the loop. `_x` can't have the name of a local, a parameter or another loop's variable it's inside. For an `int[][]`, `_x` is an `int[]` (a copy of that row).
 - The array must have a type known to the compiler, so looping over a global the script hasn't declared is a compile error.
@@ -712,7 +714,7 @@ goto Hub;
 function int AddScore(int _amount)
 {
 	return _amount * 2;
-};
+}
 
 function void Greet(entity _who)
 {
@@ -722,8 +724,8 @@ function void Greet(entity _who)
 	{
 		_who Speak("Hello.");
 		AwaitSpeak();
-	};
-};
+	}
+}
 ```
 
 - A function's locals are declared at the top of its body, before its first statement (section 4), and get their values each time it's called. A function can't declare globals; it uses the ones declared at the top of the file.
@@ -751,7 +753,7 @@ A script can take arguments when it's spawned, declared with a `#define params` 
 for (int _i = 0; _i < _repeats; _i++)
 {
 	_speaker Speak(_line);
-};
+}
 ```
 
 ### Declaring
@@ -814,7 +816,7 @@ A **condition** is a script that answers **true or false**, for C++ and other pl
   if (IsNull(_who))
   {
   	return false;
-  };
+  }
 
   return foundThings >= 10 && GetPos(_who).z > 100;
   ```
@@ -952,7 +954,7 @@ while (true)                    //@1(0, 0)
 	_x += _speed * 2;           //@2(2, 0)   <- change the math and save:
 	@platform SetPos([_x, 0, 0]);   //@3(4, 0)
 	Sleep(0);                   //@4(6, 0)   <- the next frame, it carries on here, in the new version
-};
+}
 ```
 
 How a running copy switches:
@@ -1016,7 +1018,7 @@ The graph editor shows a script as nodes and wires and saves it back as text. Th
   //~ if (true)               //@3(20, 20)
   //~ {
   //~ 	WriteLog("inside");        //@4(40, 30)
-  //~ };
+  //~ }
   ```
 - `//~` lines are written at the end of their graph: after the main graph's code, or at the end of a function's body. A blank line separates one disconnected chain from the next.
 - `//~` lines must read as valid statements (as if the `//~ ` were removed). Declarations can't be in them: a disconnected chain uses the graph's locals like any other node. A broken `//~` line, a `#` line or a `function` in them, or a NodeID already used elsewhere in the file stops the graph editor from opening the file.
@@ -1042,7 +1044,7 @@ When the graph editor saves, it writes the whole file in a fixed layout:
 3. The main graph's code, then its disconnected chains.
 
    Each of these parts that has anything in it starts with a **section heading** and a blank line, after a blank line (unless it's the first line of the file): `// ============ SCRIPT INPUT ====================` above the `#define` lines, `// ============ GLOBAL VARS =====================` above the globals, `// ============ LOCAL VARS ======================` above the main graph's locals, and `// ============ SCRIPT BODY =====================` above the code.
-4. Each function, after a blank line and a separator line and another blank line: its comment, `function <signature>`, `{`, its local declarations and a blank line (if it has any), its code and disconnected chains, `};`. The separator before the first function is `// ============ FUNCTIONS =======================`; before each of the others it's `// ----------------------------------------------`. When a file is read, **any comment line starting with `// ====`** is skipped wherever it is, as a section heading (they're all written again on save), so headings never become comment bubbles; don't start a comment of your own that way, as it would be lost. The `// ---...` line between functions is skipped outside function bodies only; inside a function's body it's an ordinary comment.
+4. Each function, after a blank line and a separator line and another blank line: its comment, `function <signature>`, `{`, its local declarations and a blank line (if it has any), its code and disconnected chains, `}`. The separator before the first function is `// ============ FUNCTIONS =======================`; before each of the others it's `// ----------------------------------------------`. When a file is read, **any comment line starting with `// ====`** is skipped wherever it is, as a section heading (they're all written again on save), so headings never become comment bubbles; don't start a comment of your own that way, as it would be lost. The `// ---...` line between functions is skipped outside function bodies only; inside a function's body it's an ordinary comment.
 5. After a blank line, `#undef LOCTEXT_NAMESPACE`, if the script has a namespace. Comments below the last node, including one next to the `#undef`, move up to it, like other comments with no node after them (see Comments above).
 
 **Function order** is depth-first by first use. Reading the main graph in the order its lines are written (connected nodes, then disconnected ones), the first call to a function places it, and that function's own calls are placed right after it, before the main graph goes on. Functions nothing calls follow, in their existing order, each followed by the functions it calls. A call counts wherever it appears in a node's text (conditions, arguments, values), but not inside a string. Recursive or circular calls don't change the order: a function is only placed the first time it's used. So if the main graph calls `A` then `B`, and `A` calls `C`, the order is `A`, `C`, `B`. Opening a file also lists its functions in this order.
@@ -1077,6 +1079,8 @@ The graph editor is the **Bango Scripts** tab (Tools menu). It doesn't need the 
   - **Changes on disk:** when something other than the graph editor changes the open script's file (a text editor, source control), the editor notices within a moment. With no unsaved changes, it **reloads** the script, keeping the shown graph and its view. With unsaved changes, it never throws them away by itself: a bar above the graph says the file changed, with **Reload** (read the file, losing the changes) and **Keep Mine** (keep them; the bar goes away until the file changes again, and Save then overwrites the file without asking). A script tab that isn't shown checks when it's shown again. A file that's been deleted is left alone.
   - **Script text pane** (between the lists and the graph): the script's text. It's hidden to start with. The **Source Editor** tab, a folder tab floating on the graph's left edge with its name written up it (reading bottom to top), pulls it out: the pane slides open from the left, and the tab rides out on its right side. Clicking the tab again slides it back. When open, the splitter between it and the graph resizes it, and it opens to that width next time.
     - It shows the script as it would be saved, and follows the graph as it's edited. It's the Bango text editor (**Bango Text Editor Spec**): Bango syntax highlighting, tabs typed and shown as tabs. Line numbers are shown down its left side, and scroll with the text.
+    - **Locals can be declared anywhere while typing.** Applying moves a local declared further down a graph (in its code, or inside a block) up to the graph's other locals. A starting value that's a fixed value moves with it (`int _n = 3;`); any other is left where the declaration was, as a Set node (`float _d = Distance(_a, _b);` leaves `_d = Distance(_a, _b);`, a new node). A name declared twice in one graph is an error. Moving changes when a fixed starting value is given: once, when the graph starts, rather than each time that line is reached (in a loop, say). This is only for the text pane: a `.bango` file with a local declared below its code still doesn't compile.
+    - **While there's typed text that isn't applied, the left pane and the graph are locked**: the pane is greyed out and the graph is covered by a note, with **Apply** and **Revert** buttons. The text is what counts until it's applied or reverted.
     - It can be typed in. Typed text isn't used until it's applied: **Apply** (or Ctrl+Enter) makes the graphs again from it, keeping the shown graph and its view, like Reload. Applying can't be undone with Undo. If the text doesn't read, the error is shown above the text, the cursor goes to where it is, and the graphs are left as they are. **Revert** throws the typing away. While there's typed text that isn't applied, the graph doesn't change the pane's text, a note says so, and the script counts as having unsaved changes; **Save** and **Compile** apply it first (and don't go ahead if it doesn't read).
     - A script whose text doesn't read opens with the pane shown, holding the file's text and its error, so it can be fixed there and applied.
   - **Debug** (toolbar, after Save): while playing in the editor, which running copy of this script to follow, like Blueprint's debug object. The dropdown lists every copy running in the Play in Editor worlds, as `#3: Sleep at node 12 in Step()` (its number, the command it's waiting on, the node, and the function if it's in one), and copies that **stopped with an error** in this play session, as `#4: failed at node 7: '_x' is nil.`. Picking one follows it and shows the node it's at; **No debugging** follows none; **Show Where It Is** shows the node again; **Forget Failed Copies** takes the failed ones off the list. When nothing is followed, the only running copy is followed by itself, or, if none is running, the copy that failed last (so a script that fails as soon as it's spawned is shown too); No debugging stops this until playing stops. A copy that's followed stays followed when it fails. The followed copy is shown in the graph, updated ten times a second:
@@ -1186,19 +1190,19 @@ function void Nag()
 {
 	@john Speak("Find a gun.");    //@20(0, 0)
 	AwaitSpeak();                  //@21(0, 1)
-};
+}
 
 if (!IsNil(foundThings) && foundThings >= 10)   //@4(0, 3)
 {
 	Hint(LOCTEXT("FoundTen", "You found at least 10 things!"));    //@5(1, 4)
 	questLog Push("Found 10 things");              //@6(1, 5)
-};
+}
 
 for (int _i = 0; _i < 3; _i++)     //@7(0, 6)
 {
 	Hint(LOCTEXT("Countdown", "Countdown: {0}"), 3 - _i);          //@8(1, 7)
 	Sleep(1.0);                    //@9(1, 8)
-};
+}
 
 label Check;                       //@10(0, 9)
 if (IsNil(playerHasGun))      //@11(0, 10)
@@ -1214,16 +1218,16 @@ else
 		Nag();                     //@16(3, 12)
 		Sleep(Random(3.0, 5.0));   //@17(3, 13)
 		goto Check;                //@18(3, 14)
-	};
-};
+	}
+}
 
 forEach (_entry in questLog)       //@19(0, 15)
 {
 	if (!IsNil(_entry))         //@22(1, 16)
 	{
 		WriteLog(_entry);               //@23(2, 17)
-	};
-};
+	}
+}
 
 @john Speak("Great, you found a gun.");  //@24(0, 18)
 AwaitSpeak();                            //@25(0, 19)

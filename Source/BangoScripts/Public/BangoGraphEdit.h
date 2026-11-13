@@ -103,6 +103,15 @@ namespace Bango
 	 */
 	BANGOSCRIPTS_API bool RenameFunctionInText(FString& Text, const FString& OldName, const FString& NewName);
 
+	/**
+	 * For the script text pane's Apply: moves locals declared further down a graph (in its code, or in a block) up to the
+	 * graph's other locals, so the text can be typed in any order. A starting value that's a fixed value moves with it;
+	 * any other becomes a Set node where the declaration was (`float _d = Distance(_a, _b);` leaves `_d = Distance(_a, _b);`).
+	 * Text that doesn't read, or has nothing to move, comes back as it is. Fails, with OutError, if a name would be declared
+	 * twice in one graph.
+	 */
+	BANGOSCRIPTS_API bool HoistLateLocals(const FString& Source, FString& OutSource, FBangoCompileError& OutError);
+
 	/** The next free NodeID in a document (one more than the largest in use). */
 	BANGOSCRIPTS_API int64 GetNextNodeID(const FBangoGraphDocument& Document);
 

@@ -140,7 +140,7 @@ namespace BangoGraphWriterPrivate
 				{
 					return false;
 				}
-				AddCode(0, -1, TEXT("};"), nullptr);
+				AddCode(0, -1, TEXT("}"), nullptr);
 			}
 
 			if (Doc.bHasLocNamespace)
@@ -506,7 +506,7 @@ namespace BangoGraphWriterPrivate
 				{
 					return false;
 				}
-				AddCode(Indent, Detached, TEXT("};"), nullptr);
+				AddCode(Indent, Detached, TEXT("}"), nullptr);
 				return true;
 			}
 
@@ -520,7 +520,7 @@ namespace BangoGraphWriterPrivate
 				const int32 FalseBranch = Node.Branches[1];
 				if (FalseBranch == INDEX_NONE)
 				{
-					AddCode(Indent, Detached, TEXT("};"), nullptr);
+					AddCode(Indent, Detached, TEXT("}"), nullptr);
 					return true;
 				}
 				AddCode(Indent, Detached, TEXT("}"), nullptr);
@@ -541,7 +541,7 @@ namespace BangoGraphWriterPrivate
 				{
 					return false;
 				}
-				AddCode(Indent, Detached, TEXT("};"), nullptr);
+				AddCode(Indent, Detached, TEXT("}"), nullptr);
 				return true;
 			}
 			}

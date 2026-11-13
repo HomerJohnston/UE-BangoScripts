@@ -194,6 +194,9 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 			[
 				SNew(SBox)
 				.WidthOverride_Lambda([this]() { return ScriptDataWidth; })
+				// While the text pane has typed text that isn't applied, the text is what counts: the lists wait for it.
+				.IsEnabled_Lambda([this]() { return !bTextEdited; })
+				.ToolTipText_Lambda([this]() { return bTextEdited ? LOCTEXT("PaneLockedTooltip", "The script's text has been edited. Apply it (Ctrl+Enter) or Revert it to use these again.") : FText::GetEmpty(); })
 				[
 					// SCRIPT DESCRIPTION, SCRIPT INPUT, GLOBAL VARS, LOCAL VARS and FUNCTIONS (the order of the script's text): foldouts one after another in a single scrolling pane.
 					// Each list is as tall as its rows, so only the pane scrolls. A closed foldout is just its header.
@@ -471,7 +474,66 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 						+ SVerticalBox::Slot()
 						.FillHeight(1.0f)
 						[
-							SAssignNew(GraphHost, SBox)
+							SNew(SOverlay)
+							+ SOverlay::Slot()
+							[
+								SAssignNew(GraphHost, SBox)
+								.IsEnabled_Lambda([this]() { return !bTextEdited; })
+							]
+							// While the text pane has typed text that isn't applied, the graph is covered (and takes no clicks):
+							// the text is what counts until it's applied or reverted.
+							+ SOverlay::Slot()
+							[
+								SNew(SBorder)
+								.Visibility_Lambda([this]() { return bTextEdited && EdGraphs.Num() > 0 ? EVisibility::Visible : EVisibility::Collapsed; })
+								.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+								.BorderBackgroundColor(FLinearColor(0.0f, 0.0f, 0.0f, 0.45f))
+								.HAlign(HAlign_Center)
+								.VAlign(VAlign_Center)
+								[
+									SNew(SVerticalBox)
+									+ SVerticalBox::Slot()
+									.AutoHeight()
+									.HAlign(HAlign_Center)
+									.Padding(0.0f, 0.0f, 0.0f, 8.0f)
+									[
+										SNew(STextBlock)
+										.Text(LOCTEXT("GraphLockedNote", "The script's text has been edited.\nApply it to see it in the graph, or Revert it to go back."))
+										.Justification(ETextJustify::Center)
+										.Font(FAppStyle::GetFontStyle("BoldFont"))
+										.ColorAndOpacity(FStyleColors::AccentOrange)
+									]
+									+ SVerticalBox::Slot()
+									.AutoHeight()
+									.HAlign(HAlign_Center)
+									[
+										SNew(SHorizontalBox)
+										+ SHorizontalBox::Slot()
+										.AutoWidth()
+										.Padding(0.0f, 0.0f, 4.0f, 0.0f)
+										[
+											SNew(SButton)
+											.Text(LOCTEXT("GraphLockedApply", "Apply (Ctrl+Enter)"))
+											.OnClicked_Lambda([this]()
+											{
+												ApplyScriptText();
+												return FReply::Handled();
+											})
+										]
+										+ SHorizontalBox::Slot()
+										.AutoWidth()
+										[
+											SNew(SButton)
+											.Text(LOCTEXT("GraphLockedRevert", "Revert"))
+											.OnClicked_Lambda([this]()
+											{
+												RevertScriptText();
+												return FReply::Handled();
+											})
+										]
+									]
+								]
+							]
 						]
 					]
 
@@ -1637,8 +1699,8 @@ void SBangoScriptEditor::UpdateVariables(const FBangoGraphDocument& Document, co
 	{
 		for (const TSharedPtr<FDeclEntry>& Item : *List)
 		{
-			Shape += FString::Printf(TEXT("%d %d %d %s %s %d %s %s|"), Item->bGlobal ? 1 : 0, Item->Index, Item->bReadOnly ? 1 : 0, *Item->Decl.Type, *Item->Decl.Name,
-				Item->Decl.bHasValue ? 1 : 0, *Item->Decl.Value, *Item->Decl.Comment);
+			Shape += FString::Printf(TEXT("%d %d %d %s %s %d %s %s %d|"), Item->bGlobal ? 1 : 0, Item->Index, Item->bReadOnly ? 1 : 0, *Item->Decl.Type, *Item->Decl.Name,
+				Item->Decl.bHasValue ? 1 : 0, *Item->Decl.Value, *Item->Decl.Comment, Item->LoopNode);
 		}
 		Shape += TEXT("#");
 	}
@@ -3138,9 +3200,21 @@ bool SBangoScriptEditor::ApplyScriptText()
 	{
 		return false;
 	}
-	const FString Text = TextBox->GetText().ToString();
-	FBangoGraphDocument Document;
+	// Locals can be declared anywhere while typing: they're moved up to their graph's other locals first.
+	const FString Typed = TextBox->GetText().ToString();
+	FString Text;
 	FBangoCompileError Error;
+	if (!Bango::HoistLateLocals(Typed, Text, Error))
+	{
+		Error.FileName = OpenScript + TEXT(".bango");
+		TextError = Error.ToString();
+		if (Error.Line > 0)
+		{
+			TextBox->GoTo(FTextLocation(Error.Line - 1, FMath::Max(Error.Column - 1, 0)));
+		}
+		return false;
+	}
+	FBangoGraphDocument Document;
 	if (!Bango::BuildGraph(Text, OpenScript + TEXT(".bango"), Document, Error))
 	{
 		TextError = Error.ToString();

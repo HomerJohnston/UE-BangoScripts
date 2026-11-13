@@ -110,13 +110,13 @@ static const TCHAR* const GBangoGraphRoundTripSources[] =
 	TEXT("{\n")
 	TEXT("\tjohn Speak(\"Find a gun.\");     //@20(0, 0)\n")
 	TEXT("\tAwaitSpeak();                  //@21(0, 1)\n")
-	TEXT("};\n")
+	TEXT("}\n")
 	TEXT("\n")
 	TEXT("if (!IsNil(foundThings) && foundThings >= 10)   //@4(0, 3)\n")
 	TEXT("{\n")
 	TEXT("\tHint(\"You found at least 10 things!\");         //@5(1, 4)\n")
 	TEXT("\tquestLog Push(\"Found 10 things\");              //@6(1, 5)\n")
-	TEXT("};\n")
+	TEXT("}\n")
 	TEXT("label Check;                       //@10(0, 9)\n")
 	TEXT("if (IsNil(playerHasGun))      //@11(0, 10)\n")
 	TEXT("{\n")
@@ -128,21 +128,21 @@ static const TCHAR* const GBangoGraphRoundTripSources[] =
 	TEXT("\t{\n")
 	TEXT("\t\tNag();                     //@16(3, 12)\n")
 	TEXT("\t\tgoto Check;                //@18(3, 14)\n")
-	TEXT("\t};\n")
-	TEXT("};\n")
+	TEXT("\t}\n")
+	TEXT("}\n")
 	TEXT("forEach (_entry in questLog)       //@19(0, 15)\n")
 	TEXT("{\n")
 	TEXT("\tif (!IsNil(_entry))         //@22(1, 16)\n")
 	TEXT("\t{\n")
 	TEXT("\t\tHint(_entry);              //@23(2, 17)\n")
-	TEXT("\t};\n")
-	TEXT("};\n"),
+	TEXT("\t}\n")
+	TEXT("}\n"),
 
 	// Comments everywhere, no metadata at all, CRLF line endings.
-	TEXT("// File header\r\n// second line\r\nparams (string _name, int _n = 3);\r\n\r\n//   indented comment\r\nHint(\"{0}\", _name); // trailing\r\nif (_n > 2)\r\n{\r\n\t// inside\r\n\tHint(\"big\");\r\n\t// at the end of the block\r\n}; // after the block\r\n//no space\r\nfor (int _i = 0; _i < _n; _i++)\r\n{\r\n};\r\n// at the end of the file\r\n"),
+	TEXT("// File header\r\n// second line\r\nparams (string _name, int _n = 3);\r\n\r\n//   indented comment\r\nHint(\"{0}\", _name); // trailing\r\nif (_n > 2)\r\n{\r\n\t// inside\r\n\tHint(\"big\");\r\n\t// at the end of the block\r\n} // after the block\r\n//no space\r\nfor (int _i = 0; _i < _n; _i++)\r\n{\r\n};\r\n// at the end of the file\r\n"),
 
 	// Functions with comments, and code after a return/goto (only reachable through a label).
-	TEXT("// about F\nfunction int F(int _a, string[] _b) // on the function line\n{\n\t// first\n\treturn _a;\n\tlabel After;\n\tHint(\"x\");\n};\ngoto Skip;\nHint(\"never\");\nlabel Skip;\nHint(\"{0}\", F(1, []));\n"),
+	TEXT("// about F\nfunction int F(int _a, string[] _b) // on the function line\n{\n\t// first\n\treturn _a;\n\tlabel After;\n\tHint(\"x\");\n}\ngoto Skip;\nHint(\"never\");\nlabel Skip;\nHint(\"{0}\", F(1, []));\n"),
 
 	// Disconnected nodes in the main graph and in a function.
 	TEXT("Hint(\"a\");    //@1(0, 0)\n")
@@ -152,21 +152,21 @@ static const TCHAR* const GBangoGraphRoundTripSources[] =
 	TEXT("//~ if (true)    //@3(20, 20)\n")
 	TEXT("//~ {\n")
 	TEXT("//~ \tHint(\"c\");    //@4(40, 30)\n")
-	TEXT("//~ };\n")
+	TEXT("//~ }\n")
 	TEXT("\n")
 	TEXT("//~ while (false)\n")
 	TEXT("//~ {\n")
-	TEXT("//~ };\n")
+	TEXT("//~ }\n")
 	TEXT("function void G()\n")
 	TEXT("{\n")
 	TEXT("\tHint(\"g\");\n")
 	TEXT("\n")
 	TEXT("\t//~ Hint(\"loose\");    //@9(5, 5)\n")
-	TEXT("};\n"),
+	TEXT("}\n"),
 
 	// else-if chains, an else holding an if followed by more code, empty blocks, nested loops.
-	TEXT("if (true)\n{\n}\nelse if (false)\n{\n\tHint(\"1\");\n}\nelse\n{\n\tif (true)\n\t{\n\t};\n\tHint(\"2\");\n};\n")
-	TEXT("while (false)\n{\n\tfor (;;)\n\t{\n\t\tforEach (_x in [1, 2])\n\t\t{\n\t\t\tbreak;\n\t\t};\n\t\tcontinue;\n\t};\n};\n"),
+	TEXT("if (true)\n{\n}\nelse if (false)\n{\n\tHint(\"1\");\n}\nelse\n{\n\tif (true)\n\t{\n\t}\n\tHint(\"2\");\n}\n")
+	TEXT("while (false)\n{\n\tfor (;;)\n\t{\n\t\tforEach (_x in [1, 2])\n\t\t{\n\t\t\tbreak;\n\t\t}\n\t\tcontinue;\n\t}\n}\n"),
 
 	// A very long line doesn't push every //@ column out.
 	TEXT("Hint(\"short\");\nHint(\"this line is far longer than one hundred characters, so its metadata is written four spaces after it and the others stay put\");\nHint(\"short again\");\n"),
@@ -195,12 +195,12 @@ static const TCHAR* const GBangoGraphRoundTripSources[] =
 	TEXT("\t{\n")
 	TEXT("\t\tHint(\"neg\");     //@8(28, 8)\n")
 	TEXT("\t\t                //@9(32, 8)\n")
-	TEXT("\t};\n")
-	TEXT("};\n")
+	TEXT("\t}\n")
+	TEXT("}\n")
 	TEXT("while (_n > 0)      //@10(40, 0)\n")
 	TEXT("{\n")
 	TEXT("\t_n--;              //@11(44, 0)\n")
-	TEXT("};\n")
+	TEXT("}\n")
 	TEXT("                    //@12(48, 0)\n")
 	TEXT("//~ Hint(\"loose\");   //@13(0, 20)\n")
 	TEXT("//~\n")
@@ -211,34 +211,34 @@ static const TCHAR* const GBangoGraphRoundTripSources[] =
 	TEXT("{\n")
 	TEXT("\t                    //@16(4, 0)\n")
 	TEXT("\tHint(\"f\");          //@17(8, 0)\n")
-	TEXT("};\n"),
+	TEXT("}\n"),
 	// New nodes from the add-node menu, with their fields still empty: they don't compile, but must load and save.
 	TEXT("if ()                    //@1(0, 0)\n")
 	TEXT("{\n")
 	TEXT("\t= ;                    //@2(4, 0)\n")
 	TEXT("\n")
 	TEXT("\t++;                    //@3(8, 0)\n")
-	TEXT("};\n")
+	TEXT("}\n")
 	TEXT("\n")
 	TEXT("forEach (_item in)       //@4(12, 0)\n")
 	TEXT("{\n")
 	TEXT("\tlabel ;                //@5(16, 0)\n")
 	TEXT("\n")
 	TEXT("\tgoto ;                 //@6(20, 0)\n")
-	TEXT("};\n")
+	TEXT("}\n")
 	TEXT("\n")
 	TEXT("for (int _i = ; _i <= ; _i++) //@7(24, 0)\n")
 	TEXT("{\n")
-	TEXT("};\n")
+	TEXT("}\n")
 	TEXT("\n")
 	TEXT("//~ while ()              //@8(0, 10)\n")
 	TEXT("//~ {\n")
-	TEXT("//~ };\n")
+	TEXT("//~ }\n")
 	TEXT("\n")
 	TEXT("//~ = ;                   //@9(0, 14)\n"),
 
 	// Disabled nodes, among comments and reroutes, in a function and a disconnected chain.
-	TEXT("// first\n/* Hint(\"b\"); */ //@2(4, 0)\n/*\n// a loop\nwhile (true) //@3(1, 1)\n{\n\t/* break; */ //@4(2, 2)\n\t//@5(3, 3)\n};\n*/\nfunction void F()\n{\n\t/* return; */\n};\n//~ /*\n//~ if (a) //@6(9, 9)\n//~ {\n//~ \t/* /* b(); */ */\n//~ };\n//~ */\n"),
+	TEXT("// first\n/* Hint(\"b\"); */ //@2(4, 0)\n/*\n// a loop\nwhile (true) //@3(1, 1)\n{\n\t/* break; */ //@4(2, 2)\n\t//@5(3, 3)\n}\n*/\nfunction void F()\n{\n\t/* return; */\n}\n//~ /*\n//~ if (a) //@6(9, 9)\n//~ {\n//~ \t/* /* b(); */ */\n//~ }\n//~ */\n"),
 };
 
 static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
@@ -250,6 +250,63 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			OutFailures.Add(What);
 		}
 	};
+
+	// ---- The text pane's Apply: locals declared further down are moved up (Bango::HoistLateLocals) ----
+	{
+		const TCHAR* Source =
+			TEXT("int _a = 1;\n")
+			TEXT("// first\n")
+			TEXT("Hint(\"x\");    //@1(0, 0)\n")
+			TEXT("int _n = 3;\n")
+			TEXT("float _d = Distance(GetPos(@a), [0, 0, 0]);\n")
+			TEXT("if (_n > 1)    //@2(1, 0)\n")
+			TEXT("{\n")
+			TEXT("\tvector3 _p = GetPos(@b);\n")
+			TEXT("}\n")
+			TEXT("function void F()\n")
+			TEXT("{\n")
+			TEXT("\tHint(\"f\");    //@3(0, 0)\n")
+			TEXT("\tbool _b = Chance(0.5);\n")
+			TEXT("}\n");
+		const TCHAR* Expected =
+			TEXT("int _a = 1;\n")
+			TEXT("int _n = 3;\n")
+			TEXT("float _d;\n")
+			TEXT("vector3 _p;\n")
+			TEXT("// first\n")
+			TEXT("Hint(\"x\");    //@1(0, 0)\n")
+			TEXT("_d = Distance(GetPos(@a), [0, 0, 0]);\n")
+			TEXT("if (_n > 1)    //@2(1, 0)\n")
+			TEXT("{\n")
+			TEXT("\t_p = GetPos(@b);\n")
+			TEXT("}\n")
+			TEXT("function void F()\n")
+			TEXT("{\n")
+			TEXT("\tbool _b;\n")
+			TEXT("\tHint(\"f\");    //@3(0, 0)\n")
+			TEXT("\t_b = Chance(0.5);\n")
+			TEXT("}\n");
+		FString Hoisted;
+		FBangoCompileError Error;
+		Expect(Bango::HoistLateLocals(Source, Hoisted, Error) && Hoisted == FString(Expected), FString(TEXT("HoistLateLocals:\n")) + Hoisted);
+		FBangoGraphDocument Doc;
+		Expect(Bango::BuildGraph(Hoisted, TEXT("hoist.bango"), Doc, Error) && Doc.Main.Locals.Num() == 4, FString(TEXT("HoistLateLocals: the result reads: ")) + Error.ToString());
+
+		FString Same;
+		Expect(Bango::HoistLateLocals(Expected, Same, Error) && Same == FString(Expected), TEXT("HoistLateLocals: nothing to move"));
+		Expect(!Bango::HoistLateLocals(TEXT("int _x;\nHint(\"x\");\nint _x = 2;\n"), Same, Error) && Error.Line == 3 && Error.Message.Contains(TEXT("declared twice")),
+			TEXT("HoistLateLocals: a name declared twice"));
+		Expect(Bango::HoistLateLocals(TEXT("#define params (int _n = 3)\n\nfloat _a;\n\nHint(\"x\");\nint foo;\n"), Same, Error)
+			&& Same == FString(TEXT("#define params (int _n = 3)\n\nfloat _a;\nint foo;\n\nHint(\"x\");\n")),
+			FString(TEXT("HoistLateLocals: after the params line and the locals: ")) + Same);
+		Expect(Bango::HoistLateLocals(TEXT("#define params (int _n = 3)\n\nHint(\"x\");\nint foo;\n"), Same, Error)
+			&& Same == FString(TEXT("#define params (int _n = 3)\n\nint foo;\nHint(\"x\");\n")),
+			FString(TEXT("HoistLateLocals: after the params line, with no locals: ")) + Same);
+		Expect(Bango::HoistLateLocals(TEXT("// note\nHint(\"x\");\nint _x = 2;\n"), Same, Error) && Same == FString(TEXT("// note\nint _x = 2;\nHint(\"x\");\n")),
+			FString(TEXT("HoistLateLocals: before the first statement, under the description: ")) + Same);
+		Expect(Bango::HoistLateLocals(TEXT("Hint(\"x\");\n\n// note\nHint(\"y\");\nint _x = 2;\n"), Same, Error) && Same == FString(TEXT("int _x = 2;\nHint(\"x\");\n\n// note\nHint(\"y\");\n")),
+			FString(TEXT("HoistLateLocals: above the first statement's comment: ")) + Same);
+	}
 
 	// ---- Disabled nodes: inline for simple nodes, marker lines around block nodes, nested, in disconnected chains ----
 	{
@@ -265,7 +322,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			TEXT("}\n")
 			TEXT("else if (w)         //@6(8, 4)\n")
 			TEXT("{\n")
-			TEXT("};\n")
+			TEXT("}\n")
 			TEXT("*/\n")
 			TEXT("//~ /* q(); */      //@9(0, 20)\n");
 		const TCHAR* Expected =
@@ -284,7 +341,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			TEXT("}\n")
 			TEXT("else if (w)         //@6(8, 4)\n")
 			TEXT("{\n")
-			TEXT("};\n")
+			TEXT("}\n")
 			TEXT("*/\n")
 			TEXT("\n")
 			TEXT("//~ /* q(); */      //@9(0, 20)\n");
@@ -317,7 +374,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			}
 		}
 		const TCHAR* ExpectedElse = TEXT("}\nelse\n{\n\t/*\n\tif (w) ");
-		const TCHAR* ExpectedElseEnd = TEXT("\t{\n\t};\n\t*/\n};\n*/\n");
+		const TCHAR* ExpectedElseEnd = TEXT("\t{\n\t}\n\t*/\n}\n*/\n");
 		FString ElseText;
 		Expect(bBuilt && Bango::WriteGraphText(Doc, ElseText, WriteError) && ElseText.Contains(ExpectedElse) && ElseText.Contains(ExpectedElseEnd), FString(TEXT("Disabled nodes: a disabled else-if: ")) + WriteError + TEXT("\n") + ElseText);
 		FBangoGraphDocument ElseDoc;
@@ -333,7 +390,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			TEXT("#define LOCTEXT_NAMESPACE \"Bango.Intro\"\n")
 			TEXT("// About the hint\n")
 			TEXT("Say(NSNOTELOCTEXT(\"Other\", \"K\", \"Hello {0}\", \"Said slowly\"), 1); //@1(10, 0)\n")
-			TEXT("function void F()\n{\n\tSay(LOCTEXT(\"F\", \"In F\")); //@2(0, 0)\n};\n")
+			TEXT("function void F()\n{\n\tSay(LOCTEXT(\"F\", \"In F\")); //@2(0, 0)\n}\n")
 			TEXT("#undef LOCTEXT_NAMESPACE // the end\n");
 		const TCHAR* Expected =
 			TEXT("// ============ SCRIPT INPUT ====================\n")
@@ -353,7 +410,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			TEXT("function void F()\n")
 			TEXT("{\n")
 			TEXT("\tSay(LOCTEXT(\"F\", \"In F\"));                                      //@2(0, 0)\n")
-			TEXT("};\n")
+			TEXT("}\n")
 			TEXT("\n")
 			TEXT("#undef LOCTEXT_NAMESPACE\n");
 		FBangoGraphDocument Doc;
@@ -380,13 +437,13 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				TEXT("{\n")
 				TEXT("\t// ----------------------------------------------\n")
 				TEXT("\tHint(\"f\");    //@2(0, 0)\n")
-				TEXT("};\n")
+				TEXT("}\n")
 				TEXT("\n")
 				TEXT("// ----------------------------------------------\n")
 				TEXT("\n")
 				TEXT("function void G()\n")
 				TEXT("{\n")
-				TEXT("};\n");
+				TEXT("}\n");
 			FBangoGraphDocument SepDoc;
 			FString SepText;
 			const bool bSepBuilt = Bango::BuildGraph(Separated, TEXT("sep.bango"), SepDoc, Error);
@@ -454,7 +511,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			TEXT("if (true) //@3(20, 0)\n")
 			TEXT("{\n")
 			TEXT("//@4(30, 4)\n")
-			TEXT("};\n");
+			TEXT("}\n");
 		const TCHAR* Expected =
 			TEXT("// ============ SCRIPT BODY =====================\n")
 			TEXT("\n")
@@ -464,7 +521,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			TEXT("if (true)     //@3(20, 0)\n")
 			TEXT("{\n")
 			TEXT("\t          //@4(30, 4)\n")
-			TEXT("};\n");
+			TEXT("}\n");
 		FBangoGraphDocument Doc;
 		FBangoCompileError Error;
 		FString Text;
@@ -490,7 +547,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		{
 			const TCHAR* GroupSource =
 				TEXT("global int b;\nint _a = 1;\n_a = 2; //@3(0,2)\n_a++; //@4(0,3)\nHint(\"x\"); //@5(0,4)\nLog(\"y\"); //@6(0,5)\n")
-				TEXT("// about z\nLog(\"z\"); //@7(0,6)\nif (true) //@8(0,7)\n{\nLog(\"in\"); //@9(1,8)\nbreak; //@10(1,9)\n};\nreturn; //@11(0,10)\n");
+				TEXT("// about z\nLog(\"z\"); //@7(0,6)\nif (true) //@8(0,7)\n{\nLog(\"in\"); //@9(1,8)\nbreak; //@10(1,9)\n}\nreturn; //@11(0,10)\n");
 			const TCHAR* GroupExpected =
 				TEXT("// ============ GLOBAL VARS =====================\n")
 				TEXT("\n")
@@ -516,7 +573,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				TEXT("\tLog(\"in\");    //@9(1, 8)\n")
 				TEXT("\n")
 				TEXT("\tbreak;        //@10(1, 9)\n")
-				TEXT("};\n")
+				TEXT("}\n")
 				TEXT("\n")
 				TEXT("return;           //@11(0, 10)\n");
 			FBangoGraphDocument GroupDoc;
@@ -558,14 +615,14 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				TEXT("\tbool _done = true;\n")
 				TEXT("\n")
 				TEXT("\tHint(\"y\");    //@2(0, 0)\n")
-				TEXT("};\n")
+				TEXT("}\n")
 				TEXT("\n")
 				TEXT("// ----------------------------------------------\n")
 				TEXT("\n")
 				TEXT("function void G()\n")
 				TEXT("{\n")
 				TEXT("\tint _unused;\n")
-				TEXT("};\n")
+				TEXT("}\n")
 				TEXT("\n")
 				TEXT("#undef LOCTEXT_NAMESPACE\n");
 			FBangoGraphDocument DeclDoc;
@@ -589,10 +646,10 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			const TCHAR* const Refused[] =
 			{
 				TEXT("Hint(\"x\");\nint _late;\n"),
-				TEXT("if (true)\n{\n\tint _inner;\n};\n"),
+				TEXT("if (true)\n{\n\tint _inner;\n}\n"),
 				TEXT("global int gold = 1;\n"),
 				TEXT("int _x;\nglobal int gold;\n"),
-				TEXT("function void F()\n{\n\tglobal int g;\n};\n"),
+				TEXT("function void F()\n{\n\tglobal int g;\n}\n"),
 				TEXT("Hint(\"a\");\n//~ int _gone;\n"),
 			};
 			for (const TCHAR* Bad : Refused)
@@ -622,7 +679,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		Expect(bRunBuilt && Bango::WriteGraphText(RunDoc, Text, WriteError) && Text == FString(RunExpected), FString(TEXT("reroute runs: saved on shared lines:\n")) + Text);
 
 		FBangoScript Script;
-		Expect(!Bango::ParseScript(TEXT("if (true)\n//@1(0, 0)\n{\n};\n"), TEXT("bad.bango"), Script, Error)
+		Expect(!Bango::ParseScript(TEXT("if (true)\n//@1(0, 0)\n{\n}\n"), TEXT("bad.bango"), Script, Error)
 			&& Error.Line == 2 && Error.Message.Contains(TEXT("reroute")), FString(TEXT("reroute: not allowed between 'if (...)' and '{': ")) + Error.ToString());
 		Expect(!Bango::ParseScript(TEXT("//@1(0, 0)\n#define params (int _a)\n"), TEXT("bad.bango"), Script, Error)
 			&& Error.Message.Contains(TEXT("first line")), FString(TEXT("reroute: not before #define params: ")) + Error.ToString());
@@ -646,7 +703,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			TEXT("else\n")
 			TEXT("{\n")
 			TEXT("\tHint(\"none\");            //@9(40, 20)\n")
-			TEXT("};\n")
+			TEXT("}\n")
 			TEXT("_who Speak(\"hi\"); // trailing\n");
 
 		FBangoGraphDocument Doc;
@@ -707,7 +764,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				TEXT("else\n")
 				TEXT("{\n")
 				TEXT("\tHint(\"none\");    //@9(40, 20)\n")
-				TEXT("};\n")
+				TEXT("}\n")
 				TEXT("\n")
 				TEXT("// trailing\n")
 				TEXT("_who Speak(\"hi\");    //@11(40, 0)\n");
@@ -723,7 +780,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			TEXT("//~ if (true)    //@3(20, 20)\n")
 			TEXT("//~ {\n")
 			TEXT("//~ \tHint(\"c\");    //@4(40, 30)\n")
-			TEXT("//~ };\n");
+			TEXT("//~ }\n");
 		FBangoGraphDocument Doc;
 		FBangoCompileError Error;
 		Expect(Bango::BuildGraph(Source, TEXT("test.bango"), Doc, Error), FString(TEXT("detached: ")) + Error.ToString());
@@ -758,7 +815,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			TEXT("function int Twice(int _n, string[][] _s)\n")
 			TEXT("{\n")
 			TEXT("\treturn _n * 2;\n")
-			TEXT("};\n");
+			TEXT("}\n");
 		FBangoGraphDocument Doc;
 		FBangoCompileError Error;
 		Expect(Bango::BuildGraph(Source, TEXT("test.bango"), Doc, Error), FString(TEXT("function: ")) + Error.ToString());
@@ -780,12 +837,12 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			TEXT("Hint(\"A()\");\n")              // in a string: not a call
 			TEXT("A();\n")
 			TEXT("//~ D();\n")                    // disconnected nodes count too, after the connected ones
-			TEXT("function void A()\n{\n\tif (C())\n\t{\n\t};\n};\n")
-			TEXT("function void B()\n{\n\tA();\n\tB();\n};\n")   // B calls A (placed right after B), and itself
-			TEXT("function bool C()\n{\n\treturn true;\n};\n")
-			TEXT("function void E()\n{\n\tF();\n};\n")            // nothing calls E: it goes after the used ones, with F after it
-			TEXT("function void D()\n{\n\tD();\n};\n")
-			TEXT("function void F()\n{\n\tE();\n};\n");         // E and F call each other
+			TEXT("function void A()\n{\n\tif (C())\n\t{\n\t}\n}\n")
+			TEXT("function void B()\n{\n\tA();\n\tB();\n}\n")   // B calls A (placed right after B), and itself
+			TEXT("function bool C()\n{\n\treturn true;\n}\n")
+			TEXT("function void E()\n{\n\tF();\n}\n")            // nothing calls E: it goes after the used ones, with F after it
+			TEXT("function void D()\n{\n\tD();\n}\n")
+			TEXT("function void F()\n{\n\tE();\n}\n");         // E and F call each other
 		FBangoGraphDocument Doc;
 		FBangoCompileError Error;
 		Expect(Bango::BuildGraph(Source, TEXT("test.bango"), Doc, Error), FString(TEXT("order: ")) + Error.ToString());
@@ -850,7 +907,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			TEXT("while (true)        //@2(2, 0)\n")
 			TEXT("{\n")
 			TEXT("\tbreak;          //@3(3, 0)\n")
-			TEXT("};\n")
+			TEXT("}\n")
 			TEXT("\n")
 			TEXT("return;             //@4(4, 0)\n")
 			TEXT("\n")
