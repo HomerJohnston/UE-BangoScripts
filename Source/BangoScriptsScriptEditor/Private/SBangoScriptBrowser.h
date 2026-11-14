@@ -8,6 +8,7 @@
 #include "Widgets/Views/STreeView.h"
 
 class FTabManager;
+struct FAssetData;
 class ITableRow;
 class SBangoScriptEditor;
 class SDockTab;
@@ -15,7 +16,8 @@ class STableViewBase;
 class SWindow;
 
 /**
- * The content of the "Bango Scripts" tab: every script in the script folder on the left, and the open scripts on
+ * The content of the "Bango Scripts" tab: every Bango Script asset on the left (by asset path, from the Asset
+ * Registry, followed as they're added, renamed and deleted), and the open scripts on
  * the right, one tab each. Each tab is a script editor of its own (SBangoScriptEditor), kept while the tab is open,
  * so switching tabs keeps each script's view, selection and unsaved changes. The list only picks which script to
  * show; everything about an open script is its editor's.
@@ -34,6 +36,7 @@ public:
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
+	virtual ~SBangoScriptBrowser() override;
 
 private:
 	/** An open script and its editor. */
@@ -53,16 +56,16 @@ private:
 	{
 		/** Shown: the folder's or the script's name. */
 		FString Name;
-		/** A script's name as the list shows it (its path under the script folder, without .bango), or a folder's path under it ("" for the script folder itself). */
+		/** A script's asset path ("/Game/Quests/Intro"), or a folder's ("/Game/Quests"; a content root's is "/Game"). */
 		FString Path;
 		bool bFolder = false;
 		TArray<TSharedPtr<FScriptTreeItem>> Children;
 	};
 
-	/** The folder tree's one root: the script folder (Content/Bango). */
+	/** The folder tree's roots: a content root each (Content first, then plugins'). */
 	TArray<TSharedPtr<FScriptTreeItem>> TreeRoots;
 	TSharedPtr<STreeView<TSharedPtr<FScriptTreeItem>>> ScriptTree;
-	/** The folders open in the tree (by Path), kept when the tree is made again. The script folder starts open. */
+	/** The folders open in the tree (by Path), kept when the tree is made again. Content starts open. */
 	TSet<FString> ExpandedFolders;
 	/** Showing the folder tree instead of the list. Remembered between sessions. */
 	bool bTreeView = false;
@@ -79,12 +82,19 @@ private:
 	/** Owned by the Bango Scripts tab; the script tabs are document tabs in its one tab stack. */
 	TSharedPtr<FTabManager> TabManager;
 
-	/** Finds every .bango file in the script folder again, keeping the shown script selected. */
+	/** Lists every Bango Script asset again, keeping the shown script selected. */
 	void RefreshScriptList();
+	/** RefreshScriptList on the next frame (once, however many assets changed). */
+	void QueueRefresh();
+	bool bRefreshQueued = false;
+	void OnAssetChanged(const FAssetData& AssetData);
+	void OnAssetRenamed(const FAssetData& AssetData, const FString& OldObjectPath);
+	/** How the list shows a script: "/Game/Quests/Intro" as "Quests/Intro". */
+	static FString GetDisplayName(const FString& Script);
 	FReply OnRefreshClicked();
 
-	/** Makes the folder tree again from the script folder's folders and Files (paths under it, without .bango). */
-	void RebuildScriptTree(const TArray<FString>& Scripts, const TArray<FString>& Folders);
+	/** Makes the folder tree again from the scripts' asset paths (folders are shown if they hold a script). */
+	void RebuildScriptTree(const TArray<FString>& Scripts);
 	TSharedRef<ITableRow> OnGenerateTreeRow(TSharedPtr<FScriptTreeItem> Item, const TSharedRef<STableViewBase>& Owner);
 	void OnGetTreeChildren(TSharedPtr<FScriptTreeItem> Item, TArray<TSharedPtr<FScriptTreeItem>>& OutChildren);
 	void OnTreeSelectionChanged(TSharedPtr<FScriptTreeItem> Item, ESelectInfo::Type SelectInfo);

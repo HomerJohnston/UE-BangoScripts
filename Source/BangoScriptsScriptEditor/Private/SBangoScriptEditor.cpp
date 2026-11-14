@@ -1,5 +1,8 @@
 #include "SBangoScriptEditor.h"
 
+#include "BangoScriptAsset.h"
+#include "BangoScriptSync.h"
+
 #include "Bango.h"
 #include "BangoCompiler.h"
 #include "BangoEdGraphBuilder.h"
@@ -2364,6 +2367,19 @@ void SBangoScriptEditor::CloseScript()
 	UpdateDescriptionBox(); // empty, with no graphs
 }
 
+void SBangoScriptEditor::OpenScriptAsset(UBangoScriptAsset* Asset)
+{
+	OpenAsset = Asset;
+	if (Asset)
+	{
+		LoadScript(Asset->GetScriptName());
+	}
+	else
+	{
+		CloseScript();
+	}
+}
+
 void SBangoScriptEditor::ReloadScript()
 {
 	if (!OpenScript.IsEmpty())
@@ -2376,15 +2392,34 @@ void SBangoScriptEditor::LoadScript(const FString& Script)
 {
 	CloseScript();
 	OpenScript = Script;
-	OpenPath = FPaths::Combine(GetScriptFolder(), Script + TEXT(".bango"));
 
+	// A script asset: a linked one's text is its .bango file (the file wins), an embedded one's is in the asset.
+	// Otherwise, a file in the script folder.
 	FString Source;
-	if (!FFileHelper::LoadFileToString(Source, *OpenPath))
+	UBangoScriptAsset* Asset = OpenAsset.Get();
+	if (Asset && Asset->GetScriptName() == Script)
 	{
-		ShowMessage(FText::Format(LOCTEXT("CantRead", "Couldn't read {0}."), FText::FromString(OpenPath)));
-		return;
+		OpenPath = Asset->bLinked ? FBangoScriptSync::GetLinkedFilePath(Script) : FString();
+		if (OpenPath.IsEmpty() || !FFileHelper::LoadFileToString(Source, *OpenPath))
+		{
+			if (!OpenPath.IsEmpty())
+			{
+				UE_LOG(LogBangoScriptEditor, Warning, TEXT("Couldn't read %s, so %s's own copy of its text is shown."), *OpenPath, *Script);
+			}
+			Source = Asset->Source;
+		}
 	}
-	OpenFileTime = IFileManager::Get().GetTimeStamp(*OpenPath);
+	else
+	{
+		OpenAsset.Reset();
+		OpenPath = FPaths::Combine(GetScriptFolder(), Script + TEXT(".bango"));
+		if (!FFileHelper::LoadFileToString(Source, *OpenPath))
+		{
+			ShowMessage(FText::Format(LOCTEXT("CantRead", "Couldn't read {0}."), FText::FromString(OpenPath)));
+			return;
+		}
+	}
+	OpenFileTime = OpenPath.IsEmpty() ? FDateTime::MinValue() : IFileManager::Get().GetTimeStamp(*OpenPath);
 
 	FBangoGraphDocument Document;
 	FBangoCompileError Error;
@@ -3696,7 +3731,7 @@ bool SBangoScriptEditor::BuildCurrentDocument(FBangoGraphDocument& OutDocument, 
 
 void SBangoScriptEditor::CheckFileOnDisk()
 {
-	if (OpenScript.IsEmpty() || bChangedOnDisk)
+	if (OpenScript.IsEmpty() || OpenPath.IsEmpty() || bChangedOnDisk)
 	{
 		return;
 	}
@@ -3765,7 +3800,15 @@ void SBangoScriptEditor::GatherDebugEntries(TArray<FDebugEntry>& OutEntries) con
 {
 	FString Wanted;
 	FString PathError;
-	if (!GEngine || OpenScript.IsEmpty() || !Bango::NormalizeScriptPath(OpenScript, Wanted, PathError))
+	if (!GEngine || OpenScript.IsEmpty())
+	{
+		return;
+	}
+	if (OpenAsset.IsValid())
+	{
+		Wanted = OpenScript + TEXT(".bango"); // the runtime's name for it ("/Game/Quests/Intro.bango")
+	}
+	else if (!Bango::NormalizeScriptPath(OpenScript, Wanted, PathError))
 	{
 		return;
 	}
@@ -4662,7 +4705,7 @@ bool SBangoScriptEditor::Save()
 	}
 
 	// Don't silently overwrite changes made to the file outside the editor.
-	const FDateTime FileTime = IFileManager::Get().GetTimeStamp(*OpenPath);
+	const FDateTime FileTime = OpenPath.IsEmpty() ? FDateTime::MinValue() : IFileManager::Get().GetTimeStamp(*OpenPath);
 	// (Not when the user already chose Keep Mine for this change.)
 	if (FileTime != FDateTime::MinValue() && FileTime != OpenFileTime && FileTime != KeptFileTime)
 	{
@@ -4675,13 +4718,35 @@ bool SBangoScriptEditor::Save()
 		}
 	}
 
-	if (!FFileHelper::SaveStringToFile(Text, *OpenPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+	if (UBangoScriptAsset* Asset = OpenAsset.Get())
+	{
+		// A linked script: its file first (checked out with source control), then the asset's copy of it. An embedded
+		// one: just the asset. Either way the asset is saved, and running copies of the script pick up the new text.
+		if (!OpenPath.IsEmpty())
+		{
+			FString WriteError;
+			if (!FBangoScriptSync::WriteScriptFile(OpenPath, Text, WriteError))
+			{
+				Notify(FText::FromString(WriteError), false);
+				return false;
+			}
+		}
+		Asset->Modify();
+		Asset->Source = Text;
+		if (!OpenPath.IsEmpty())
+		{
+			Asset->SourceFileHash = FBangoScriptSync::HashFile(OpenPath);
+		}
+		Asset->MarkPackageDirty();
+		FBangoScriptSync::SaveAssets({ Asset });
+	}
+	else if (!FFileHelper::SaveStringToFile(Text, *OpenPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 	{
 		Notify(FText::Format(LOCTEXT("WriteFailed", "Couldn't write {0}. Is it read-only?"), FText::FromString(OpenPath)), false);
 		return false;
 	}
 
-	OpenFileTime = IFileManager::Get().GetTimeStamp(*OpenPath);
+	OpenFileTime = OpenPath.IsEmpty() ? FDateTime::MinValue() : IFileManager::Get().GetTimeStamp(*OpenPath);
 	SavedDocument = Document;
 	bDirty = false;
 	bChangedOnDisk = false;
@@ -4730,7 +4795,9 @@ void SBangoScriptEditor::WriteRecoveryCopy() const
 	{
 		return;
 	}
-	const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Bango"), TEXT("Unsaved"), OpenScript + TEXT(".bango"));
+	FString Relative = OpenScript;
+	Relative.RemoveFromStart(TEXT("/")); // an asset's path ("/Game/Quests/Intro")
+	const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Bango"), TEXT("Unsaved"), Relative + TEXT(".bango"));
 	if (FFileHelper::SaveStringToFile(Text, *Path, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 	{
 		UE_LOG(LogBangoScriptEditor, Warning, TEXT("The Bango graph editor closed with unsaved changes to %s. They were saved to %s."), *OpenScript, *FPaths::ConvertRelativePathToFull(Path));

@@ -1,6 +1,7 @@
 #include "BangoScriptFactories.h"
 
 #include "BangoScriptAsset.h"
+#include "BangoScriptAssetEditor.h"
 #include "BangoScriptSync.h"
 #include "Misc/FeedbackContext.h"
 #include "Misc/FileHelper.h"
@@ -87,6 +88,16 @@ TConstArrayView<FAssetCategoryPath> UAssetDefinition_BangoScript::GetAssetCatego
 {
 	static const FAssetCategoryPath Categories[] = { EAssetCategoryPaths::Misc };
 	return Categories;
+}
+
+EAssetCommandResult UAssetDefinition_BangoScript::OpenAssets(const FAssetOpenArgs& OpenArgs) const
+{
+	for (UBangoScriptAsset* Asset : OpenArgs.LoadObjects<UBangoScriptAsset>())
+	{
+		const TSharedRef<FBangoScriptAssetEditor> Editor = MakeShared<FBangoScriptAssetEditor>();
+		Editor->Init(OpenArgs.GetToolkitMode(), OpenArgs.ToolkitHost, Asset);
+	}
+	return EAssetCommandResult::Handled;
 }
 
 #undef LOCTEXT_NAMESPACE

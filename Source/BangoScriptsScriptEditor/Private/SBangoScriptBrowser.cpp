@@ -1,6 +1,10 @@
 #include "SBangoScriptBrowser.h"
 
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "BangoEditorStyle.h"
+#include "BangoScriptAsset.h"
+#include "Misc/PackageName.h"
+#include "UObject/SoftObjectPath.h"
 #include "Framework/Docking/TabManager.h"
 #include "HAL/FileManager.h"
 #include "Misc/ConfigCacheIni.h"
@@ -55,7 +59,7 @@ void SBangoScriptBrowser::Construct(const FArguments& InArgs)
 	GConfig->GetBool(BangoScriptBrowserPrivate::ConfigSection, TEXT("bTreeView"), bTreeView, GEditorPerProjectIni);
 	GConfig->GetFloat(BangoScriptBrowserPrivate::ConfigSection, TEXT("ListWidth"), ListWidth, GEditorPerProjectIni);
 	ListWidth = FMath::Max(ListWidth, 120.0f);
-	ExpandedFolders.Add(FString()); // the script folder starts open
+	ExpandedFolders.Add(TEXT("/Game")); // Content starts open
 
 	ChildSlot
 	[
@@ -98,7 +102,7 @@ void SBangoScriptBrowser::Construct(const FArguments& InArgs)
 					[
 						SNew(SCheckBox)
 						.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
-						.ToolTipText(LOCTEXT("TreeViewTooltip", "Show the scripts in their folders, with the Bango script folder (Content/Bango) at the top, instead of as one list."))
+						.ToolTipText(LOCTEXT("TreeViewTooltip", "Show the scripts in their folders, like the Content Browser, instead of as one list."))
 						.IsChecked_Lambda([this]() { return bTreeView ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
 						.OnCheckStateChanged_Lambda([this](ECheckBoxState NewState) { SetTreeView(NewState == ECheckBoxState::Checked); })
 						.Padding(FMargin(6.0f, 2.0f))
@@ -126,7 +130,7 @@ void SBangoScriptBrowser::Construct(const FArguments& InArgs)
 					[
 						SNew(SButton)
 						.Text(LOCTEXT("Refresh", "Refresh"))
-						.ToolTipText(LOCTEXT("RefreshTooltip", "Look for .bango files again. (To read an open script again from its file, use its Reload button.)"))
+						.ToolTipText(LOCTEXT("RefreshTooltip", "List the Bango Script assets again (the list also follows them as they're added, renamed and deleted). To read an open script again from its file, use its Reload button."))
 						.OnClicked(this, &SBangoScriptBrowser::OnRefreshClicked)
 					]
 				]
@@ -181,56 +185,95 @@ void SBangoScriptBrowser::Construct(const FArguments& InArgs)
 			[
 				SNew(STextBlock)
 				.Visibility_Lambda([this]() { return Tabs.Num() == 0 ? EVisibility::HitTestInvisible : EVisibility::Collapsed; })
-				.Text(LOCTEXT("PickScript", "Pick a script on the left to open it. Each open script gets a tab here."))
+				.Text(LOCTEXT("PickScript", "Pick a script on the left to open it. Each open script gets a tab here. (Bango Script assets can also be opened from the Content Browser.)"))
 				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 				.AutoWrapText(true)
 			]
 		]
 	];
 
+	// The list follows script assets as they're added, renamed and deleted.
+	IAssetRegistry& Registry = IAssetRegistry::GetChecked();
+	Registry.OnAssetAdded().AddSP(this, &SBangoScriptBrowser::OnAssetChanged);
+	Registry.OnAssetRemoved().AddSP(this, &SBangoScriptBrowser::OnAssetChanged);
+	Registry.OnAssetRenamed().AddSP(this, &SBangoScriptBrowser::OnAssetRenamed);
+
 	RefreshScriptList();
+}
+
+SBangoScriptBrowser::~SBangoScriptBrowser()
+{
+	if (IAssetRegistry* Registry = IAssetRegistry::Get())
+	{
+		Registry->OnAssetAdded().RemoveAll(this);
+		Registry->OnAssetRemoved().RemoveAll(this);
+		Registry->OnAssetRenamed().RemoveAll(this);
+	}
+}
+
+void SBangoScriptBrowser::OnAssetRenamed(const FAssetData& AssetData, const FString& OldObjectPath)
+{
+	OnAssetChanged(AssetData);
 }
 
 // ---- Script list ----
 
 void SBangoScriptBrowser::RefreshScriptList()
 {
-	FString Folder = SBangoScriptEditor::GetScriptFolder();
-	FPaths::NormalizeDirectoryName(Folder);
+	bRefreshQueued = false;
 
-	TArray<FString> Files;
-	IFileManager::Get().FindFilesRecursive(Files, *Folder, TEXT("*.bango"), /*Files*/ true, /*Directories*/ false);
-	Files.Sort();
-
-	// Paths under the script folder, with '/'.
-	const FString Prefix = FPaths::ConvertRelativePathToFull(Folder) + TEXT("/");
-	auto UnderFolder = [&Prefix](FString Path)
+	// Every Bango Script asset, by its asset path ("/Game/Quests/Intro").
+	TArray<FAssetData> Assets;
+	IAssetRegistry::GetChecked().GetAssetsByClass(UBangoScriptAsset::StaticClass()->GetClassPathName(), Assets);
+	TArray<FString> Scripts;
+	for (const FAssetData& Asset : Assets)
 	{
-		Path = FPaths::ConvertRelativePathToFull(Path);
-		FPaths::NormalizeFilename(Path);
-		return Path.StartsWith(Prefix) ? Path.RightChop(Prefix.Len()) : Path;
-	};
+		Scripts.Add(Asset.PackageName.ToString());
+	}
+	Scripts.Sort([](const FString& A, const FString& B) { return A.Compare(B, ESearchCase::IgnoreCase) < 0; });
 
 	ScriptItems.Reset();
-	TArray<FString> Scripts;
-	for (const FString& File : Files)
+	for (const FString& Script : Scripts)
 	{
-		Scripts.Add(FPaths::GetBaseFilename(UnderFolder(File), /*bRemovePath*/ false));
-		ScriptItems.Add(MakeShared<FString>(Scripts.Last()));
+		ScriptItems.Add(MakeShared<FString>(Script));
 	}
 	ScriptList->RequestListRefresh();
-
-	// The tree shows empty folders too, as the Content Browser does.
-	TArray<FString> Directories;
-	IFileManager::Get().FindFilesRecursive(Directories, *Folder, TEXT("*"), /*Files*/ false, /*Directories*/ true);
-	TArray<FString> Folders;
-	for (const FString& Directory : Directories)
-	{
-		Folders.Add(UnderFolder(Directory));
-	}
-	RebuildScriptTree(Scripts, Folders);
-
+	RebuildScriptTree(Scripts);
 	SelectShownScript();
+}
+
+void SBangoScriptBrowser::QueueRefresh()
+{
+	// Once, on the next frame, however many assets changed (the registry reports them one at a time).
+	if (bRefreshQueued)
+	{
+		return;
+	}
+	bRefreshQueued = true;
+	RegisterActiveTimer(0.0f, FWidgetActiveTimerDelegate::CreateLambda([this](double, float)
+	{
+		RefreshScriptList();
+		return EActiveTimerReturnType::Stop;
+	}));
+}
+
+void SBangoScriptBrowser::OnAssetChanged(const FAssetData& AssetData)
+{
+	if (AssetData.IsInstanceOf(UBangoScriptAsset::StaticClass()))
+	{
+		QueueRefresh();
+	}
+}
+
+FString SBangoScriptBrowser::GetDisplayName(const FString& Script)
+{
+	// "/Game/Quests/Intro" is shown as "Quests/Intro"; a plugin's ("/MyPlugin/Intro") keeps its root.
+	FString Name = Script;
+	if (!Name.RemoveFromStart(TEXT("/Game/")))
+	{
+		Name.RemoveFromStart(TEXT("/"));
+	}
+	return Name;
 }
 
 FReply SBangoScriptBrowser::OnRefreshClicked()
@@ -245,9 +288,10 @@ TSharedRef<ITableRow> SBangoScriptBrowser::OnGenerateScriptRow(TSharedPtr<FStrin
 	const FString Script = Item.IsValid() ? *Item : FString();
 	return SNew(STableRow<TSharedPtr<FString>>, Owner)
 		.Padding(FMargin(6.0f, 2.0f))
+		.ToolTipText(FText::FromString(Script))
 		[
 			SNew(STextBlock)
-			.Text(FText::FromString(Script))
+			.Text(FText::FromString(GetDisplayName(Script)))
 			// Open scripts are bold.
 			.Font_Lambda([this, Script]() { return FindTab(Script) != INDEX_NONE ? FAppStyle::GetFontStyle("BoldFont") : FAppStyle::GetFontStyle("NormalFont"); })
 		];
@@ -299,19 +343,13 @@ void SBangoScriptBrowser::SelectShownScript()
 
 // ---- Folder tree ----
 
-void SBangoScriptBrowser::RebuildScriptTree(const TArray<FString>& Scripts, const TArray<FString>& Folders)
+void SBangoScriptBrowser::RebuildScriptTree(const TArray<FString>& Scripts)
 {
-	FString Folder = SBangoScriptEditor::GetScriptFolder();
-	FPaths::NormalizeDirectoryName(Folder);
-
-	TSharedPtr<FScriptTreeItem> Root = MakeShared<FScriptTreeItem>();
-	Root->Name = FPaths::GetCleanFilename(Folder); // "Bango"
-	Root->bFolder = true;
-
-	// The folder for a path ("" is the root), made along with its parents if they aren't there yet.
+	// A root per content root ("/Game" shown as Content, a plugin's by its name), then its folders, made along with
+	// their parents as they're needed.
+	TArray<TSharedPtr<FScriptTreeItem>> Roots;
 	TMap<FString, TSharedPtr<FScriptTreeItem>> FolderItems;
-	FolderItems.Add(FString(), Root);
-	TFunction<TSharedPtr<FScriptTreeItem>(const FString&)> GetFolder = [&FolderItems, &GetFolder](const FString& Path) -> TSharedPtr<FScriptTreeItem>
+	TFunction<TSharedPtr<FScriptTreeItem>(const FString&)> GetFolder = [&FolderItems, &Roots, &GetFolder](const FString& Path) -> TSharedPtr<FScriptTreeItem>
 	{
 		if (const TSharedPtr<FScriptTreeItem>* Found = FolderItems.Find(Path))
 		{
@@ -320,20 +358,23 @@ void SBangoScriptBrowser::RebuildScriptTree(const TArray<FString>& Scripts, cons
 		FString ParentPath;
 		FString Name = Path;
 		Path.Split(TEXT("/"), &ParentPath, &Name, ESearchCase::CaseSensitive, ESearchDir::FromEnd);
-		const TSharedPtr<FScriptTreeItem> Parent = GetFolder(ParentPath);
 		TSharedPtr<FScriptTreeItem> Item = MakeShared<FScriptTreeItem>();
-		Item->Name = Name;
 		Item->Path = Path;
 		Item->bFolder = true;
-		Parent->Children.Add(Item);
+		if (ParentPath.IsEmpty())
+		{
+			Item->Name = Name == TEXT("Game") ? FString(TEXT("Content")) : Name; // a content root
+			Roots.Add(Item);
+		}
+		else
+		{
+			Item->Name = Name;
+			GetFolder(ParentPath)->Children.Add(Item);
+		}
 		FolderItems.Add(Path, Item);
 		return Item;
 	};
 
-	for (const FString& Path : Folders)
-	{
-		GetFolder(Path);
-	}
 	for (const FString& Script : Scripts)
 	{
 		FString FolderPath;
@@ -358,8 +399,17 @@ void SBangoScriptBrowser::RebuildScriptTree(const TArray<FString>& Scripts, cons
 		});
 	}
 
-	TreeRoots.Reset();
-	TreeRoots.Add(Root);
+	Roots.Sort([](const TSharedPtr<FScriptTreeItem>& A, const TSharedPtr<FScriptTreeItem>& B)
+	{
+		const bool bAContent = A->Path == TEXT("/Game");
+		const bool bBContent = B->Path == TEXT("/Game");
+		if (bAContent != bBContent)
+		{
+			return bAContent; // Content first
+		}
+		return A->Name.Compare(B->Name, ESearchCase::IgnoreCase) < 0;
+	});
+	TreeRoots = Roots;
 	ScriptTree->RequestTreeRefresh();
 
 	// The same folders open as before.
@@ -378,7 +428,7 @@ TSharedRef<ITableRow> SBangoScriptBrowser::OnGenerateTreeRow(TSharedPtr<FScriptT
 	const bool bFolder = Item.IsValid() && Item->bFolder;
 	return SNew(STableRow<TSharedPtr<FScriptTreeItem>>, Owner)
 		.Padding(FMargin(2.0f, 2.0f))
-		.ToolTipText(FText::FromString(bFolder ? FString::Printf(TEXT("Content/Bango/%s"), *Path) : Path + TEXT(".bango")))
+		.ToolTipText(FText::FromString(Path))
 		[
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot()
@@ -499,9 +549,18 @@ void SBangoScriptBrowser::OpenScriptTab(const FString& Script)
 	int32 Index = FindTab(Script);
 	if (Index == INDEX_NONE)
 	{
+		const FSoftObjectPath ObjectPath(Script + TEXT(".") + FPackageName::GetLongPackageAssetName(Script));
+		UBangoScriptAsset* Asset = Cast<UBangoScriptAsset>(ObjectPath.TryLoad());
+		if (!Asset)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Bango: couldn't open %s: there's no Bango Script asset there any more."), *Script);
+			QueueRefresh();
+			return;
+		}
 		FScriptTab& Tab = Tabs.AddDefaulted_GetRef();
 		Tab.Script = Script;
-		SAssignNew(Tab.Editor, SBangoScriptEditor).Script(Script);
+		SAssignNew(Tab.Editor, SBangoScriptEditor);
+		Tab.Editor->OpenScriptAsset(Asset);
 		const TSharedRef<SDockTab> DockTab = MakeScriptDockTab(Script, Tab.Editor.ToSharedRef());
 		Tab.DockTab = DockTab;
 		Index = Tabs.Num() - 1;
@@ -534,9 +593,10 @@ TSharedRef<SDockTab> SBangoScriptBrowser::MakeScriptDockTab(const FString& Scrip
 		.Label_Lambda([Script, WeakEditor]()
 		{
 			const TSharedPtr<SBangoScriptEditor> Pinned = WeakEditor.Pin();
-			return FText::FromString(Pinned.IsValid() && Pinned->HasUnsavedChanges() ? Script + TEXT("*") : Script);
+			const FString Name = FPackageName::GetLongPackageAssetName(Script);
+			return FText::FromString(Pinned.IsValid() && Pinned->HasUnsavedChanges() ? Name + TEXT("*") : Name);
 		})
-		.ToolTipText(FText::FromString(Script + TEXT(".bango")))
+		.ToolTipText(FText::FromString(Script))
 		// Closing (the tab's x, middle-click, or its menu) asks about unsaved changes first.
 		.OnCanCloseTab_Lambda([WeakEditor]()
 		{

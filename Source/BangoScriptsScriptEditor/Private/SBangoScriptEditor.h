@@ -40,6 +40,8 @@ struct FBangoNodeMenuEntry;
  * The .bango file is the source of truth: opening reads it into editor graphs, and Save writes them back
  * (Bango::WriteGraphText). Unsaved changes show as a * in the title.
  */
+class UBangoScriptAsset;
+
 class SBangoScriptEditor : public SCompoundWidget, public FSelfRegisteringEditorUndoClient
 {
 public:
@@ -63,8 +65,17 @@ public:
 	 * unsaved changes: call ConfirmCloseScript first.
 	 */
 	void LoadScript(const FString& Script);
+	/**
+	 * Opens a Bango Script asset (spec section 15), replacing the open script. Its name is its asset path
+	 * ("/Game/Quests/Intro"). A linked script's text is its .bango file (the file wins); an embedded one's is the
+	 * asset's. Save writes the file and the asset's copy (linked), or the asset (embedded). Doesn't ask about unsaved
+	 * changes either.
+	 */
+	void OpenScriptAsset(UBangoScriptAsset* Asset);
 	/** Opens the open script again from its file, to pick up changes made outside the editor. Doesn't ask either. */
 	void ReloadScript();
+	/** Saves the open script (as the Save button does). False if it wasn't saved. */
+	bool SaveScript() { return Save(); }
 	/**
 	 * If there are unsaved changes, asks whether to save them. Returns false if the user cancelled. Answering No
 	 * throws the changes away: they aren't kept as a recovery copy when the editor closes.
@@ -230,8 +241,11 @@ private:
 
 	/** The open script, as a path inside the script folder without extension ("Examples/Hello"). Empty if none. */
 	FString OpenScript;
+	/** The file the open script is read from and saved to, watched for changes made outside the editor. Empty for an embedded script asset. */
 	FString OpenPath;
 	FDateTime OpenFileTime;
+	/** The open Bango Script asset (OpenScriptAsset), or none for a script file in the script folder. */
+	TWeakObjectPtr<UBangoScriptAsset> OpenAsset;
 
 	/** Editor graphs for the open script: [0] is the main graph, then one per function. */
 	TArray<TStrongObjectPtr<UEdGraph>> EdGraphs;
