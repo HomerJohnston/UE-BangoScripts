@@ -223,12 +223,17 @@ private:
 
 void SBangoGraphNode::CreateOutputSideAddButton(TSharedPtr<SVerticalBox> OutputBox)
 {
+	// Nothing here: SGraphNode would put it under all the outputs, but it goes above Then (see AddPin).
+}
+
+void SBangoGraphNode::AddAddPinButton(const TSharedPtr<SVerticalBox>& OutputBox)
+{
 	using namespace BangoGraphNodeStyle;
 	if (!BangoNode || !(BangoNode->IsSequence() || BangoNode->IsSwitch()) || !OutputBox.IsValid())
 	{
 		return;
 	}
-	// Placed like an output pin: its circle's centre on the node's right edge, one pin row below the last output.
+	// Placed like an output pin, in a row of its own: its circle's centre on the node's right edge.
 	const FMargin BodyInset = GetDefault<UGraphEditorSettings>()->GetNonPinNodeBodyPadding();
 	const float HalfPin = SBangoGraphPin::PinSize * 0.5f;
 	const FText Tip = BangoNode->IsSwitch()
@@ -267,6 +272,10 @@ void SBangoGraphNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 	PinToAdd->SetOwner(SharedThis(this));
 	const FMargin BodyInset = GetDefault<UGraphEditorSettings>()->GetNonPinNodeBodyPadding();
 	const float HalfPin = SBangoGraphPin::PinSize * 0.5f;
+	if (PinToAdd->GetDirection() == EGPD_Output && PinToAdd->GetPinObj() && PinToAdd->GetPinObj()->PinName == UBangoEdGraphNode::NextPinName)
+	{
+		AddAddPinButton(RightNodeBox); // a sequence's or switch's Add pin goes after its other outputs, above Then
+	}
 	if (PinToAdd->GetDirection() == EGPD_Input)
 	{
 		LeftNodeBox->AddSlot()

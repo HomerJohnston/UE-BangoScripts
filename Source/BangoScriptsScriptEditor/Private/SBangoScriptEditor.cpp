@@ -4515,7 +4515,7 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeToolbar()
 	return Toolbar.MakeWidget();
 }
 
-void SBangoScriptEditor::CompileQuietly()
+void SBangoScriptEditor::CompileQuietly(FString* OutError)
 {
 	// Like Compile Test, but only for its icon: no notification, nothing marked on the nodes, the view left alone.
 	FBangoGraphDocument Document;
@@ -4532,6 +4532,10 @@ void SBangoScriptEditor::CompileQuietly()
 	if (!Bango::CompileSource(Text, OpenScript + TEXT(".bango"), FBangoModule::Get().GetCommands(), Program, CompileError))
 	{
 		CompileStatus = ECompileStatus::Error;
+		if (OutError)
+		{
+			*OutError = CompileError.Message;
+		}
 		return;
 	}
 	int32 NumWarnings = 0;
@@ -4724,6 +4728,16 @@ bool SBangoScriptEditor::Save()
 	bDirty = false;
 	bChangedOnDisk = false;
 	KeptFileTime = FDateTime::MinValue();
+
+	// What was saved is compiled too, for the Compile Test icon (as when the script is opened). A script with an error
+	// is still saved; the notification says so. (Compile Test marks the error on its node.)
+	FString CompileError;
+	CompileQuietly(&CompileError);
+	if (CompileStatus == ECompileStatus::Error && !CompileError.IsEmpty())
+	{
+		Notify(FText::Format(LOCTEXT("SavedWithError", "Saved {0}, but it doesn't compile: {1}"), FText::FromString(OpenScript + TEXT(".bango")), FText::FromString(CompileError)), false);
+		return true;
+	}
 	Notify(FText::Format(LOCTEXT("Saved", "Saved {0}."), FText::FromString(OpenScript + TEXT(".bango"))), true);
 	return true;
 }

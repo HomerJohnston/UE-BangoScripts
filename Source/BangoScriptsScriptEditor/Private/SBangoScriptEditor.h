@@ -254,7 +254,10 @@ private:
 	/** The document as last opened or saved; the script has unsaved changes when the graphs differ from it. */
 	FBangoGraphDocument SavedDocument;
 	bool bDirty = false;
-	/** What the toolbar's Compile Test icon shows, as Blueprint's does: compiled when opened (CompileQuietly), Unknown once changed after. */
+	/**
+	 * What the toolbar's Compile Test icon shows, as Blueprint's does: compiled when opened and when saved
+	 * (CompileQuietly), Unknown once changed after.
+	 */
 	enum class ECompileStatus : uint8 { Unknown, Good, Warning, Error };
 	ECompileStatus CompileStatus = ECompileStatus::Unknown;
 	/** The script as it was last compiled, so a change after it puts CompileStatus back to Unknown (OnPoll). */
@@ -448,8 +451,11 @@ private:
 	/** The toolbar: Reload, Compile (with its status icon) and Save, then the Debug dropdown, styled like an asset editor's. */
 	TSharedRef<SWidget> MakeToolbar();
 	FReply OnCompileClicked();
-	/** Compiles the script only to set CompileStatus (the Compile Test icon): no notification, no node errors, no view change. */
-	void CompileQuietly();
+	/**
+	 * Compiles the script only to set CompileStatus (the Compile Test icon): no notification, no node errors, no view
+	 * change. If it doesn't compile and OutError isn't null, OutError gets the compile error.
+	 */
+	void CompileQuietly(FString* OutError = nullptr);
 	FReply OnSaveClicked();
 	/** Writes the open script to its file. Returns false if it couldn't (and says why). */
 	bool Save();

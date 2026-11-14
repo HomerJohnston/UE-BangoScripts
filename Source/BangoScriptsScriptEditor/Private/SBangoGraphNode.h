@@ -44,8 +44,10 @@ protected:
 	//~ Begin SGraphNode
 	virtual TSharedRef<SWidget> CreateNodeContentArea() override;
 	virtual void AddPin(const TSharedRef<SGraphPin>& PinToAdd) override;
-	/** A sequence's or switch's "Add pin +" under its outputs, like Blueprint's Sequence node. */
+	/** Does nothing: a sequence's or switch's Add pin goes above Then instead (AddAddPinButton, from AddPin). */
 	virtual void CreateOutputSideAddButton(TSharedPtr<SVerticalBox> OutputBox) override;
+	/** A sequence's or switch's Add pin (a "+" pin-like button), as a row of OutputBox. Nothing for other nodes. */
+	void AddAddPinButton(const TSharedPtr<SVerticalBox>& OutputBox);
 	virtual FReply OnAddPin() override;
 	virtual TSharedRef<SWidget> CreateTitleWidget(TSharedPtr<SNodeTitle> NodeTitle) override;
 	/** Entry nodes (Script Start, a function's start) stay at (0,0): they're never moved, even with other nodes. */
