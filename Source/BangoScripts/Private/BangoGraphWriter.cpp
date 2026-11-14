@@ -443,7 +443,7 @@ namespace BangoGraphWriterPrivate
 		{
 			return Kind == EBangoGraphNodeKind::If || Kind == EBangoGraphNodeKind::While
 				|| Kind == EBangoGraphNodeKind::For || Kind == EBangoGraphNodeKind::ForEach || Kind == EBangoGraphNodeKind::Sequence
-				|| Kind == EBangoGraphNodeKind::Switch;
+				|| Kind == EBangoGraphNodeKind::Switch || Kind == EBangoGraphNodeKind::Spawn;
 		}
 
 		/**
@@ -541,6 +541,17 @@ namespace BangoGraphWriterPrivate
 					}
 					AddCode(Indent, Detached, TEXT("}"), nullptr);
 				}
+				return true;
+			}
+
+			case EBangoGraphNodeKind::Spawn:
+			{
+				AddCode(Indent, Detached, Text.IsEmpty() ? FString(TEXT("spawn")) : Text + TEXT(" = spawn"), &Node);
+				if (!WriteBlock(Graph, Node.Branches[0], Indent, Detached, Depth))
+				{
+					return false;
+				}
+				AddCode(Indent, Detached, TEXT("}"), nullptr);
 				return true;
 			}
 

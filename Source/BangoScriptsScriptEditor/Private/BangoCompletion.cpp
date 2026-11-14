@@ -175,6 +175,7 @@ void FBangoCompletion::GetKeywordItems(TArray<FBangoCompletionItem>& OutItems, b
 		{ TEXT("forEach"),  TEXT("flow"),        TEXT("forEach (_x in _array) { ... } runs its block once for each element."), false },
 		{ TEXT("in"),       TEXT("flow"),        TEXT("In a forEach header: forEach (_x in _array)."), false },
 		{ TEXT("sequence"), TEXT("flow"),        TEXT("sequence { ... } { ... } runs its blocks one after another, each to its end."), false },
+		{ TEXT("spawn"),    TEXT("flow"),        TEXT("spawn { ... } starts its block as a separate running copy of the script, and carries on straight away."), false },
 		{ TEXT("switch"),   TEXT("flow"),        TEXT("switch (value) { case 1: { ... } default: { ... } } runs the case whose value matches."), false },
 		{ TEXT("case"),     TEXT("flow"),        TEXT("In a switch: case 1, 2: { ... }."), false },
 		{ TEXT("default"),  TEXT("flow"),        TEXT("In a switch, last: default: { ... } runs when no case matches."), false },

@@ -215,6 +215,10 @@ namespace BangoCompilerPrivate
 		TArray<FScope> Scopes;
 		TArray<FLoop> Loops;
 		TArray<int32> BlockParents;
+		/** The blocks (BlockParents indexes) that are spawn blocks: a goto can't jump out of one. */
+		TArray<int32> SpawnBlockIds;
+		/** For each spawn block being compiled, inside each other: how many loops were open when it started. */
+		TArray<int32> SpawnLoopBases;
 		TBangoNameMap<FLabel> Labels;
 		/** Labels in disabled statements, by name, with their lines: a goto to one gets its own error. */
 		TBangoNameMap<int32> DisabledLabels;
@@ -703,6 +707,8 @@ namespace BangoCompilerPrivate
 					}
 				}
 				return true;
+			case EBangoStmtKind::Spawn:
+				return CheckNoDeclsInBlock(Stmt.As<FBangoSpawnStmt>()->Body, bInFunction);
 			case EBangoStmtKind::Switch:
 			{
 				const FBangoSwitchStmt& Switch = *Stmt.As<FBangoSwitchStmt>();
@@ -907,6 +913,8 @@ namespace BangoCompilerPrivate
 					}
 				}
 				return true;
+			case EBangoStmtKind::Spawn:
+				return CollectGlobalsInBlock(Stmt.As<FBangoSpawnStmt>()->Body);
 			case EBangoStmtKind::Switch:
 			{
 				const FBangoSwitchStmt& Switch = *Stmt.As<FBangoSwitchStmt>();
@@ -1012,6 +1020,8 @@ namespace BangoCompilerPrivate
 			Scopes.Reset();
 			Loops.Reset();
 			BlockParents.Reset();
+			SpawnBlockIds.Reset();
+			SpawnLoopBases.Reset();
 			Labels = TBangoNameMap<FLabel>();
 			DisabledLabels = TBangoNameMap<int32>();
 			Gotos.Reset();
@@ -1211,6 +1221,7 @@ namespace BangoCompilerPrivate
 				}
 				// The label's block must contain the goto: jumping out of blocks is fine, jumping into one isn't.
 				bool bReachable = false;
+				bool bLeavesSpawn = false;
 				for (int32 Block = Goto.BlockId; Block >= 0; Block = BlockParents[Block])
 				{
 					if (Block == Label->BlockId)
@@ -1218,6 +1229,12 @@ namespace BangoCompilerPrivate
 						bReachable = true;
 						break;
 					}
+					bLeavesSpawn |= SpawnBlockIds.Contains(Block);
+				}
+				if (bReachable && bLeavesSpawn)
+				{
+					return Fail(Goto.Loc, FString::Printf(TEXT("'goto %s' would jump out of a spawn block (label '%s' is on line %d, outside it). The spawned copy runs on its own: use 'return;' to end it."),
+						*Goto.Name, *Goto.Name, Label->Line));
 				}
 				if (!bReachable)
 				{
@@ -1339,6 +1356,10 @@ namespace BangoCompilerPrivate
 				}
 				NoteBlock(Switch->Default);
 			}
+			else if (const FBangoSpawnStmt* Spawn = Stmt.As<FBangoSpawnStmt>())
+			{
+				NoteBlock(Spawn->Body);
+			}
 		}
 
 		bool CompileStmt(const FBangoStmt& Stmt)
@@ -1388,6 +1409,7 @@ namespace BangoCompilerPrivate
 			case EBangoStmtKind::ForEach:  return CompileForEach(*Stmt.As<FBangoForEachStmt>());
 			case EBangoStmtKind::Sequence: return CompileSequence(*Stmt.As<FBangoSequenceStmt>());
 			case EBangoStmtKind::Switch:   return CompileSwitch(*Stmt.As<FBangoSwitchStmt>());
+			case EBangoStmtKind::Spawn:    return CompileSpawn(*Stmt.As<FBangoSpawnStmt>());
 			case EBangoStmtKind::Break:
 			case EBangoStmtKind::Continue: return CompileBreakContinue(Stmt);
 			case EBangoStmtKind::Return:   return CompileReturn(*Stmt.As<FBangoReturnStmt>());
@@ -1579,6 +1601,51 @@ namespace BangoCompilerPrivate
 			{
 				PatchJump(Jump, BreakTarget);
 			}
+		}
+
+		/**
+		 * `spawn { ... }`: SpawnBlock starts a new instance at the block (with a copy of this frame), then this one jumps
+		 * over it. The block ends with Halt: the copy is done.
+		 */
+		bool CompileSpawn(const FBangoSpawnStmt& Spawn)
+		{
+			if (bCondition)
+			{
+				return Fail(Spawn.Loc, TEXT("A condition can't spawn: it only works out its answer."));
+			}
+			// `_id = spawn`: the place's indexes (if any) first, then SpawnBlock pushes the copy's id, then it's stored.
+			FPlaceInfo IdPlace;
+			if (Spawn.IdTarget)
+			{
+				if (!ResolvePlace(*Spawn.IdTarget, EPlaceUse::Write, IdPlace))
+				{
+					return false;
+				}
+				if (!CanAssign(IdPlace.Type.Type, FExprType::MakeKnown(FBangoType::Int()), Spawn.IdTarget->Loc, FString::Printf(TEXT("The spawned copy's id (an int) stored in '%s'"), *IdPlace.Text)))
+				{
+					return false;
+				}
+			}
+			const int32 SpawnAt = Emit(EBangoOp::SpawnBlock, 0, Spawn.IdTarget ? 1 : 0);
+			if (Spawn.IdTarget)
+			{
+				Emit(EBangoOp::StorePlace, IdPlace.PlaceIndex);
+			}
+			const int32 JumpOver = Emit(EBangoOp::Jump);
+			PatchJump(SpawnAt, Here());
+			SpawnBlockIds.Add(BlockParents.Num()); // the block CompileBlock is about to open
+			SpawnLoopBases.Add(Loops.Num());
+			const bool bCompiled = CompileBlock(Spawn.Body);
+			SpawnLoopBases.Pop();
+			if (!bCompiled)
+			{
+				return false;
+			}
+			CurrentStmt = &Spawn;
+			CurrentLoc = Spawn.Loc;
+			Emit(EBangoOp::Halt);
+			PatchJump(JumpOver, Here());
+			return true;
 		}
 
 		/** A sequence's blocks, one after another: it only groups statements, so it needs no code of its own. */
@@ -1851,7 +1918,12 @@ namespace BangoCompilerPrivate
 		bool CompileBreakContinue(const FBangoStmt& Stmt)
 		{
 			const bool bBreak = Stmt.Kind == EBangoStmtKind::Break;
-			if (Loops.Num() == 0)
+			if (SpawnLoopBases.Num() > 0 && Loops.Num() <= SpawnLoopBases.Last() && Loops.Num() > 0)
+			{
+				return Fail(Stmt.Loc, FString::Printf(TEXT("'%s' can't leave a spawn block: the spawned copy runs on its own, outside the loop. Use 'return;' to end it."),
+					bBreak ? TEXT("break") : TEXT("continue")));
+			}
+			if (Loops.Num() == 0 || (SpawnLoopBases.Num() > 0 && Loops.Num() <= SpawnLoopBases.Last()))
 			{
 				return Fail(Stmt.Loc, FString::Printf(TEXT("'%s' can only be used inside a while, for or forEach loop."), bBreak ? TEXT("break") : TEXT("continue")));
 			}
@@ -1873,6 +1945,16 @@ namespace BangoCompilerPrivate
 
 		bool CompileReturn(const FBangoReturnStmt& Return)
 		{
+			if (SpawnLoopBases.Num() > 0)
+			{
+				// In a spawn block, return ends the spawned copy (and only it).
+				if (Return.Value)
+				{
+					return Fail(Return.Value->Loc, TEXT("In a spawn block, 'return;' ends the spawned copy, so it can't give back a value."));
+				}
+				Emit(EBangoOp::Halt);
+				return true;
+			}
 			if (!FnAst && bCondition)
 			{
 				// A condition's main graph returns its answer.

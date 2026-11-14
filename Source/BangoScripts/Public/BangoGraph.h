@@ -45,6 +45,11 @@ enum class EBangoGraphNodeKind : uint8
 	 * each with an output (Branches), then the Default output (the last of Branches); then Next.
 	 */
 	Switch,
+	/**
+	 * `spawn { }` or `_id = spawn { }`: its block (Branches[0], Run) starts as a separate running copy of the script;
+	 * Next (Then) follows straight away. Text: where the copy's id goes, or empty.
+	 */
+	Spawn,
 	Break,
 	Continue,
 	Return,
@@ -68,7 +73,8 @@ struct BANGOSCRIPTS_API FBangoGraphNode
 	 * - Entry: `int _a, string _b = "x"` (main graph) or `int AddScore(int _amount)` (function)
 	 * - Assign, IncDec, Call: the statement, like `_x += 2`, `_x++`, `john Speak("Hi")`
 	 * - If, While, Switch: the condition or value. For: `int _i = 0; _i < 3; _i++`. ForEach: `_x in _array`
-	 * - Return: the value, or empty. Label, Goto: the label name. Break, Continue, Sequence, Reroute: empty.
+	 * - Return: the value, or empty. Spawn: where the copy's id goes, or empty. Label, Goto: the label name. Break,
+	 *   Continue, Sequence, Reroute: empty.
 	 */
 	FString Text;
 
@@ -79,7 +85,7 @@ struct BANGOSCRIPTS_API FBangoGraphNode
 	int32 Next = INDEX_NONE;
 
 	/**
-	 * If: [Do, Else]. While, For, ForEach: [Do]. Sequence: one per block ([Scope 0, Scope 1, ...], at least one).
+	 * If: [Do, Else]. While, For, ForEach: [Do]. Spawn: [Run]. Sequence: one per block ([Scope 0, Scope 1, ...], at least one).
 	 * Switch: one per case, then Default (CaseValues.Num() + 1). Unused entries are INDEX_NONE. Every kind but Sequence
 	 * and Switch has two entries; see Bango::GetGraphNodeBranchCount for how many are used.
 	 */

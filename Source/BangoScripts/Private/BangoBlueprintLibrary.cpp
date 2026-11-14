@@ -313,11 +313,11 @@ FBangoScriptHandle UBangoBlueprintLibrary::SpawnBangoScript(UObject* WorldContex
 	return Subsystem ? Subsystem->Spawn(ScriptPath) : FBangoScriptHandle();
 }
 
-void UBangoBlueprintLibrary::TerminateBangoScript(UObject* WorldContextObject, FBangoScriptHandle Handle)
+void UBangoBlueprintLibrary::TerminateBangoScript(UObject* WorldContextObject, FBangoScriptHandle Handle, bool bAndChildren)
 {
 	if (UBangoScriptSubsystem* Subsystem = GetScripts(WorldContextObject, TEXT("Terminate Bango Script")))
 	{
-		Subsystem->Terminate(Handle);
+		Subsystem->Terminate(Handle, bAndChildren);
 	}
 }
 

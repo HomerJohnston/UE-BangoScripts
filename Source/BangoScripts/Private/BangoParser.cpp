@@ -914,6 +914,7 @@ namespace BangoParserPrivate
 			case EBangoTokenKind::KwForEach: return ParseForEach();
 			case EBangoTokenKind::KwSequence: return ParseSequence();
 			case EBangoTokenKind::KwSwitch:  return ParseSwitch();
+			case EBangoTokenKind::KwSpawn:   return ParseSpawn();
 			case EBangoTokenKind::KwCase:
 			case EBangoTokenKind::KwDefault:
 				Fail(First.Loc, FString::Printf(TEXT("'%s' can only be used directly inside the braces of a switch."), *First.Text));
@@ -923,7 +924,7 @@ namespace BangoParserPrivate
 				Fail(First.Loc, TEXT("'else' must come straight after the '}' of an if block, with no ';' in between."));
 				return nullptr;
 			case EBangoTokenKind::LBrace:
-				Fail(First.Loc, TEXT("A '{' block must belong to an if, else, while, for, forEach, sequence, switch case or function. (To group statements, put them in a sequence: sequence { ... })"));
+				Fail(First.Loc, TEXT("A '{' block must belong to an if, else, while, for, forEach, sequence, spawn, switch case or function. (To group statements, put them in a sequence: sequence { ... })"));
 				return nullptr;
 			case EBangoTokenKind::RBrace:
 				Fail(First.Loc, TEXT("Unexpected '}' with no matching '{'."));
@@ -935,6 +936,10 @@ namespace BangoParserPrivate
 				Fail(First.Loc, TEXT("This '*/' has no '/*' before it in this block. '/*' and '*/' go around disabled nodes, and both must be in the same block."));
 				return nullptr;
 			default:
+				if (IsSpawnAssignment())
+				{
+					return ParseSpawn();
+				}
 				break;
 			}
 
@@ -1470,6 +1475,95 @@ namespace BangoParserPrivate
 			LeaveNesting();
 			Advance(); // '}'
 			if (!ExpectBlockTerminator())
+			{
+				return nullptr;
+			}
+			return MoveTemp(Stmt);
+		}
+
+		/**
+		 * True at `place = spawn`, before its `;` or `{`: a spawn whose copy's id is kept. (Another assignment with
+		 * spawn, like `+= spawn`, is too, so ParseSpawn can say what's wrong.)
+		 */
+		bool IsSpawnAssignment() const
+		{
+			int32 BracketDepth = 0;
+			for (int32 i = Pos; Tokens.IsValidIndex(i) && Tokens[i].Loc.Line == Cur().Loc.Line; ++i)
+			{
+				const EBangoTokenKind Kind = Tokens[i].Kind;
+				if (Kind == EBangoTokenKind::LParen || Kind == EBangoTokenKind::LBracket)
+				{
+					++BracketDepth;
+				}
+				else if (Kind == EBangoTokenKind::RParen || Kind == EBangoTokenKind::RBracket)
+				{
+					--BracketDepth;
+				}
+				else if (Kind == EBangoTokenKind::Semicolon || Kind == EBangoTokenKind::LBrace || Kind == EBangoTokenKind::RBrace || Kind == EBangoTokenKind::EndOfFile)
+				{
+					return false;
+				}
+				else if (BracketDepth == 0 && IsAssignOp(Kind))
+				{
+					return Tokens.IsValidIndex(i + 1) && Tokens[i + 1].Kind == EBangoTokenKind::KwSpawn;
+				}
+			}
+			return false;
+		}
+
+		/** `spawn` then one block, or `place = spawn` then one block (keeping the copy's id). */
+		FBangoStmtPtr ParseSpawn()
+		{
+			const FBangoSourceLocation StartLoc = Cur().Loc;
+			const int32 TargetTok = Pos;
+			FBangoExprPtr IdTarget;
+			if (!Check(EBangoTokenKind::KwSpawn))
+			{
+				IdTarget = ParseExpression();
+				if (!IdTarget)
+				{
+					return nullptr;
+				}
+				if (!IsPlace(*IdTarget, /*bAllowPart*/ false))
+				{
+					Fail(IdTarget->Loc, TEXT("A spawned copy's id can only go in a variable (an int), or an element of an int array: _timer = spawn { ... }"));
+					return nullptr;
+				}
+				if (!Check(EBangoTokenKind::Assign))
+				{
+					Fail(Cur().Loc, TEXT("A spawned copy's id can only be stored with '=': _timer = spawn { ... }"));
+					return nullptr;
+				}
+				Advance(); // '='
+			}
+			const int32 AssignTok = Pos - 1; // '=', just after the place (unused without one)
+			const FBangoToken& Keyword = Advance();
+			TUniquePtr<FBangoSpawnStmt> Stmt = MakeUnique<FBangoSpawnStmt>();
+			Stmt->Loc = StartLoc;
+			Stmt->IdTarget = MoveTemp(IdTarget);
+			if (Check(EBangoTokenKind::LParen))
+			{
+				Fail(Cur().Loc, TEXT("To keep the spawned copy's id, write it as an assignment: _timer = spawn { ... }"));
+				return nullptr;
+			}
+			if (!RequireOneLine(StartLoc.Line, Keyword.Loc) || !RegisterNode(*Stmt, StartLoc.Line))
+			{
+				return nullptr;
+			}
+			if (Stmt->IdTarget)
+			{
+				SetTextSpan(*Stmt, TargetTok, AssignTok); // the place, for the node's Id field
+			}
+			else
+			{
+				Stmt->Node.TextBegin = Stmt->Node.TextEnd = Keyword.EndColumn; // no text: its output is its block
+			}
+			if (!Check(EBangoTokenKind::LBrace))
+			{
+				Fail(Cur().Loc, FString::Printf(TEXT("Expected '{' after 'spawn', but found %s. A spawn is followed by a block: spawn { ... }"), *Bango::DescribeToken(Cur())));
+				return nullptr;
+			}
+			if (!ParseBlock(Stmt->Body) || !ExpectBlockTerminator())
 			{
 				return nullptr;
 			}

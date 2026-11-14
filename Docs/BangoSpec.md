@@ -1,8 +1,12 @@
-# Bango Language Spec (draft v0.41)
+# Bango Language Spec (draft v0.43)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.43:** scripts can manage other running scripts by id: **`Abort(Script, Children)`** stops one (with no id, this script), and with `Children` true, every script it started with `Exec` or `spawn`, and theirs; **`IsRunning(Script)`** and **`WaitFor(Script)`** (section 7). **`_id = spawn { ... }`** keeps the spawned copy's id (section 8). Blueprint's **Terminate Bango Script** has an **And Children** option. Save data from earlier versions can't be loaded (section 11).
+
+**Changes in v0.42:** **`spawn { ... }`** starts its block as a separate running copy of the script, with copies of the variables as they are at that moment, and carries on straight away (section 8). In the block, `return;` ends just the copy; `break`, `continue` and `goto` can't leave it. In the graph it's a **Spawn** node with a **Run** output and **Then** (section 12). `spawn` is a keyword.
 
 **Changes in v0.41:** a **`switch`** runs the first case whose value equals the switch's value, or `default`: `switch (_x) { case 1: { ... } case 2, 3: { ... } default: { ... } }` (section 8). The value is an `int`, a `string` or an `entity`; case values are fixed values written out, and a value can only be in one case. There's no fallthrough, and `break`/`continue` act on the loop around the switch. In the graph it's a **Switch** node: a box with each case's values beside that case's output, then **Default** and **Then** (section 12). `switch`, `case` and `default` are keywords, and `:` is a new token.
 
@@ -161,6 +165,7 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
 | `for (init; cond; step)` | exec in → Do, Then |
 | `forEach (_x in arr)` | exec in → Do, Then |
 | `sequence { ... } { ... }` | exec in → Scope 0, Scope 1, Scope 2, ... (one per block), Then |
+| `spawn { ... }` | exec in → Run, Then |
 | `switch (value) { case ...: { } default: { } }` | exec in → one output per case (beside a box with its values), Default, Then |
 | `break;` / `continue;` | exec in → exec out |
 | `return [expr];` | exec in → exec out |
@@ -183,7 +188,7 @@ A `goto` node **does not draw a wire** to its label. It shows the target label's
 
 ## 2. Blocks and semicolons
 
-- A block that ends a statement (`if`, `while`, `for`, `forEach`, `sequence`, `switch` and `function`) closes with `}`. A `;` after it is allowed (`};`, as earlier versions required) but not needed; the graph editor writes `}`. The next statement starts on a new line.
+- A block that ends a statement (`if`, `while`, `for`, `forEach`, `sequence`, `spawn`, `switch` and `function`) closes with `}`. A `;` after it is allowed (`};`, as earlier versions required) but not needed; the graph editor writes `}`. The next statement starts on a new line.
 - A `}` that is followed by `else` has no semicolon.
 - `else if` is allowed. A whole `if / else if / else` chain ends with a single `}`. In the graph, the inner `if` is the node on the outer if's Else pin.
 - A `{` block on its own, not belonging to one of the statements above, is a compile error. (To group statements, use a `sequence`, section 8.)
@@ -332,7 +337,7 @@ Hint(NSLOCTEXT("Shared.UI", "Continue", "Continue"));
 - **Names are case-sensitive**: `john` and `John` are different names. This covers variables, globals, functions, labels, commands, keywords, type names and Bango ID names (`@john` and `@John` are different actors).
 - Calling a command or function with the wrong capitalisation is a compile error that suggests the right name: *"Unknown command or function 'hint'. Did you mean 'Hint'? Names are case-sensitive."*
 - A name is letters, digits and `_`, and doesn't start with a digit.
-- Keywords and type names can't be used as names: `if else while for forEach in sequence switch case default break continue return label goto function global params true false nil bool int float double string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
+- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn switch case default break continue return label goto function global params true false nil bool int float double string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
 
 ### Locals
 - Any name will do; a leading `_` is allowed but not needed (`count` and `_count` are both fine). The same goes for function parameters, script parameters and loop variables. Locals only exist inside the running script instance.
@@ -650,7 +655,10 @@ Every placeholder needs a value. When the text is written as a literal (`WriteLo
 | `Dot(vector3 A, vector3 B)` → `float` | The dot product. For two directions 1 long, it's 1 if they're the same, 0 at right angles and -1 if they're opposite. |
 | `Cross(vector3 A, vector3 B)` → `vector3` | The cross product: a vector at right angles to both. |
 | `LerpVector(vector3 A, vector3 B, float Alpha)` → `vector3` | Blends from A to B, like `Lerp`. |
-| `Exec(string Path, ...)` → `int` | Starts another script: the path is relative to this script's folder (`"Intro"`, `"../Shared/Greet"`) or a full asset path (`"/Game/Quests/Intro"`) (section 15). The extra values are its parameters, in order, checked as `Spawn` checks them. The new script runs on its own, alongside this one: it runs straight away until it first pauses (or ends), and then this script carries on from the `Exec`. Gives back the new script's id, which can be ignored (`Exec("Doors/OpenAll");` on its own line is fine). A script that can't be found, doesn't compile, or whose parameters don't fit stops this script with that error; an error the new script hits once it's running stops only it. A chain of more than 32 scripts each started by the one before, before it pauses (a script that runs `Exec` on itself straight away), is an error. Needs a game world. |
+| `Exec(string Path, ...)` → `int` | Starts another script: the path is relative to this script's folder (`"Intro"`, `"../Shared/Greet"`) or a full asset path (`"/Game/Quests/Intro"`) (section 15). The extra values are its parameters, in order, checked as `Spawn` checks them. The new script runs on its own, alongside this one: it runs straight away until it first pauses (or ends), and then this script carries on from the `Exec`. Gives back the new script's id, which can be ignored (`Exec("Doors/OpenAll");` on its own line is fine). A script that can't be found, doesn't compile, or whose parameters don't fit stops this script with that error; an error the new script hits once it's running stops only it. A chain of more than 32 scripts each started by the one before, before it pauses (a script that runs `Exec` on itself straight away), is an error. The new script counts as this one's child, for `Abort`'s `Children`. Needs a game world. |
+| `Abort(int Script = this script, bool Children = false)` | Stops the running script with this id (from `Exec` or `spawn`). With no id (or `nil`), stops this script, from anywhere, even in a function or a spawned copy: it stops as soon as the command returns. With `Children` true, also stops every script it started with `Exec` or `spawn` that's still running, and every script those started, and so on, even where the ones in between, or the one named, have already ended: `Abort(_alarm, true)`, or `Abort(nil, true)` for this script and everything it started. Does nothing for a script that has already ended (apart from its children, with `Children` true). Needs a game world. |
+| `IsRunning(int Script)` → `bool` | True while the script with this id is running or waiting; false once it has ended, for any reason (finished, aborted, failed). Needs a game world. |
+| `WaitFor(int Script)` | Waits until the script with this id has ended, for any reason. Carries on at once if it already has. Waiting for itself is an error. Needs a game world. |
 | `Time()` → `float` | The world's time (`GetWorld()->GetTimeSeconds()`): seconds since the level started; stops while the game is paused. |
 | `ToEntity(string Name)` → `entity` | The entity with this Bango ID name, for names that come from data (`ToEntity("john")` is the same as `@john`). A name that isn't letters, digits and `_` (or starts with a digit) is an error. |
 | `entity SetPos(vector3 Pos)` | Moves the actor. |
@@ -722,6 +730,27 @@ WriteLog("both done");                // after both blocks
 - It only groups statements, to keep a graph tidy: it makes no scope, and `break`, `continue`, `return`, labels and `goto` work in its blocks just as they do around it (a `break` in a sequence in a loop leaves the loop).
 - A block can be empty (`{` then `}`): an output with nothing on it.
 - The `//@` metadata goes on the `sequence` line. Disabling a sequence disables all its blocks.
+
+### spawn
+`spawn` is followed by one block. It starts the block as a **separate running copy of the script** and carries on with what follows straight away, without waiting for it. Written as an assignment, `_id = spawn { ... }`, it also stores the copy's id in an `int` variable (or an element of an `int` array), so it can be stopped or waited for: `Abort(_id)`, `WaitFor(_id)`. Only `=` works (not `+=` and the like), and only on its own line: a spawn isn't a value to use in other expressions. The id is stored after the variables are copied, so the copy doesn't see its own id:
+
+```
+Hint(LOCTEXT("Wait", "The gate opens in two seconds."));
+spawn                                 //@7(20, 0)
+{
+	Sleep(2);
+	@gate OpenDoor();
+	Exec("Gate/Opened");
+}
+WriteLog("gate timer started");       // runs at once, while the copy waits
+```
+
+- It's for small fire-and-forget jobs. The copy runs on its own, like a script started with `Exec`: it can wait, and it ends at the end of its block (or at a `return;`), whatever the script that spawned it is doing by then. Like `Exec`, the copy runs straight away until it first waits; then the spawning script carries on.
+- **Variables:** the copy gets a copy of every local and parameter as it is at that moment (and of a loop's variable, so a spawn in a loop gets each pass's value). Changing them in the block doesn't change the spawning script's, nor the other way round. Globals are shared, as always.
+- In the block, `return;` ends the copy (it can't return a value, even in a function). `break` and `continue` only work for loops inside the block, and `goto` only to labels inside it: they can't leave it. A spawn in a function ends with its block; it doesn't go back to the function's caller.
+- Each copy is a running script of its own, with its own id, listed in the editor's Debug dropdown under the same script (so its nodes light up when debugged), and saved and hot-reloaded like any other. It can use `Exec` with paths relative to its script, as the spawning script can.
+- The copy counts as the spawning script's child, for `Abort`'s `Children` (section 7).
+- A condition can't spawn. The `//@` metadata goes on the `spawn` line. Disabling a spawn disables its block.
 
 ### switch
 `switch (value)` is followed by `{`, then its cases, each `case` and its values, a `:` and a block, then an optional `default:` and a block, then `}`:
@@ -967,7 +996,7 @@ The **Spawn Bango Script** node reads the script's `params` line and creates one
 |---|---|
 | **Spawn Bango Script** (fixed path, one pin per parameter) → Handle | Starts a script with arguments (section 10). Returns an invalid handle (and shows an error) if it can't start. |
 | **Spawn Bango Script (Dynamic Path)** (path) → Handle | Starts a script from a path chosen at runtime, with no arguments, so the script can't have required parameters. Returns an invalid handle (and shows an error) if it can't start. |
-| **Terminate Bango Script** (Handle) | Stops a script. A script stopped while one of its commands is running stays stopped. |
+| **Terminate Bango Script** (Handle, And Children) | Stops a script. A script stopped while one of its commands is running stays stopped. With And Children, also stops the scripts it started (with `Exec` or `spawn`), and theirs, as `Abort`'s `Children` does. |
 | **Is Bango Script Running** (Handle) → bool | True while running or paused; false once it has finished, failed or been terminated. |
 | **Is Valid Bango Script Handle** (Handle) → bool | True if the handle came from a successful spawn. |
 | **Set Bango Global** Bool / Int / Float / String / Text / Vector2 / Vector3 | Sets a global, declaring it with that type if it doesn't exist. A type conflict is an error. Int uses a Blueprint Integer. |
@@ -1031,7 +1060,7 @@ A save stores:
 
 On load, each saved script is loaded and compiled from its path (or from its saved text), and its saved state is checked against it. If a script was changed so that the saved state no longer fits (or the file is missing), that script isn't restored and an error is shown. Other scripts still load. Beyond that check, loading state into a changed script is **undefined behaviour** (not supported).
 
-The save data has a format version. Data from an older version (such as saves made before ints became 32-bit in v0.9, or before scripts spawned from text were saved with their text in v0.35, or before script ids became 32-bit in v0.38) fails to load with an error rather than being misread.
+The save data has a format version. Data from an older version (such as saves made before ints became 32-bit in v0.9, or before scripts spawned from text were saved with their text in v0.35, or before script ids became 32-bit in v0.38, or before each script's parent was saved in v0.43) fails to load with an error rather than being misread.
 
 ### Limits (project settings)
 | Setting | Default |
@@ -1058,7 +1087,7 @@ The graph editor shows a script as nodes and wires and saves it back as text. Th
 ### Pins and wires
 - Every node except the entry has one **exec input**, and each input can have **only one wire** into it.
 - Every node has one main **exec output**. On `if`, loops, sequences and switches it is called **Then**; it leads to the statement after the block (a sequence's last block).
-- `if` also has **Do** and **Else** outputs; `while`, `for` and `forEach` have **Do**. A **Sequence** has an output per block, named **Scope 0**, **Scope 1**, **Scope 2**, ..., above **Then** (for what follows its blocks). Its **Add pin** button (under its outputs, as on Blueprint's Sequence node) or right-click > **Add Output** adds one at the end; right-clicking one > **Remove Scope N** removes it and its wire (the nodes on it stay, unwired), and the later outputs move up. A Sequence always keeps at least one output. In the add-node menu it's under Flow Control, and starts with two.
+- `if` also has **Do** and **Else** outputs; `while`, `for` and `forEach` have **Do**; a **Spawn** has **Run** (its block, started as a separate copy of the script) and **Then**, which goes on straight away, and an optional **Id** field: the `int` variable the copy's id goes in. A **Sequence** has an output per block, named **Scope 0**, **Scope 1**, **Scope 2**, ..., above **Then** (for what follows its blocks). Its **Add pin** button (under its outputs, as on Blueprint's Sequence node) or right-click > **Add Output** adds one at the end; right-clicking one > **Remove Scope N** removes it and its wire (the nodes on it stay, unwired), and the later outputs move up. A Sequence always keeps at least one output. In the add-node menu it's under Flow Control, and starts with two.
 - A **Switch** has its **On** field (the value it switches on), then an output per case, each with a box just inside the node showing that case's values (the first labelled **Case**) (click it to edit them; Enter or Tab goes on to the next case's box, Shift goes back). Then come **Default** and **Then**. Its **Add pin** button or right-click > **Add Case** adds a case, with no value yet, before Default; right-clicking a case's output > **Remove Case** removes it and its wire, and the later cases move up. **Default** is only written to the text when something is wired to it. A compile error in a case's values outlines that case's box in red. In the add-node menu it's under Flow Control, and starts with one case.
 - A block is the chain of nodes along those wires: the Do chain is the `if` block, the Else chain the `else` block, and so on.
 - **`else if`:** an Else output wired to an `if` node that has nothing on its Then output is written as `else if`. An `else` block containing only an `if` means the same thing, so it's shown the same way.
@@ -1225,11 +1254,9 @@ Problems visible from the line alone show Blueprint's **ERROR!** banner on the n
 ---
 
 ## 13. Deferred / later
-- Commands that use the id `Exec` gives back: stop a script, or check whether it's still running (and maybe a handle type in the language instead of an `int`)
 - A level-placed "Bango Script" component that shows a script's parameters as editable fields
 - Maps
 - Rotators, and commands for them
-- A way to check whether a Bango ID's actor is in the level before using it
 - A shorthand for giving a global a starting value only if it's `nil` (like a "Set if not defined" node)
 - A deterministic random source, seedable and saved with the game, used by every random command (`Random`, `RandomInt`, `RandomBool`, `Chance`), so a run can be replayed exactly
 - The vector commands for `vector2` too (they take `vector3` for now)

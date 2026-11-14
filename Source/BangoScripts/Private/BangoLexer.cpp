@@ -19,6 +19,7 @@ namespace BangoLexerPrivate
 		{ TEXT("forEach"), EBangoTokenKind::KwForEach },
 		{ TEXT("in"), EBangoTokenKind::KwIn },
 		{ TEXT("sequence"), EBangoTokenKind::KwSequence },
+		{ TEXT("spawn"), EBangoTokenKind::KwSpawn },
 		{ TEXT("switch"), EBangoTokenKind::KwSwitch },
 		{ TEXT("case"), EBangoTokenKind::KwCase },
 		{ TEXT("default"), EBangoTokenKind::KwDefault },

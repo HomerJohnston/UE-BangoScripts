@@ -47,6 +47,8 @@ struct BANGOSCRIPTS_API FBangoRuntimeError
 };
 
 /** What Resume needs from the outside world. */
+class FBangoInstance;
+
 struct FBangoExecContext
 {
 	FBangoGlobalStore* Globals = nullptr;
@@ -61,6 +63,13 @@ struct FBangoExecContext
 	int32 MaxInstructionsPerResume = 1000000;
 	/** Deepest allowed function call nesting. */
 	int32 MaxCallDepth = 200;
+
+	/**
+	 * Starts a spawn block's copy of the script (spec section 8): a new instance, made with FBangoInstance::StartSpawned
+	 * from Parent at the block's first instruction, that the host runs on its own. Parent carries on. OutId: the new
+	 * instance's id. Unset where scripts can't be started (then a spawn stops the script with an error).
+	 */
+	TFunction<bool(const FBangoInstance& Parent, int32 BlockIP, int64& OutId, FString& OutError)> SpawnBlock;
 };
 
 /** One function call in progress, for the debugger (FBangoInstance::GetCallStack). */
@@ -116,6 +125,12 @@ public:
 	 */
 	bool Start(const TSharedPtr<const FBangoProgram>& InProgram, const FBangoCommandTable& Commands, FBangoGlobalStore& Globals, int64 InId, FBangoRuntimeError& OutError,
 		TConstArrayView<FBangoValue> Args = TConstArrayView<FBangoValue>());
+
+	/**
+	 * Prepares the instance to run a spawn block of Parent's script: the same program and commands, one frame that is a
+	 * copy of Parent's current one (its variables as they are now), starting at BlockIP. Fails if Parent isn't running.
+	 */
+	bool StartSpawned(const FBangoInstance& Parent, int32 BlockIP, int64 InId, FBangoRuntimeError& OutError);
 
 	/**
 	 * Runs until the script pauses on a latent command, finishes or fails. Returns the new status.

@@ -179,6 +179,8 @@ namespace Bango
 			.Description = TEXT("Runs Scope 0, then Scope 1, then Scope 2 and so on, each to its end (waits and all) before the next starts; then carries on from Then. To run two paths at the same time, start another script with Exec instead.");
 		Menu.Add(Flow, EBangoGraphNodeKind::Switch, FString(), TEXT("switch case select choose int string entity"))
 			.Description = TEXT("Runs the output of the first case whose value equals the switch's value (an int, a string or an entity), or Default if none does; then carries on from Then. Add a case with Add pin; a case can list several values, like 1, 2.");
+		Menu.Add(Flow, EBangoGraphNodeKind::Spawn, FString(), TEXT("spawn async fork parallel background run start detach"))
+			.Description = TEXT("Starts the nodes on Run as a separate running copy of this script, with copies of its variables as they are now, and carries on from Then straight away. Good for small fire-and-forget jobs, like waiting a bit and then opening a door. In the copy, Return ends it.");
 		Menu.Add(Flow, EBangoGraphNodeKind::Break, FString(), TEXT("loop exit"))
 			.Description = TEXT("Leaves the loop it's in, carrying on from the loop's Then.");
 		Menu.Add(Flow, EBangoGraphNodeKind::Continue, FString(), TEXT("loop next"))

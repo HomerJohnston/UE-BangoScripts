@@ -826,13 +826,105 @@ namespace Bango
 				{
 					return Call.Fail(Error);
 				}
-				const FBangoScriptHandle Handle = Subsystem->Spawn(Resolved, ScriptArgs, Error);
+				const FBangoScriptHandle Handle = Subsystem->SpawnChild(Call.InstanceId, Resolved, ScriptArgs, Error); // its child, for Abort's Children
 				if (!Handle.IsValid())
 				{
 					return Call.Fail(FString::Printf(TEXT("Couldn't start '%s': %s"), *Path, Error.IsEmpty() ? TEXT("it didn't start.") : *Error));
 				}
 				Call.Result = FBangoValue::MakeInt(Handle.Id);
 				return EBangoCommandResult::Done;
+			};
+			Add(Commands, Command);
+		}
+
+		// Abort(Script = this one, Children = false): stops a running script (UBangoScriptSubsystem::Terminate).
+		{
+			FBangoCommand Command;
+			Command.Signature = FBangoCommandSignature::Make(TEXT("Abort"))
+				.Optional()
+				.Param(TEXT("Script"), Int, TEXT("The script's id (from Exec or spawn). Leave it out, or nil, for this script")).MayBeNil()
+				.Param(TEXT("Children"), Bool, TEXT("Also stop the scripts it started (with Exec or spawn), and the ones they started, and so on"))
+				.InCategory(TEXT("Flow Control"))
+				.Describe(TEXT("Stops a running script, or this one if no id is given. With Children true, also stops every script it started (with Exec or spawn) that's still running, and theirs. Does nothing for a script that has already ended (but still stops its children, with Children true)."));
+			Command.Start = [](FBangoCommandCall& Call)
+			{
+				UBangoScriptSubsystem* Subsystem = UBangoScriptSubsystem::Get(Call.WorldContext);
+				if (!Subsystem)
+				{
+					return Call.Fail(TEXT("Abort needs a game world, with its running scripts."));
+				}
+				FBangoScriptHandle Handle;
+				Handle.Id = Call.Args.Num() > 0 && !Call.Args[0].IsNil() ? Call.Args[0].GetInt() : (int32)Call.InstanceId;
+				const bool bChildren = Call.Args.Num() > 1 && !Call.Args[1].IsNil() && Call.Args[1].GetBool();
+				Subsystem->Terminate(Handle, bChildren); // if that's this script, it stops as soon as this command returns
+				return EBangoCommandResult::Done;
+			};
+			Add(Commands, Command);
+		}
+
+		// IsRunning(Script) -> bool: UBangoScriptSubsystem::IsRunning.
+		{
+			FBangoCommand Command;
+			Command.Signature = FBangoCommandSignature::Make(TEXT("IsRunning"))
+				.Param(TEXT("Script"), Int, TEXT("The script's id (from Exec or spawn)"))
+				.Returns(Bool).InCategory(TEXT("Flow Control"))
+				.Describe(TEXT("True while the script with this id (from Exec or spawn) is running or waiting; false once it has ended, for any reason."));
+			Command.Start = [](FBangoCommandCall& Call)
+			{
+				if (!RequireArgs(Call, 1))
+				{
+					return EBangoCommandResult::Failed;
+				}
+				UBangoScriptSubsystem* Subsystem = UBangoScriptSubsystem::Get(Call.WorldContext);
+				if (!Subsystem)
+				{
+					return Call.Fail(TEXT("IsRunning needs a game world, with its running scripts."));
+				}
+				FBangoScriptHandle Handle;
+				Handle.Id = Call.Args[0].GetInt();
+				Call.Result = FBangoValue::MakeBool(Subsystem->IsRunning(Handle));
+				return EBangoCommandResult::Done;
+			};
+			Add(Commands, Command);
+		}
+
+		// WaitFor(Script): latent, until that script ends.
+		{
+			FBangoCommand Command;
+			Command.Signature = FBangoCommandSignature::Make(TEXT("WaitFor"))
+				.Param(TEXT("Script"), Int, TEXT("The script's id (from Exec or spawn)"))
+				.InCategory(TEXT("Flow Control"))
+				.Describe(TEXT("Waits until the script with this id (from Exec or spawn) has ended, for any reason. Carries on at once if it already has."));
+			Command.Start = [](FBangoCommandCall& Call)
+			{
+				if (!RequireArgs(Call, 1))
+				{
+					return EBangoCommandResult::Failed;
+				}
+				UBangoScriptSubsystem* Subsystem = UBangoScriptSubsystem::Get(Call.WorldContext);
+				if (!Subsystem)
+				{
+					return Call.Fail(TEXT("WaitFor needs a game world, with its running scripts."));
+				}
+				FBangoScriptHandle Handle;
+				Handle.Id = Call.Args[0].GetInt();
+				if (Handle.Id == (int32)Call.InstanceId)
+				{
+					return Call.Fail(TEXT("A script can't wait for itself to end: it would wait forever."));
+				}
+				if (!Subsystem->IsRunning(Handle))
+				{
+					return EBangoCommandResult::Done;
+				}
+				Call.LatentState.Add(FBangoValue::MakeInt(Handle.Id));
+				return EBangoCommandResult::Pending;
+			};
+			Command.Poll = [](FBangoCommandCall& Call)
+			{
+				UBangoScriptSubsystem* Subsystem = UBangoScriptSubsystem::Get(Call.WorldContext);
+				FBangoScriptHandle Handle;
+				Handle.Id = Call.LatentState.Num() > 0 ? Call.LatentState[0].GetInt() : 0;
+				return Subsystem && Subsystem->IsRunning(Handle) ? EBangoCommandResult::Pending : EBangoCommandResult::Done;
 			};
 			Add(Commands, Command);
 		}

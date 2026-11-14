@@ -58,6 +58,7 @@ enum class EBangoOp : uint8
 	ArrayCount,         // array -> int
 	ArrayModify,        // A = place, B = EBangoArrayModify, C = 1 if the result is used.  indexes..., args... -> [result]
 	ForEachNext,        // A = slot holding the array copy (A + 1 holds the int position), B = loop variable slot, C = target when done
+	SpawnBlock,         // A = target: starts another instance at A with a copy of this frame's slots (a spawn block); this one carries on. B = 1: push the new instance's id
 
 	Count               // not an op
 };

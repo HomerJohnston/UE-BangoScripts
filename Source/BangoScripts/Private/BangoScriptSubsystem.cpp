@@ -16,7 +16,7 @@
 namespace BangoScriptSubsystemPrivate
 {
 	constexpr int32 SaveMagic = 0x4F474E42; // "BNGO"
-	constexpr int32 SaveVersion = 4; // 2: ints are 32-bit; 3: scripts spawned from text are saved with their text; 4: script ids are 32-bit
+	constexpr int32 SaveVersion = 5; // 2: ints are 32-bit; 3: scripts spawned from text are saved with their text; 4: script ids are 32-bit; 5: which script started each one
 
 	class FWorldEntityResolver : public IBangoEntityResolver
 	{
@@ -81,7 +81,141 @@ bool UBangoScriptSubsystem::MakeContext(float DeltaSeconds, FBangoExecContext& O
 	OutContext.DeltaSeconds = DeltaSeconds;
 	OutContext.MaxInstructionsPerResume = Settings->MaxInstructionsPerFrame;
 	OutContext.MaxCallDepth = Settings->MaxCallDepth;
+	OutContext.SpawnBlock = [this](const FBangoInstance& Parent, int32 BlockIP, int64& OutId, FString& OutError)
+	{
+		return StartSpawnBlock(Parent, BlockIP, OutId, OutError);
+	};
 	return true;
+}
+
+bool UBangoScriptSubsystem::StartSpawnBlock(const FBangoInstance& Parent, int32 BlockIP, int64& OutId, FString& OutError)
+{
+	if (StartDepth >= MaxStartDepth)
+	{
+		OutError = FString::Printf(TEXT("%d scripts are already being started inside each other (each by the one before, before it paused). Is a spawn block spawning itself?"), MaxStartDepth);
+		return false;
+	}
+	// A copy of the script it's in: the same path (so Exec finds files relative to it, and saving and hot reload find
+	// its script), or the same text for a script spawned from text.
+	TSharedPtr<FRunningScript> Script = MakeShared<FRunningScript>();
+	if (const TSharedPtr<FRunningScript>* ParentScript = Scripts.Find(Parent.GetId()))
+	{
+		Script->Path = (*ParentScript)->Path;
+		Script->bFromSource = (*ParentScript)->bFromSource;
+		Script->Source = (*ParentScript)->Source;
+	}
+	else
+	{
+		Script->Path = Parent.GetProgram().IsValid() ? Parent.GetProgram()->FileName : FString();
+		Script->bFromSource = true; // not one of this subsystem's scripts (a condition's run): nothing to reload it from
+	}
+	Script->ParentId = (int32)Parent.GetId();
+
+#if WITH_EDITOR
+	Script->Instance.SetRecordTrail(true); // for the editor's debugger
+#endif
+	const int32 Id = AllocateId();
+	FBangoRuntimeError StartError;
+	if (!Script->Instance.StartSpawned(Parent, BlockIP, Id, StartError))
+	{
+		OutError = StartError.Message;
+		return false;
+	}
+	OutId = Id;
+	Scripts.Add(Id, Script);
+	++StartDepth;
+	const bool bStillRunning = ResumeScript(*Script, 0.0f);
+	--StartDepth;
+	if (!bStillRunning)
+	{
+		RemoveScript(Id);
+		PruneEndedParents();
+	}
+	return true;
+}
+
+FBangoScriptHandle UBangoScriptSubsystem::SpawnChild(int64 ParentId, const FString& ScriptPath, const TArray<FBangoValue>& Args, FString& OutError)
+{
+	PendingParentId = (int32)ParentId;
+	const FBangoScriptHandle Handle = Spawn(ScriptPath, Args, OutError);
+	PendingParentId = 0; // if it never got as far as StartScript
+	return Handle;
+}
+
+int32 UBangoScriptSubsystem::GetParentId(int32 Id) const
+{
+	if (const TSharedPtr<FRunningScript>* Script = Scripts.Find(Id))
+	{
+		return (*Script)->ParentId;
+	}
+	const int32* Parent = EndedParents.Find(Id);
+	return Parent ? *Parent : 0;
+}
+
+bool UBangoScriptSubsystem::IsDescendant(int32 Id, int32 Ancestor) const
+{
+	int32 Parent = GetParentId(Id);
+	for (int32 Steps = 0; Parent != 0 && Steps < 100000; ++Steps) // the limit only guards against a loop in damaged save data
+	{
+		if (Parent == Ancestor)
+		{
+			return true;
+		}
+		Parent = GetParentId(Parent);
+	}
+	return false;
+}
+
+void UBangoScriptSubsystem::RemoveScript(int64 Id)
+{
+	if (const TSharedPtr<FRunningScript>* Script = Scripts.Find(Id))
+	{
+		EndedParents.Add((int32)Id, (*Script)->ParentId);
+		Scripts.Remove(Id);
+	}
+}
+
+void UBangoScriptSubsystem::PruneEndedParents()
+{
+	if (Scripts.Num() == 0)
+	{
+		EndedParents.Reset();
+		return;
+	}
+	// Keep the ended scripts that running ones descend from: they link those to their ancestors.
+	TSet<int32> Needed;
+	for (const TPair<int64, TSharedPtr<FRunningScript>>& Pair : Scripts)
+	{
+		int32 Parent = Pair.Value->ParentId;
+		for (int32 Steps = 0; Parent != 0 && Steps < 100000; ++Steps)
+		{
+			if (const TSharedPtr<FRunningScript>* Running = Scripts.Find(Parent))
+			{
+				Parent = (*Running)->ParentId;
+			}
+			else if (const int32* Up = EndedParents.Find(Parent))
+			{
+				bool bAlreadyIn = false;
+				Needed.Add(Parent, &bAlreadyIn);
+				if (bAlreadyIn)
+				{
+					break; // the rest of the way up is already kept
+				}
+				Parent = *Up;
+			}
+			else
+			{
+				break;
+			}
+		}
+	}
+	for (auto It = EndedParents.CreateIterator(); It; ++It)
+	{
+		if (!Needed.Contains(It.Key()))
+		{
+			It.RemoveCurrent();
+		}
+	}
 }
 
 void UBangoScriptSubsystem::GetDebugInfo(TArray<FBangoScriptDebugInfo>& OutScripts) const
@@ -281,7 +415,7 @@ int32 UBangoScriptSubsystem::AllocateId()
 			NextId = 1;
 		}
 		const int32 Id = NextId++;
-		if (!Scripts.Contains(Id))
+		if (!Scripts.Contains(Id) && !EndedParents.Contains(Id))
 		{
 			return Id;
 		}
@@ -364,6 +498,8 @@ FBangoScriptHandle UBangoScriptSubsystem::StartScript(const TSharedPtr<const FBa
 		return FBangoScriptHandle();
 	}
 
+	Script->ParentId = PendingParentId; // SpawnChild's (taken now, so the scripts this one starts don't get it too)
+	PendingParentId = 0;
 #if WITH_EDITOR
 	Script->Instance.SetRecordTrail(true); // for the editor's debugger
 #endif
@@ -381,7 +517,8 @@ FBangoScriptHandle UBangoScriptSubsystem::StartScript(const TSharedPtr<const FBa
 	--StartDepth;
 	if (!bStillRunning)
 	{
-		Scripts.Remove(Id);
+		RemoveScript(Id);
+		PruneEndedParents();
 	}
 
 	FBangoScriptHandle Handle;
@@ -460,12 +597,23 @@ bool UBangoScriptSubsystem::RunCondition(const TSharedPtr<const FBangoProgram>& 
 	return true;
 }
 
-void UBangoScriptSubsystem::Terminate(FBangoScriptHandle Handle)
+void UBangoScriptSubsystem::Terminate(FBangoScriptHandle Handle, bool bAndChildren)
 {
+	// Each is removed at the end of the next tick, so a script can safely terminate itself (or the script that started
+	// it, which may be running a command that started this one) from inside a command.
+	if (bAndChildren && Handle.Id != 0)
+	{
+		for (TPair<int64, TSharedPtr<FRunningScript>>& Pair : Scripts)
+		{
+			if (Pair.Value->Instance.IsRunning() && IsDescendant((int32)Pair.Key, Handle.Id))
+			{
+				Pair.Value->Instance.Terminate();
+			}
+		}
+	}
 	if (const TSharedPtr<FRunningScript>* Script = Scripts.Find(Handle.Id))
 	{
 		(*Script)->Instance.Terminate();
-		// Removed at the end of the next tick, so a script can safely terminate itself from a command.
 	}
 }
 
@@ -482,6 +630,7 @@ void UBangoScriptSubsystem::TerminateAll()
 		Pair.Value->Instance.Terminate();
 	}
 	Scripts.Reset();
+	EndedParents.Reset();
 }
 
 void UBangoScriptSubsystem::Tick(float DeltaTime)
@@ -513,13 +662,19 @@ void UBangoScriptSubsystem::Tick(float DeltaTime)
 		}
 	}
 
+	bool bRemoved = false;
 	for (const int64 Id : Ids)
 	{
 		const TSharedPtr<FRunningScript>* Script = Scripts.Find(Id);
 		if (Script && !(*Script)->Instance.IsRunning())
 		{
-			Scripts.Remove(Id);
+			RemoveScript(Id);
+			bRemoved = true;
 		}
+	}
+	if (bRemoved)
+	{
+		PruneEndedParents();
 	}
 }
 
@@ -570,6 +725,7 @@ bool UBangoScriptSubsystem::SaveState(TArray<uint8>& OutData)
 	{
 		FRunningScript& Script = *Scripts.FindRef(Id);
 		Writer << Script.Path;
+		Writer << Script.ParentId;
 		Writer << Script.bFromSource;
 		if (Script.bFromSource)
 		{
@@ -577,6 +733,7 @@ bool UBangoScriptSubsystem::SaveState(TArray<uint8>& OutData)
 		}
 		Script.Instance.Serialize(Writer);
 	}
+	Writer << EndedParents; // links running scripts to the ended ones that started them
 	return !Writer.IsError();
 }
 
@@ -617,6 +774,7 @@ bool UBangoScriptSubsystem::LoadState(const TArray<uint8>& Data)
 	{
 		TSharedPtr<FRunningScript> Script = MakeShared<FRunningScript>();
 		Reader << Script->Path;
+		Reader << Script->ParentId;
 		Reader << Script->bFromSource;
 		if (Script->bFromSource)
 		{
@@ -645,6 +803,11 @@ bool UBangoScriptSubsystem::LoadState(const TArray<uint8>& Data)
 		}
 	}
 
+	if (!Reader.IsError())
+	{
+		Reader << EndedParents;
+		PruneEndedParents();
+	}
 	if (Reader.IsError())
 	{
 		Bango::ReportError(TEXT("Bango save data is damaged; some scripts may not have been restored."));

@@ -136,9 +136,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
 	static FBangoScriptHandle SpawnBangoScriptAssetWithArgs(UObject* WorldContextObject, const UBangoScriptAsset* Script, const FBangoBlueprintArgs& Args);
 
-	/** Stops a running script. */
+	/**
+	 * Stops a running script. With And Children, also stops the scripts it started (with Exec or spawn) that are still
+	 * running, and the ones those started, and so on.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "Bango", meta = (WorldContext = "WorldContextObject"))
-	static void TerminateBangoScript(UObject* WorldContextObject, FBangoScriptHandle Handle);
+	static void TerminateBangoScript(UObject* WorldContextObject, FBangoScriptHandle Handle, bool bAndChildren = false);
 
 	/** True while the script is running or paused; false once it has ended for any reason. */
 	UFUNCTION(BlueprintPure, Category = "Bango", meta = (WorldContext = "WorldContextObject"))

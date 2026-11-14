@@ -142,7 +142,8 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 		TEXT("Min"), TEXT("Max"), TEXT("Abs"), TEXT("Clamp"), TEXT("Sin"), TEXT("Cos"), TEXT("SinDegrees"), TEXT("CosDegrees"), TEXT("Time"), TEXT("ToEntity"), TEXT("SetPos"), TEXT("GetPos"), TEXT("SetHidden"), TEXT("DistanceTo"), TEXT("IsNull"),
 		TEXT("Ceil"), TEXT("Sign"), TEXT("Sqrt"), TEXT("Pow"), TEXT("Log"), TEXT("Ln"), TEXT("Lerp"), TEXT("MapRange"), TEXT("InterpTo"), TEXT("DeltaTime"),
 		TEXT("Tan"), TEXT("TanDegrees"), TEXT("Asin"), TEXT("AsinDegrees"), TEXT("Acos"), TEXT("AcosDegrees"), TEXT("Atan"), TEXT("AtanDegrees"), TEXT("Atan2"), TEXT("Atan2Degrees"),
-		TEXT("Pi"), TEXT("RandomBool"), TEXT("Chance"), TEXT("IsNearlyEqual"), TEXT("Length"), TEXT("Distance"), TEXT("Normalize"), TEXT("Dot"), TEXT("Cross"), TEXT("LerpVector"), TEXT("Exec") })
+		TEXT("Pi"), TEXT("RandomBool"), TEXT("Chance"), TEXT("IsNearlyEqual"), TEXT("Length"), TEXT("Distance"), TEXT("Normalize"), TEXT("Dot"), TEXT("Cross"), TEXT("LerpVector"), TEXT("Exec"),
+		TEXT("Abort"), TEXT("IsRunning"), TEXT("WaitFor") })
 	{
 		const FBangoCommand* Registered = Commands.FindCommandImpl(Name);
 		TestNotNull(FString::Printf(TEXT("registered: %s"), Name), Registered);
@@ -256,6 +257,11 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 		{ TEXT("float _x;\n_x = MapRange(1, 2, 2, 0, 1);"), TEXT("no range to map from") },
 		{ TEXT("float _t;\n_t = Time();"), TEXT("needs a game world") },
 		{ TEXT("Exec(\"Intro\");"), TEXT("needs a game world") },
+		{ TEXT("Abort();"), TEXT("needs a game world") },
+		{ TEXT("Abort(nil, true);"), TEXT("needs a game world") },
+		{ TEXT("bool _r;\n_r = IsRunning(1);"), TEXT("needs a game world") },
+		{ TEXT("WaitFor(1);"), TEXT("needs a game world") },
+		{ TEXT("spawn\n{\n}"), TEXT("only a script running in a game world can spawn") },
 		{ TEXT("int _x;\n_x = Floor(1e300);"), TEXT("too large to convert") },
 		{ TEXT("int _x;\n_x = Abs(-2147483647 - 1);"), TEXT("has no positive int") },
 		{ TEXT("int _x;\n_x = Clamp(5, 10, 1);"), TEXT("Min (10) is greater than Max (1)") },

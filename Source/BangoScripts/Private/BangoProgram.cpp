@@ -77,6 +77,7 @@ namespace BangoProgramPrivate
 		case EBangoOp::JumpIfFalse:
 		case EBangoOp::JumpIfFalseOrPop:
 		case EBangoOp::JumpIfTrueOrPop:
+		case EBangoOp::SpawnBlock:
 			return FString::Printf(TEXT("-> %d"), I.A);
 		case EBangoOp::CallFunction:
 			return FString::Printf(TEXT("%s %d"), Program.Functions.IsValidIndex(I.A) ? *Program.Functions[I.A].Name : TEXT("<bad function>"), I.B);
@@ -134,6 +135,7 @@ namespace Bango
 		case EBangoOp::ReturnValue:        return TEXT("ReturnValue");
 		case EBangoOp::Halt:               return TEXT("Halt");
 		case EBangoOp::ErrorMissingReturn: return TEXT("ErrorMissingReturn");
+		case EBangoOp::SpawnBlock:         return TEXT("SpawnBlock");
 		case EBangoOp::ArrayCount:         return TEXT("ArrayCount");
 		case EBangoOp::ArrayModify:        return TEXT("ArrayModify");
 		case EBangoOp::ForEachNext:        return TEXT("ForEachNext");

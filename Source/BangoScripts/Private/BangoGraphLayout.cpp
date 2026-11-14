@@ -718,6 +718,7 @@ namespace BangoGraphLayoutPrivate
 					break;
 				case EBangoGraphNodeKind::Sequence:
 				case EBangoGraphNodeKind::Switch:
+				case EBangoGraphNodeKind::Spawn:
 					for (const int32 Output : Node.Branches)
 					{
 						Chain(Output, Scope);
@@ -1085,6 +1086,11 @@ namespace BangoGraphLayoutPrivate
 		case EBangoGraphNodeKind::Continue:
 		case EBangoGraphNodeKind::Sequence: // no text: its outputs are its blocks
 		case EBangoGraphNodeKind::Reroute:
+			return;
+
+		case EBangoGraphNodeKind::Spawn:
+			// Where the copy's id goes, if anywhere (an int variable): `_timer = spawn`.
+			Out.Fields.Add(WholeText(TEXT("Id"), TEXT("int"), Node.Text, true));
 			return;
 
 		default:

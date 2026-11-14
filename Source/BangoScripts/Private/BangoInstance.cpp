@@ -198,6 +198,42 @@ bool FBangoInstance::Start(const TSharedPtr<const FBangoProgram>& InProgram, con
 	return true;
 }
 
+bool FBangoInstance::StartSpawned(const FBangoInstance& Parent, int32 BlockIP, int64 InId, FBangoRuntimeError& OutError)
+{
+	Program = Parent.Program;
+	BoundCommands = Parent.BoundCommands;
+	Id = InId;
+	Error = FBangoRuntimeError();
+	Frames.Reset();
+	Stack.Reset();
+	PendingCommandName = -1;
+	PendingCall = FBangoCommandCall();
+	Status = EBangoInstanceStatus::Failed;
+	if (!Program.IsValid() || Parent.Frames.Num() == 0)
+	{
+		Error.Message = TEXT("Internal error: a spawn block's script isn't running.");
+		OutError = Error;
+		return false;
+	}
+	Error.FileName = Program->FileName;
+	const FBangoFrame& From = Parent.Frames.Last();
+	if (!Program->Functions.IsValidIndex(From.Function) || !Program->Functions[From.Function].Code.IsValidIndex(BlockIP))
+	{
+		Error.Message = TEXT("Internal error: bad spawn block.");
+		OutError = Error;
+		return false;
+	}
+	// Only the frame it's in: what the block does doesn't go back to a caller. Its variables are copies.
+	FBangoFrame Frame;
+	Frame.Function = From.Function;
+	Frame.IP = BlockIP;
+	Frame.StackBase = 0;
+	Frame.Slots = From.Slots;
+	Frames.Add(MoveTemp(Frame));
+	Status = EBangoInstanceStatus::Ready;
+	return true;
+}
+
 bool FBangoInstance::CheckArguments(TConstArrayView<FBangoValue> Args, TArray<FBangoValue>& OutValues)
 {
 	const TArray<FBangoScriptParamInfo>& Params = Program->Params;
@@ -1390,6 +1426,30 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 		case EBangoOp::Jump:
 			Frames.Last().IP = I.A;
 			break;
+
+		case EBangoOp::SpawnBlock:
+		{
+			// The block runs as a new instance (which may run straight away, until it first pauses); this one goes on.
+			if (!Context.SpawnBlock)
+			{
+				return RuntimeFail(TEXT("'spawn' can't start its block here: only a script running in a game world can spawn."));
+			}
+			FString SpawnError;
+			int64 SpawnedId = 0;
+			if (!Context.SpawnBlock(*this, I.A, SpawnedId, SpawnError))
+			{
+				return RuntimeFail(FString::Printf(TEXT("'spawn' couldn't start its block: %s"), *SpawnError));
+			}
+			if (Status != EBangoInstanceStatus::Ready)
+			{
+				return false; // the copy aborted this script while it ran
+			}
+			if (I.B != 0)
+			{
+				Stack.Add(FBangoValue::MakeInt((int32)SpawnedId));
+			}
+			break;
+		}
 
 		case EBangoOp::JumpIfFalse:
 		{

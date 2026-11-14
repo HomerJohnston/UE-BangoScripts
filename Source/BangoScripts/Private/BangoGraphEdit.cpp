@@ -98,6 +98,13 @@ namespace Bango
 		case EBangoGraphNodeKind::Return:  Source = Text.IsEmpty() ? FString(TEXT("return;")) : FString(TEXT("return ")) + Text + TEXT(";"); break;
 		case EBangoGraphNodeKind::Label:   Source = FString(TEXT("label ")) + Text + TEXT(";"); break;
 		case EBangoGraphNodeKind::Goto:    Source = FString(TEXT("goto ")) + Text + TEXT(";"); break;
+		case EBangoGraphNodeKind::Spawn:
+			if (Text.IsEmpty())
+			{
+				return true; // the copy's id isn't kept
+			}
+			Source = Text + TEXT(" = spawn\n{\n};");
+			break;
 		case EBangoGraphNodeKind::Break:
 		case EBangoGraphNodeKind::Continue:
 		case EBangoGraphNodeKind::Sequence:
@@ -1035,6 +1042,10 @@ namespace Bango
 					{
 						CollectLateDecls(SequenceBlock, false, 0, Out);
 					}
+				}
+				else if (const FBangoSpawnStmt* Spawn = Stmt.As<FBangoSpawnStmt>())
+				{
+					CollectLateDecls(Spawn->Body, false, 0, Out);
 				}
 				else if (const FBangoSwitchStmt* Switch = Stmt.As<FBangoSwitchStmt>())
 				{

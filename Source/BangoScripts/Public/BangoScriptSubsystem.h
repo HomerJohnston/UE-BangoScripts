@@ -87,6 +87,12 @@ public:
 	FBangoScriptHandle Spawn(const UBangoScriptAsset* Script, const TArray<FBangoValue>& Args, FString& OutError);
 
 	/**
+	 * Spawn of a script path (reporting errors in OutError) as a child of the running script ParentId: the Exec
+	 * command's. Terminate with bAndChildren stops a script's children, and theirs.
+	 */
+	FBangoScriptHandle SpawnChild(int64 ParentId, const FString& ScriptPath, const TArray<FBangoValue>& Args, FString& OutError);
+
+	/**
 	 * The name of the running script with this id ("/Game/Quests/Intro.bango"), for paths relative to it (Exec).
 	 * Empty if there's none, or it was spawned from text (SpawnFromSource).
 	 */
@@ -123,8 +129,12 @@ public:
 	bool EvaluateBoolCondition(const FString& Source, bool& bOutResult, FString& OutError,
 		const TArray<FBangoValue>& Args = TArray<FBangoValue>(), const FString& Name = TEXT("Condition"));
 
-	/** Stops a script. Does nothing if it has already ended. */
-	void Terminate(FBangoScriptHandle Handle);
+	/**
+	 * Stops a script. Does nothing if it has already ended. With bAndChildren, also stops every script it started
+	 * (with Exec or spawn) that's still running, and every script those started, and so on, even if the ones in between
+	 * (or this one) have already ended. A script may stop itself, or one that started it, from inside a command.
+	 */
+	void Terminate(FBangoScriptHandle Handle, bool bAndChildren = false);
 
 	/** True while the script is running or paused. False once it has finished, failed or been terminated. */
 	bool IsRunning(FBangoScriptHandle Handle) const;
@@ -193,12 +203,34 @@ private:
 		FBangoInstance Instance;
 		/** The newest version it's been asked to switch to (hot reload), so each version is asked for once. */
 		TSharedPtr<const FBangoProgram> ReloadTarget;
+		/** The script that started it (with Exec or spawn), or 0. For Terminate's bAndChildren. */
+		int32 ParentId = 0;
 	};
+
+	/**
+	 * Scripts that have ended, each with the script that started it (or 0), kept while a running script descends from
+	 * them, so Terminate with bAndChildren still finds a script's children's children after its children have ended.
+	 */
+	TMap<int32, int32> EndedParents;
+	/** The parent StartScript gives the script it starts (SpawnChild), or 0. */
+	int32 PendingParentId = 0;
+	/** The script that started this one, whether it's running or has ended (0 if none or unknown). */
+	int32 GetParentId(int32 Id) const;
+	/** True if Ancestor started Id, or started a script that started it, and so on. */
+	bool IsDescendant(int32 Id, int32 Ancestor) const;
+	/** Removes an ended script, keeping its parent in EndedParents (PruneEndedParents drops what's no longer needed). */
+	void RemoveScript(int64 Id);
+	void PruneEndedParents();
 
 	bool MakeContext(float DeltaSeconds, FBangoExecContext& OutContext);
 	/** Starts a compiled script (Spawn and SpawnFromSource). An error starting it goes in OutError if given, else it's shown. */
 	FBangoScriptHandle StartScript(const TSharedPtr<const FBangoProgram>& Program, TSharedPtr<FRunningScript> Script, const TArray<FBangoValue>& Args,
 		FString* OutError = nullptr);
+	/**
+	 * A spawn block (FBangoExecContext::SpawnBlock): starts a copy of Parent's script at the block, as a script of its
+	 * own (the same path, for Exec and the debugger), and runs it until it first pauses, as StartScript does.
+	 */
+	bool StartSpawnBlock(const FBangoInstance& Parent, int32 BlockIP, int64& OutId, FString& OutError);
 	/** The next id for a script (or a condition's run): in order, skipping any still in use if they ever wrap around. */
 	int32 AllocateId();
 	/** Compiles a script's text (SpawnFromSource, and loading one that was saved). */

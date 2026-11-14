@@ -259,6 +259,7 @@ enum class EBangoStmtKind : uint8
 	For,
 	ForEach,
 	Sequence,
+	Spawn,
 	Switch,
 	Break,
 	Continue,
@@ -410,6 +411,21 @@ struct FBangoSequenceStmt : FBangoStmt
 
 	/** At least one. */
 	TArray<FBangoBlock> Blocks;
+};
+
+/**
+ * `spawn { ... }` or `_id = spawn { ... }`: starts its block as a separate running copy of the script, with copies of
+ * the variables as they are now, and carries on straight away (after storing the copy's id in IdTarget, if given). In
+ * the block, return ends the copy; break, continue and goto can't leave it.
+ */
+struct FBangoSpawnStmt : FBangoStmt
+{
+	static constexpr EBangoStmtKind StaticKind = EBangoStmtKind::Spawn;
+	FBangoSpawnStmt() : FBangoStmt(StaticKind) {}
+
+	/** Where the copy's id goes (an int variable, or an element of an int array), or null. */
+	FBangoExprPtr IdTarget;
+	FBangoBlock Body;
 };
 
 /** One `case v1, v2: { ... }` of a switch. The case line is not a node of its own: it is a row on the switch node. */

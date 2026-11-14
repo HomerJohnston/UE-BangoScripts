@@ -459,7 +459,8 @@ FLinearColor UBangoEdGraphNode::GetNodeTitleColor() const
 	case EBangoGraphNodeKind::For:
 	case EBangoGraphNodeKind::ForEach:
 	case EBangoGraphNodeKind::Sequence:
-	case EBangoGraphNodeKind::Switch:   return FLinearColor(0.35f, 0.35f, 0.35f);   // like Blueprint flow control
+	case EBangoGraphNodeKind::Switch:
+	case EBangoGraphNodeKind::Spawn:    return FLinearColor(0.35f, 0.35f, 0.35f);   // like Blueprint flow control
 	case EBangoGraphNodeKind::Label:
 	case EBangoGraphNodeKind::Goto:     return FLinearColor(0.45f, 0.20f, 0.60f);
 	case EBangoGraphNodeKind::Break:

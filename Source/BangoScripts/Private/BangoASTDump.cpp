@@ -212,6 +212,13 @@ namespace BangoDumpPrivate
 			}
 			return Result + TEXT(")");
 		}
+		case EBangoStmtKind::Spawn:
+		{
+			const FBangoSpawnStmt& S = *Stmt.As<FBangoSpawnStmt>();
+			return S.IdTarget
+				? FString::Printf(TEXT("(= %s (spawn %s))"), *Bango::DumpExpr(*S.IdTarget), *DumpBlock(S.Body))
+				: FString::Printf(TEXT("(spawn %s)"), *DumpBlock(S.Body));
+		}
 		case EBangoStmtKind::Switch:
 		{
 			const FBangoSwitchStmt& S = *Stmt.As<FBangoSwitchStmt>();

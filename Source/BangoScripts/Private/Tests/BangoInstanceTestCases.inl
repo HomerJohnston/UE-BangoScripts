@@ -272,15 +272,68 @@ static void BangoRunScript(const TCHAR* Source, FBangoRuntimeTestResult& Out, in
 	Context.Entities = &Entities;
 	Context.DeltaSeconds = 0.5f;
 	Context.MaxInstructionsPerResume = MaxInstructions;
-	while (Instance.IsRunning() && Out.Resumes < 1000)
+	// Spawn blocks: like the script subsystem, each runs straight away until it first pauses, then with the others.
+	TArray<TSharedPtr<FBangoInstance>> Spawned;
+	FString SpawnedError;
+	Context.SpawnBlock = [&Spawned, &Context, &SpawnedError](const FBangoInstance& Parent, int32 BlockIP, int64& OutId, FString& OutError)
+	{
+		if (Spawned.Num() >= 100)
+		{
+			OutError = TEXT("too many spawned copies");
+			return false;
+		}
+		TSharedPtr<FBangoInstance> Child = MakeShared<FBangoInstance>();
+		FBangoRuntimeError StartError;
+		if (!Child->StartSpawned(Parent, BlockIP, 100 + Spawned.Num(), StartError))
+		{
+			OutError = StartError.Message;
+			return false;
+		}
+		Spawned.Add(Child);
+		OutId = Child->GetId();
+		Child->Resume(Context);
+		if (Child->GetStatus() == EBangoInstanceStatus::Failed && SpawnedError.IsEmpty())
+		{
+			SpawnedError = Child->GetError().ToString();
+		}
+		return true;
+	};
+	const auto AnyRunning = [&Instance, &Spawned]()
+	{
+		bool bRunning = Instance.IsRunning();
+		for (const TSharedPtr<FBangoInstance>& Child : Spawned)
+		{
+			bRunning |= Child->IsRunning();
+		}
+		return bRunning;
+	};
+	while (AnyRunning() && Out.Resumes < 1000)
 	{
 		Instance.Resume(Context);
+		for (int32 i = 0; i < Spawned.Num(); ++i)
+		{
+			const TSharedPtr<FBangoInstance> Child = Spawned[i];
+			if (Child->IsRunning())
+			{
+				Child->Resume(Context);
+				if (Child->GetStatus() == EBangoInstanceStatus::Failed && SpawnedError.IsEmpty())
+				{
+					SpawnedError = Child->GetError().ToString();
+				}
+			}
+		}
 		++Out.Resumes;
 	}
 	Out.Status = Instance.GetStatus();
 	if (Out.Status == EBangoInstanceStatus::Failed)
 	{
 		Out.Error = Instance.GetError().ToString();
+	}
+	else if (!SpawnedError.IsEmpty())
+	{
+		// A spawned copy's error counts as the test's.
+		Out.Status = EBangoInstanceStatus::Failed;
+		Out.Error = SpawnedError;
 	}
 }
 
@@ -334,6 +387,13 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 	{ TEXT("while, break, continue"), TEXT("int _i = 0;\nwhile (true)\n{\n\t_i++;\n\tif (_i == 2)\n\t{\n\t\tcontinue;\n\t};\n\tif (_i > 4)\n\t{\n\t\tbreak;\n\t};\n\tHint(\"{0}\", _i);\n};"), TEXT("1|3|4"), nullptr, nullptr },
 	{ TEXT("sequence: blocks in order, then what follows"), TEXT("sequence\n{\n\tHint(\"a\");\n\tSleep(0);\n\tHint(\"b\");\n}\n{\n}\n{\n\tHint(\"c\");\n}\nHint(\"d\");"), TEXT("a|b|c|d"), nullptr, nullptr },
 	{ TEXT("sequence: break and continue in a loop"), TEXT("int _i = 0;\nwhile (true)\n{\n\t_i++;\n\tsequence\n\t{\n\t\tif (_i == 2)\n\t\t{\n\t\t\tcontinue;\n\t\t}\n\t}\n\t{\n\t\tif (_i > 3)\n\t\t{\n\t\t\tbreak;\n\t\t}\n\t\tHint(\"{0}\", _i);\n\t}\n}"), TEXT("1|3"), nullptr, nullptr },
+	{ TEXT("spawn: runs on its own, the parent goes straight on"), TEXT("Hint(\"a\");\nspawn\n{\n\tHint(\"b\");\n\tSleep(1);\n\tHint(\"d\");\n}\nHint(\"c\");"), TEXT("a|b|c|d"), nullptr, nullptr },
+	{ TEXT("spawn: copies of the variables"), TEXT("int _x = 1;\nspawn\n{\n\tSleep(1);\n\tHint(\"copy {0}\", _x);\n\t_x = 5;\n}\n_x = 2;\nSleep(2);\nHint(\"parent {0}\", _x);"), TEXT("copy 1|parent 2"), nullptr, nullptr },
+	{ TEXT("spawn: in a loop, each with its own copy"), TEXT("for (int _i = 0; _i < 3; _i++)\n{\n\tspawn\n\t{\n\t\tSleep(_i);\n\t\tHint(\"{0}\", _i);\n\t}\n}\nHint(\"loop done\");"), TEXT("loop done|0|1|2"), nullptr, nullptr },
+	{ TEXT("spawn: the copy's id, kept before it runs"), TEXT("int _id = 0;\nint[] _ids = [0, 0];\n_id = spawn\n{\n\tHint(\"copy sees {0}\", _id);\n}\n_ids[1] = spawn\n{\n}\nHint(\"{0} {1}\", _id > 0, _ids[1] > _id);"), TEXT("copy sees 0|true true"), nullptr, nullptr },
+	{ TEXT("spawn: return ends only the copy"), TEXT("spawn\n{\n\tHint(\"in\");\n\treturn;\n\tHint(\"never\");\n}\nHint(\"out\");"), TEXT("in|out"), nullptr, nullptr },
+	{ TEXT("spawn: in a function, the copy doesn't go back to the caller"), TEXT("function void F(int _n)\n{\n\tspawn\n\t{\n\t\tHint(\"spawned {0}\", _n);\n\t}\n\tHint(\"F done\");\n}\nF(7);\nHint(\"main\");"), TEXT("spawned 7|F done|main"), nullptr, nullptr },
+	{ TEXT("spawn: a disabled one"), TEXT("/*\nspawn\n{\n\tHint(\"no\");\n}\n*/\nHint(\"yes\");"), TEXT("yes"), nullptr, nullptr },
 	{ TEXT("switch: int cases, several values, default"), TEXT("for (int _i = 0; _i < 5; _i++)\n{\n\tswitch (_i)\n\t{\n\t\tcase 0:\n\t\t{\n\t\t\tHint(\"zero\");\n\t\t}\n\t\tcase 1, -1, 3:\n\t\t{\n\t\t\tHint(\"odd {0}\", _i);\n\t\t}\n\t\tdefault:\n\t\t{\n\t\t\tHint(\"other {0}\", _i);\n\t\t}\n\t}\n}\nHint(\"end\");"), TEXT("zero|odd 1|other 2|odd 3|other 4|end"), nullptr, nullptr },
 	{ TEXT("switch: strings, no default, no match"), TEXT("string _s = \"b\";\nswitch (_s)\n{\n\tcase \"a\":\n\t{\n\t\tHint(\"a\");\n\t}\n\tcase \"B\":\n\t{\n\t\tHint(\"B\");\n\t}\n}\nHint(\"after\");"), TEXT("after"), nullptr, nullptr },
 	{ TEXT("switch: entities, value evaluated once"), TEXT("int _n = 0;\nentity _e = @john;\nswitch (_e)\n{\n\tcase @player:\n\t{\n\t\tHint(\"player\");\n\t}\n\tcase @john:\n\t{\n\t\tHint(\"john\");\n\t\tSleep(0);\n\t\tHint(\"still john\");\n\t}\n}"), TEXT("john|still john"), nullptr, nullptr },

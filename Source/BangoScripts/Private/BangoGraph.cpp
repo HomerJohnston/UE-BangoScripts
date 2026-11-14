@@ -97,6 +97,7 @@ namespace Bango
 		case EBangoGraphNodeKind::ForEach: return 1;
 		case EBangoGraphNodeKind::Sequence: return 2;
 		case EBangoGraphNodeKind::Switch:   return 2; // a new one: one case and Default
+		case EBangoGraphNodeKind::Spawn:    return 1;
 		default:                           return 0;
 		}
 	}
@@ -115,7 +116,8 @@ namespace Bango
 		case EBangoGraphNodeKind::For:
 		case EBangoGraphNodeKind::ForEach:
 		case EBangoGraphNodeKind::Sequence:
-		case EBangoGraphNodeKind::Switch:   return TEXT("Then");
+		case EBangoGraphNodeKind::Switch:
+		case EBangoGraphNodeKind::Spawn:    return TEXT("Then");
 		default:                           return FString();
 		}
 	}
@@ -133,6 +135,10 @@ namespace Bango
 		if (Kind == EBangoGraphNodeKind::Switch)
 		{
 			return FString(TEXT("Case ")) + FString::FromInt(Branch);
+		}
+		if (Kind == EBangoGraphNodeKind::Spawn)
+		{
+			return Branch == 0 ? TEXT("Run") : TEXT("");
 		}
 		return GetGraphNodeBranchCount(Kind) > Branch ? TEXT("Do") : TEXT("");
 	}
@@ -164,6 +170,7 @@ namespace Bango
 		case EBangoGraphNodeKind::ForEach:  return TEXT("For Each");
 		case EBangoGraphNodeKind::Sequence: return TEXT("Sequence");
 		case EBangoGraphNodeKind::Switch:   return TEXT("Switch");
+		case EBangoGraphNodeKind::Spawn:    return TEXT("Spawn");
 		case EBangoGraphNodeKind::Break:    return TEXT("Break");
 		case EBangoGraphNodeKind::Continue: return TEXT("Continue");
 		case EBangoGraphNodeKind::Return:   return TEXT("Return");
@@ -346,6 +353,7 @@ namespace BangoGraphPrivate
 		case EBangoStmtKind::ForEach:  return EBangoGraphNodeKind::ForEach;
 		case EBangoStmtKind::Sequence: return EBangoGraphNodeKind::Sequence;
 		case EBangoStmtKind::Switch:   return EBangoGraphNodeKind::Switch;
+		case EBangoStmtKind::Spawn:    return EBangoGraphNodeKind::Spawn;
 		case EBangoStmtKind::Break:    return EBangoGraphNodeKind::Break;
 		case EBangoStmtKind::Continue: return EBangoGraphNodeKind::Continue;
 		case EBangoStmtKind::Return:   return EBangoGraphNodeKind::Return;
@@ -722,6 +730,11 @@ namespace BangoGraphPrivate
 					Outputs.Add(BuildChain(Graph, Block, 0, Targets));
 				}
 				GraphAt(Graph).Nodes[Index].Branches = MoveTemp(Outputs);
+			}
+			else if (const FBangoSpawnStmt* Spawn = Stmt.As<FBangoSpawnStmt>())
+			{
+				const int32 Body = BuildChain(Graph, Spawn->Body, 0, Targets);
+				GraphAt(Graph).Nodes[Index].Branches[0] = Body;
 			}
 			else if (const FBangoSwitchStmt* Switch = Stmt.As<FBangoSwitchStmt>())
 			{
