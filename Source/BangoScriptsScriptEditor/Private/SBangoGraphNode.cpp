@@ -21,6 +21,7 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
+#include "Widgets/Input/SEditableText.h"
 #include "Widgets/Input/SMenuAnchor.h"
 #include "BangoCommand.h"
 #include "Widgets/Layout/SBorder.h"
@@ -40,8 +41,8 @@ namespace BangoGraphNodeStyle
 	 * Value boxes stay on one line between these widths; longer values end in "..." (hover for the whole value).
 	 * Wrapping made nodes change shape while typing.
 	 */
-	static constexpr float MinValueWidth = 90.0f;
-	static constexpr float MaxValueWidth = 240.0f;
+	static constexpr float MinValueWidth = 40.0f;
+	static constexpr float MaxValueWidth = 280.0f;
 
 	/** Size of the type icon at the start of a row. */
 	static constexpr float IconSize = 12.0f;
@@ -58,6 +59,13 @@ namespace BangoGraphNodeStyle
 	 * line, add N; if below, take N away (or add 16 - N). Changing it changes every node's height a little.
 	 */
 	static constexpr float PinGridOffset = 13.0f;
+
+	/** A switch's case row: as tall as a plain pin's row (the circle and PinRowGap above and below), so pins stay on the grid. */
+	static constexpr float CaseRowHeight = 10.0f + PinRowGap * 2.0f;
+	/** Space above a node's fields (inside the fields area's own top gap of 2). */
+	static constexpr float FieldsTopGap = 9.0f;
+	/** The grid's gap above each value box. */
+	static constexpr float ValueRowGap = 1.0f;
 
 	static const FLinearColor LabelColor(0.75f, 0.75f, 0.75f);
 	static const FLinearColor EmptyColor(0.45f, 0.45f, 0.45f);
@@ -82,6 +90,10 @@ TSharedRef<SWidget> SBangoGraphNode::CreateNodeContentArea()
 	// at the same place on nodes with no input pin (Script Start).
 	const FMargin BodyInset = GetDefault<UGraphEditorSettings>()->GetNonPinNodeBodyPadding();
 	const float HalfPin = SBangoGraphPin::PinSize * 0.5f;
+	// A switch's case boxes are made with their pins (AddPin), which comes after this.
+	CaseEditBoxes.Reset();
+	CaseEditBoxes.SetNum(BangoNode && BangoNode->IsSwitch() ? BangoNode->CaseValues.Num() : 0);
+	EditingCase = INDEX_NONE;
 	// A disabled node: SGraphNode fades the title and the body and adds the Disabled banner; this fades the fields
 	// and the pins to match.
 	return SNew(SBorder)
@@ -130,6 +142,125 @@ TSharedRef<SWidget> SBangoGraphNode::CreateNodeContentArea()
 		];
 }
 
+/**
+ * A sequence's or switch's Add pin button, drawn like a pin: a dark grey ring (an unwired pin's circle) on the node's
+ * edge, with a "+" just inside the node to its left. Clicking it adds an output.
+ */
+class SBangoAddPinButton : public SCompoundWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SBangoAddPinButton) {}
+		SLATE_EVENT(FSimpleDelegate, OnClicked)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs)
+	{
+		OnClicked = InArgs._OnClicked;
+		SetCursor(EMouseCursor::Hand);
+		ChildSlot
+		[
+			SNew(SBox)
+			.WidthOverride(SBangoGraphPin::PinSize)
+			.HeightOverride(SBangoGraphPin::PinSize)
+			[
+				SNew(SImage)
+				.Image(FBangoEditorStyle::GetPinBrush(/*bConnected*/ false)) // a ring, like an unwired pin
+				.ColorAndOpacity_Lambda([this]()
+				{
+					return IsHovered() ? FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f)) : FSlateColor(FLinearColor(0.05f, 0.05f, 0.05f));
+				})
+			]
+		];
+	}
+
+	virtual FReply OnMouseButtonDown(const FGeometry& Geometry, const FPointerEvent& MouseEvent) override
+	{
+		if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton)
+		{
+			return FReply::Unhandled();
+		}
+		return FReply::Handled().CaptureMouse(AsShared()); // so a click doesn't start dragging the node
+	}
+
+	virtual FReply OnMouseButtonUp(const FGeometry& Geometry, const FPointerEvent& MouseEvent) override
+	{
+		if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton || !HasMouseCapture())
+		{
+			return FReply::Unhandled();
+		}
+		if (Geometry.IsUnderLocation(MouseEvent.GetScreenSpacePosition()))
+		{
+			OnClicked.ExecuteIfBound();
+		}
+		return FReply::Handled().ReleaseMouseCapture();
+	}
+
+	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect,
+		FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
+	{
+		const int32 MaxLayer = SCompoundWidget::OnPaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
+		if (!FSlateApplication::IsInitialized())
+		{
+			return MaxLayer;
+		}
+		// The "+" inside the node, just left of the circle, centred on it.
+		static const FText Plus = FText::AsCultureInvariant(TEXT("+"));
+		const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Bold", 11);
+		const auto Measured = FSlateApplication::Get().GetRenderer()->GetFontMeasureService()->Measure(Plus, Font);
+		const FVector2f TextSize((float)Measured.X, (float)Measured.Y);
+		const FVector2f Size = AllottedGeometry.GetLocalSize();
+		FSlateDrawElement::MakeText(OutDrawElements, MaxLayer + 1,
+			AllottedGeometry.ToPaintGeometry(TextSize, FSlateLayoutTransform(FVector2f(-3.0f - TextSize.X, (Size.Y - TextSize.Y) * 0.5f))),
+			Plus, Font, ESlateDrawEffect::None,
+			//InWidgetStyle.GetColorAndOpacityTint() * (IsHovered() ? FLinearColor::White : FLinearColor(0.85f, 0.85f, 0.85f)));
+			InWidgetStyle.GetColorAndOpacityTint() * (IsHovered() ? FLinearColor(0.5f, 0.5f, 0.5f) : FLinearColor(0.05f, 0.05f, 0.05f)));
+		return MaxLayer + 1;
+	}
+
+private:
+	FSimpleDelegate OnClicked;
+};
+
+void SBangoGraphNode::CreateOutputSideAddButton(TSharedPtr<SVerticalBox> OutputBox)
+{
+	using namespace BangoGraphNodeStyle;
+	if (!BangoNode || !(BangoNode->IsSequence() || BangoNode->IsSwitch()) || !OutputBox.IsValid())
+	{
+		return;
+	}
+	// Placed like an output pin: its circle's centre on the node's right edge, one pin row below the last output.
+	const FMargin BodyInset = GetDefault<UGraphEditorSettings>()->GetNonPinNodeBodyPadding();
+	const float HalfPin = SBangoGraphPin::PinSize * 0.5f;
+	const FText Tip = BangoNode->IsSwitch()
+		? LOCTEXT("AddSwitchPinTooltip", "Add pin: adds a case after the others, before Default. Type its value (or values, separated by commas) in its box. (To remove one, right-click its pin.)")
+		: LOCTEXT("AddSequencePinTooltip", "Add pin: adds a scope after the others: another block, run after them and before Then. (To remove one, right-click it.)");
+	OutputBox->AddSlot()
+		.AutoHeight()
+		.HAlign(HAlign_Right)
+		.Padding(0.0f, PinRowGap, BodyInset.Right - HalfPin, PinRowGap)
+		[
+			SNew(SBangoAddPinButton)
+			.ToolTipText(Tip)
+			.OnClicked_Lambda([this]() { OnAddPin(); })
+		];
+}
+
+FReply SBangoGraphNode::OnAddPin()
+{
+	if (BangoNode && BangoNode->IsSequence())
+	{
+		BangoNode->AddSequenceOutput();
+	}
+	else if (BangoNode && BangoNode->IsSwitch())
+	{
+		// The new case's box opens for typing once the node has rebuilt.
+		BangoNode->AddSwitchCase();
+		PendingCaseEdit = BangoNode->CaseValues.Num() - 1;
+		RefreshSoon();
+	}
+	return FReply::Handled();
+}
+
 void SBangoGraphNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 {
 	using namespace BangoGraphNodeStyle;
@@ -147,6 +278,36 @@ void SBangoGraphNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 			];
 		InputPins.Add(PinToAdd);
 	}
+	else if (const int32 Case = BangoNode ? BangoNode->GetCaseOfPin(PinToAdd->GetPinObj()) : INDEX_NONE; Case != INDEX_NONE && CaseEditBoxes.IsValidIndex(Case))
+	{
+		// A switch's case: its values in a box just inside the node, then the pin. The row is exactly as tall as a
+		// plain pin's (PinRowGap above and below the circle), so the pins stay on the grid.
+		RightNodeBox->AddSlot()
+			.AutoHeight()
+			.HAlign(HAlign_Right)
+			.Padding(0.0f, 0.0f, BodyInset.Right - HalfPin, 0.0f)
+			[
+				SNew(SBox)
+				.HeightOverride(CaseRowHeight)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Fill) // the box fills its row: case boxes are 16 high, with no gap between them
+					.Padding(0.0f, 0.0f, 4.0f, 0.0f)
+					[
+						MakeCaseValueBox(Case)
+					]
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					[
+						PinToAdd
+					]
+				]
+			];
+		OutputPins.Add(PinToAdd);
+	}
 	else
 	{
 		RightNodeBox->AddSlot()
@@ -158,6 +319,135 @@ void SBangoGraphNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 			];
 		OutputPins.Add(PinToAdd);
 	}
+}
+
+TSharedRef<SWidget> SBangoGraphNode::MakeCaseValueBox(int32 Case)
+{
+	using namespace BangoGraphNodeStyle;
+	const FString Values = BangoNode->CaseValues.IsValidIndex(Case) ? BangoNode->CaseValues[Case] : FString();
+	const bool bEmpty = Values.IsEmpty();
+	const bool bHasError = BangoNode->ErrorCase == Case;
+	const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Mono", 8);
+
+	TSharedRef<SEditableText> Edit = SNew(SEditableText)
+		.Text(FText::FromString(Values))
+		.Font(Font)
+		.SelectAllTextWhenFocused(true)
+		.RevertTextOnEscape(true)
+		.OnTextCommitted(this, &SBangoGraphNode::OnCaseCommitted, Case)
+		.OnKeyDownHandler(this, &SBangoGraphNode::OnCaseKeyDown, Case);
+	CaseEditBoxes[Case] = Edit;
+
+	const FText Tip = bHasError ? FText::FromString(BangoNode->ErrorMsg)
+		: LOCTEXT("CaseValuesTip", "This case's values: the switch runs this output when its value equals one of them.\nAn int like 3, a string like \"north\" or a Bango ID like @guard; separate several with commas, like 1, 2.\nRight-click the pin to remove the case.");
+	TSharedRef<SBorder> Box = SNew(SBorder)
+		.BorderImage(FAppStyle::GetBrush(bHasError ? "WhiteBrush" : "NoBorder"))
+		.BorderBackgroundColor(FSlateColor(ErrorColor))
+		.Padding(bHasError ? FMargin(1.0f) : FMargin(0.0f))
+		.ToolTipText(Tip)
+		[
+			SNew(SBorder)
+			.BorderImage(FAppStyle::GetBrush("ToolPanel.DarkGroupBorder"))
+			.Padding(FMargin(4.0f, 0.0f, 3.0f, 0.0f))
+			[
+				SNew(SBox)
+				.MinDesiredWidth(28.0f)
+				.MaxDesiredWidth(MaxValueWidth * 0.6f)
+				.VAlign(VAlign_Center)
+				[
+					SNew(SWidgetSwitcher)
+					.WidgetIndex_Lambda([this, Case]() { return EditingCase == Case ? 1 : 0; })
+					+ SWidgetSwitcher::Slot()
+					[
+						SNew(STextBlock)
+						.Text(bEmpty ? LOCTEXT("CaseValueMissing", "value") : FText::FromString(Values))
+						.Font(bEmpty ? FCoreStyle::GetDefaultFontStyle("Italic", 8) : Font)
+						.ColorAndOpacity(bEmpty ? FSlateColor(EmptyColor) : FSlateColor::UseForeground())
+						.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+					]
+					+ SWidgetSwitcher::Slot()
+					[
+						Edit
+					]
+				]
+			]
+		];
+	Box->SetCursor(EMouseCursor::TextEditBeam);
+	Box->SetOnMouseButtonDown(FPointerEventHandler::CreateLambda([this, Case](const FGeometry&, const FPointerEvent& MouseEvent)
+	{
+		if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton)
+		{
+			return FReply::Unhandled();
+		}
+		BeginEditingCase(Case);
+		return FReply::Handled();
+	}));
+	return Box;
+}
+
+void SBangoGraphNode::BeginEditingCase(int32 Case)
+{
+	if (!CaseEditBoxes.IsValidIndex(Case) || !CaseEditBoxes[Case].IsValid())
+	{
+		return;
+	}
+	EditingCase = Case;
+	TWeakPtr<SEditableText> WeakBox = CaseEditBoxes[Case];
+	// As with fields: the box shows on the next frame, so it gets keyboard focus then.
+	RegisterActiveTimer(0.0f, FWidgetActiveTimerDelegate::CreateLambda([WeakBox](double, float)
+	{
+		if (TSharedPtr<SEditableText> Box = WeakBox.Pin())
+		{
+			FSlateApplication::Get().SetKeyboardFocus(Box, EFocusCause::SetDirectly);
+		}
+		return EActiveTimerReturnType::Stop;
+	}));
+}
+
+void SBangoGraphNode::OnCaseCommitted(const FText& NewText, ETextCommit::Type CommitType, int32 Case)
+{
+	if (EditingCase != Case)
+	{
+		return; // not being edited
+	}
+	EditingCase = INDEX_NONE;
+	if (CommitType == ETextCommit::OnCleared || !BangoNode)
+	{
+		PendingCaseEdit = INDEX_NONE;
+		return; // Escape: keep the old values
+	}
+	FString Error;
+	if (!BangoNode->SetCaseValues(Case, NewText.ToString(), Error))
+	{
+		PendingCaseEdit = INDEX_NONE;
+		FNotificationInfo Info(FText::FromString(Error));
+		Info.ExpireDuration = 6.0f;
+		Info.bUseSuccessFailIcons = true;
+		if (TSharedPtr<SNotificationItem> Item = FSlateNotificationManager::Get().AddNotification(Info))
+		{
+			Item->SetCompletionState(SNotificationItem::CS_Fail);
+		}
+	}
+	RefreshSoon();
+}
+
+FReply SBangoGraphNode::OnCaseKeyDown(const FGeometry& Geometry, const FKeyEvent& KeyEvent, int32 Case)
+{
+	const FKey Key = KeyEvent.GetKey();
+	if ((Key != EKeys::Enter && Key != EKeys::Tab) || KeyEvent.IsControlDown() || KeyEvent.IsAltDown() || KeyEvent.IsCommandDown()
+		|| EditingCase != Case || !CaseEditBoxes.IsValidIndex(Case) || !CaseEditBoxes[Case].IsValid())
+	{
+		return FReply::Unhandled();
+	}
+	const int32 Num = CaseEditBoxes.Num();
+	int32 Next = Case + (KeyEvent.IsShiftDown() ? -1 : 1);
+	if (Next < 0 || Next >= Num)
+	{
+		Next = Key == EKeys::Tab ? ((Next % Num) + Num) % Num : INDEX_NONE;
+	}
+	PendingCaseEdit = Next == Case ? INDEX_NONE : Next;
+	OnCaseCommitted(CaseEditBoxes[Case]->GetText(), ETextCommit::OnEnter, Case); // and the node rebuilds on the next frame
+	return FReply::Handled();
 }
 
 TSharedRef<SWidget> SBangoGraphNode::MakeFieldsArea()
@@ -259,9 +549,13 @@ TSharedRef<SWidget> SBangoGraphNode::MakeFieldsArea()
 		}
 	}
 
+	// A switch's Var row starts where its first case row does (that row is PinGridOffset below the top, like the
+	// first pin), so the Var box and the first case box line up.
+	using namespace BangoGraphNodeStyle;
+	const float TopGap = BangoNode->IsSwitch() ? PinGridOffset - 2.0f - ValueRowGap : FieldsTopGap;
 	return SNew(SBox)
 		.MinDesiredWidth(HeadingWidth)
-		.Padding(2, 9, 2, 2)
+		.Padding(2.0f, TopGap, 2.0f, 2.0f)
 		[
 			Grid
 		];
@@ -423,7 +717,11 @@ TSharedRef<SWidget> SBangoGraphNode::MakeFieldValue(int32 FieldIndex)
 			]
 		];
 
-	TSharedRef<SWidget> Content = DisplayBox;
+	// A switch's Var box is as tall as its case boxes, beside it.
+	const TSharedRef<SWidget> ShownBox = BangoNode->IsSwitch()
+		? StaticCastSharedRef<SWidget>(SNew(SBox).HeightOverride(CaseRowHeight)[ DisplayBox ])
+		: StaticCastSharedRef<SWidget>(DisplayBox);
+	TSharedRef<SWidget> Content = ShownBox;
 	if (bEditable)
 	{
 		DisplayBox->SetOnMouseButtonDown(FPointerEventHandler::CreateSP(this, &SBangoGraphNode::OnValueClicked, FieldIndex));
@@ -466,7 +764,7 @@ TSharedRef<SWidget> SBangoGraphNode::MakeFieldValue(int32 FieldIndex)
 			.WidgetIndex_Lambda([this, FieldIndex]() { return EditingField == FieldIndex ? 1 : 0; })
 			+ SWidgetSwitcher::Slot()
 			[
-				DisplayBox
+				ShownBox
 			]
 			+ SWidgetSwitcher::Slot()
 			[
@@ -933,6 +1231,12 @@ void SBangoGraphNode::RefreshSoon()
 		{
 			This->UpdateGraphNode();
 			This->ResumePendingEdit(); // Enter or Tab: on to the next field
+			if (This->PendingCaseEdit != INDEX_NONE)
+			{
+				const int32 Case = This->PendingCaseEdit;
+				This->PendingCaseEdit = INDEX_NONE;
+				This->BeginEditingCase(Case);
+			}
 		}
 		return EActiveTimerReturnType::Stop;
 	}));
@@ -964,6 +1268,7 @@ namespace BangoNodeCompletionPrivate
 		case EBangoCompletionKind::Global:   return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("4FC1FF")));
 		case EBangoCompletionKind::Function: return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("DCDCAA")));
 		case EBangoCompletionKind::Builtin:  return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("C586C0")));
+		case EBangoCompletionKind::Keyword:  return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("569CD6")));
 		default:                             return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("4EC9B0")));
 		}
 	}
@@ -977,6 +1282,7 @@ namespace BangoNodeCompletionPrivate
 		case EBangoCompletionKind::Global:    return TEXT("G");
 		case EBangoCompletionKind::Function:  return TEXT("F");
 		case EBangoCompletionKind::Builtin:   return TEXT("B");
+		case EBangoCompletionKind::Keyword:   return TEXT("K");
 		default:                              return TEXT("C");
 		}
 	}
@@ -1125,6 +1431,7 @@ void SBangoGraphNode::GatherCompletionItems()
 	}
 	TArray<FBangoCompletionItem> Builtins;
 	FBangoCompletion::GetBuiltinItems(Builtins);
+	FBangoCompletion::GetKeywordItems(Builtins, /*bValuesOnly*/ true); // true, false, nil: a field holds an expression
 	for (const FBangoCompletionItem& Item : Builtins)
 	{
 		AddItem(Item);

@@ -94,11 +94,13 @@ namespace Bango
 		case EBangoGraphNodeKind::While:   Source = FString(TEXT("while (")) + Text + TEXT(")\n{\n};"); break;
 		case EBangoGraphNodeKind::For:     Source = FString(TEXT("for (")) + Text + TEXT(")\n{\n};"); break;
 		case EBangoGraphNodeKind::ForEach: Source = FString(TEXT("forEach (")) + Text + TEXT(")\n{\n};"); break;
+		case EBangoGraphNodeKind::Switch:  Source = FString(TEXT("switch (")) + Text + TEXT(")\n{\n};"); break;
 		case EBangoGraphNodeKind::Return:  Source = Text.IsEmpty() ? FString(TEXT("return;")) : FString(TEXT("return ")) + Text + TEXT(";"); break;
 		case EBangoGraphNodeKind::Label:   Source = FString(TEXT("label ")) + Text + TEXT(";"); break;
 		case EBangoGraphNodeKind::Goto:    Source = FString(TEXT("goto ")) + Text + TEXT(";"); break;
 		case EBangoGraphNodeKind::Break:
 		case EBangoGraphNodeKind::Continue:
+		case EBangoGraphNodeKind::Sequence:
 		case EBangoGraphNodeKind::Reroute:
 			if (!Text.IsEmpty())
 			{
@@ -142,6 +144,49 @@ namespace Bango
 			if (Parsed != EBangoStmtKind::Assign && Parsed != EBangoStmtKind::IncDec && Parsed != EBangoStmtKind::Call)
 			{
 				OutError = TEXT("This should be an assignment, ++/-- or a call.");
+				return false;
+			}
+		}
+		return true;
+	}
+
+	bool ValidateCaseValues(const FString& Values, FString& OutError)
+	{
+		using namespace BangoGraphEditPrivate;
+		if (HasLineBreak(Values))
+		{
+			OutError = TEXT("A case's values must be one line.");
+			return false;
+		}
+		if (Values.TrimStartAndEnd().IsEmpty())
+		{
+			OutError = TEXT("A case needs a value, like 1, \"north\" or @guard.");
+			return false;
+		}
+		FBangoScript Script;
+		FBangoCompileError Error;
+		if (!ParseScript(FString(TEXT("switch (_v)\n{\ncase ")) + Values + TEXT(":\n{\n}\n}"), TEXT("node"), Script, Error))
+		{
+			OutError = Error.Message;
+			return false;
+		}
+		const FBangoSwitchStmt* Switch = Script.TopLevel.Num() == 1 ? Script.TopLevel[0]->As<FBangoSwitchStmt>() : nullptr;
+		if (!Switch || Switch->Cases.Num() != 1)
+		{
+			OutError = TEXT("This should be one or more values separated by commas, like 1, 2.");
+			return false;
+		}
+		for (const FBangoExprPtr& Value : Switch->Cases[0].Values)
+		{
+			const FBangoLiteralExpr* Lit = Value->As<FBangoLiteralExpr>();
+			if (const FBangoUnaryExpr* Unary = Value->As<FBangoUnaryExpr>())
+			{
+				const FBangoLiteralExpr* Operand = Unary->Op == EBangoUnaryOp::Negate && Unary->Operand.IsValid() ? Unary->Operand->As<FBangoLiteralExpr>() : nullptr;
+				Lit = Operand && Operand->LiteralKind == EBangoLiteralKind::Int ? Operand : nullptr;
+			}
+			if (!Lit || (Lit->LiteralKind != EBangoLiteralKind::Int && Lit->LiteralKind != EBangoLiteralKind::String && Lit->LiteralKind != EBangoLiteralKind::Entity))
+			{
+				OutError = TEXT("A case value must be a fixed value written out: an int like 3, a string like \"north\" or a Bango ID like @guard.");
 				return false;
 			}
 		}
@@ -333,6 +378,44 @@ namespace Bango
 			++LineEnd;
 		}
 		const FString Line = WrittenText.Mid(LineStart, LineEnd - LineStart);
+		if (Node.Kind == EBangoGraphNodeKind::Switch && Line.TrimStart().StartsWith(TEXT("case "), ESearchCase::CaseSensitive))
+		{
+			// A case line: which case it is, counting the case lines at its indent back up to the switch's '{'.
+			const int32 Indent = Line.Len() - Line.TrimStart().Len();
+			int32 CaseIndex = 0;
+			int32 End = LineStart - 1; // the '\n' before this line
+			while (End > 0)
+			{
+				int32 Start = End;
+				while (Start > 0 && WrittenText[Start - 1] != TEXT('\n'))
+				{
+					--Start;
+				}
+				const FString Above = WrittenText.Mid(Start, End - Start);
+				const FString Trimmed = Above.TrimStart();
+				const int32 AboveIndent = Above.Len() - Trimmed.Len();
+				if (!Trimmed.IsEmpty() && AboveIndent < Indent)
+				{
+					break;
+				}
+				if (AboveIndent == Indent && Trimmed.StartsWith(TEXT("case "), ESearchCase::CaseSensitive))
+				{
+					++CaseIndex;
+				}
+				End = Start - 1;
+			}
+			if (Node.CaseValues.IsValidIndex(CaseIndex))
+			{
+				OutPlace.Case = CaseIndex;
+				const int32 ValuesAt = Indent + 5; // after `case `
+				const int32 Offset = Error.Column - 1 - ValuesAt;
+				if (Offset >= 0 && Offset <= Node.CaseValues[CaseIndex].Len())
+				{
+					OutPlace.Offset = Offset;
+				}
+			}
+			return true;
+		}
 		const int32 TextAt = Line.Find(*Node.Text, ESearchCase::CaseSensitive);
 		if (TextAt != INDEX_NONE)
 		{
@@ -945,6 +1028,21 @@ namespace Bango
 				else if (const FBangoForEachStmt* ForEach = Stmt.As<FBangoForEachStmt>())
 				{
 					CollectLateDecls(ForEach->Body, false, 0, Out);
+				}
+				else if (const FBangoSequenceStmt* Sequence = Stmt.As<FBangoSequenceStmt>())
+				{
+					for (const FBangoBlock& SequenceBlock : Sequence->Blocks)
+					{
+						CollectLateDecls(SequenceBlock, false, 0, Out);
+					}
+				}
+				else if (const FBangoSwitchStmt* Switch = Stmt.As<FBangoSwitchStmt>())
+				{
+					for (const FBangoSwitchCase& Case : Switch->Cases)
+					{
+						CollectLateDecls(Case.Body, false, 0, Out);
+					}
+					CollectLateDecls(Switch->Default, false, 0, Out);
 				}
 			}
 		}

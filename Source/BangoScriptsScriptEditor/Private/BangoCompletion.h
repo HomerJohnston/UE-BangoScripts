@@ -17,6 +17,8 @@ enum class EBangoCompletionKind : uint8
 	Function,
 	Command,
 	Builtin,
+	/** A keyword or type name, like `while`, `switch`, `int` or `nil`. */
+	Keyword,
 };
 
 /** One entry in the autocomplete list. */
@@ -49,8 +51,14 @@ public:
 	static void GetBuiltinItems(TArray<FBangoCompletionItem>& OutItems);
 
 	/**
+	 * The language's keywords and type names, as items (Detail says what kind of word it is). With bValuesOnly, just
+	 * the ones that can be part of an expression (true, false, nil), for a node's fields.
+	 */
+	static void GetKeywordItems(TArray<FBangoCompletionItem>& OutItems, bool bValuesOnly = false);
+
+	/**
 	 * Everything a line can use: its graph's parameters and locals, the file's globals and functions, then the given
-	 * commands and the built-ins. Sorted by name (ignoring case); a name appears once.
+	 * commands, the built-ins and the keywords. Sorted by name (ignoring case); a name appears once.
 	 */
 	static void GatherItems(const FBangoScriptNames& Names, int32 LineIndex, const TArray<FBangoCompletionItem>& CommandItems,
 		TArray<FBangoCompletionItem>& OutItems);

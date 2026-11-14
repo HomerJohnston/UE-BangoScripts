@@ -258,6 +258,8 @@ enum class EBangoStmtKind : uint8
 	While,
 	For,
 	ForEach,
+	Sequence,
+	Switch,
 	Break,
 	Continue,
 	Return,
@@ -394,6 +396,50 @@ struct FBangoForEachStmt : FBangoStmt
 	FString VarName;
 	FBangoExprPtr Array;
 	FBangoBlock Body;
+};
+
+/**
+ * `sequence { ... } { ... }`: runs its blocks in order, each to the end (sleeps and all) before the next starts;
+ * then what follows. Only groups statements: it makes no scope, and break, continue, return and goto work in its
+ * blocks as they do outside them.
+ */
+struct FBangoSequenceStmt : FBangoStmt
+{
+	static constexpr EBangoStmtKind StaticKind = EBangoStmtKind::Sequence;
+	FBangoSequenceStmt() : FBangoStmt(StaticKind) {}
+
+	/** At least one. */
+	TArray<FBangoBlock> Blocks;
+};
+
+/** One `case v1, v2: { ... }` of a switch. The case line is not a node of its own: it is a row on the switch node. */
+struct FBangoSwitchCase
+{
+	/** At least one; each a fixed value (a literal) of the switch value's type. */
+	TArray<FBangoExprPtr> Values;
+	FBangoSourceLocation Loc;
+	/** The values' text as columns [ValuesBegin, ValuesEnd) on Loc.Line: the row's editable text. */
+	int32 ValuesBegin = 0;
+	int32 ValuesEnd = 0;
+	FBangoBlock Body;
+};
+
+/**
+ * `switch (value) { case 1: { ... } case 2, 3: { ... } default: { ... } }`: evaluates the value once and runs the
+ * first case that has an equal value, else the default (if any); then what follows. There is no fallthrough. The
+ * value is an int, a string or an entity. Like sequence, it isn't a loop: break and continue inside it act on the
+ * loop around it.
+ */
+struct FBangoSwitchStmt : FBangoStmt
+{
+	static constexpr EBangoStmtKind StaticKind = EBangoStmtKind::Switch;
+	FBangoSwitchStmt() : FBangoStmt(StaticKind) {}
+
+	FBangoExprPtr Value;
+	TArray<FBangoSwitchCase> Cases;
+	bool bHasDefault = false;
+	FBangoSourceLocation DefaultLoc;
+	FBangoBlock Default;
 };
 
 struct FBangoBreakStmt : FBangoStmt

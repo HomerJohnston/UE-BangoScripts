@@ -12,7 +12,18 @@ bool FBangoGraphNode::operator==(const FBangoGraphNode& Other) const
 {
 	return Kind == Other.Kind && NodeID == Other.NodeID && X == Other.X && Y == Other.Y
 		&& Text.Equals(Other.Text, ESearchCase::CaseSensitive) && Comment.Equals(Other.Comment, ESearchCase::CaseSensitive) && Next == Other.Next
-		&& Branches[0] == Other.Branches[0] && Branches[1] == Other.Branches[1] && bDisabled == Other.bDisabled;
+		&& Branches == Other.Branches && bDisabled == Other.bDisabled && CaseValues.Num() == Other.CaseValues.Num()
+		&& [&]()
+		{
+			for (int32 i = 0; i < CaseValues.Num(); ++i)
+			{
+				if (!CaseValues[i].Equals(Other.CaseValues[i], ESearchCase::CaseSensitive))
+				{
+					return false;
+				}
+			}
+			return true;
+		}();
 }
 
 bool FBangoGraphDecl::operator==(const FBangoGraphDecl& Other) const
@@ -84,8 +95,15 @@ namespace Bango
 		case EBangoGraphNodeKind::While:
 		case EBangoGraphNodeKind::For:
 		case EBangoGraphNodeKind::ForEach: return 1;
+		case EBangoGraphNodeKind::Sequence: return 2;
+		case EBangoGraphNodeKind::Switch:   return 2; // a new one: one case and Default
 		default:                           return 0;
 		}
+	}
+
+	int32 GetGraphNodeBranchCount(const FBangoGraphNode& Node)
+	{
+		return Node.Kind == EBangoGraphNodeKind::Sequence || Node.Kind == EBangoGraphNodeKind::Switch ? Node.Branches.Num() : GetGraphNodeBranchCount(Node.Kind);
 	}
 
 	FString GetGraphNodeNextName(EBangoGraphNodeKind Kind)
@@ -95,7 +113,9 @@ namespace Bango
 		case EBangoGraphNodeKind::If:
 		case EBangoGraphNodeKind::While:
 		case EBangoGraphNodeKind::For:
-		case EBangoGraphNodeKind::ForEach: return TEXT("Then");
+		case EBangoGraphNodeKind::ForEach:
+		case EBangoGraphNodeKind::Sequence:
+		case EBangoGraphNodeKind::Switch:   return TEXT("Then");
 		default:                           return FString();
 		}
 	}
@@ -106,7 +126,28 @@ namespace Bango
 		{
 			return Branch == 0 ? TEXT("Do") : TEXT("Else");
 		}
+		if (Kind == EBangoGraphNodeKind::Sequence)
+		{
+			return FString(TEXT("Scope ")) + FString::FromInt(Branch);
+		}
+		if (Kind == EBangoGraphNodeKind::Switch)
+		{
+			return FString(TEXT("Case ")) + FString::FromInt(Branch);
+		}
 		return GetGraphNodeBranchCount(Kind) > Branch ? TEXT("Do") : TEXT("");
+	}
+
+	FString GetGraphNodeBranchName(const FBangoGraphNode& Node, int32 Branch)
+	{
+		if (Node.Kind == EBangoGraphNodeKind::Switch)
+		{
+			if (Branch == Node.Branches.Num() - 1)
+			{
+				return TEXT("Default");
+			}
+			return Node.CaseValues.IsValidIndex(Branch) && !Node.CaseValues[Branch].IsEmpty() ? Node.CaseValues[Branch] : GetGraphNodeBranchName(Node.Kind, Branch);
+		}
+		return GetGraphNodeBranchName(Node.Kind, Branch);
 	}
 
 	FString GetGraphNodeKindName(EBangoGraphNodeKind Kind)
@@ -121,6 +162,8 @@ namespace Bango
 		case EBangoGraphNodeKind::While:    return TEXT("While");
 		case EBangoGraphNodeKind::For:      return TEXT("For");
 		case EBangoGraphNodeKind::ForEach:  return TEXT("For Each");
+		case EBangoGraphNodeKind::Sequence: return TEXT("Sequence");
+		case EBangoGraphNodeKind::Switch:   return TEXT("Switch");
 		case EBangoGraphNodeKind::Break:    return TEXT("Break");
 		case EBangoGraphNodeKind::Continue: return TEXT("Continue");
 		case EBangoGraphNodeKind::Return:   return TEXT("Return");
@@ -146,7 +189,7 @@ namespace BangoGraphOrderPrivate
 		{
 			Visited[i] = true;
 			Callback(Graph.Nodes[i]);
-			for (int32 Branch = 0; Branch < Bango::GetGraphNodeBranchCount(Graph.Nodes[i].Kind); ++Branch)
+			for (int32 Branch = 0; Branch < Bango::GetGraphNodeBranchCount(Graph.Nodes[i]); ++Branch)
 			{
 				VisitChain(Graph, Graph.Nodes[i].Branches[Branch], Visited, Callback);
 			}
@@ -166,7 +209,8 @@ namespace BangoGraphOrderPrivate
 		HasIncoming.Init(false, Graph.Nodes.Num());
 		for (const FBangoGraphNode& Node : Graph.Nodes)
 		{
-			const int32 Links[3] = { Node.Next, Node.Branches[0], Node.Branches[1] };
+			TArray<int32> Links = Node.Branches;
+			Links.Add(Node.Next);
 			for (int32 Link : Links)
 			{
 				if (Graph.Nodes.IsValidIndex(Link))
@@ -300,6 +344,8 @@ namespace BangoGraphPrivate
 		case EBangoStmtKind::While:    return EBangoGraphNodeKind::While;
 		case EBangoStmtKind::For:      return EBangoGraphNodeKind::For;
 		case EBangoStmtKind::ForEach:  return EBangoGraphNodeKind::ForEach;
+		case EBangoStmtKind::Sequence: return EBangoGraphNodeKind::Sequence;
+		case EBangoStmtKind::Switch:   return EBangoGraphNodeKind::Switch;
 		case EBangoStmtKind::Break:    return EBangoGraphNodeKind::Break;
 		case EBangoStmtKind::Continue: return EBangoGraphNodeKind::Continue;
 		case EBangoStmtKind::Return:   return EBangoGraphNodeKind::Return;
@@ -668,6 +714,30 @@ namespace BangoGraphPrivate
 				const int32 Body = BuildChain(Graph, ForEach->Body, 0, Targets);
 				GraphAt(Graph).Nodes[Index].Branches[0] = Body;
 			}
+			else if (const FBangoSequenceStmt* Sequence = Stmt.As<FBangoSequenceStmt>())
+			{
+				TArray<int32> Outputs;
+				for (const FBangoBlock& Block : Sequence->Blocks)
+				{
+					Outputs.Add(BuildChain(Graph, Block, 0, Targets));
+				}
+				GraphAt(Graph).Nodes[Index].Branches = MoveTemp(Outputs);
+			}
+			else if (const FBangoSwitchStmt* Switch = Stmt.As<FBangoSwitchStmt>())
+			{
+				TArray<int32> Outputs;
+				TArray<FString> Values;
+				for (const FBangoSwitchCase& Case : Switch->Cases)
+				{
+					const int32 LineIndex = Case.Loc.Line - 1;
+					Values.Add(Lines.IsValidIndex(LineIndex) && Case.ValuesEnd > Case.ValuesBegin
+						? Lines[LineIndex].Mid(Case.ValuesBegin - 1, Case.ValuesEnd - Case.ValuesBegin) : FString());
+					Outputs.Add(BuildChain(Graph, Case.Body, 0, Targets));
+				}
+				Outputs.Add(Switch->bHasDefault ? BuildChain(Graph, Switch->Default, 0, Targets) : INDEX_NONE);
+				GraphAt(Graph).Nodes[Index].Branches = MoveTemp(Outputs);
+				GraphAt(Graph).Nodes[Index].CaseValues = MoveTemp(Values);
+			}
 			return Index;
 		}
 
@@ -904,7 +974,7 @@ namespace BangoGraphPrivate
 				}
 				LowestY = Node.Y > LowestY ? Node.Y : LowestY;
 
-				const int32 Count = Bango::GetGraphNodeBranchCount(Node.Kind);
+				const int32 Count = Bango::GetGraphNodeBranchCount(Node);
 				for (int32 Branch = -1; Branch < Count; ++Branch)
 				{
 					const int32 To = Branch < 0 ? Node.Next : Node.Branches[Branch];

@@ -17,7 +17,7 @@ enum class EBangoSyntaxKind : uint8
 	Default,
 
 	// Text layer
-	Keyword,            // if else while for forEach in
+	Keyword,            // if else while for forEach in sequence
 	JumpKeyword,        // return break continue
 	LabelKeyword,       // label goto
 	LabelName,          // the name after label / goto

@@ -912,12 +912,18 @@ namespace BangoParserPrivate
 			case EBangoTokenKind::KwWhile:   return ParseWhile();
 			case EBangoTokenKind::KwFor:     return ParseFor();
 			case EBangoTokenKind::KwForEach: return ParseForEach();
+			case EBangoTokenKind::KwSequence: return ParseSequence();
+			case EBangoTokenKind::KwSwitch:  return ParseSwitch();
+			case EBangoTokenKind::KwCase:
+			case EBangoTokenKind::KwDefault:
+				Fail(First.Loc, FString::Printf(TEXT("'%s' can only be used directly inside the braces of a switch."), *First.Text));
+				return nullptr;
 
 			case EBangoTokenKind::KwElse:
 				Fail(First.Loc, TEXT("'else' must come straight after the '}' of an if block, with no ';' in between."));
 				return nullptr;
 			case EBangoTokenKind::LBrace:
-				Fail(First.Loc, TEXT("A '{' block must belong to an if, else, while, for, forEach or function."));
+				Fail(First.Loc, TEXT("A '{' block must belong to an if, else, while, for, forEach, sequence, switch case or function. (To group statements, put them in a sequence: sequence { ... })"));
 				return nullptr;
 			case EBangoTokenKind::RBrace:
 				Fail(First.Loc, TEXT("Unexpected '}' with no matching '{'."));
@@ -1305,6 +1311,165 @@ namespace BangoParserPrivate
 			}
 
 			if (bOutermost && !ExpectBlockTerminator())
+			{
+				return nullptr;
+			}
+			return MoveTemp(Stmt);
+		}
+
+		/** `sequence` then one or more blocks, each `{` on the line after the last one's `}`. */
+		FBangoStmtPtr ParseSequence()
+		{
+			const FBangoToken& Keyword = Advance();
+			TUniquePtr<FBangoSequenceStmt> Stmt = MakeUnique<FBangoSequenceStmt>();
+			Stmt->Loc = Keyword.Loc;
+			if (!RegisterNode(*Stmt, Keyword.Loc.Line))
+			{
+				return nullptr;
+			}
+			Stmt->Node.TextBegin = Stmt->Node.TextEnd = Keyword.EndColumn; // no text: its blocks are its outputs
+			if (!Check(EBangoTokenKind::LBrace))
+			{
+				Fail(Cur().Loc, FString::Printf(TEXT("Expected '{' after 'sequence', but found %s. A sequence is one or more blocks: sequence { ... } { ... }"), *Bango::DescribeToken(Cur())));
+				return nullptr;
+			}
+			while (Check(EBangoTokenKind::LBrace))
+			{
+				if (!ParseBlock(Stmt->Blocks.AddDefaulted_GetRef()))
+				{
+					return nullptr;
+				}
+			}
+			if (!ExpectBlockTerminator())
+			{
+				return nullptr;
+			}
+			return MoveTemp(Stmt);
+		}
+
+		/**
+		 * The lines between `switch (...) {` and its `}` are not nodes: metadata (//@) there would be lost, so it's
+		 * an error. Checks the lines after the previous token, up to and including the current one's.
+		 */
+		bool CheckNoMetadataInSwitch()
+		{
+			const int32 AfterLine = Pos > 0 ? Tokens[Pos - 1].Loc.Line : 0;
+			const int32 UpToLine = Check(EBangoTokenKind::EndOfFile) ? MAX_int32 : Cur().Loc.Line;
+			for (const int32 Line : Lex.MetadataLines)
+			{
+				if (Line > AfterLine && Line <= UpToLine && !NodeLines.Contains(Line))
+				{
+					FBangoSourceLocation Loc;
+					Loc.Line = Line;
+					Loc.Column = 1;
+					return Fail(Loc, TEXT("Node metadata (//@) can't go on a switch's case lines or between its cases: they aren't graph nodes. Put it on the 'switch' line or on statements inside the case blocks."));
+				}
+			}
+			return true;
+		}
+
+		/** `switch (value)` `{` then `case v, ...:` / `default:` each followed by a block, then `}`. */
+		FBangoStmtPtr ParseSwitch()
+		{
+			const int32 KeywordTok = Pos;
+			const FBangoToken& Keyword = Advance();
+			TUniquePtr<FBangoSwitchStmt> Stmt = MakeUnique<FBangoSwitchStmt>();
+			Stmt->Loc = Keyword.Loc;
+
+			Stmt->Value = ParseParenCondition(Keyword.Loc.Line, TEXT("after 'switch'"));
+			if (!Stmt->Value || !RegisterNode(*Stmt, Keyword.Loc.Line))
+			{
+				return nullptr;
+			}
+			SetTextSpan(*Stmt, KeywordTok + 2, Pos - 1);
+
+			if (!Check(EBangoTokenKind::LBrace))
+			{
+				Fail(Cur().Loc, FString::Printf(TEXT("Expected '{' after 'switch (...)', but found %s."), *Bango::DescribeToken(Cur())));
+				return nullptr;
+			}
+			const FBangoSourceLocation OpenLoc = Advance().Loc;
+			if (!EnterNesting())
+			{
+				return nullptr;
+			}
+			while (true)
+			{
+				if (!CheckNoMetadataInSwitch())
+				{
+					return nullptr;
+				}
+				const FBangoToken& Tok = Cur();
+				if (Tok.Kind == EBangoTokenKind::RBrace)
+				{
+					break;
+				}
+				if (Tok.Kind == EBangoTokenKind::EndOfFile)
+				{
+					Fail(Tok.Loc, FString::Printf(TEXT("The switch opened with '{' on line %d is never closed."), OpenLoc.Line));
+					return nullptr;
+				}
+				if (Tok.Kind == EBangoTokenKind::KwCase)
+				{
+					if (Stmt->bHasDefault)
+					{
+						Fail(Tok.Loc, TEXT("'default' must be the last part of a switch: no 'case' can come after it."));
+						return nullptr;
+					}
+					Advance();
+					FBangoSwitchCase& Case = Stmt->Cases.AddDefaulted_GetRef();
+					Case.Loc = Tok.Loc;
+					const int32 FirstValueTok = Pos;
+					do
+					{
+						FBangoExprPtr Value = ParseExpression();
+						if (!Value)
+						{
+							return nullptr;
+						}
+						Case.Values.Add(MoveTemp(Value));
+					}
+					while (Match(EBangoTokenKind::Comma));
+					Case.ValuesBegin = Tokens[FirstValueTok].Loc.Column;
+					Case.ValuesEnd = Previous().EndColumn;
+					if (!Expect(EBangoTokenKind::Colon, TEXT("after the case values")) || !RequireOneLine(Tok.Loc.Line, Previous().Loc))
+					{
+						return nullptr;
+					}
+					if (!ParseBlock(Case.Body))
+					{
+						return nullptr;
+					}
+				}
+				else if (Tok.Kind == EBangoTokenKind::KwDefault)
+				{
+					if (Stmt->bHasDefault)
+					{
+						Fail(Tok.Loc, TEXT("A switch can only have one 'default'."));
+						return nullptr;
+					}
+					Advance();
+					Stmt->bHasDefault = true;
+					Stmt->DefaultLoc = Tok.Loc;
+					if (!Expect(EBangoTokenKind::Colon, TEXT("after 'default'")) || !RequireOneLine(Tok.Loc.Line, Previous().Loc))
+					{
+						return nullptr;
+					}
+					if (!ParseBlock(Stmt->Default))
+					{
+						return nullptr;
+					}
+				}
+				else
+				{
+					Fail(Tok.Loc, FString::Printf(TEXT("Expected 'case', 'default' or '}' in the switch, but found %s. Statements go inside a case's block: case 1: { ... }"), *Bango::DescribeToken(Tok)));
+					return nullptr;
+				}
+				Match(EBangoTokenKind::Semicolon); // `};` after a case block, as after any block
+			}
+			LeaveNesting();
+			Advance(); // '}'
+			if (!ExpectBlockTerminator())
 			{
 				return nullptr;
 			}

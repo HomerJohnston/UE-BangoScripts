@@ -201,6 +201,41 @@ namespace BangoDumpPrivate
 			const FBangoForEachStmt& S = *Stmt.As<FBangoForEachStmt>();
 			return FString::Printf(TEXT("(forEach %s %s %s)"), *S.VarName, *Bango::DumpExpr(*S.Array), *DumpBlock(S.Body));
 		}
+		case EBangoStmtKind::Sequence:
+		{
+			const FBangoSequenceStmt& S = *Stmt.As<FBangoSequenceStmt>();
+			FString Result = TEXT("(sequence");
+			for (const FBangoBlock& Block : S.Blocks)
+			{
+				Result += TEXT(" ");
+				Result += DumpBlock(Block);
+			}
+			return Result + TEXT(")");
+		}
+		case EBangoStmtKind::Switch:
+		{
+			const FBangoSwitchStmt& S = *Stmt.As<FBangoSwitchStmt>();
+			FString Result = FString::Printf(TEXT("(switch %s"), *Bango::DumpExpr(*S.Value));
+			for (const FBangoSwitchCase& Case : S.Cases)
+			{
+				Result += TEXT(" (case");
+				for (const FBangoExprPtr& Value : Case.Values)
+				{
+					Result += TEXT(" ");
+					Result += Bango::DumpExpr(*Value);
+				}
+				Result += TEXT(" ");
+				Result += DumpBlock(Case.Body);
+				Result += TEXT(")");
+			}
+			if (S.bHasDefault)
+			{
+				Result += TEXT(" (default ");
+				Result += DumpBlock(S.Default);
+				Result += TEXT(")");
+			}
+			return Result + TEXT(")");
+		}
 		case EBangoStmtKind::Break:
 			return TEXT("(break)");
 		case EBangoStmtKind::Continue:

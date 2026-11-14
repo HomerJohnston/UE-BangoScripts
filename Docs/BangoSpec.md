@@ -1,8 +1,12 @@
-# Bango Language Spec (draft v0.39)
+# Bango Language Spec (draft v0.41)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.41:** a **`switch`** runs the first case whose value equals the switch's value, or `default`: `switch (_x) { case 1: { ... } case 2, 3: { ... } default: { ... } }` (section 8). The value is an `int`, a `string` or an `entity`; case values are fixed values written out, and a value can only be in one case. There's no fallthrough, and `break`/`continue` act on the loop around the switch. In the graph it's a **Switch** node: a box with each case's values beside that case's output, then **Default** and **Then** (section 12). `switch`, `case` and `default` are keywords, and `:` is a new token.
+
+**Changes in v0.40:** a **`sequence`** runs one block after another: `sequence { ... } { ... }`, each block to its end (waits and all) before the next, then what follows (section 8). In the graph it's a **Sequence** node with an output per block, named `Scope 0`, `Scope 1`, `Scope 2`, ..., and **Then**; **Add pin** adds an output and right-clicking one removes it (section 12). `sequence` is a keyword. A `{` block on its own is still an error; the error now suggests a sequence.
 
 **Changes in v0.39:** a block no longer needs a `;` after its `}`: `if`, `while`, `for`, `forEach` and `function` blocks end with `}` (`};` still reads the same). The graph editor writes `}` (section 2).
 
@@ -156,6 +160,8 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
 | `while (cond)` | exec in → Do, Then |
 | `for (init; cond; step)` | exec in → Do, Then |
 | `forEach (_x in arr)` | exec in → Do, Then |
+| `sequence { ... } { ... }` | exec in → Scope 0, Scope 1, Scope 2, ... (one per block), Then |
+| `switch (value) { case ...: { } default: { } }` | exec in → one output per case (beside a box with its values), Default, Then |
 | `break;` / `continue;` | exec in → exec out |
 | `return [expr];` | exec in → exec out |
 | `label Name;` | exec in → exec out |
@@ -177,10 +183,10 @@ A `goto` node **does not draw a wire** to its label. It shows the target label's
 
 ## 2. Blocks and semicolons
 
-- A block that ends a statement (`if`, `while`, `for`, `forEach` and `function`) closes with `}`. A `;` after it is allowed (`};`, as earlier versions required) but not needed; the graph editor writes `}`. The next statement starts on a new line.
+- A block that ends a statement (`if`, `while`, `for`, `forEach`, `sequence`, `switch` and `function`) closes with `}`. A `;` after it is allowed (`};`, as earlier versions required) but not needed; the graph editor writes `}`. The next statement starts on a new line.
 - A `}` that is followed by `else` has no semicolon.
 - `else if` is allowed. A whole `if / else if / else` chain ends with a single `}`. In the graph, the inner `if` is the node on the outer if's Else pin.
-- A `{` block on its own, not belonging to one of the statements above, is a compile error.
+- A `{` block on its own, not belonging to one of the statements above, is a compile error. (To group statements, use a `sequence`, section 8.)
 
 ```
 if (globalBoolVariable)
@@ -326,7 +332,7 @@ Hint(NSLOCTEXT("Shared.UI", "Continue", "Continue"));
 - **Names are case-sensitive**: `john` and `John` are different names. This covers variables, globals, functions, labels, commands, keywords, type names and Bango ID names (`@john` and `@John` are different actors).
 - Calling a command or function with the wrong capitalisation is a compile error that suggests the right name: *"Unknown command or function 'hint'. Did you mean 'Hint'? Names are case-sensitive."*
 - A name is letters, digits and `_`, and doesn't start with a digit.
-- Keywords and type names can't be used as names: `if else while for forEach in break continue return label goto function global params true false nil bool int float double string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
+- Keywords and type names can't be used as names: `if else while for forEach in sequence switch case default break continue return label goto function global params true false nil bool int float double string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
 
 ### Locals
 - Any name will do; a leading `_` is allowed but not needed (`count` and `_count` are both fine). The same goes for function parameters, script parameters and loop variables. Locals only exist inside the running script instance.
@@ -697,6 +703,57 @@ forEach (_x in _myArray)
 - A `nil` element is visited too. Reading `_x` then stops the script, so check `IsNil(_x)` if the array might have gaps.
 - `break` and `continue` work as usual.
 
+### sequence
+`sequence` is followed by one or more blocks, each `{` on the line after the previous block's `}`. It runs the blocks in order, each **to its end** before the next starts, then carries on with what follows the last block:
+
+```
+sequence                              //@5(20, 0)
+{
+	@gate OpenDoor();
+	Sleep(2);
+}
+{
+	Hint(LOCTEXT("Open", "The gate is open."));
+}
+WriteLog("both done");                // after both blocks
+```
+
+- A block that waits (`Sleep`, or any command that takes time) holds up the next one: the second block above starts two seconds later. Unlike Blueprint's Sequence node, the blocks never run at the same time. To run two things at once, start another script with `Exec` (section 7).
+- It only groups statements, to keep a graph tidy: it makes no scope, and `break`, `continue`, `return`, labels and `goto` work in its blocks just as they do around it (a `break` in a sequence in a loop leaves the loop).
+- A block can be empty (`{` then `}`): an output with nothing on it.
+- The `//@` metadata goes on the `sequence` line. Disabling a sequence disables all its blocks.
+
+### switch
+`switch (value)` is followed by `{`, then its cases, each `case` and its values, a `:` and a block, then an optional `default:` and a block, then `}`:
+
+```
+switch (_answer)                      //@6(20, 0)
+{
+	case 1:
+	{
+		Hint(LOCTEXT("Yes", "Agreed."));
+	}
+	case 2, 3:
+	{
+		Hint(LOCTEXT("Maybe", "Let me think."));
+		Sleep(1);
+	}
+	default:
+	{
+		Hint(LOCTEXT("No", "No deal."));
+	}
+}
+WriteLog("answered");                 // after whichever case ran
+```
+
+- The value is evaluated once. It must be an `int`, a `string` or an `entity` (not an array); anything else is a compile error, as is an undeclared global (declare it first, so its type is known). Reading a `nil` value stops the script, as reading `nil` always does.
+- Each case lists one or more values, separated by commas. They must be **fixed values written out** of the switch value's type: an int (`3`, `-1`), a string (`"north"`) or a Bango ID (`@guard`); not names, calculations or constants made of several parts. A value can only be in one case: a repeat is a compile error. Strings compare with case (`"a"` doesn't match `"A"`).
+- The first case with an equal value runs, to its end (waits and all), then the script carries on after the switch. **There's no fallthrough**: a case never runs into the next one, and needs no `break`.
+- If no case matches, `default` runs; with no `default`, nothing does. `default` comes last, at most once. A switch can have no cases at all.
+- A switch isn't a loop: `break` and `continue` inside it act on the loop around it (a `break` in a case leaves that loop), as do `return`, labels and `goto` as usual.
+- A case's block can be empty: a case with nothing on it.
+- Only `case` and `default` parts can be inside the switch's braces; statements go in their blocks. The `case` and `default` lines aren't nodes (they're rows of the switch node), so they can't have `//@` metadata, and nothing else can sit between the cases. The `//@` metadata goes on the `switch` line. Disabling a switch disables all its cases.
+
 ### Labels and goto
 ```
 label Hub;
@@ -1000,8 +1057,9 @@ The graph editor shows a script as nodes and wires and saves it back as text. Th
 
 ### Pins and wires
 - Every node except the entry has one **exec input**, and each input can have **only one wire** into it.
-- Every node has one main **exec output**. On `if` and loops it is called **Then**; it leads to the statement after the block.
-- `if` also has **Do** and **Else** outputs; `while`, `for` and `forEach` have **Do**.
+- Every node has one main **exec output**. On `if`, loops, sequences and switches it is called **Then**; it leads to the statement after the block (a sequence's last block).
+- `if` also has **Do** and **Else** outputs; `while`, `for` and `forEach` have **Do**. A **Sequence** has an output per block, named **Scope 0**, **Scope 1**, **Scope 2**, ..., above **Then** (for what follows its blocks). Its **Add pin** button (under its outputs, as on Blueprint's Sequence node) or right-click > **Add Output** adds one at the end; right-clicking one > **Remove Scope N** removes it and its wire (the nodes on it stay, unwired), and the later outputs move up. A Sequence always keeps at least one output. In the add-node menu it's under Flow Control, and starts with two.
+- A **Switch** has its **Var** field (the value it switches on), then an output per case, each with a box just inside the node showing that case's values (click it to edit them; Enter or Tab goes on to the next case's box, Shift goes back). Then come **Default** and **Then**. Its **Add pin** button or right-click > **Add Case** adds a case, with no value yet, before Default; right-clicking a case's output > **Remove Case** removes it and its wire, and the later cases move up. **Default** is only written to the text when something is wired to it. A compile error in a case's values outlines that case's box in red. In the add-node menu it's under Flow Control, and starts with one case.
 - A block is the chain of nodes along those wires: the Do chain is the `if` block, the Else chain the `else` block, and so on.
 - **`else if`:** an Else output wired to an `if` node that has nothing on its Then output is written as `else if`. An `else` block containing only an `if` means the same thing, so it's shown the same way.
 - Wires can't form a loop. Loops are made with `while`, `for`, `forEach` or `goto`.

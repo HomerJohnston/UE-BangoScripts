@@ -31,6 +31,14 @@ namespace BangoScriptEditor
 			Node->KindValue = (uint8)Source.Kind;
 			Node->NodeID = Source.NodeID;
 			Node->Text = Source.Text;
+			if (Source.Kind == EBangoGraphNodeKind::Sequence)
+			{
+				Node->SequenceOutputs = FMath::Max(Source.Branches.Num(), 1);
+			}
+			if (Source.Kind == EBangoGraphNodeKind::Switch)
+			{
+				Node->CaseValues = Source.CaseValues;
+			}
 			Node->bInFunctionGraph = Graph.bIsFunction;
 			Node->LayoutContext = LayoutContext;
 			Node->CreateNewGuid();
@@ -63,7 +71,7 @@ namespace BangoScriptEditor
 			{
 				Link(Nodes[i]->GetNextPin(), Nodes[Source.Next]);
 			}
-			for (int32 Branch = 0; Branch < Bango::GetGraphNodeBranchCount(Source.Kind); ++Branch)
+			for (int32 Branch = 0; Branch < Bango::GetGraphNodeBranchCount(Source) && Branch < Nodes[i]->GetBranchCount(); ++Branch)
 			{
 				if (Nodes.IsValidIndex(Source.Branches[Branch]))
 				{
@@ -213,7 +221,15 @@ namespace BangoScriptEditor
 				Out.Comment = Node->NodeComment;
 				Out.bDisabled = Node->IsDisabledNode();
 				Out.Next = Target(Node->GetNextPin(), Index);
-				for (int32 Branch = 0; Branch < Bango::GetGraphNodeBranchCount(Out.Kind); ++Branch)
+				if (Node->IsSequence() || Node->IsSwitch())
+				{
+					Out.Branches.Init(INDEX_NONE, Node->GetBranchCount());
+				}
+				if (Node->IsSwitch())
+				{
+					Out.CaseValues = Node->CaseValues;
+				}
+				for (int32 Branch = 0; Branch < Node->GetBranchCount(); ++Branch)
 				{
 					Out.Branches[Branch] = Target(Node->GetBranchPin(Branch), Index);
 				}

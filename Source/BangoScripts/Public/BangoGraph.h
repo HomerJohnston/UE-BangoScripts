@@ -15,7 +15,8 @@
  * - Every node has one main exec output, Next: "Then" on if nodes and loops, and the plain exec
  *   output on everything else. Return, break, continue and goto have one too; whatever follows them only
  *   runs if it is reached through a label.
- * - If nodes also have Do and Else outputs, and loops have a Do output (Branches).
+ * - If nodes also have Do and Else outputs, loops have a Do output, and sequences have an output per block, named
+ *   Scope 0, Scope 1, Scope 2, ... (Branches). A sequence's Next is its Then output, for what follows its blocks.
  * - A chain of nodes that nothing wires into, other than the entry node's chain, is "disconnected". It is
  *   saved as `//~` comment lines, so the compiler ignores it but the graph keeps it.
  *
@@ -37,6 +38,13 @@ enum class EBangoGraphNodeKind : uint8
 	While,
 	For,
 	ForEach,
+	/** `sequence { } { }`: an output per block (Branches), each run to its end before the next; then Next. No text. */
+	Sequence,
+	/**
+	 * `switch (value) { case 1: { } case 2, 3: { } default: { } }`: Text is the value; a row per case (CaseValues),
+	 * each with an output (Branches), then the Default output (the last of Branches); then Next.
+	 */
+	Switch,
 	Break,
 	Continue,
 	Return,
@@ -59,8 +67,8 @@ struct BANGOSCRIPTS_API FBangoGraphNode
 	 * The text the user edits, without keywords, brackets or ';':
 	 * - Entry: `int _a, string _b = "x"` (main graph) or `int AddScore(int _amount)` (function)
 	 * - Assign, IncDec, Call: the statement, like `_x += 2`, `_x++`, `john Speak("Hi")`
-	 * - If, While: the condition. For: `int _i = 0; _i < 3; _i++`. ForEach: `_x in _array`
-	 * - Return: the value, or empty. Label, Goto: the label name. Break, Continue, Reroute: empty.
+	 * - If, While, Switch: the condition or value. For: `int _i = 0; _i < 3; _i++`. ForEach: `_x in _array`
+	 * - Return: the value, or empty. Label, Goto: the label name. Break, Continue, Sequence, Reroute: empty.
 	 */
 	FString Text;
 
@@ -70,8 +78,15 @@ struct BANGOSCRIPTS_API FBangoGraphNode
 	/** Index into the graph's Nodes of the node the main exec output leads to, or INDEX_NONE. */
 	int32 Next = INDEX_NONE;
 
-	/** If: [Do, Else]. While, For, ForEach: [Do]. Unused entries are INDEX_NONE. */
-	int32 Branches[2] = { INDEX_NONE, INDEX_NONE };
+	/**
+	 * If: [Do, Else]. While, For, ForEach: [Do]. Sequence: one per block ([Scope 0, Scope 1, ...], at least one).
+	 * Switch: one per case, then Default (CaseValues.Num() + 1). Unused entries are INDEX_NONE. Every kind but Sequence
+	 * and Switch has two entries; see Bango::GetGraphNodeBranchCount for how many are used.
+	 */
+	TArray<int32> Branches = { INDEX_NONE, INDEX_NONE };
+
+	/** Switch only: each case's values as written, like `1` or `"north", "south"`. Branches[i] is case i's output. */
+	TArray<FString> CaseValues;
 
 	/**
 	 * A disabled node (written between slash-star and star-slash): it does nothing, and execution goes
@@ -148,12 +163,20 @@ struct FBangoCompileError;
 
 namespace Bango
 {
-	/** Number of Branches an exec node of this kind has: 2 for If, 1 for loops, 0 otherwise. */
+	/** Number of Branches an exec node of this kind has: 2 for If, 1 for loops, 0 otherwise; for Sequence, a new one's (2). */
 	BANGOSCRIPTS_API int32 GetGraphNodeBranchCount(EBangoGraphNodeKind Kind);
+	/** Number of Branches this node has: a sequence's or switch's own number of outputs, otherwise its kind's. */
+	BANGOSCRIPTS_API int32 GetGraphNodeBranchCount(const FBangoGraphNode& Node);
 
-	/** Display names: "Do"/"Else"/"Then" for If; "Do"/"Then" for loops; empty for a plain exec output. */
+	/**
+	 * Display names: "Do"/"Else"/"Then" for If; "Do"/"Then" for loops; "Scope 0", "Scope 1", ... / "Then" for Sequence;
+	 * "Case 0", "Case 1", ... / "Then" for Switch (whose last output is "Default": see the node overload); empty for a
+	 * plain exec output.
+	 */
 	BANGOSCRIPTS_API FString GetGraphNodeNextName(EBangoGraphNodeKind Kind);
 	BANGOSCRIPTS_API FString GetGraphNodeBranchName(EBangoGraphNodeKind Kind, int32 Branch);
+	/** As above, for this node: a switch's case outputs are named by their values, and its last is "Default". */
+	BANGOSCRIPTS_API FString GetGraphNodeBranchName(const FBangoGraphNode& Node, int32 Branch);
 
 	/**
 	 * The order functions are written in: depth-first by first use. Walking the main graph in the order

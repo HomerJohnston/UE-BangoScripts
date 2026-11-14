@@ -541,6 +541,156 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		FBangoCommandTable Commands;
 		BangoMakeTestCommands(Commands);
 		Expect(Bango::CompileSource(Source, TEXT("reroute.bango"), Commands, Program, Error), FString(TEXT("reroute: compiles: ")) + Error.ToString());
+	}
+	{
+		// A sequence: an output per block (an empty block is an output with nothing on it), and Next for what follows.
+		const TCHAR* Source =
+			TEXT("sequence      //@1(20, 0)\n")
+			TEXT("{\n")
+			TEXT("\tHint(\"a\");  //@2(40, 10)\n")
+			TEXT("}\n")
+			TEXT("{\n")
+			TEXT("}\n")
+			TEXT("{\n")
+			TEXT("\tHint(\"c\");  //@3(40, 30)\n")
+			TEXT("}\n")
+			TEXT("\n")
+			TEXT("Hint(\"d\");    //@4(40, 0)\n");
+		FBangoGraphDocument Doc;
+		FBangoCompileError Error;
+		FString Text;
+		FString WriteError;
+		const bool bBuilt = Bango::BuildGraph(Source, TEXT("sequence.bango"), Doc, Error);
+		Expect(bBuilt && Doc.Main.Nodes.Num() == 5, FString(TEXT("sequence: builds: ")) + Error.ToString());
+		if (bBuilt && Doc.Main.Nodes.Num() == 5)
+		{
+			const TArray<FBangoGraphNode>& N = Doc.Main.Nodes;
+			Expect(N[1].Kind == EBangoGraphNodeKind::Sequence && N[1].Text.IsEmpty() && N[1].Branches.Num() == 3 && Bango::GetGraphNodeBranchCount(N[1]) == 3,
+				TEXT("sequence: a node with three outputs"));
+			Expect(N[N[1].Branches[0]].Text == FString(TEXT("Hint(\"a\")")) && N[1].Branches[1] == INDEX_NONE && N[N[1].Branches[2]].Text == FString(TEXT("Hint(\"c\")")),
+				TEXT("sequence: outputs 0 and 2 have their blocks, 1 is empty"));
+			Expect(N[N[1].Next].Text == FString(TEXT("Hint(\"d\")")), TEXT("sequence: what follows is on Then"));
+			Expect(Bango::GetGraphNodeBranchName(EBangoGraphNodeKind::Sequence, 2) == FString(TEXT("Scope 2")) && Bango::GetGraphNodeNextName(EBangoGraphNodeKind::Sequence) == FString(TEXT("Then")),
+				TEXT("sequence: outputs named Scope 0, Scope 1, Scope 2 and Then"));
+		}
+		const TCHAR* Expected =
+			TEXT("// ============ SCRIPT BODY =====================\n")
+			TEXT("\n")
+			TEXT("sequence          //@1(20, 0)\n")
+			TEXT("{\n")
+			TEXT("\tHint(\"a\");    //@2(40, 10)\n")
+			TEXT("}\n")
+			TEXT("{\n")
+			TEXT("}\n")
+			TEXT("{\n")
+			TEXT("\tHint(\"c\");    //@3(40, 30)\n")
+			TEXT("}\n")
+			TEXT("\n")
+			TEXT("Hint(\"d\");        //@4(40, 0)\n");
+		Expect(bBuilt && Bango::WriteGraphText(Doc, Text, WriteError) && Text == FString(Expected), FString(TEXT("sequence: written in the saved layout:\n")) + Text);
+
+		// Adding an output (as the editor's Add pin does) writes an empty block; with none, it isn't written.
+		if (bBuilt && Doc.Main.Nodes.Num() == 5)
+		{
+			FBangoGraphDocument More = Doc;
+			More.Main.Nodes[1].Branches.Add(INDEX_NONE);
+			Expect(Bango::WriteGraphText(More, Text, WriteError) && Text.Contains(TEXT("}\n{\n}\n\nHint(\"d\")")), FString(TEXT("sequence: a fourth, empty output:\n")) + Text);
+			FBangoGraphDocument None = Doc;
+			None.Main.Nodes[1].Branches.Reset();
+			Expect(!Bango::WriteGraphText(None, Text, WriteError) && WriteError.Contains(TEXT("no outputs")), FString(TEXT("sequence: needs an output: ")) + WriteError);
+		}
+	}
+	{
+		// A switch: a row per case (its values as written) with an output, Default last, and Next for what follows.
+		const TCHAR* Source =
+			TEXT("switch (_x)   //@1(20, 0)\n")
+			TEXT("{\n")
+			TEXT("\tcase 1, -2:\n")
+			TEXT("\t{\n")
+			TEXT("\t\tHint(\"a\");  //@2(40, 10)\n")
+			TEXT("\t}\n")
+			TEXT("\tcase 3:\n")
+			TEXT("\t{\n")
+			TEXT("\t}\n")
+			TEXT("\tdefault:\n")
+			TEXT("\t{\n")
+			TEXT("\t\tHint(\"c\");  //@3(40, 30)\n")
+			TEXT("\t}\n")
+			TEXT("}\n")
+			TEXT("\n")
+			TEXT("Hint(\"d\");    //@4(40, 0)\n");
+		FBangoGraphDocument Doc;
+		FBangoCompileError Error;
+		FString Text;
+		FString WriteError;
+		const bool bBuilt = Bango::BuildGraph(Source, TEXT("switch.bango"), Doc, Error);
+		Expect(bBuilt && Doc.Main.Nodes.Num() == 5, FString(TEXT("switch: builds: ")) + Error.ToString());
+		if (bBuilt && Doc.Main.Nodes.Num() == 5)
+		{
+			const TArray<FBangoGraphNode>& N = Doc.Main.Nodes;
+			Expect(N[1].Kind == EBangoGraphNodeKind::Switch && N[1].Text == FString(TEXT("_x")) && N[1].Branches.Num() == 3 && Bango::GetGraphNodeBranchCount(N[1]) == 3
+				&& N[1].CaseValues.Num() == 2 && N[1].CaseValues[0] == FString(TEXT("1, -2")) && N[1].CaseValues[1] == FString(TEXT("3")),
+				TEXT("switch: a node with two cases and Default"));
+			Expect(N[N[1].Branches[0]].Text == FString(TEXT("Hint(\"a\")")) && N[1].Branches[1] == INDEX_NONE && N[N[1].Branches[2]].Text == FString(TEXT("Hint(\"c\")")),
+				TEXT("switch: case 0 and Default have their blocks, case 1 is empty"));
+			Expect(N[N[1].Next].Text == FString(TEXT("Hint(\"d\")")), TEXT("switch: what follows is on Then"));
+			Expect(Bango::GetGraphNodeBranchName(N[1], 0) == FString(TEXT("1, -2")) && Bango::GetGraphNodeBranchName(N[1], 2) == FString(TEXT("Default"))
+				&& Bango::GetGraphNodeNextName(EBangoGraphNodeKind::Switch) == FString(TEXT("Then")),
+				TEXT("switch: outputs named by their values, Default and Then"));
+		}
+		const TCHAR* Expected =
+			TEXT("// ============ SCRIPT BODY =====================\n")
+			TEXT("\n")
+			TEXT("switch (_x)           //@1(20, 0)\n")
+			TEXT("{\n")
+			TEXT("\tcase 1, -2:\n")
+			TEXT("\t{\n")
+			TEXT("\t\tHint(\"a\");    //@2(40, 10)\n")
+			TEXT("\t}\n")
+			TEXT("\tcase 3:\n")
+			TEXT("\t{\n")
+			TEXT("\t}\n")
+			TEXT("\tdefault:\n")
+			TEXT("\t{\n")
+			TEXT("\t\tHint(\"c\");    //@3(40, 30)\n")
+			TEXT("\t}\n")
+			TEXT("}\n")
+			TEXT("\n")
+			TEXT("Hint(\"d\");            //@4(40, 0)\n");
+		Expect(bBuilt && Bango::WriteGraphText(Doc, Text, WriteError) && Text == FString(Expected), FString(TEXT("switch: written in the saved layout:\n")) + Text);
+
+		if (bBuilt && Doc.Main.Nodes.Num() == 5)
+		{
+			// Default with nothing on it isn't written; a new case (as Add pin makes) goes before Default.
+			FBangoGraphDocument NoDefault = Doc;
+			NoDefault.Main.Nodes[1].Branches[2] = INDEX_NONE;
+			Expect(Bango::WriteGraphText(NoDefault, Text, WriteError) && !Text.Contains(TEXT("default")), FString(TEXT("switch: an unwired Default isn't written:\n")) + Text);
+			FBangoGraphDocument More = Doc;
+			More.Main.Nodes[1].CaseValues.Add(TEXT("4"));
+			More.Main.Nodes[1].Branches.Insert(INDEX_NONE, 2);
+			Expect(Bango::WriteGraphText(More, Text, WriteError) && Text.Contains(TEXT("\tcase 4:\n\t{\n\t}\n\tdefault:")), FString(TEXT("switch: a third case:\n")) + Text);
+			FBangoGraphDocument Mismatch = Doc;
+			Mismatch.Main.Nodes[1].CaseValues.Add(TEXT("4"));
+			Expect(!Bango::WriteGraphText(Mismatch, Text, WriteError) && WriteError.Contains(TEXT("one per case")), FString(TEXT("switch: outputs must match cases: ")) + WriteError);
+		}
+
+		// Case values: fixed values only; an error on a case line points at that case.
+		FString ValueError;
+		Expect(Bango::ValidateCaseValues(TEXT("1, -2, \"a\", @guard"), ValueError), FString(TEXT("switch: valid case values: ")) + ValueError);
+		Expect(!Bango::ValidateCaseValues(TEXT(""), ValueError) && ValueError.Contains(TEXT("needs a value")), FString(TEXT("switch: an empty case: ")) + ValueError);
+		Expect(!Bango::ValidateCaseValues(TEXT("_y"), ValueError) && ValueError.Contains(TEXT("fixed value")), FString(TEXT("switch: a name as a case value: ")) + ValueError);
+		Expect(!Bango::ValidateCaseValues(TEXT("1 +"), ValueError), TEXT("switch: case values that don't read"));
+		Expect(!Bango::ValidateCaseValues(TEXT("1:"), ValueError), TEXT("switch: a colon in case values"));
+		if (bBuilt)
+		{
+			FBangoCompileError CaseError;
+			CaseError.NodeID = 1;
+			CaseError.Line = 9; // `\tcase 3:` in Expected
+			CaseError.Column = 7;
+			Bango::FBangoErrorPlace Place;
+			Expect(Bango::FindErrorPlace(Doc, Expected, CaseError, Place) && Place.Node == 1 && Place.Case == 1 && Place.Offset == 0,
+				FString::Printf(TEXT("switch: an error on a case line finds the case (node %d, case %d, offset %d)"), Place.Node, Place.Case, Place.Offset));
+		}
 
 		// Statements of the same kind sit together; a blank line goes between different kinds, around flow
 		// control, and above a statement with a comment.

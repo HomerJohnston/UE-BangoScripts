@@ -694,6 +694,27 @@ namespace BangoCompilerPrivate
 				return CheckNoDeclsInBlock(Stmt.As<FBangoForStmt>()->Body, bInFunction);
 			case EBangoStmtKind::ForEach:
 				return CheckNoDeclsInBlock(Stmt.As<FBangoForEachStmt>()->Body, bInFunction);
+			case EBangoStmtKind::Sequence:
+				for (const FBangoBlock& Block : Stmt.As<FBangoSequenceStmt>()->Blocks)
+				{
+					if (!CheckNoDeclsInBlock(Block, bInFunction))
+					{
+						return false;
+					}
+				}
+				return true;
+			case EBangoStmtKind::Switch:
+			{
+				const FBangoSwitchStmt& Switch = *Stmt.As<FBangoSwitchStmt>();
+				for (const FBangoSwitchCase& Case : Switch.Cases)
+				{
+					if (!CheckNoDeclsInBlock(Case.Body, bInFunction))
+					{
+						return false;
+					}
+				}
+				return CheckNoDeclsInBlock(Switch.Default, bInFunction);
+			}
 			default:
 				return true;
 			}
@@ -877,6 +898,27 @@ namespace BangoCompilerPrivate
 				return CollectGlobalsInBlock(Stmt.As<FBangoForStmt>()->Body);
 			case EBangoStmtKind::ForEach:
 				return CollectGlobalsInBlock(Stmt.As<FBangoForEachStmt>()->Body);
+			case EBangoStmtKind::Sequence:
+				for (const FBangoBlock& Block : Stmt.As<FBangoSequenceStmt>()->Blocks)
+				{
+					if (!CollectGlobalsInBlock(Block))
+					{
+						return false;
+					}
+				}
+				return true;
+			case EBangoStmtKind::Switch:
+			{
+				const FBangoSwitchStmt& Switch = *Stmt.As<FBangoSwitchStmt>();
+				for (const FBangoSwitchCase& Case : Switch.Cases)
+				{
+					if (!CollectGlobalsInBlock(Case.Body))
+					{
+						return false;
+					}
+				}
+				return CollectGlobalsInBlock(Switch.Default);
+			}
 			default:
 				return true;
 			}
@@ -1282,6 +1324,21 @@ namespace BangoCompilerPrivate
 			{
 				NoteBlock(ForEach->Body);
 			}
+			else if (const FBangoSequenceStmt* Sequence = Stmt.As<FBangoSequenceStmt>())
+			{
+				for (const FBangoBlock& Block : Sequence->Blocks)
+				{
+					NoteBlock(Block);
+				}
+			}
+			else if (const FBangoSwitchStmt* Switch = Stmt.As<FBangoSwitchStmt>())
+			{
+				for (const FBangoSwitchCase& Case : Switch->Cases)
+				{
+					NoteBlock(Case.Body);
+				}
+				NoteBlock(Switch->Default);
+			}
 		}
 
 		bool CompileStmt(const FBangoStmt& Stmt)
@@ -1329,6 +1386,8 @@ namespace BangoCompilerPrivate
 			case EBangoStmtKind::While:    return CompileWhile(*Stmt.As<FBangoWhileStmt>());
 			case EBangoStmtKind::For:      return CompileFor(*Stmt.As<FBangoForStmt>());
 			case EBangoStmtKind::ForEach:  return CompileForEach(*Stmt.As<FBangoForEachStmt>());
+			case EBangoStmtKind::Sequence: return CompileSequence(*Stmt.As<FBangoSequenceStmt>());
+			case EBangoStmtKind::Switch:   return CompileSwitch(*Stmt.As<FBangoSwitchStmt>());
 			case EBangoStmtKind::Break:
 			case EBangoStmtKind::Continue: return CompileBreakContinue(Stmt);
 			case EBangoStmtKind::Return:   return CompileReturn(*Stmt.As<FBangoReturnStmt>());
@@ -1520,6 +1579,143 @@ namespace BangoCompilerPrivate
 			{
 				PatchJump(Jump, BreakTarget);
 			}
+		}
+
+		/** A sequence's blocks, one after another: it only groups statements, so it needs no code of its own. */
+		bool CompileSequence(const FBangoSequenceStmt& Sequence)
+		{
+			for (const FBangoBlock& Block : Sequence.Blocks)
+			{
+				if (!CompileBlock(Block))
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+
+		/**
+		 * A case value as a constant of the switch value's type: an int literal (or a negated one), a string literal
+		 * or an entity literal (@name). Anything else, even a constant expression, is an error: case values are fixed.
+		 */
+		bool EvaluateCaseValue(const FBangoExpr& Expr, const FBangoType& Type, FBangoValue& OutValue)
+		{
+			const TCHAR* Wanted = Type.Base == EBangoBaseType::Int ? TEXT("an int, like 3 or -1")
+				: Type.Base == EBangoBaseType::String ? TEXT("a string in quotes, like \"north\"")
+				: TEXT("a Bango ID, like @guard");
+			const FBangoLiteralExpr* Lit = Expr.As<FBangoLiteralExpr>();
+			bool bNegate = false;
+			if (const FBangoUnaryExpr* Unary = Expr.As<FBangoUnaryExpr>())
+			{
+				Lit = Unary->Op == EBangoUnaryOp::Negate && Unary->Operand.IsValid() ? Unary->Operand->As<FBangoLiteralExpr>() : nullptr;
+				bNegate = Lit != nullptr;
+				if (Lit && Lit->LiteralKind != EBangoLiteralKind::Int)
+				{
+					Lit = nullptr;
+				}
+			}
+			if (!Lit)
+			{
+				return Fail(Expr.Loc, FString::Printf(TEXT("A case value must be a fixed value written out (here, %s), not a name or a calculation."), Wanted));
+			}
+			if (Type.Base == EBangoBaseType::Int && Lit->LiteralKind == EBangoLiteralKind::Int)
+			{
+				OutValue = FBangoValue::MakeInt(bNegate ? (int32)-Lit->IntValue : (int32)Lit->IntValue);
+				return true;
+			}
+			if (Type.Base == EBangoBaseType::String && Lit->LiteralKind == EBangoLiteralKind::String)
+			{
+				OutValue = FBangoValue::MakeString(Lit->StringValue);
+				return true;
+			}
+			if (Type.Base == EBangoBaseType::Entity && Lit->LiteralKind == EBangoLiteralKind::Entity)
+			{
+				OutValue = FBangoValue::MakeEntity(Lit->StringValue);
+				return true;
+			}
+			return Fail(Expr.Loc, FString::Printf(TEXT("This switch is on %s, so each case value must be %s."), *Article(Type), Wanted));
+		}
+
+		/**
+		 * The value is evaluated once and kept on the stack while the cases are tested in order; the first equal
+		 * value pops it and jumps to its case. No match pops it and goes to the default, or past the switch. Each case
+		 * block jumps past the rest. A switch isn't a loop, so break and continue act on the loop around it.
+		 */
+		bool CompileSwitch(const FBangoSwitchStmt& Switch)
+		{
+			FExprType ValueType;
+			if (!CompileExpr(*Switch.Value, nullptr, ValueType))
+			{
+				return false;
+			}
+			if (ValueType.IsUnknown())
+			{
+				return Fail(Switch.Value->Loc, TEXT("switch needs to know the value's type. This global isn't declared in this script, so declare it first, like 'global int stage;'."));
+			}
+			const bool bAllowed = ValueType.IsKnown() && !ValueType.Type.IsArray()
+				&& (ValueType.Type.Base == EBangoBaseType::Int || ValueType.Type.Base == EBangoBaseType::String || ValueType.Type.Base == EBangoBaseType::Entity);
+			if (!bAllowed)
+			{
+				return Fail(Switch.Value->Loc, FString::Printf(TEXT("switch works on an int, a string or an entity, but this is %s."), *ValueType.Describe()));
+			}
+
+			struct FCaseJumps { TArray<int32> Jumps; };
+			TArray<FCaseJumps> CaseJumps;
+			TArray<FBangoValue> Seen;
+			for (const FBangoSwitchCase& Case : Switch.Cases)
+			{
+				FCaseJumps& Jumps = CaseJumps.AddDefaulted_GetRef();
+				for (const FBangoExprPtr& ValueExpr : Case.Values)
+				{
+					FBangoValue Value;
+					if (!EvaluateCaseValue(*ValueExpr, ValueType.Type, Value))
+					{
+						return false;
+					}
+					if (Seen.Contains(Value))
+					{
+						return Fail(ValueExpr->Loc, TEXT("This value is already in an earlier case of this switch. Each value can only be in one case."));
+					}
+					Seen.Add(Value);
+
+					Emit(EBangoOp::DupN, 1);
+					Emit(EBangoOp::PushConst, AddConstant(Value));
+					Emit(EBangoOp::Equal);
+					const int32 JumpToNext = Emit(EBangoOp::JumpIfFalse);
+					Emit(EBangoOp::Pop);
+					Jumps.Jumps.Add(Emit(EBangoOp::Jump));
+					PatchJump(JumpToNext, Here());
+				}
+			}
+			Emit(EBangoOp::Pop);
+			TArray<int32> JumpsToEnd;
+			const int32 JumpToDefault = Emit(EBangoOp::Jump);
+
+			for (int32 i = 0; i < Switch.Cases.Num(); ++i)
+			{
+				for (const int32 Jump : CaseJumps[i].Jumps)
+				{
+					PatchJump(Jump, Here());
+				}
+				if (!CompileBlock(Switch.Cases[i].Body))
+				{
+					return false;
+				}
+				CurrentStmt = &Switch;
+				CurrentLoc = Switch.Loc;
+				JumpsToEnd.Add(Emit(EBangoOp::Jump));
+			}
+
+			PatchJump(JumpToDefault, Here());
+			if (Switch.bHasDefault && !CompileBlock(Switch.Default))
+			{
+				return false;
+			}
+			for (const int32 Jump : JumpsToEnd)
+			{
+				PatchJump(Jump, Here());
+			}
+			return true;
 		}
 
 		bool CompileWhile(const FBangoWhileStmt& While)

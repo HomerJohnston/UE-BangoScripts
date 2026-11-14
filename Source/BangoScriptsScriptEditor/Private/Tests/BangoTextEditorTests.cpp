@@ -486,7 +486,8 @@ bool FBangoCompletionTest::RunTest(const FString& Parameters)
 		Commands.Add(Item);
 	}
 
-	// In the main graph (line 5): "fo" is the command foo, the command Format and the global foundThings, by name.
+	// In the main graph (line 5): "fo" is the command foo, the keywords for and forEach, the command Format and the
+	// global foundThings, by name.
 	TArray<FBangoCompletionItem> Items;
 	FBangoCompletion::GatherItems(Names, 4, Commands, Items);
 	TArray<int32> Shown;
@@ -496,7 +497,17 @@ bool FBangoCompletionTest::RunTest(const FString& Parameters)
 	{
 		Got += Items[Index].Name + TEXT(" ");
 	}
-	TestEqual(TEXT("'fo' in the main graph"), Got, FString(TEXT("foo Format foundThings ")));
+	TestEqual(TEXT("'fo' in the main graph"), Got, FString(TEXT("foo for forEach Format foundThings ")));
+
+	// Keywords are listed too, and aren't calls.
+	FBangoCompletion::Filter(Items, TEXT("sw"), Shown);
+	TestTrue(TEXT("'sw' is the keyword switch"), Shown.Num() == 1 && Items[Shown[0]].Name.Equals(TEXT("switch"), ESearchCase::CaseSensitive)
+		&& Items[Shown[0]].Kind == EBangoCompletionKind::Keyword && !Items[Shown[0]].bCallable);
+	FBangoCompletion::Filter(Items, TEXT("whi"), Shown);
+	TestTrue(TEXT("'whi' is the keyword while"), Shown.Num() == 1 && Items[Shown[0]].Name.Equals(TEXT("while"), ESearchCase::CaseSensitive));
+	TArray<FBangoCompletionItem> Values;
+	FBangoCompletion::GetKeywordItems(Values, /*bValuesOnly*/ true);
+	TestEqual(TEXT("Keywords for a node's field: true, false and nil"), Values.Num(), 3);
 
 	// The local count hides the global count; the function is listed with its signature.
 	const FBangoCompletionItem* Count = Items.FindByPredicate([](const FBangoCompletionItem& Item) { return Item.Name.Equals(TEXT("count"), ESearchCase::CaseSensitive); });

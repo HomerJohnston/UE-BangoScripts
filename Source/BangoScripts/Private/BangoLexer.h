@@ -17,7 +17,7 @@ enum class EBangoTokenKind : uint8
 	EntityLiteral,
 
 	// Keywords
-	KwIf, KwElse, KwWhile, KwFor, KwForEach, KwIn,
+	KwIf, KwElse, KwWhile, KwFor, KwForEach, KwIn, KwSequence, KwSwitch, KwCase, KwDefault,
 	KwBreak, KwContinue, KwReturn, KwLabel, KwGoto,
 	KwFunction, KwGlobal, KwTrue, KwFalse, KwNil,
 	KwBool, KwInt, KwDouble, KwString, KwEntity, KwText, KwVector2, KwVector3, KwVoid,
@@ -28,7 +28,7 @@ enum class EBangoTokenKind : uint8
 	HashDefine, HashUndef,
 
 	// Punctuation
-	LParen, RParen, LBrace, RBrace, LBracket, RBracket, Semicolon, Comma,
+	LParen, RParen, LBrace, RBrace, LBracket, RBracket, Semicolon, Comma, Colon,
 	/** `.` before a vector part: `_pos.x` */
 	Dot,
 

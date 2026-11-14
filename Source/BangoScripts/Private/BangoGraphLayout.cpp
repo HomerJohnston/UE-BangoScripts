@@ -716,6 +716,13 @@ namespace BangoGraphLayoutPrivate
 				case EBangoGraphNodeKind::While:
 					Chain(Node.Branches[0], Scope);
 					break;
+				case EBangoGraphNodeKind::Sequence:
+				case EBangoGraphNodeKind::Switch:
+					for (const int32 Output : Node.Branches)
+					{
+						Chain(Output, Scope);
+					}
+					break;
 				case EBangoGraphNodeKind::For:
 				{
 					FVarScope Body = Scope;
@@ -761,7 +768,8 @@ namespace BangoGraphLayoutPrivate
 			HasInput.Init(false, Graph.Nodes.Num());
 			for (const FBangoGraphNode& Node : Graph.Nodes)
 			{
-				const int32 Outputs[] = { Node.Next, Node.Branches[0], Node.Branches[1] };
+				TArray<int32> Outputs = Node.Branches;
+				Outputs.Add(Node.Next);
 				for (const int32 Output : Outputs)
 				{
 					if (HasInput.IsValidIndex(Output))
@@ -982,6 +990,15 @@ namespace BangoGraphLayoutPrivate
 			return;
 		}
 
+		case EBangoGraphNodeKind::Switch:
+		{
+			// The value's type when it's a variable this node can see (its cases' values are rows of their own).
+			const TMap<FString, FString>* Visible = Context.VisibleVariables.Find(Node.NodeID);
+			const FString Type = Visible ? ResolveVariableType(Node.Text, *Visible) : FString();
+			Out.Fields.Add(WholeText(TEXT("Var"), Type, Node.Text, false));
+			return;
+		}
+
 		case EBangoGraphNodeKind::For:
 		{
 			const TArray<TPair<int32, int32>> Parts = Tok.Split(0, N, EBangoTokenKind::Semicolon, /*bEmptyIsNone*/ false);
@@ -1066,6 +1083,7 @@ namespace BangoGraphLayoutPrivate
 
 		case EBangoGraphNodeKind::Break:
 		case EBangoGraphNodeKind::Continue:
+		case EBangoGraphNodeKind::Sequence: // no text: its outputs are its blocks
 		case EBangoGraphNodeKind::Reroute:
 			return;
 

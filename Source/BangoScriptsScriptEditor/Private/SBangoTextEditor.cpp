@@ -928,6 +928,19 @@ TSharedRef<ITableRow> SBangoTextEditor::MakeCompletionRow(TSharedPtr<FBangoCompl
 	case EBangoCompletionKind::Function:  Kind = EBangoSyntaxKind::Function;  Letter = TEXT("F"); break;
 	case EBangoCompletionKind::Builtin:   Kind = EBangoSyntaxKind::Builtin;   Letter = TEXT("B"); break;
 	case EBangoCompletionKind::Command:   Kind = EBangoSyntaxKind::Command;   Letter = TEXT("C"); break;
+	case EBangoCompletionKind::Keyword:
+	{
+		// In the colour the text gives that word (flow, jump, type, value, ...).
+		Letter = TEXT("K");
+		Kind = EBangoSyntaxKind::Keyword;
+		TArray<FBangoSyntaxToken> Tokens;
+		FBangoLineTokenizer::TokenizeLine(FStringView(Item->Name), Tokens);
+		if (Tokens.Num() == 1)
+		{
+			Kind = Tokens[0].Kind;
+		}
+		break;
+	}
 	}
 	const FTextBlockStyle& KindStyle = SyntaxStyle->GetStyle(Kind, false);
 

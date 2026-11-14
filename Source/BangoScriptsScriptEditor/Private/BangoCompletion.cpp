@@ -162,6 +162,51 @@ void FBangoCompletion::GetBuiltinItems(TArray<FBangoCompletionItem>& OutItems)
 	OutItems.Add(MakeItem(TEXT("RemoveAt"), EBangoCompletionKind::Builtin, TEXT("array RemoveAt(int Index) -> element"), TEXT("Removes and returns an element, and moves later elements down."), true));
 }
 
+void FBangoCompletion::GetKeywordItems(TArray<FBangoCompletionItem>& OutItems, bool bValuesOnly)
+{
+	using namespace BangoCompletionPrivate;
+	struct FKeyword { const TCHAR* Name; const TCHAR* Detail; const TCHAR* Description; bool bValue; };
+	static const FKeyword Keywords[] =
+	{
+		{ TEXT("if"),       TEXT("flow"),        TEXT("if (condition) { ... } runs its block when the condition is true."), false },
+		{ TEXT("else"),     TEXT("flow"),        TEXT("After an if block: else { ... } or else if (...) { ... }."), false },
+		{ TEXT("while"),    TEXT("flow"),        TEXT("while (condition) { ... } runs its block again and again while the condition is true."), false },
+		{ TEXT("for"),      TEXT("flow"),        TEXT("for (int _i = 0; _i < 3; _i++) { ... }: a counting loop."), false },
+		{ TEXT("forEach"),  TEXT("flow"),        TEXT("forEach (_x in _array) { ... } runs its block once for each element."), false },
+		{ TEXT("in"),       TEXT("flow"),        TEXT("In a forEach header: forEach (_x in _array)."), false },
+		{ TEXT("sequence"), TEXT("flow"),        TEXT("sequence { ... } { ... } runs its blocks one after another, each to its end."), false },
+		{ TEXT("switch"),   TEXT("flow"),        TEXT("switch (value) { case 1: { ... } default: { ... } } runs the case whose value matches."), false },
+		{ TEXT("case"),     TEXT("flow"),        TEXT("In a switch: case 1, 2: { ... }."), false },
+		{ TEXT("default"),  TEXT("flow"),        TEXT("In a switch, last: default: { ... } runs when no case matches."), false },
+		{ TEXT("break"),    TEXT("jump"),        TEXT("Leaves the loop it's in."), false },
+		{ TEXT("continue"), TEXT("jump"),        TEXT("Skips the rest of this pass through the loop it's in."), false },
+		{ TEXT("return"),   TEXT("jump"),        TEXT("Ends the script, or the function it's in (with its result, if it has one)."), false },
+		{ TEXT("label"),    TEXT("jump"),        TEXT("label Name; marks a place that goto can jump to."), false },
+		{ TEXT("goto"),     TEXT("jump"),        TEXT("goto Name; jumps to a label."), false },
+		{ TEXT("global"),   TEXT("declaration"), TEXT("global int stage; declares a global, at the top of the file."), false },
+		{ TEXT("function"), TEXT("declaration"), TEXT("function int AddScore(int _amount) { ... } defines a function, at the top level."), false },
+		{ TEXT("bool"),     TEXT("type"),        TEXT("true or false."), false },
+		{ TEXT("int"),      TEXT("type"),        TEXT("A whole number."), false },
+		{ TEXT("float"),    TEXT("type"),        TEXT("A number with a fraction (64-bit)."), false },
+		{ TEXT("string"),   TEXT("type"),        TEXT("Text that isn't translated, like a name or an ID."), false },
+		{ TEXT("entity"),   TEXT("type"),        TEXT("A Bango ID, like @guard."), false },
+		{ TEXT("text"),     TEXT("type"),        TEXT("Text that players read, translatable: LOCTEXT(\"Key\", \"...\")."), false },
+		{ TEXT("vector2"),  TEXT("type"),        TEXT("Two numbers, like [1, 2]."), false },
+		{ TEXT("vector3"),  TEXT("type"),        TEXT("Three numbers, like [1, 2, 3]."), false },
+		{ TEXT("void"),     TEXT("type"),        TEXT("A function that gives back no result."), false },
+		{ TEXT("true"),     TEXT("value"),       TEXT("The bool value true."), true },
+		{ TEXT("false"),    TEXT("value"),       TEXT("The bool value false."), true },
+		{ TEXT("nil"),      TEXT("value"),       TEXT("No value. Reading nil stops the script; check with IsNil."), true },
+	};
+	for (const FKeyword& Keyword : Keywords)
+	{
+		if (!bValuesOnly || Keyword.bValue)
+		{
+			OutItems.Add(MakeItem(Keyword.Name, EBangoCompletionKind::Keyword, Keyword.Detail, Keyword.Description, false));
+		}
+	}
+}
+
 void FBangoCompletion::GatherItems(const FBangoScriptNames& Names, int32 LineIndex, const TArray<FBangoCompletionItem>& CommandItems,
 	TArray<FBangoCompletionItem>& OutItems)
 {
@@ -187,7 +232,9 @@ void FBangoCompletion::GatherItems(const FBangoScriptNames& Names, int32 LineInd
 
 	TArray<FBangoCompletionItem> Builtins;
 	GetBuiltinItems(Builtins);
-	const TArray<FBangoCompletionItem>* const Groups[] = { &CommandItems, &Builtins };
+	TArray<FBangoCompletionItem> Keywords;
+	GetKeywordItems(Keywords);
+	const TArray<FBangoCompletionItem>* const Groups[] = { &CommandItems, &Builtins, &Keywords };
 	for (const TArray<FBangoCompletionItem>* Group : Groups)
 	{
 		for (const FBangoCompletionItem& Item : *Group)

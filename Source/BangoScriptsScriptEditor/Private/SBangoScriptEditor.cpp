@@ -4626,8 +4626,8 @@ FReply SBangoScriptEditor::OnCompileClicked()
 		if (Nodes.IsValidIndex(GraphIndex) && Nodes[GraphIndex].IsValidIndex(Place.Node))
 		{
 			UBangoEdGraphNode* Node = Nodes[GraphIndex][Place.Node];
-			const int32 Field = Place.Offset == INDEX_NONE ? INDEX_NONE : Bango::FindFieldAt(Node->Layout, Place.Offset);
-			Node->SetCompileError(CompileError.Message, Field);
+			const int32 Field = Place.Offset == INDEX_NONE || Place.Case != INDEX_NONE ? INDEX_NONE : Bango::FindFieldAt(Node->Layout, Place.Offset);
+			Node->SetCompileError(CompileError.Message, Field, Place.Case);
 			if (GraphIndex != ShownGraph)
 			{
 				ShowGraph(GraphIndex);

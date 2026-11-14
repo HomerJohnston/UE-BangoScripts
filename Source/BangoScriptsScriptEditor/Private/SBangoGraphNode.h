@@ -5,6 +5,7 @@
 #include "SGraphNode.h"
 #include "BangoCompletion.h"
 
+class SEditableText;
 class SEditableTextBox;
 class SMenuAnchor;
 class SVerticalBox;
@@ -43,6 +44,9 @@ protected:
 	//~ Begin SGraphNode
 	virtual TSharedRef<SWidget> CreateNodeContentArea() override;
 	virtual void AddPin(const TSharedRef<SGraphPin>& PinToAdd) override;
+	/** A sequence's or switch's "Add pin +" under its outputs, like Blueprint's Sequence node. */
+	virtual void CreateOutputSideAddButton(TSharedPtr<SVerticalBox> OutputBox) override;
+	virtual FReply OnAddPin() override;
 	virtual TSharedRef<SWidget> CreateTitleWidget(TSharedPtr<SNodeTitle> NodeTitle) override;
 	/** Entry nodes (Script Start, a function's start) stay at (0,0): they're never moved, even with other nodes. */
 	virtual void MoveTo(const FVector2f& NewPosition, FNodeSet& NodeFilter, bool bMarkDirty = true) override;
@@ -145,6 +149,22 @@ private:
 	void OnValueCommitted(const FText& NewText, ETextCommit::Type CommitType, int32 FieldIndex);
 	/** Rebuilds the node's widgets on the next frame (never from inside one of its own callbacks). */
 	void RefreshSoon();
+
+	// ---- A switch's case values: a box beside each case's output pin ----
+
+	/** One edit box per case (see MakeCaseValueBox). */
+	TArray<TSharedPtr<SEditableText>> CaseEditBoxes;
+	/** The case being edited, or INDEX_NONE. */
+	int32 EditingCase = INDEX_NONE;
+	/** Enter or Tab in a case box: the case to open once the node has rebuilt, or INDEX_NONE. */
+	int32 PendingCaseEdit = INDEX_NONE;
+
+	/** The case's values, shown on one line beside its pin; clicking edits them in place. */
+	TSharedRef<SWidget> MakeCaseValueBox(int32 Case);
+	void BeginEditingCase(int32 Case);
+	void OnCaseCommitted(const FText& NewText, ETextCommit::Type CommitType, int32 Case);
+	/** Enter applies and moves on to the next case (editing ends after the last); Tab wraps around; Shift goes back. */
+	FReply OnCaseKeyDown(const FGeometry& Geometry, const FKeyEvent& KeyEvent, int32 Case);
 };
 
 /** Creates SBangoGraphNode widgets for Bango nodes. */

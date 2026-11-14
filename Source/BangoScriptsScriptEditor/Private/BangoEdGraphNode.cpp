@@ -18,7 +18,207 @@
 
 const FName UBangoEdGraphNode::InPinName(TEXT("In"));
 const FName UBangoEdGraphNode::NextPinName(TEXT("Next"));
-const FName UBangoEdGraphNode::BranchPinNames[2] = { FName(TEXT("Branch0")), FName(TEXT("Branch1")) };
+const FName UBangoEdGraphNode::DefaultPinName(TEXT("Default"));
+FName UBangoEdGraphNode::GetBranchPinName(int32 Branch)
+{
+	return FName(*FString::Printf(TEXT("Branch%d"), Branch));
+}
+
+int32 UBangoEdGraphNode::GetBranchCount() const
+{
+	if (IsSwitch())
+	{
+		return CaseValues.Num() + 1;
+	}
+	return IsSequence() ? FMath::Max(SequenceOutputs, 1) : Bango::GetGraphNodeBranchCount(GetKind());
+}
+
+UEdGraphPin* UBangoEdGraphNode::GetBranchPin(int32 Branch) const
+{
+	if (IsSwitch() && Branch == CaseValues.Num())
+	{
+		return FindPin(DefaultPinName, EGPD_Output);
+	}
+	return FindPin(GetBranchPinName(Branch), EGPD_Output);
+}
+
+int32 UBangoEdGraphNode::GetCaseOfPin(const UEdGraphPin* Pin) const
+{
+	for (int32 Case = 0; IsSwitch() && Pin && Case < CaseValues.Num(); ++Case)
+	{
+		if (Pin->PinName == GetBranchPinName(Case) && Pin->Direction == EGPD_Output)
+		{
+			return Case;
+		}
+	}
+	return INDEX_NONE;
+}
+
+void UBangoEdGraphNode::AddSwitchCase()
+{
+	if (!IsSwitch())
+	{
+		return;
+	}
+	const FScopedTransaction Transaction(LOCTEXT("AddSwitchCase", "Add Switch Case"));
+	Modify();
+	const int32 Case = CaseValues.Num();
+	CaseValues.Add(FString());
+	UEdGraphPin* Pin = CreatePin(EGPD_Output, UBangoEdGraphSchema::PC_BangoExec, GetBranchPinName(Case));
+	// After the other cases, above Default.
+	Pins.Remove(Pin);
+	const int32 DefaultIndex = Pins.IndexOfByKey(FindPin(DefaultPinName, EGPD_Output));
+	Pins.Insert(Pin, DefaultIndex == INDEX_NONE ? Pins.Num() : DefaultIndex);
+	UpdateLayout();
+	if (UEdGraph* Graph = GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
+}
+
+void UBangoEdGraphNode::RemoveSwitchCase(int32 Case)
+{
+	const int32 Count = CaseValues.Num();
+	if (!IsSwitch() || Case < 0 || Case >= Count)
+	{
+		return;
+	}
+	const FScopedTransaction Transaction(LOCTEXT("RemoveSwitchCase", "Remove Switch Case"));
+	Modify();
+	// Each case's wire, without the removed one's: the later cases move up one, wires and all.
+	TArray<TArray<UEdGraphPin*>> Links;
+	for (int32 i = 0; i < Count; ++i)
+	{
+		UEdGraphPin* Pin = FindPin(GetBranchPinName(i), EGPD_Output);
+		TArray<UEdGraphPin*> Linked = Pin ? Pin->LinkedTo : TArray<UEdGraphPin*>();
+		for (UEdGraphPin* Other : Linked)
+		{
+			if (Other && Other->GetOwningNode())
+			{
+				Other->GetOwningNode()->Modify();
+			}
+		}
+		if (Pin)
+		{
+			Pin->BreakAllPinLinks();
+		}
+		Links.Add(Linked);
+	}
+	Links.RemoveAt(Case);
+	if (UEdGraphPin* Last = FindPin(GetBranchPinName(Count - 1), EGPD_Output))
+	{
+		RemovePin(Last);
+	}
+	CaseValues.RemoveAt(Case);
+	for (int32 i = 0; i < Links.Num(); ++i)
+	{
+		if (UEdGraphPin* Pin = FindPin(GetBranchPinName(i), EGPD_Output))
+		{
+			for (UEdGraphPin* Other : Links[i])
+			{
+				Pin->MakeLinkTo(Other);
+			}
+		}
+	}
+	UpdateLayout();
+	if (UEdGraph* Graph = GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
+}
+
+bool UBangoEdGraphNode::SetCaseValues(int32 Case, const FString& Values, FString& OutError)
+{
+	if (!IsSwitch() || !CaseValues.IsValidIndex(Case))
+	{
+		return false;
+	}
+	const FString Trimmed = Values.TrimStartAndEnd();
+	if (!Trimmed.IsEmpty() && !Bango::ValidateCaseValues(Trimmed, OutError))
+	{
+		return false;
+	}
+	if (Trimmed.Equals(CaseValues[Case], ESearchCase::CaseSensitive))
+	{
+		return true;
+	}
+	const FScopedTransaction Transaction(LOCTEXT("EditSwitchCase", "Edit Switch Case"));
+	Modify();
+	CaseValues[Case] = Trimmed;
+	UpdateLayout();
+	return true;
+}
+
+void UBangoEdGraphNode::AddSequenceOutput()
+{
+	if (!IsSequence())
+	{
+		return;
+	}
+	const FScopedTransaction Transaction(LOCTEXT("AddSequenceOutput", "Add Sequence Output"));
+	Modify();
+	const int32 Branch = GetBranchCount();
+	SequenceOutputs = Branch + 1;
+	UEdGraphPin* Pin = CreatePin(EGPD_Output, UBangoEdGraphSchema::PC_BangoExec, GetBranchPinName(Branch));
+	// Above Then, after the other outputs.
+	Pins.Remove(Pin);
+	const int32 NextIndex = Pins.IndexOfByKey(GetNextPin());
+	Pins.Insert(Pin, NextIndex == INDEX_NONE ? Pins.Num() : NextIndex);
+	if (UEdGraph* Graph = GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
+}
+
+void UBangoEdGraphNode::RemoveSequenceOutput(int32 Branch)
+{
+	const int32 Count = GetBranchCount();
+	if (!CanRemoveSequenceOutput() || Branch < 0 || Branch >= Count)
+	{
+		return;
+	}
+	const FScopedTransaction Transaction(LOCTEXT("RemoveSequenceOutput", "Remove Sequence Output"));
+	Modify();
+	// Each output's wire, without the removed one's: the later outputs move up one, wires and all.
+	TArray<TArray<UEdGraphPin*>> Links;
+	for (int32 i = 0; i < Count; ++i)
+	{
+		UEdGraphPin* Pin = GetBranchPin(i);
+		TArray<UEdGraphPin*> Linked = Pin ? Pin->LinkedTo : TArray<UEdGraphPin*>();
+		for (UEdGraphPin* Other : Linked)
+		{
+			if (Other && Other->GetOwningNode())
+			{
+				Other->GetOwningNode()->Modify();
+			}
+		}
+		if (Pin)
+		{
+			Pin->BreakAllPinLinks();
+		}
+		Links.Add(Linked);
+	}
+	Links.RemoveAt(Branch);
+	if (UEdGraphPin* Last = GetBranchPin(Count - 1))
+	{
+		RemovePin(Last);
+	}
+	SequenceOutputs = Count - 1;
+	for (int32 i = 0; i < Links.Num(); ++i)
+	{
+		if (UEdGraphPin* Pin = GetBranchPin(i))
+		{
+			for (UEdGraphPin* Other : Links[i])
+			{
+				Pin->MakeLinkTo(Other);
+			}
+		}
+	}
+	if (UEdGraph* Graph = GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
+}
 
 void UBangoEdGraphNode::AllocateDefaultPins()
 {
@@ -26,9 +226,10 @@ void UBangoEdGraphNode::AllocateDefaultPins()
 	{
 		CreatePin(EGPD_Input, UBangoEdGraphSchema::PC_BangoExec, InPinName);
 	}
-	for (int32 Branch = 0; Branch < Bango::GetGraphNodeBranchCount(GetKind()); ++Branch)
+	for (int32 Branch = 0; Branch < GetBranchCount(); ++Branch)
 	{
-		CreatePin(EGPD_Output, UBangoEdGraphSchema::PC_BangoExec, BranchPinNames[Branch]);
+		const bool bDefault = IsSwitch() && Branch == CaseValues.Num();
+		CreatePin(EGPD_Output, UBangoEdGraphSchema::PC_BangoExec, bDefault ? DefaultPinName : GetBranchPinName(Branch));
 	}
 	CreatePin(EGPD_Output, UBangoEdGraphSchema::PC_BangoExec, NextPinName);
 }
@@ -46,6 +247,7 @@ void UBangoEdGraphNode::UpdateLayout()
 	}
 
 	ErrorField = INDEX_NONE;
+	ErrorCase = INDEX_NONE;
 	FieldWarnings.Reset();
 	bHasCompilerMessage = !Layout.Error.IsEmpty();
 	ErrorType = EMessageSeverity::Error;
@@ -104,12 +306,13 @@ bool UBangoEdGraphNode::SetFieldValue(int32 FieldIndex, const FString& Value, FS
 	return true;
 }
 
-void UBangoEdGraphNode::SetCompileError(const FString& Message, int32 FieldIndex)
+void UBangoEdGraphNode::SetCompileError(const FString& Message, int32 FieldIndex, int32 CaseIndex)
 {
 	bHasCompilerMessage = true;
 	ErrorType = EMessageSeverity::Error;
 	ErrorMsg = Message;
 	ErrorField = FieldIndex;
+	ErrorCase = CaseIndex;
 }
 
 int32 UBangoEdGraphNode::UpdateCompileWarnings()
@@ -148,7 +351,52 @@ void UBangoEdGraphNode::PostEditUndo()
 void UBangoEdGraphNode::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const
 {
 	Super::GetNodeContextMenuActions(Menu, Context);
-	if (!Menu || !Context || Context->Pin || !CanBeDisabled())
+	if (!Menu || !Context)
+	{
+		return;
+	}
+	if (IsSequence())
+	{
+		// A sequence's outputs: add one at the end; right-clicking an output removes it.
+		UBangoEdGraphNode* MutableThis = const_cast<UBangoEdGraphNode*>(this);
+		FToolMenuSection& Section = Menu->AddSection(TEXT("BangoSequence"), LOCTEXT("SequenceSection", "Sequence"));
+		Section.AddMenuEntry(TEXT("AddSequenceOutput"), LOCTEXT("AddOutput", "Add Output"),
+			LOCTEXT("AddOutputTooltip", "Adds a scope after the others: another block, run after them and before Then."), FSlateIcon(),
+			FUIAction(FExecuteAction::CreateLambda([MutableThis]() { MutableThis->AddSequenceOutput(); })));
+		int32 Branch = INDEX_NONE;
+		for (int32 i = 0; Context->Pin && i < GetBranchCount(); ++i)
+		{
+			if (Context->Pin->PinName == GetBranchPinName(i))
+			{
+				Branch = i;
+			}
+		}
+		if (Branch != INDEX_NONE)
+		{
+			Section.AddMenuEntry(TEXT("RemoveSequenceOutput"), FText::Format(LOCTEXT("RemoveOutput", "Remove Scope {0}"), FText::AsNumber(Branch)),
+				LOCTEXT("RemoveOutputTooltip", "Removes this scope and its wire (the nodes on it stay, unwired). The scopes after it move up."), FSlateIcon(),
+				FUIAction(FExecuteAction::CreateLambda([MutableThis, Branch]() { MutableThis->RemoveSequenceOutput(Branch); }),
+					FCanExecuteAction::CreateLambda([MutableThis]() { return MutableThis->CanRemoveSequenceOutput(); })));
+		}
+	}
+	if (IsSwitch())
+	{
+		// A switch's cases: add one before Default; right-clicking a case's output removes it.
+		UBangoEdGraphNode* MutableThis = const_cast<UBangoEdGraphNode*>(this);
+		FToolMenuSection& Section = Menu->AddSection(TEXT("BangoSwitch"), LOCTEXT("SwitchSection", "Switch"));
+		Section.AddMenuEntry(TEXT("AddSwitchCase"), LOCTEXT("AddCase", "Add Case"),
+			LOCTEXT("AddCaseTooltip", "Adds a case after the others, before Default. Type its value (or values, separated by commas) in its box."), FSlateIcon(),
+			FUIAction(FExecuteAction::CreateLambda([MutableThis]() { MutableThis->AddSwitchCase(); })));
+		const int32 Case = GetCaseOfPin(Context->Pin);
+		if (Case != INDEX_NONE)
+		{
+			const FString Values = CaseValues[Case];
+			Section.AddMenuEntry(TEXT("RemoveSwitchCase"), Values.IsEmpty() ? LOCTEXT("RemoveEmptyCase", "Remove Case") : FText::Format(LOCTEXT("RemoveCase", "Remove Case {0}"), FText::FromString(Values)),
+				LOCTEXT("RemoveCaseTooltip", "Removes this case and its wire (the nodes on it stay, unwired). The cases after it move up."), FSlateIcon(),
+				FUIAction(FExecuteAction::CreateLambda([MutableThis, Case]() { MutableThis->RemoveSwitchCase(Case); })));
+		}
+	}
+	if (Context->Pin || !CanBeDisabled())
 	{
 		return;
 	}
@@ -209,7 +457,9 @@ FLinearColor UBangoEdGraphNode::GetNodeTitleColor() const
 	case EBangoGraphNodeKind::If:
 	case EBangoGraphNodeKind::While:
 	case EBangoGraphNodeKind::For:
-	case EBangoGraphNodeKind::ForEach:  return FLinearColor(0.35f, 0.35f, 0.35f);   // like Blueprint flow control
+	case EBangoGraphNodeKind::ForEach:
+	case EBangoGraphNodeKind::Sequence:
+	case EBangoGraphNodeKind::Switch:   return FLinearColor(0.35f, 0.35f, 0.35f);   // like Blueprint flow control
 	case EBangoGraphNodeKind::Label:
 	case EBangoGraphNodeKind::Goto:     return FLinearColor(0.45f, 0.20f, 0.60f);
 	case EBangoGraphNodeKind::Break:
@@ -258,9 +508,14 @@ FText UBangoEdGraphNode::GetPinDisplayName(const UEdGraphPin* Pin) const
 	{
 		return FText::FromString(Bango::GetGraphNodeNextName(GetKind()));
 	}
-	for (int32 Branch = 0; Branch < 2; ++Branch)
+	if (IsSwitch())
 	{
-		if (Pin->PinName == BranchPinNames[Branch])
+		// A case's values are in the box beside its pin, so the pin itself has no name; Default has.
+		return Pin->PinName == DefaultPinName ? LOCTEXT("DefaultPin", "Default") : FText::GetEmpty();
+	}
+	for (int32 Branch = 0; Branch < GetBranchCount(); ++Branch)
+	{
+		if (Pin->PinName == GetBranchPinName(Branch))
 		{
 			return FText::FromString(Bango::GetGraphNodeBranchName(GetKind(), Branch));
 		}

@@ -72,7 +72,13 @@ class UBangoEdGraphNode : public UEdGraphNode
 public:
 	static const FName InPinName;
 	static const FName NextPinName;
-	static const FName BranchPinNames[2];
+	/** A switch's Default output (its last branch). Named apart from the cases, so adding a case doesn't rename it. */
+	static const FName DefaultPinName;
+	/**
+	 * The name of an output that leads into a block: Branch0, Branch1, ... (If's Do and Else, a loop's Do, a sequence's
+	 * Scope 0, Scope 1, ..., a switch's cases). A switch's last branch is DefaultPinName instead: use GetBranchPin.
+	 */
+	static FName GetBranchPinName(int32 Branch);
 
 	/** EBangoGraphNodeKind, stored as a byte for reflection. */
 	UPROPERTY()
@@ -84,6 +90,14 @@ public:
 	/** The node's editable text (see FBangoGraphNode::Text). */
 	UPROPERTY()
 	FString Text;
+
+	/** A sequence's number of outputs (blocks): at least 1. Other kinds' outputs come from their kind. */
+	UPROPERTY()
+	int32 SequenceOutputs = 2;
+
+	/** A switch's cases: each one's values as written, like `1, 2` (see FBangoGraphNode::CaseValues). One output each. */
+	UPROPERTY()
+	TArray<FString> CaseValues;
 
 	/** True for nodes in a function's graph (a function graph's entry node's Text is the signature). */
 	UPROPERTY()
@@ -138,6 +152,8 @@ public:
 
 	/** The field the last compile error points at, or INDEX_NONE. */
 	int32 ErrorField = INDEX_NONE;
+	/** A switch's case the last compile error is on, or INDEX_NONE. */
+	int32 ErrorCase = INDEX_NONE;
 
 	/** Warnings from the last compile (like a placeholder with no value), each on a field. Shown in yellow. */
 	TArray<Bango::FBangoFieldWarning> FieldWarnings;
@@ -162,8 +178,11 @@ public:
 	 */
 	bool SetFieldValue(int32 FieldIndex, const FString& Value, FString& OutError);
 
-	/** Shows a compile error on the node, pointing at a field if FieldIndex isn't INDEX_NONE. Replaces a warning banner. */
-	void SetCompileError(const FString& Message, int32 FieldIndex);
+	/**
+	 * Shows a compile error on the node, pointing at a field if FieldIndex isn't INDEX_NONE (or at a switch's case, if
+	 * CaseIndex isn't). Replaces a warning banner.
+	 */
+	void SetCompileError(const FString& Message, int32 FieldIndex, int32 CaseIndex = INDEX_NONE);
 
 	/**
 	 * Finds this node's compile warnings (Bango::GetNodeWarnings) and shows them: a yellow outline on each field,
@@ -183,7 +202,26 @@ public:
 
 	UEdGraphPin* GetInputPin() const { return FindPin(InPinName, EGPD_Input); }
 	UEdGraphPin* GetNextPin() const { return FindPin(NextPinName, EGPD_Output); }
-	UEdGraphPin* GetBranchPin(int32 Branch) const { return FindPin(BranchPinNames[Branch], EGPD_Output); }
+	UEdGraphPin* GetBranchPin(int32 Branch) const;
+	/** How many outputs lead into blocks (see Bango::GetGraphNodeBranchCount): a sequence's or switch's own count. */
+	int32 GetBranchCount() const;
+
+	bool IsSequence() const { return GetKind() == EBangoGraphNodeKind::Sequence; }
+	/** A sequence's Add pin: a new last output, as an undoable edit. */
+	void AddSequenceOutput();
+	/** A sequence's Remove pin: takes out one output (its wire goes too), moving the later ones up. Never the last one left. */
+	void RemoveSequenceOutput(int32 Branch);
+	bool CanRemoveSequenceOutput() const { return IsSequence() && GetBranchCount() > 1; }
+
+	bool IsSwitch() const { return GetKind() == EBangoGraphNodeKind::Switch; }
+	/** A switch's Add pin: a new case (with no value yet) after the others, before Default, as an undoable edit. */
+	void AddSwitchCase();
+	/** Takes out one case and its output (its wire goes too), moving the later ones up. Default stays. */
+	void RemoveSwitchCase(int32 Case);
+	/** Sets a case's values (see Bango::ValidateCaseValues; empty is allowed while it's being filled in) as an undoable edit. */
+	bool SetCaseValues(int32 Case, const FString& Values, FString& OutError);
+	/** The case an output pin is for, or INDEX_NONE (Default, Then, the input, or not a switch). */
+	int32 GetCaseOfPin(const UEdGraphPin* Pin) const;
 
 	//~ Begin UEdGraphNode
 	virtual void AllocateDefaultPins() override;

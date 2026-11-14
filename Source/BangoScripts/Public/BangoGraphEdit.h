@@ -35,6 +35,13 @@ namespace Bango
 	BANGOSCRIPTS_API bool ValidateNodeText(EBangoGraphNodeKind Kind, bool bInFunctionGraph, const FString& Text, FString& OutError);
 
 	/**
+	 * Checks a switch case's values (a row of a Switch node): one line, one or more fixed values separated by
+	 * commas, each an int (or a negated one), a string or a Bango ID, like `1, -2` or `"north"`. Whether they match
+	 * the switch value's type, and repeats, are checked by Compile.
+	 */
+	BANGOSCRIPTS_API bool ValidateCaseValues(const FString& Values, FString& OutError);
+
+	/**
 	 * For statement text (a declaration, assignment, ++/--, or call): which of those kinds it is. Text that
 	 * stores a call's result (`double _t = Random(...)`, `_t = Random(...)`) is a declaration or assignment.
 	 */
@@ -61,6 +68,8 @@ namespace Bango
 		int32 Node = INDEX_NONE;
 		/** Character offset in the node's text, or INDEX_NONE if the error isn't inside the node's text. */
 		int32 Offset = INDEX_NONE;
+		/** For a Switch node, the case whose line the error is on, or INDEX_NONE. Offset is then in its values. */
+		int32 Case = INDEX_NONE;
 	};
 
 	/**

@@ -200,6 +200,10 @@ UEdGraphNode* FBangoSchemaAction_NewNode::PerformAction(UEdGraph* ParentGraph, U
 	UBangoEdGraphNode* Node = NewObject<UBangoEdGraphNode>(ParentGraph, NAME_None, RF_Transactional);
 	Node->KindValue = Kind;
 	Node->Text = Text;
+	if ((EBangoGraphNodeKind)Kind == EBangoGraphNodeKind::Switch)
+	{
+		Node->CaseValues.Add(FString()); // a new switch has one case, to be filled in
+	}
 	Node->NodeID = 0;
 	Node->bInFunctionGraph = Sibling->bInFunctionGraph;
 	Node->LayoutContext = Sibling->LayoutContext;

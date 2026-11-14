@@ -18,6 +18,10 @@ namespace BangoLexerPrivate
 		{ TEXT("for"), EBangoTokenKind::KwFor },
 		{ TEXT("forEach"), EBangoTokenKind::KwForEach },
 		{ TEXT("in"), EBangoTokenKind::KwIn },
+		{ TEXT("sequence"), EBangoTokenKind::KwSequence },
+		{ TEXT("switch"), EBangoTokenKind::KwSwitch },
+		{ TEXT("case"), EBangoTokenKind::KwCase },
+		{ TEXT("default"), EBangoTokenKind::KwDefault },
 		{ TEXT("break"), EBangoTokenKind::KwBreak },
 		{ TEXT("continue"), EBangoTokenKind::KwContinue },
 		{ TEXT("return"), EBangoTokenKind::KwReturn },
@@ -540,6 +544,7 @@ namespace BangoLexerPrivate
 			case TEXT(']'): return Emit(EBangoTokenKind::RBracket, Loc, 1);
 			case TEXT(';'): return Emit(EBangoTokenKind::Semicolon, Loc, 1);
 			case TEXT(','): return Emit(EBangoTokenKind::Comma, Loc, 1);
+			case TEXT(':'): return Emit(EBangoTokenKind::Colon, Loc, 1);
 			case TEXT('%'): return Emit(EBangoTokenKind::Percent, Loc, 1);
 			case TEXT('+'):
 				if (N == TEXT('+')) return Emit(EBangoTokenKind::PlusPlus, Loc, 2);
@@ -626,6 +631,7 @@ namespace Bango
 		case EBangoTokenKind::RBracket: return TEXT("']'");
 		case EBangoTokenKind::Semicolon: return TEXT("';'");
 		case EBangoTokenKind::Comma: return TEXT("','");
+		case EBangoTokenKind::Colon: return TEXT("':'");
 		case EBangoTokenKind::Dot: return TEXT("'.'");
 		case EBangoTokenKind::Assign: return TEXT("'='");
 		case EBangoTokenKind::KwIn: return TEXT("'in'");

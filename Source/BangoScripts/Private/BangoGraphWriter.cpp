@@ -241,8 +241,26 @@ namespace BangoGraphWriterPrivate
 				{
 					return false;
 				}
-				const int32 Count = Bango::GetGraphNodeBranchCount(Node.Kind);
-				for (int32 Branch = 0; Branch < 2; ++Branch)
+				const int32 Count = Bango::GetGraphNodeBranchCount(Node);
+				if (Node.Kind == EBangoGraphNodeKind::Sequence && Count == 0)
+				{
+					return Fail(FString::Printf(TEXT("In %s, %s has no outputs: a sequence needs at least one."), *GraphName, *NodeName(Node)));
+				}
+				if (Node.Kind == EBangoGraphNodeKind::Switch)
+				{
+					if (Node.Branches.Num() != Node.CaseValues.Num() + 1)
+					{
+						return Fail(FString::Printf(TEXT("In %s, %s has %d outputs for %d cases: a switch has one per case, then Default."), *GraphName, *NodeName(Node), Node.Branches.Num(), Node.CaseValues.Num()));
+					}
+					for (const FString& Values : Node.CaseValues)
+					{
+						if (HasLineBreak(Values))
+						{
+							return Fail(FString::Printf(TEXT("In %s, a case of %s has a line break in its values. Each case's values must be one line."), *GraphName, *NodeName(Node)));
+						}
+					}
+				}
+				for (int32 Branch = 0; Branch < Node.Branches.Num(); ++Branch)
 				{
 					if (Branch >= Count && Node.Branches[Branch] != INDEX_NONE)
 					{
@@ -267,7 +285,7 @@ namespace BangoGraphWriterPrivate
 				{
 					++Incoming[Node.Next];
 				}
-				for (int32 Branch = 0; Branch < 2; ++Branch)
+				for (int32 Branch = 0; Branch < Node.Branches.Num(); ++Branch)
 				{
 					if (Node.Branches[Branch] != INDEX_NONE)
 					{
@@ -424,7 +442,8 @@ namespace BangoGraphWriterPrivate
 		static bool IsBlockKind(EBangoGraphNodeKind Kind)
 		{
 			return Kind == EBangoGraphNodeKind::If || Kind == EBangoGraphNodeKind::While
-				|| Kind == EBangoGraphNodeKind::For || Kind == EBangoGraphNodeKind::ForEach;
+				|| Kind == EBangoGraphNodeKind::For || Kind == EBangoGraphNodeKind::ForEach || Kind == EBangoGraphNodeKind::Sequence
+				|| Kind == EBangoGraphNodeKind::Switch;
 		}
 
 		/**
@@ -505,6 +524,47 @@ namespace BangoGraphWriterPrivate
 				if (!WriteBlock(Graph, Node.Branches[0], Indent, Detached, Depth))
 				{
 					return false;
+				}
+				AddCode(Indent, Detached, TEXT("}"), nullptr);
+				return true;
+			}
+
+			case EBangoGraphNodeKind::Sequence:
+			{
+				// `sequence`, then each output's block in turn: the `{` of one on the line after the `}` of the last.
+				AddCode(Indent, Detached, TEXT("sequence"), &Node);
+				for (const int32 Output : Node.Branches)
+				{
+					if (!WriteBlock(Graph, Output, Indent, Detached, Depth))
+					{
+						return false;
+					}
+					AddCode(Indent, Detached, TEXT("}"), nullptr);
+				}
+				return true;
+			}
+
+			case EBangoGraphNodeKind::Switch:
+			{
+				// `switch (value)` `{`, each case line with its block one deeper, `default:` only if it's wired, `}`.
+				AddCode(Indent, Detached, FString(TEXT("switch (")) + Text + TEXT(")"), &Node);
+				AddCode(Indent, Detached, TEXT("{"), nullptr);
+				int32 CaseIndent = Indent;
+				int32 CaseDetached = Detached;
+				Deeper(CaseIndent, CaseDetached);
+				const int32 DefaultBranch = Node.Branches.Num() - 1;
+				for (int32 Branch = 0; Branch < Node.Branches.Num(); ++Branch)
+				{
+					if (Branch == DefaultBranch && Node.Branches[Branch] == INDEX_NONE)
+					{
+						break;
+					}
+					AddCode(CaseIndent, CaseDetached, Branch == DefaultBranch ? FString(TEXT("default:")) : FString(TEXT("case ")) + Node.CaseValues[Branch] + TEXT(":"), nullptr);
+					if (!WriteBlock(Graph, Node.Branches[Branch], CaseIndent, CaseDetached, Depth + 1))
+					{
+						return false;
+					}
+					AddCode(CaseIndent, CaseDetached, TEXT("}"), nullptr);
 				}
 				AddCode(Indent, Detached, TEXT("}"), nullptr);
 				return true;
