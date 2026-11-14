@@ -96,6 +96,13 @@ struct BANGOSCRIPTS_API FBangoNodeField
 	/** A heading the editor shows on its own row above this field ("Input Params", "Localization"), or empty. */
 	FString SectionHeader;
 
+	/**
+	 * Text the editor shows after the value, on its row, that isn't part of it: ValueSuffix, then ValueSuffixItalic in
+	 * italics (a Spawn's Var row ends "= New Handle"). Both empty for most fields.
+	 */
+	FString ValueSuffix;
+	FString ValueSuffixItalic;
+
 	/** What clearing the field removes: [OuterBegin, OuterEnd), its text plus separators (like `, ` or ` = `). */
 	int32 OuterBegin = 0;
 	int32 OuterEnd = 0;

@@ -30,6 +30,8 @@ bool FBangoNodeField::operator==(const FBangoNodeField& Other) const
 		&& MirrorBegins == Other.MirrorBegins
 		&& bHideLabel == Other.bHideLabel && bHideIcon == Other.bHideIcon
 		&& SectionHeader.Equals(Other.SectionHeader, ESearchCase::CaseSensitive)
+		&& ValueSuffix.Equals(Other.ValueSuffix, ESearchCase::CaseSensitive)
+		&& ValueSuffixItalic.Equals(Other.ValueSuffixItalic, ESearchCase::CaseSensitive)
 		&& OuterBegin == Other.OuterBegin && OuterEnd == Other.OuterEnd
 		&& InsertPrefix.Equals(Other.InsertPrefix, ESearchCase::CaseSensitive)
 		&& InsertSuffix.Equals(Other.InsertSuffix, ESearchCase::CaseSensitive);
@@ -1089,9 +1091,14 @@ namespace BangoGraphLayoutPrivate
 			return;
 
 		case EBangoGraphNodeKind::Spawn:
-			// Where the copy's id goes, if anywhere (an int variable): `_timer = spawn`.
-			Out.Fields.Add(WholeText(TEXT("Id"), TEXT("int"), Node.Text, true));
+		{
+			// Where the copy's id goes, if anywhere (an int variable): `_timer = spawn`. Shown as "Var [_timer] = New Handle".
+			FBangoNodeField Var = WholeText(TEXT("Var"), TEXT("int"), Node.Text, true);
+			Var.ValueSuffix = TEXT("= ");
+			Var.ValueSuffixItalic = TEXT("New Handle");
+			Out.Fields.Add(Var);
 			return;
+		}
 
 		default:
 			break;

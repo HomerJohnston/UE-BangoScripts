@@ -606,11 +606,41 @@ TSharedRef<SWidget> SBangoGraphNode::MakeFieldsArea()
 				[
 					MakeFieldLabel(Field)
 				];
+			TSharedRef<SWidget> Value = MakeFieldValue(FieldIndex);
+			if (!Field.ValueSuffix.IsEmpty() || !Field.ValueSuffixItalic.IsEmpty())
+			{
+				// Text after the value that isn't part of it, like a Spawn's "= New Handle".
+				Value = SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot()
+					.FillWidth(1.0f)
+					[
+						Value
+					]
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					.Padding(6.0f, 0.0f, 0.0f, 0.0f)
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString(Field.ValueSuffix))
+						.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+						.ColorAndOpacity(FSlateColor(BangoGraphNodeStyle::LabelColor))
+					]
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString(Field.ValueSuffixItalic))
+						.Font(FCoreStyle::GetDefaultFontStyle("Italic", 9))
+						.ColorAndOpacity(FSlateColor(BangoGraphNodeStyle::LabelColor))
+					];
+			}
 			Grid->AddSlot(ValueColumn, Row)
 				.VAlign(VAlign_Fill)
 				.Padding(0.0f, 1.0f)
 				[
-					MakeFieldValue(FieldIndex)
+					Value
 				];
 		}
 		if (BangoNode->ExpandedTextFields.Contains(FieldIndex))
