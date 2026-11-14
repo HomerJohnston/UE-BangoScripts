@@ -48,6 +48,8 @@ protected:
 	virtual void CreateOutputSideAddButton(TSharedPtr<SVerticalBox> OutputBox) override;
 	/** A sequence's or switch's Add pin (a "+" pin-like button), as a row of OutputBox. Nothing for other nodes. */
 	void AddAddPinButton(const TSharedPtr<SVerticalBox>& OutputBox);
+	/** Sequence and switch nodes spread their outputs out: a grid square (16 px) between rows, after the first. */
+	void AddOutputGap();
 	virtual FReply OnAddPin() override;
 	virtual TSharedRef<SWidget> CreateTitleWidget(TSharedPtr<SNodeTitle> NodeTitle) override;
 	/** Entry nodes (Script Start, a function's start) stay at (0,0): they're never moved, even with other nodes. */

@@ -144,7 +144,7 @@ TSharedRef<SWidget> SBangoGraphNode::CreateNodeContentArea()
 
 /**
  * A sequence's or switch's Add pin button, drawn like a pin: a dark grey ring (an unwired pin's circle) on the node's
- * edge, with a "+" just inside the node to its left. Clicking it adds an output.
+ * edge, with a "+" just inside the node to its left. Clicking either adds an output.
  */
 class SBangoAddPinButton : public SCompoundWidget
 {
@@ -157,20 +157,44 @@ public:
 	{
 		OnClicked = InArgs._OnClicked;
 		SetCursor(EMouseCursor::Hand);
+		// The "+" and the circle are both part of the button. It's a whole pin row tall (the circle and the gap above
+		// and below it), so it stays on the grid and is easy to hit.
 		ChildSlot
 		[
 			SNew(SBox)
-			.WidthOverride(SBangoGraphPin::PinSize)
-			.HeightOverride(SBangoGraphPin::PinSize)
+			.HeightOverride(SBangoGraphPin::PinSize + BangoGraphNodeStyle::PinRowGap * 2.0f)
 			[
-				SNew(SImage)
-				.Image(FBangoEditorStyle::GetPinBrush(/*bConnected*/ false)) // a ring, like an unwired pin
-				.ColorAndOpacity_Lambda([this]()
-				{
-					return IsHovered() ? FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f)) : FSlateColor(FLinearColor(0.05f, 0.05f, 0.05f));
-				})
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(0.0f, 0.0f, 3.0f, 0.0f)
+				[
+					SNew(STextBlock)
+					.Text(FText::AsCultureInvariant(TEXT("+")))
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
+					.ColorAndOpacity_Lambda([this]() { return GetColor(); })
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				[
+					SNew(SBox)
+					.WidthOverride(SBangoGraphPin::PinSize)
+					.HeightOverride(SBangoGraphPin::PinSize)
+					[
+						SNew(SImage)
+						.Image(FBangoEditorStyle::GetPinBrush(/*bConnected*/ false)) // a ring, like an unwired pin
+						.ColorAndOpacity_Lambda([this]() { return GetColor(); })
+					]
+				]
 			]
 		];
+	}
+
+	FSlateColor GetColor() const
+	{
+		return IsHovered() ? FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f)) : FSlateColor(FLinearColor(0.05f, 0.05f, 0.05f));
 	}
 
 	virtual FReply OnMouseButtonDown(const FGeometry& Geometry, const FPointerEvent& MouseEvent) override
@@ -195,28 +219,6 @@ public:
 		return FReply::Handled().ReleaseMouseCapture();
 	}
 
-	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect,
-		FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
-	{
-		const int32 MaxLayer = SCompoundWidget::OnPaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
-		if (!FSlateApplication::IsInitialized())
-		{
-			return MaxLayer;
-		}
-		// The "+" inside the node, just left of the circle, centred on it.
-		static const FText Plus = FText::AsCultureInvariant(TEXT("+"));
-		const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Bold", 11);
-		const auto Measured = FSlateApplication::Get().GetRenderer()->GetFontMeasureService()->Measure(Plus, Font);
-		const FVector2f TextSize((float)Measured.X, (float)Measured.Y);
-		const FVector2f Size = AllottedGeometry.GetLocalSize();
-		FSlateDrawElement::MakeText(OutDrawElements, MaxLayer + 1,
-			AllottedGeometry.ToPaintGeometry(TextSize, FSlateLayoutTransform(FVector2f(-3.0f - TextSize.X, (Size.Y - TextSize.Y) * 0.5f))),
-			Plus, Font, ESlateDrawEffect::None,
-			//InWidgetStyle.GetColorAndOpacityTint() * (IsHovered() ? FLinearColor::White : FLinearColor(0.85f, 0.85f, 0.85f)));
-			InWidgetStyle.GetColorAndOpacityTint() * (IsHovered() ? FLinearColor(0.5f, 0.5f, 0.5f) : FLinearColor(0.05f, 0.05f, 0.05f)));
-		return MaxLayer + 1;
-	}
-
 private:
 	FSimpleDelegate OnClicked;
 };
@@ -233,6 +235,7 @@ void SBangoGraphNode::AddAddPinButton(const TSharedPtr<SVerticalBox>& OutputBox)
 	{
 		return;
 	}
+	AddOutputGap();
 	// Placed like an output pin, in a row of its own: its circle's centre on the node's right edge.
 	const FMargin BodyInset = GetDefault<UGraphEditorSettings>()->GetNonPinNodeBodyPadding();
 	const float HalfPin = SBangoGraphPin::PinSize * 0.5f;
@@ -242,7 +245,7 @@ void SBangoGraphNode::AddAddPinButton(const TSharedPtr<SVerticalBox>& OutputBox)
 	OutputBox->AddSlot()
 		.AutoHeight()
 		.HAlign(HAlign_Right)
-		.Padding(0.0f, PinRowGap, BodyInset.Right - HalfPin, PinRowGap)
+		.Padding(0.0f, 0.0f, BodyInset.Right - HalfPin, 0.0f) // the button is a whole pin row tall
 		[
 			SNew(SBangoAddPinButton)
 			.ToolTipText(Tip)
@@ -266,6 +269,18 @@ FReply SBangoGraphNode::OnAddPin()
 	return FReply::Handled();
 }
 
+void SBangoGraphNode::AddOutputGap()
+{
+	if (BangoNode && (BangoNode->IsSequence() || BangoNode->IsSwitch()) && RightNodeBox.IsValid() && OutputPins.Num() > 0)
+	{
+		RightNodeBox->AddSlot()
+			.AutoHeight()
+			[
+				SNew(SBox).HeightOverride((float)BangoGraphGridSize)
+			];
+	}
+}
+
 void SBangoGraphNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 {
 	using namespace BangoGraphNodeStyle;
@@ -275,6 +290,10 @@ void SBangoGraphNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 	if (PinToAdd->GetDirection() == EGPD_Output && PinToAdd->GetPinObj() && PinToAdd->GetPinObj()->PinName == UBangoEdGraphNode::NextPinName)
 	{
 		AddAddPinButton(RightNodeBox); // a sequence's or switch's Add pin goes after its other outputs, above Then
+	}
+	if (PinToAdd->GetDirection() == EGPD_Output)
+	{
+		AddOutputGap();
 	}
 	if (PinToAdd->GetDirection() == EGPD_Input)
 	{
@@ -300,9 +319,22 @@ void SBangoGraphNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 				.HeightOverride(CaseRowHeight)
 				[
 					SNew(SHorizontalBox)
+					// "Case" before the first case's box.
 					+ SHorizontalBox::Slot()
 					.AutoWidth()
-					.VAlign(VAlign_Fill) // the box fills its row: case boxes are 16 high, with no gap between them
+					.VAlign(VAlign_Center)
+					.Padding(0.0f, 0.0f, Case == 0 ? 6.0f : 0.0f, 0.0f)
+					[
+						Case == 0
+							? StaticCastSharedRef<SWidget>(SNew(STextBlock)
+								.Text(LOCTEXT("CaseLabel", "Case"))
+								.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+								.ColorAndOpacity(FSlateColor(LabelColor)))
+							: SNullWidget::NullWidget
+					]
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Fill) // the box fills its row (16 high)
 					.Padding(0.0f, 0.0f, 4.0f, 0.0f)
 					[
 						MakeCaseValueBox(Case)

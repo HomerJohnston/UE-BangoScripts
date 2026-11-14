@@ -995,7 +995,7 @@ namespace BangoGraphLayoutPrivate
 			// The value's type when it's a variable this node can see (its cases' values are rows of their own).
 			const TMap<FString, FString>* Visible = Context.VisibleVariables.Find(Node.NodeID);
 			const FString Type = Visible ? ResolveVariableType(Node.Text, *Visible) : FString();
-			Out.Fields.Add(WholeText(TEXT("Var"), Type, Node.Text, false));
+			Out.Fields.Add(WholeText(TEXT("On"), Type, Node.Text, false));
 			return;
 		}
 
