@@ -1613,6 +1613,11 @@ namespace BangoCompilerPrivate
 			{
 				return Fail(Spawn.Loc, TEXT("A condition can't spawn: it only works out its answer."));
 			}
+			if (Spawn.bDeclaresId)
+			{
+				return Fail(Spawn.Loc, FString::Printf(TEXT("Locals are declared at the top of their %s, before its first statement: move '%s %s;' up there, and write '%s = spawn' here."),
+					FnAst ? TEXT("function") : TEXT("script"), *Spawn.IdType.ToString(), *Spawn.IdName, *Spawn.IdName));
+			}
 			// `_id = spawn`: the place's indexes (if any) first, then SpawnBlock pushes the copy's id, then it's stored.
 			FPlaceInfo IdPlace;
 			if (Spawn.IdTarget)

@@ -353,6 +353,7 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 	{ TEXT("Count wrong"), TEXT("int _c;\n_c = Count(5);"), nullptr, TEXT("(2:12)"), TEXT("Count needs an array") },
 	{ TEXT("forEach over undeclared global"), TEXT("forEach (_x in questLog)\n{\n};"), nullptr, TEXT("(1:16)"), TEXT("declare it first") },
 	{ TEXT("spawn: the id goes in an int"), TEXT("string _s;\n_s = spawn\n{\n}"), nullptr, TEXT("(2:1)"), TEXT("stored in '_s'") },
+	{ TEXT("spawn: declaring its id variable on the spot"), TEXT("Hint(\"x\");\nint _t = spawn\n{\n}"), nullptr, TEXT("(2:1)"), TEXT("move 'int _t;' up there") },
 	{ TEXT("spawn: break can't leave it"), TEXT("while (true)\n{\n\tspawn\n\t{\n\t\tbreak;\n\t}\n}"), nullptr, TEXT("(5:3)"), TEXT("can't leave a spawn block") },
 	{ TEXT("spawn: break in its own loop"), TEXT("spawn\n{\n\twhile (true)\n\t{\n\t\tbreak;\n\t}\n}"), TEXT("*"), nullptr, nullptr },
 	{ TEXT("spawn: return with a value"), TEXT("function int F()\n{\n\tspawn\n\t{\n\t\treturn 1;\n\t}\n\treturn 2;\n}"), nullptr, TEXT("(5:10)"), TEXT("can't give back a value") },

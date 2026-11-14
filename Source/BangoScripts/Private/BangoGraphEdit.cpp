@@ -1006,7 +1006,7 @@ namespace Bango
 	namespace HoistPrivate
 	{
 		/** The declarations after a graph's leading ones, in its blocks too (not in a for's header: that's part of the For node). */
-		static void CollectLateDecls(const FBangoBlock& Block, bool bTop, int32 FirstLate, TArray<const FBangoVarDeclStmt*>& Out)
+		static void CollectLateDecls(const FBangoBlock& Block, bool bTop, int32 FirstLate, TArray<const FBangoVarDeclStmt*>& Out, TArray<const FBangoSpawnStmt*>& OutSpawns)
 		{
 			for (int32 i = bTop ? FirstLate : 0; i < Block.Num(); ++i)
 			{
@@ -1021,39 +1021,43 @@ namespace Bango
 				}
 				if (const FBangoIfStmt* If = Stmt.As<FBangoIfStmt>())
 				{
-					CollectLateDecls(If->Then, false, 0, Out);
-					CollectLateDecls(If->Else, false, 0, Out);
+					CollectLateDecls(If->Then, false, 0, Out, OutSpawns);
+					CollectLateDecls(If->Else, false, 0, Out, OutSpawns);
 				}
 				else if (const FBangoWhileStmt* While = Stmt.As<FBangoWhileStmt>())
 				{
-					CollectLateDecls(While->Body, false, 0, Out);
+					CollectLateDecls(While->Body, false, 0, Out, OutSpawns);
 				}
 				else if (const FBangoForStmt* For = Stmt.As<FBangoForStmt>())
 				{
-					CollectLateDecls(For->Body, false, 0, Out);
+					CollectLateDecls(For->Body, false, 0, Out, OutSpawns);
 				}
 				else if (const FBangoForEachStmt* ForEach = Stmt.As<FBangoForEachStmt>())
 				{
-					CollectLateDecls(ForEach->Body, false, 0, Out);
+					CollectLateDecls(ForEach->Body, false, 0, Out, OutSpawns);
 				}
 				else if (const FBangoSequenceStmt* Sequence = Stmt.As<FBangoSequenceStmt>())
 				{
 					for (const FBangoBlock& SequenceBlock : Sequence->Blocks)
 					{
-						CollectLateDecls(SequenceBlock, false, 0, Out);
+						CollectLateDecls(SequenceBlock, false, 0, Out, OutSpawns);
 					}
 				}
 				else if (const FBangoSpawnStmt* Spawn = Stmt.As<FBangoSpawnStmt>())
 				{
-					CollectLateDecls(Spawn->Body, false, 0, Out);
+					if (Spawn->bDeclaresId)
+					{
+						OutSpawns.Add(Spawn); // `int _t = spawn`: declares _t here
+					}
+					CollectLateDecls(Spawn->Body, false, 0, Out, OutSpawns);
 				}
 				else if (const FBangoSwitchStmt* Switch = Stmt.As<FBangoSwitchStmt>())
 				{
 					for (const FBangoSwitchCase& Case : Switch->Cases)
 					{
-						CollectLateDecls(Case.Body, false, 0, Out);
+						CollectLateDecls(Case.Body, false, 0, Out, OutSpawns);
 					}
-					CollectLateDecls(Switch->Default, false, 0, Out);
+					CollectLateDecls(Switch->Default, false, 0, Out, OutSpawns);
 				}
 			}
 		}
@@ -1183,8 +1187,9 @@ namespace Bango
 				++FirstLate;
 			}
 			TArray<const FBangoVarDeclStmt*> Late;
-			CollectLateDecls(Body, true, FirstLate, Late);
-			if (Late.Num() == 0)
+			TArray<const FBangoSpawnStmt*> LateSpawns;
+			CollectLateDecls(Body, true, FirstLate, Late, LateSpawns);
+			if (Late.Num() == 0 && LateSpawns.Num() == 0)
 			{
 				return true;
 			}
@@ -1267,6 +1272,32 @@ namespace Bango
 				}
 				const int32 InsertIndex = bAfterAnchor ? AnchorIndex + 1 : AnchorIndex;
 				InsertAfter[InsertIndex < 0 ? 0 : (InsertIndex > Lines.Num() ? Lines.Num() : InsertIndex)].Add(Indent + Hoisted);
+				bChanged = true;
+			}
+
+			// `int _t = spawn` (with its block below): `int _t;` at the top, and `_t = spawn` where it was.
+			for (const FBangoSpawnStmt* Spawn : LateSpawns)
+			{
+				const int32 LineIndex = Spawn->Loc.Line - 1;
+				if (!Lines.IsValidIndex(LineIndex) || Spawn->IdNameLoc.Line != Spawn->Loc.Line)
+				{
+					continue;
+				}
+				if (Names.Contains(Spawn->IdName))
+				{
+					OutError.Line = Spawn->Loc.Line;
+					OutError.Column = Spawn->Loc.Column;
+					OutError.Message = FString::Printf(TEXT("'%s' is declared twice in this graph. A graph's locals are all declared at its top (Apply moves this one there), so each name can be used once."), *Spawn->IdName);
+					return false;
+				}
+				Names.Add(Spawn->IdName);
+				const FString& Line = Lines[LineIndex];
+				const int32 Start = Spawn->Loc.Column - 1;
+				const int32 NameStart = Spawn->IdNameLoc.Column - 1;
+				Lines[LineIndex] = Line.Left(Start) + Line.Mid(NameStart, Line.Len() - NameStart); // drop the type
+				const int32 InsertIndex = bAfterAnchor ? AnchorIndex + 1 : AnchorIndex;
+				InsertAfter[InsertIndex < 0 ? 0 : (InsertIndex > Lines.Num() ? Lines.Num() : InsertIndex)].Add(
+					Indent + FString::Printf(TEXT("%s %s;"), *Spawn->IdType.ToString(), *Spawn->IdName));
 				bChanged = true;
 			}
 			return true;

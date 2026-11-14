@@ -1517,7 +1517,36 @@ namespace BangoParserPrivate
 			const FBangoSourceLocation StartLoc = Cur().Loc;
 			const int32 TargetTok = Pos;
 			FBangoExprPtr IdTarget;
-			if (!Check(EBangoTokenKind::KwSpawn))
+			bool bDeclaresId = false;
+			FBangoType IdType;
+			FString IdName;
+			FBangoSourceLocation IdNameLoc;
+			int32 IdTok = TargetTok;
+			if (IsTypeKeyword(Cur().Kind))
+			{
+				// `int _t = spawn`: a declaration as well (see FBangoSpawnStmt::bDeclaresId).
+				if (!ParseType(IdType))
+				{
+					return nullptr;
+				}
+				IdTok = Pos;
+				if (!ExpectName(IdName, IdNameLoc, TEXT("after the type")))
+				{
+					return nullptr;
+				}
+				TUniquePtr<FBangoNameExpr> Name = MakeUnique<FBangoNameExpr>();
+				Name->Loc = IdNameLoc;
+				Name->Name = IdName;
+				IdTarget = MoveTemp(Name);
+				bDeclaresId = true;
+				if (!Check(EBangoTokenKind::Assign))
+				{
+					Fail(Cur().Loc, TEXT("A spawned copy's id can only be stored with '=': _timer = spawn { ... }"));
+					return nullptr;
+				}
+				Advance(); // '='
+			}
+			else if (!Check(EBangoTokenKind::KwSpawn))
 			{
 				IdTarget = ParseExpression();
 				if (!IdTarget)
@@ -1541,6 +1570,10 @@ namespace BangoParserPrivate
 			TUniquePtr<FBangoSpawnStmt> Stmt = MakeUnique<FBangoSpawnStmt>();
 			Stmt->Loc = StartLoc;
 			Stmt->IdTarget = MoveTemp(IdTarget);
+			Stmt->bDeclaresId = bDeclaresId;
+			Stmt->IdType = IdType;
+			Stmt->IdName = IdName;
+			Stmt->IdNameLoc = IdNameLoc;
 			if (Check(EBangoTokenKind::LParen))
 			{
 				Fail(Cur().Loc, TEXT("To keep the spawned copy's id, write it as an assignment: _timer = spawn { ... }"));
@@ -1552,7 +1585,7 @@ namespace BangoParserPrivate
 			}
 			if (Stmt->IdTarget)
 			{
-				SetTextSpan(*Stmt, TargetTok, AssignTok); // the place, for the node's Id field
+				SetTextSpan(*Stmt, IdTok, AssignTok); // the place (without a type), for the node's Id field
 			}
 			else
 			{

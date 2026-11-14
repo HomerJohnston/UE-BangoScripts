@@ -425,6 +425,14 @@ struct FBangoSpawnStmt : FBangoStmt
 
 	/** Where the copy's id goes (an int variable, or an element of an int array), or null. */
 	FBangoExprPtr IdTarget;
+	/**
+	 * `int _t = spawn { ... }`: the line declares the variable too (IdTarget is then its name). Declarations go at the
+	 * top, so this doesn't compile; the text pane's Apply (Bango::HoistLateLocals) moves `int _t;` up and leaves `_t = spawn`.
+	 */
+	bool bDeclaresId = false;
+	FBangoType IdType;
+	FString IdName;
+	FBangoSourceLocation IdNameLoc;
 	FBangoBlock Body;
 };
 

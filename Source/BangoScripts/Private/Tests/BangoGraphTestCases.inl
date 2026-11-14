@@ -296,6 +296,12 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		Expect(Bango::HoistLateLocals(Expected, Same, Error) && Same == FString(Expected), TEXT("HoistLateLocals: nothing to move"));
 		Expect(!Bango::HoistLateLocals(TEXT("int _x;\nHint(\"x\");\nint _x = 2;\n"), Same, Error) && Error.Line == 3 && Error.Message.Contains(TEXT("declared twice")),
 			TEXT("HoistLateLocals: a name declared twice"));
+		// `int _t = spawn`: `int _t;` goes up with the other locals, and `_t = spawn` stays, in a block too.
+		Expect(Bango::HoistLateLocals(TEXT("float _a;\n\nHint(\"x\");\nint _t = spawn\n{\n\tSleep(1);\n}\nif (true)\n{\n\tint[] _ids = spawn\n\t{\n\t}\n}\n"), Same, Error)
+			&& Same == FString(TEXT("float _a;\nint _t;\nint[] _ids;\n\nHint(\"x\");\n_t = spawn\n{\n\tSleep(1);\n}\nif (true)\n{\n\t_ids = spawn\n\t{\n\t}\n}\n")),
+			FString(TEXT("HoistLateLocals: int _t = spawn:\n")) + Same);
+		Expect(!Bango::HoistLateLocals(TEXT("int _t;\nint _t = spawn\n{\n}\n"), Same, Error) && Error.Message.Contains(TEXT("declared twice")),
+			TEXT("HoistLateLocals: int _t = spawn, declared twice"));
 		Expect(Bango::HoistLateLocals(TEXT("#define params (int _n = 3)\n\nfloat _a;\n\nHint(\"x\");\nint foo;\n"), Same, Error)
 			&& Same == FString(TEXT("#define params (int _n = 3)\n\nfloat _a;\nint foo;\n\nHint(\"x\");\n")),
 			FString(TEXT("HoistLateLocals: after the params line and the locals: ")) + Same);

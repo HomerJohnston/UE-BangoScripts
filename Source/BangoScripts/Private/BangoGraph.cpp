@@ -661,6 +661,12 @@ namespace BangoGraphPrivate
 
 		int32 BuildNode(int32 Graph, const FBangoStmt& Stmt, TArray<FTarget>* Targets)
 		{
+			if (const FBangoSpawnStmt* SpawnDecl = Stmt.As<FBangoSpawnStmt>(); SpawnDecl && SpawnDecl->bDeclaresId && !bFailed)
+			{
+				Fail(SpawnDecl->Loc.Line, FString::Printf(TEXT("'%s' is declared here, but declarations go at the top: locals at the top of their script or function. Move '%s %s;' there in the text and write '%s = spawn' here, then open the script again."),
+					*SpawnDecl->IdName, *SpawnDecl->IdType.ToString(), *SpawnDecl->IdName, *SpawnDecl->IdName));
+				bFailed = true;
+			}
 			if (const FBangoVarDeclStmt* Decl = Stmt.As<FBangoVarDeclStmt>())
 			{
 				// Declarations are only at the top of a graph (ReadDecls); there's no node for one anywhere else.
