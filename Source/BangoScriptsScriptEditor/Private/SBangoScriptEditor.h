@@ -37,8 +37,9 @@ struct FBangoNodeMenuEntry;
  * on the right under Compile, Save and the script's name. Everything about one open script lives here, so the same
  * widget can sit in the Bango Scripts tab (SBangoScriptBrowser, which picks the script) or in a window of its own.
  *
- * The .bango file is the source of truth: opening reads it into editor graphs, and Save writes them back
- * (Bango::WriteGraphText). Unsaved changes show as a * in the title.
+ * It edits a Bango Script asset (spec section 15). For a linked script the .bango file next to it is the source of
+ * truth: opening reads it into editor graphs, and Save writes them back (Bango::WriteGraphText), then the asset's copy.
+ * For an embedded script, the asset's text is. Unsaved changes show as a * in the title.
  */
 class UBangoScriptAsset;
 
@@ -48,8 +49,6 @@ public:
 	SLATE_BEGIN_ARGS(SBangoScriptEditor)
 		: _EmptyMessage(NSLOCTEXT("SBangoScriptEditor", "NoScript", "No script is open."))
 	{}
-		/** A script to open straight away, as a path inside the script folder without extension ("Examples/Hello"). */
-		SLATE_ARGUMENT(FString, Script)
 		/** What the graph area says while no script is open. */
 		SLATE_ARGUMENT(FText, EmptyMessage)
 	SLATE_END_ARGS()
@@ -57,12 +56,9 @@ public:
 	void Construct(const FArguments& InArgs);
 	virtual ~SBangoScriptEditor() override;
 
-	/** The folder scripts are in (Content/ plus the Script Directory setting), as a full path. */
-	static FString GetScriptFolder();
-
 	/**
-	 * Opens a script (a path inside the script folder without extension), replacing the open one. Doesn't ask about
-	 * unsaved changes: call ConfirmCloseScript first.
+	 * Reads the open script asset (OpenScriptAsset) again, by its name (its asset path), replacing what's shown.
+	 * Doesn't ask about unsaved changes: call ConfirmCloseScript first.
 	 */
 	void LoadScript(const FString& Script);
 	/**
@@ -82,7 +78,7 @@ public:
 	 */
 	bool ConfirmCloseScript();
 
-	/** The open script ("Examples/Hello"), or empty. */
+	/** The open script's name, its asset path ("/Game/Quests/Intro"), or empty. */
 	const FString& GetOpenScript() const { return OpenScript; }
 	/** As of the last check: checked every quarter second while the editor is shown, after undo, and before closing. */
 	bool HasUnsavedChanges() const { return bDirty || bTextEdited; }
@@ -239,12 +235,12 @@ private:
 	TSharedPtr<SGraphEditor> GraphEditor;
 	TSharedPtr<FUICommandList> GraphCommands;
 
-	/** The open script, as a path inside the script folder without extension ("Examples/Hello"). Empty if none. */
+	/** The open script's name, its asset path ("/Game/Quests/Intro"). Empty if none. */
 	FString OpenScript;
 	/** The file the open script is read from and saved to, watched for changes made outside the editor. Empty for an embedded script asset. */
 	FString OpenPath;
 	FDateTime OpenFileTime;
-	/** The open Bango Script asset (OpenScriptAsset), or none for a script file in the script folder. */
+	/** The open Bango Script asset (OpenScriptAsset). */
 	TWeakObjectPtr<UBangoScriptAsset> OpenAsset;
 
 	/** Editor graphs for the open script: [0] is the main graph, then one per function. */

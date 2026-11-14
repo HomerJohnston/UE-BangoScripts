@@ -8,6 +8,7 @@
 #include "BangoBuiltinCommands.h"
 #include "BangoCompiler.h"
 #include "BangoInstance.h"
+#include "BangoLocalization.h"
 #include "BangoScriptAsset.h"
 #include "BangoScriptCache.h"
 #include "UObject/Package.h"
@@ -94,6 +95,38 @@ bool FBangoScriptPathTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("no name"), Rejects(TEXT("/Game"), TEXT("/Game")));
 	TestTrue(TEXT("a dot in the name"), Rejects(TEXT("/Game/A.B"), TEXT("/Game")));
 	TestEqual(TEXT("a script's folder"), Bango::GetScriptPathFolder(TEXT("/Game/Quests/Intro.bango")), FString(TEXT("/Game/Quests")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoLocalizedTextsTest, "Bango.Game.LocalizedTexts",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FBangoLocalizedTextsTest::RunTest(const FString& Parameters)
+{
+	// What localization gathering reports for a script asset: each text once, with its namespace and notes; not
+	// INVTEXT, and not texts in disabled nodes.
+	const FString Source =
+		TEXT("#define LOCTEXT_NAMESPACE \"Bango.Test\"\n")
+		TEXT("Hint(LOCTEXT(\"Hello\", \"Hello there\"));\n")
+		TEXT("Hint(NOTELOCTEXT(\"Bye\", \"Goodbye\", \"Said at the door\"));\n")
+		TEXT("Hint(NSLOCTEXT(\"Other.NS\", \"Hey\", \"Hey!\"));\n")
+		TEXT("Hint(LOCTEXT(\"Hello\", \"Hello there\"));\n")
+		TEXT("Hint(INVTEXT(\"not translated\"));\n")
+		TEXT("/*\n")
+		TEXT("Hint(LOCTEXT(\"Hidden\", \"Disabled text\"));   //@ 9 (0,0)\n")
+		TEXT("*/\n")
+		TEXT("#undef LOCTEXT_NAMESPACE\n");
+	TArray<FBangoLocalizedTextInfo> Texts;
+	FString Error;
+	TestTrue(TEXT("script reads"), Bango::GetLocalizedTexts(Source, TEXT("test.bango"), Texts, Error));
+	TestEqual(TEXT("three texts"), Texts.Num(), 3);
+	if (Texts.Num() == 3)
+	{
+		TestTrue(TEXT("LOCTEXT"), Texts[0].Namespace == TEXT("Bango.Test") && Texts[0].Key == TEXT("Hello") && Texts[0].Source == TEXT("Hello there") && Texts[0].Line == 2);
+		TestTrue(TEXT("NOTELOCTEXT"), Texts[1].Key == TEXT("Bye") && Texts[1].Notes == TEXT("Said at the door"));
+		TestTrue(TEXT("NSLOCTEXT"), Texts[2].Namespace == TEXT("Other.NS") && Texts[2].Key == TEXT("Hey"));
+	}
+	TestFalse(TEXT("a script that doesn't read"), Bango::GetLocalizedTexts(TEXT("Hint(LOCTEXT(\"A\""), TEXT("bad.bango"), Texts, Error));
 	return true;
 }
 

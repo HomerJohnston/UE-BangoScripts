@@ -16,6 +16,8 @@
  *   Speak.Start = [](FBangoCommandCall& Call) { ...; return EBangoCommandResult::Done; };
  *   FBangoModule::Get().RegisterCommand(Speak);
  */
+class UBangoScriptAsset;
+
 class BANGOSCRIPTS_API FBangoModule : public IModuleInterface
 {
 public:
@@ -32,6 +34,8 @@ public:
 
 	/** Reads a script's parameters (compiling it if needed) without running it. */
 	bool GetScriptParams(const FString& ScriptPath, TArray<FBangoScriptParamInfo>& OutParams, FString& OutError);
+	/** GetScriptParams, for a script asset (the Spawn Bango Script node's). */
+	bool GetScriptParams(const UBangoScriptAsset& Script, TArray<FBangoScriptParamInfo>& OutParams, FString& OutError);
 	FBangoScriptCache& GetScriptCache() { return ScriptCache; }
 
 private:

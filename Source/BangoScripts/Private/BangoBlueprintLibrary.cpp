@@ -3,6 +3,7 @@
 #include "Bango.h"
 #include "BangoActorRegistry.h"
 #include "BangoGlobalsSubsystem.h"
+#include "BangoScriptAsset.h"
 #include "BangoLog.h"
 #include "GameFramework/Actor.h"
 
@@ -274,6 +275,36 @@ FBangoScriptHandle UBangoBlueprintLibrary::SpawnBangoScriptWithArgs(UObject* Wor
 		return FBangoScriptHandle();
 	}
 	return Subsystem->Spawn(ScriptPath, Values);
+}
+
+FBangoScriptHandle UBangoBlueprintLibrary::SpawnBangoScriptAssetWithArgs(UObject* WorldContextObject, const UBangoScriptAsset* Script, const FBangoBlueprintArgs& Args)
+{
+	UBangoScriptSubsystem* Subsystem = GetScripts(WorldContextObject, TEXT("Spawn Bango Script"));
+	if (!Subsystem)
+	{
+		return FBangoScriptHandle();
+	}
+	if (!Script)
+	{
+		Bango::ReportError(TEXT("Spawn Bango Script: no script was picked on the node."));
+		return FBangoScriptHandle();
+	}
+
+	TArray<FBangoScriptParamInfo> Params;
+	FString Error;
+	if (!FBangoModule::Get().GetScriptParams(*Script, Params, Error))
+	{
+		Bango::ReportError(Error);
+		return FBangoScriptHandle();
+	}
+
+	TArray<FBangoValue> Values;
+	if (!Bango::ResolveBlueprintArgs(Args, Params, Values, Error))
+	{
+		Bango::ReportError(FString::Printf(TEXT("Spawn Bango Script '%s': %s"), *Script->GetScriptName(), *Error));
+		return FBangoScriptHandle();
+	}
+	return Subsystem->Spawn(Script, Values);
 }
 
 FBangoScriptHandle UBangoBlueprintLibrary::SpawnBangoScript(UObject* WorldContextObject, const FString& ScriptPath)

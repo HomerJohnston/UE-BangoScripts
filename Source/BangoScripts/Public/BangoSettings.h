@@ -14,15 +14,8 @@ public:
 	UBangoSettings();
 
 	/**
-	 * Folder under Content that holds .bango script files. A script path like "Quest/Intro" means
-	 * Content/<ScriptDirectory>/Quest/Intro.bango. Add this folder to "Additional Non-Asset Directories
-	 * to Package" so scripts are included in packaged builds.
-	 */
-	UPROPERTY(Config, EditAnywhere, Category = "Scripts")
-	FString ScriptDirectory = TEXT("Bango");
-
-	/**
-	 * In the editor (Play in Editor), when a running script's file is saved, its running copies switch to the new
+	 * In the editor (Play in Editor), when a running script's asset changes (saved in the graph editor, or its linked
+	 * .bango file changed), its running copies switch to the new
 	 * version where they are, without starting over (hot reload). A copy that can't switch carries on with the version
 	 * it has, and the output log says why. Without this, only scripts spawned after the save use the new version.
 	 */

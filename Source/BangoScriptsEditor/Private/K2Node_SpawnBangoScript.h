@@ -8,11 +8,12 @@
 class FBlueprintActionDatabaseRegistrar;
 class FKismetCompilerContext;
 class UK2Node_CallFunction;
+class UBangoScriptAsset;
 
 /**
  * Blueprint node: Spawn Bango Script.
  *
- * Type a script path on the node ("Quest/Intro") and it shows one input pin per parameter in the
+ * Pick a Bango Script asset on the node and it shows one input pin per parameter in the
  * script's params line, named after the parameter, with the script's defaults filled in.
  *  - Required parameters always pass the pin's value.
  *  - Optional parameters count as "not passed" (so the script uses its own default) while their pin is
@@ -59,9 +60,16 @@ private:
 	void ApplyChangedDefaults();
 	void UpdateErrorDisplay();
 
-	/** The script path typed on the node. */
+	/** The script picked on the node (a hard reference: the Blueprint loads it, and packages it). */
+	UPROPERTY()
+	TObjectPtr<UBangoScriptAsset> Script;
+
+	/** Legacy: a script path typed on nodes made before scripts were assets. Turned into Script when the node is next rebuilt. */
 	UPROPERTY()
 	FString ScriptPath;
+
+	/** A legacy ScriptPath becomes Script, if there's a script asset at that path (relative to /Game, or to the old /Game/Bango). */
+	void MigrateScriptPath();
 
 	/** The default text each parameter pin was given at the last refresh. */
 	UPROPERTY()

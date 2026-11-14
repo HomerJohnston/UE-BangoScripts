@@ -4,6 +4,8 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "BangoProgram.h"
 #include "BangoScriptSubsystem.h"
+class UBangoScriptAsset;
+
 #include "BangoBlueprintLibrary.generated.h"
 
 class AActor;
@@ -129,6 +131,10 @@ public:
 	/** Spawns ScriptPath with collected arguments. */
 	UFUNCTION(BlueprintCallable, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
 	static FBangoScriptHandle SpawnBangoScriptWithArgs(UObject* WorldContextObject, const FString& ScriptPath, const FBangoBlueprintArgs& Args);
+
+	/** Spawns a script asset with collected arguments (the Spawn Bango Script node). */
+	UFUNCTION(BlueprintCallable, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
+	static FBangoScriptHandle SpawnBangoScriptAssetWithArgs(UObject* WorldContextObject, const UBangoScriptAsset* Script, const FBangoBlueprintArgs& Args);
 
 	/** Stops a running script. */
 	UFUNCTION(BlueprintCallable, Category = "Bango", meta = (WorldContext = "WorldContextObject"))

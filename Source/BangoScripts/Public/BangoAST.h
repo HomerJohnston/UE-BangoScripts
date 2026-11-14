@@ -499,6 +499,12 @@ struct FBangoScript
 	FBangoBlock TopLevel;
 	/** Ordinary comments, in file order, for the graph editor. The compiler ignores them. */
 	TArray<FBangoSourceComment> Comments;
+	/**
+	 * Every LOCTEXT / NSLOCTEXT / NOTELOCTEXT / NSNOTELOCTEXT in the script, in file order (not INVTEXT, which isn't
+	 * translated), for localization gathering (Bango::GetLocalizedTexts). Points into the tree. Texts in disabled code
+	 * (disabled nodes) aren't here: disabled code isn't run, so its texts aren't translated.
+	 */
+	TArray<const FBangoLiteralExpr*> TextLiterals;
 
 	/**
 	 * `#define LOCTEXT_NAMESPACE "Bango.Intro"`: the namespace for the script's LOCTEXT and NOTELOCTEXT texts,

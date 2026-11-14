@@ -644,7 +644,7 @@ Every placeholder needs a value. When the text is written as a literal (`WriteLo
 | `Dot(vector3 A, vector3 B)` → `float` | The dot product. For two directions 1 long, it's 1 if they're the same, 0 at right angles and -1 if they're opposite. |
 | `Cross(vector3 A, vector3 B)` → `vector3` | The cross product: a vector at right angles to both. |
 | `LerpVector(vector3 A, vector3 B, float Alpha)` → `vector3` | Blends from A to B, like `Lerp`. |
-| `Exec(string Path, ...)` → `int` | Starts another script file: `"Quest/Intro"` is `Content/Bango/Quest/Intro.bango`, as for `Spawn` in C++ (section 10). The extra values are its parameters, in order, checked as `Spawn` checks them. The new script runs on its own, alongside this one: it runs straight away until it first pauses (or ends), and then this script carries on from the `Exec`. Gives back the new script's id, which can be ignored (`Exec("Doors/OpenAll");` on its own line is fine). A script that can't be found, doesn't compile, or whose parameters don't fit stops this script with that error; an error the new script hits once it's running stops only it. A chain of more than 32 scripts each started by the one before, before it pauses (a script that runs `Exec` on itself straight away), is an error. Needs a game world. |
+| `Exec(string Path, ...)` → `int` | Starts another script: the path is relative to this script's folder (`"Intro"`, `"../Shared/Greet"`) or a full asset path (`"/Game/Quests/Intro"`) (section 15). The extra values are its parameters, in order, checked as `Spawn` checks them. The new script runs on its own, alongside this one: it runs straight away until it first pauses (or ends), and then this script carries on from the `Exec`. Gives back the new script's id, which can be ignored (`Exec("Doors/OpenAll");` on its own line is fine). A script that can't be found, doesn't compile, or whose parameters don't fit stops this script with that error; an error the new script hits once it's running stops only it. A chain of more than 32 scripts each started by the one before, before it pauses (a script that runs `Exec` on itself straight away), is an error. Needs a game world. |
 | `Time()` → `float` | The world's time (`GetWorld()->GetTimeSeconds()`): seconds since the level started; stops while the game is paused. |
 | `ToEntity(string Name)` → `entity` | The entity with this Bango ID name, for names that come from data (`ToEntity("john")` is the same as `@john`). A name that isn't letters, digits and `_` (or starts with a digit) is an error. |
 | `entity SetPos(vector3 Pos)` | Moves the actor. |
@@ -856,7 +856,7 @@ Bango::UnregisterCondition(Condition); // and Condition is made invalid
 ### From Blueprint: the Spawn Bango Script node
 The **Spawn Bango Script** node reads the script's `params` line and creates one input pin per parameter:
 
-- The script path is typed on the node (e.g. `Examples/Greet`) and is fixed, not computed at runtime. To choose a script at runtime, use **Spawn Bango Script (Dynamic Path)** (section 11), which passes no arguments.
+- The script is **picked on the node** with an asset picker (a Bango Script asset, section 15) and is fixed, not computed at runtime: the Blueprint references the asset, so it's loaded and packaged with the Blueprint, and renaming or moving the script keeps the node pointing at it. The script can't be connected. To choose a script at runtime, use **Spawn Bango Script (Dynamic Path)** (section 11), which passes no arguments. (A node made when scripts were typed paths picks up its script asset when it's next refreshed, if there's one at that path under `/Game` or `/Game/Bango`.)
 - Pins are named after the parameters, in order. Pin types:
 
   | Bango type | Blueprint pin |
@@ -886,12 +886,12 @@ The **Spawn Bango Script** node reads the script's `params` line and creates one
 ## 11. Execution model
 
 ### Script files
-- Scripts are plain text files with the `.bango` extension, in `Content/Bango/` (the folder is a project setting).
-- A script is referred to by its path inside that folder, without the extension: `Quest/Intro` means `Content/Bango/Quest/Intro.bango`. Backslashes work too, and the `.bango` extension may be included. Absolute paths and `..` are not allowed. This path, with the extension (`Quest/Intro.bango`), is also what errors show as the file name.
-- **Compiled on first use:** a script is compiled when it's first spawned. The compiled script is cached and reused until the file changes on disk, then it is recompiled on its next spawn. This works while playing in the editor, so scripts can be edited and re-spawned without restarting.
+- Scripts are **Bango Script assets** (section 15), anywhere in Content: embedded (the text is in the asset) or linked (the text is a `.bango` file next to the asset, which always wins).
+- A script is referred to by its **asset path**: `/Game/Quests/Intro`. From another script (`Exec`), a path is relative to the calling script's folder (`Intro`, `../Shared/Greet`) or full (`/Game/...`); from Blueprint and C++, one without a leading `/` is relative to `/Game`. Backslashes and a trailing `.bango` are accepted. This name, with `.bango` (`/Game/Quests/Intro.bango`), is what errors show as the file name.
+- **Compiled on first use:** a script is compiled when it's first spawned (its asset is loaded if it isn't). The compiled script is cached and reused until the asset's text changes, then it is recompiled on its next spawn. This works while playing in the editor, so scripts can be edited and re-spawned without restarting.
 - A script can't start unless it compiles without errors.
-- `Content/Bango` is listed in the project's "Additional Non-Asset Directories to Package", so scripts are included in packaged builds.
-- Example scripts ship in `Content/Bango/Examples/`: `Hello.bango` and `Greet.bango` (a script with parameters).
+- Script assets are packaged like any asset; a Spawn Bango Script node's script is packaged with its Blueprint. (`.bango` files aren't packaged: the asset keeps a copy of a linked script's text.)
+- Example scripts: `/Game/Bango/Examples/Hello` and `/Game/Bango/Examples/Greet` (a script with parameters), linked to their `.bango` files in `Content/Bango/Examples/`.
 
 ### Instances
 - Each spawn creates a separate running instance. When it starts:
@@ -925,18 +925,16 @@ The script subsystem (`UBangoScriptSubsystem`) also has two Blueprint events:
 - **OnScriptFailed** (handle, error), fired when a script stops with an error.
 
 ### Translation
-Bango scripts are translated with Unreal's localization tools, exactly like C++ source. Unreal's own text gatherer reads `.bango` files as it reads `.cpp` files: it picks up `LOCTEXT`, `NSLOCTEXT`, `NOTELOCTEXT` and `NSNOTELOCTEXT` (notes become notes for translators) and takes the namespace from `#define LOCTEXT_NAMESPACE`.
+Bango scripts are translated with Unreal's localization tools. Each Bango Script asset (section 15) reports its texts to Unreal's asset gathering itself: every `LOCTEXT`, `NSLOCTEXT`, `NOTELOCTEXT` and `NSNOTELOCTEXT`, with its namespace (from `#define LOCTEXT_NAMESPACE` for `LOCTEXT` and `NOTELOCTEXT`), its key, and for `NOTELOCTEXT` its notes for translators. This happens when the asset is saved (the texts are kept in the package), so a script saved before this existed needs saving once more (or a gather with the gather cache skipped).
 
-To set it up, in the **Localization Dashboard**, open the game target's **Gather from Text Files** settings and:
-- add `Content/Bango` (or the script folder, if it's been changed) to **Search Directories**;
-- add `*.bango` to **File Extensions**.
+To set it up, in the **Localization Dashboard**, make sure the game target's **Gather from Packages** is on and includes the folders the scripts are in (Content, by default). Then gather as usual. The scripts aren't gathered as text files any more: remove any **Gather from Text Files** entries for `Content/Bango` or `*.bango`, which would gather linked scripts' files a second time, and wrongly.
 
-Then gather as usual.
-
-- Lines disabled with `//~` are comments, so their texts aren't gathered, and neither are the texts of disabled nodes (between `/*` and `*/`), which the gatherer reads as C++ comments. But C++ comments don't nest: after a `*/` that closes an inner disabled node, the gatherer thinks the outer one has ended, so texts later in the outer disabled block are gathered. That only adds unused entries for translators.
-- `#define` lines are skipped by the gatherer, which is why parameter defaults can't be texts (section 10).
+- Only texts that run are gathered: not those on lines disabled with `//~`, or in disabled nodes (between `/*` and `*/`), however they're nested. (Gathering `.bango` files as C++ text used to pick up some texts in nested disabled nodes.)
+- Each namespace and key is gathered once per script. A key used for two different texts in one script is a compile error; across scripts, the gatherer reports it.
 - Texts made with `INVTEXT` or `ToText` aren't gathered; they're never translated.
-- The gatherer doesn't compile scripts. A key used for two different texts across files is reported by the gatherer; within one file, Compile reports it first.
+- Parameter defaults can't be texts (section 10).
+- A script that doesn't parse has nothing gathered, and the output log says so when it's saved.
+- At runtime nothing changes: a text is looked up by its namespace and key, as before.
 
 ### Errors
 - Compile errors and runtime errors are shown on screen and logged, with the file, line, column and NodeID, and for runtime errors the function: `Quest/Intro.bango(12:5) [node 7] in Nag(): '_x' is nil.`
@@ -1062,7 +1060,7 @@ Opening a file and saving it without changes gives the same script: the same sta
 
 ### The graph editor
 The graph editor is the **Bango Scripts** tab (Tools menu). It doesn't need the details panel. It has three parts:
-- **Scripts** (left): every `.bango` file in the script folder; open ones are in bold. Clicking one opens it in a new **script tab**, or shows its tab if it's already open. The **Folders** toggle beside Refresh switches between this list and a **folder tree** like the Content Browser's, with the script folder (Content/Bango) at the top: folders first, then scripts, each by name, and empty folders too. Clicking a script opens it; double-clicking a folder (or its arrow) opens or closes it. The shown script is selected in either view, with its folders opened. Which view is shown is remembered between sessions, and Refresh keeps the open folders open. **Refresh** looks for scripts again (new, renamed or deleted files); it doesn't touch open scripts.
+- **Scripts** (left): every Bango Script asset (section 15), by asset path without `/Game/`; open ones are in bold. Clicking one opens it in a new **script tab**, or shows its tab if it's already open. The **Folders** toggle beside Refresh switches between this list and a **folder tree** like the Content Browser's, with a root per content root (Content first): folders first, then scripts, each by name (only folders that hold a script). Clicking a script opens it; double-clicking a folder (or its arrow) opens or closes it. The shown script is selected in either view, with its folders opened. Which view is shown is remembered between sessions, and Refresh keeps the open folders open. The list follows script assets as they're added, renamed and deleted; **Refresh** lists them again; it doesn't touch open scripts.
 - **Script tabs** (along the top of the rest): one per open script, named by its path, with a `*` while it has unsaved changes. They're the editor's own document tabs, as an open Blueprint's are, and look and behave the same: clicking a tab shows it; its × button, a middle-click or its right-click menu closes it, asking first whether to save unsaved changes; tabs can be reordered, and dragged out into a window of their own. Each tab keeps its own script editor while it's open, so switching tabs keeps each script's view, selection and unsaved changes. With no tab open, a hint says to pick a script.
 - **The script editor** (under the tabs): everything for one open script. It's a self-contained pane, so it can also be shown in a window of its own (planned).
   - **Toolbar** (across the top, styled like an asset editor's, such as Blueprint's: each button an icon with its label): **Save** (also Ctrl+S) and **Reload**, then **Compile Test**, then the **Debug** dropdown, with a separator between each group. Compile Test is only a check: scripts are always compiled when they're loaded at runtime. Its icon shows its status as Blueprint's does. The script is test-compiled quietly when it's opened (only the icon changes: no notification, nothing marked on its nodes), and the icon shows a yellow `?` once it's changed (or its text is typed in) after, a green tick when it compiled without errors, a warning when it compiled with warnings, a red cross when it didn't compile (its tooltip says which). The tab shows the script's name, with a `*` while it has unsaved changes. **Reload** reads the script again from its file, so edits made to the text elsewhere show up; it asks first whether to save unsaved changes (Cancel keeps them and doesn't reload). It works on a script whose text didn't read too, so the text can be fixed elsewhere and reloaded. Reloading keeps the shown graph (if the script still has it) and its view.
@@ -1179,7 +1177,6 @@ Problems visible from the line alone show Blueprint's **ERROR!** banner on the n
 - The vector commands for `vector2` too (they take `vector3` for now)
 - Debugger: while following a copy that failed, keep a faint steady outline on the nodes that led to the error (its trail), instead of only flashing them
 - Graph editor: opening a script's editor in a window of its own, a pop-up for editing long text, updating a function's calls when its parameters change, an alphabetical-sort toggle for the function list, adding extra values to variadic commands, and asking before the tab closes with unsaved changes
-- Whether script files should be wrapped in Unreal assets (they are loose `.bango` files for now)
 
 ---
 
@@ -1245,9 +1242,9 @@ AwaitSpeak();                            //@25(0, 19)
 
 ---
 
-## 15. Script assets (planned, not built yet)
+## 15. Script assets
 
-*This section is a design. It replaces script files in `Content/Bango` (section 11, "Script files") once it's built; until then, section 11 describes how scripts work.*
+*Built in stages (below); it replaced the script files in a `Content/Bango` folder.*
 
 Scripts become assets: a **Bango Script** asset (`UBangoScriptAsset`, a `.uasset`) can live anywhere in Content, is found by the Asset Registry, is packaged like any asset, and can be referenced like one (renaming or moving it in the Content Browser keeps the references). A script asset is one of two kinds:
 
@@ -1267,17 +1264,17 @@ Scripts become assets: a **Bango Script** asset (`UBangoScriptAsset`, a `.uasset
 - A script's name is its **asset path**, without the asset name repeated: `/Game/Quests/Intro`. Errors show it with `.bango` (`/Game/Quests/Intro.bango(12:5)`).
 - **From a script** (`Exec`): a path is **relative to the calling script's folder**: in `/Game/Quests/Start`, `Exec("Intro")` starts `/Game/Quests/Intro` and `Exec("../Shared/Greet")` starts `/Game/Shared/Greet`. A path starting with `/` is a full asset path (`Exec("/Game/Shared/Greet")`). `..` can't go above the content root (`/Game`, or a plugin's).
 - **From Blueprint and C++** (the Dynamic Path spawn node, `UBangoScriptSubsystem::Spawn` with a string): a path starting with `/` is a full asset path; one without is relative to `/Game` (`"Quests/Intro"` is `/Game/Quests/Intro`).
-- **The Spawn Bango Script node** picks its script with an asset picker (a Bango Script asset reference), instead of a typed path. C++ can also spawn an asset directly (`Spawn(UBangoScriptAsset*, Args)`).
+- **The Spawn Bango Script node** *(built)* picks its script with an asset picker (a Bango Script asset reference), instead of a typed path (section 10). C++ can also spawn an asset directly (`Spawn(UBangoScriptAsset*, Args)`).
 - Backslashes and a trailing `.bango` are still accepted in paths.
 
 ### Runtime
 - Spawning loads the asset if it isn't loaded (a synchronous load), then compiles its text on first use, as now. The compiled script is cached per asset and reused until the asset's text changes.
 - **Hot reload** (section 11) works from the asset: when a script's asset changes in the editor (saved in the graph editor, or its linked file changed and was refreshed), running copies switch to the new version as now.
 - **Save Bango State** stores each running script's asset path (saves from before this change can't be loaded).
-- The **Script Directory** project setting, and the packaging setting for `Content/Bango`, go away.
+- The **Script Directory** project setting, and the packaging setting for `Content/Bango`, are gone *(built)*. The graph editor only opens script assets.
 
 ### Translation
-The asset keeps the script's localized texts (every `LOCTEXT` / `NSLOCTEXT` / `NOTELOCTEXT`, with its namespace, key and notes) as real text properties, updated when its text changes, so Unreal's normal asset gathering picks them up, for embedded and linked scripts alike. Gathering `.bango` files as text files (section 11) is no longer needed, and would gather linked scripts twice.
+*(built)* A Bango Script asset reports its script's texts to Unreal's asset gathering itself, with their namespaces, keys and translator notes (a gathering callback for the class, run when the asset is saved): see section 11, Translation. Embedded and linked scripts alike; nothing extra is stored in the asset. Gathering `.bango` files as text files is no longer needed, and would gather linked scripts twice.
 
 ### The graph editor
 - **Opening a script asset** (double-clicking it in the Content Browser) opens the **Bango Script editor** *(built)*: a **Script** tab with the graph editor, in front, and a **Details** tab behind it in the same tab stack. Its script's name is its asset path. A linked script is read from its `.bango` file (if the file can't be read, the asset's copy is shown); Save writes the file (checking it out with source control), then the asset's copy, and saves the asset; for an embedded script, Save writes the asset and saves it. The window's own Save (File menu) does the same, and closing it asks about unsaved changes. Running copies of the script pick up the saved text (hot reload).
@@ -1287,4 +1284,4 @@ The asset keeps the script's localized texts (every `LOCTEXT` / `NSLOCTEXT` / `N
 ### Building it, in stages
 1. **Runtime** *(built)*: the asset class (text, link data, localized texts), the script cache by asset, path resolution (relative paths for `Exec`), the Blueprint/C++ spawn functions, saved state, hot reload from assets. Spawning by asset path works; the K2 node still takes a typed path.
 2. **Editor import and linking** *(built)*: the factories (import a `.bango`, Add > Bango Script), the Content watcher, the startup scan (in the background, skipping World Partition's `__External…` folders), moving/renaming, copying (Duplicate writes the copy's own file), deleting, and the right-click commands. Assets are saved as soon as they're imported or refreshed (while playing in the editor, once play ends). The engine's own Auto Reimport, if it's turned on, may import a new `.bango` first, through the same importer; the watcher then finds the asset already there.
-3. **The graph editor and nodes:** opening a script asset in the graph editor, loading and saving through the asset (linked: the file), the script browser from the Asset Registry, the Spawn Bango Script node's asset picker, the localized-text properties, examples as assets, tests, and removing the Script Directory setting.
+3. **The graph editor and nodes** *(built)*: opening a script asset in the graph editor, loading and saving through the asset (linked: the file), the script browser from the Asset Registry, the Spawn Bango Script node's asset picker, the localized texts (gathered by the asset), tests, and removing the Script Directory setting. (The example scripts became assets through the import.)

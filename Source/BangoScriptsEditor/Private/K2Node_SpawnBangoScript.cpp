@@ -3,6 +3,10 @@
 #include "Bango.h"
 #include "BangoBlueprintLibrary.h"
 #include "BangoPinUtils.h"
+#include "BangoScriptAsset.h"
+#include "BangoScriptPath.h"
+#include "Misc/PackageName.h"
+#include "UObject/SoftObjectPath.h"
 #include "BlueprintActionDatabaseRegistrar.h"
 #include "BlueprintNodeSpawner.h"
 #include "EdGraphSchema_K2.h"
@@ -20,12 +24,37 @@ const FName UK2Node_SpawnBangoScript::HandlePinName(TEXT("Handle"));
 
 bool UK2Node_SpawnBangoScript::LoadParams(TArray<FBangoScriptParamInfo>& OutParams, FString& OutError) const
 {
-	if (ScriptPath.TrimStartAndEnd().IsEmpty())
+	if (!Script)
 	{
-		OutError = TEXT("Type the script's path on the node, like Quest/Intro.");
+		OutError = TEXT("Pick a Bango Script on the node.");
 		return false;
 	}
-	return FBangoModule::Get().GetScriptParams(ScriptPath, OutParams, OutError);
+	return FBangoModule::Get().GetScriptParams(*Script, OutParams, OutError);
+}
+
+void UK2Node_SpawnBangoScript::MigrateScriptPath()
+{
+	if (Script || ScriptPath.TrimStartAndEnd().IsEmpty())
+	{
+		return;
+	}
+	// Tried as a path under /Game, then under the old script folder (Content/Bango), where imported scripts went.
+	for (const TCHAR* Folder : { TEXT("/Game"), TEXT("/Game/Bango") })
+	{
+		FString PackageName;
+		FString Error;
+		if (!Bango::ResolveScriptPath(ScriptPath, Folder, PackageName, Error))
+		{
+			continue;
+		}
+		const FSoftObjectPath ObjectPath(PackageName + TEXT(".") + FPackageName::GetLongPackageAssetName(PackageName));
+		if (UBangoScriptAsset* Found = Cast<UBangoScriptAsset>(ObjectPath.TryLoad()))
+		{
+			Script = Found;
+			ScriptPath.Reset();
+			return;
+		}
+	}
 }
 
 bool UK2Node_SpawnBangoScript::IsParamPin(const UEdGraphPin* Pin) const
@@ -42,9 +71,10 @@ void UK2Node_SpawnBangoScript::AllocateDefaultPins()
 	CreatePin(EGPD_Input, UEdGraphSchema_K2::PC_Exec, UEdGraphSchema_K2::PN_Execute);
 	CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Exec, UEdGraphSchema_K2::PN_Then);
 
-	UEdGraphPin* ScriptPin = CreatePin(EGPD_Input, UEdGraphSchema_K2::PC_String, ScriptPinName);
-	ScriptPin->DefaultValue = ScriptPath;
-	ScriptPin->PinToolTip = TEXT("The script to spawn: its path under Content/Bango without the extension, like Quest/Intro. Must be typed here, not connected.");
+	MigrateScriptPath();
+	UEdGraphPin* ScriptPin = CreatePin(EGPD_Input, UEdGraphSchema_K2::PC_Object, UBangoScriptAsset::StaticClass(), ScriptPinName);
+	ScriptPin->DefaultObject = Script;
+	ScriptPin->PinToolTip = TEXT("The Bango Script to spawn. Must be picked here, not connected: its parameters become this node's pins.");
 
 	UEdGraphPin* HandlePin = CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Struct, FBangoScriptHandle::StaticStruct(), HandlePinName);
 	HandlePin->PinToolTip = TEXT("The spawned script, for Terminate Bango Script and Is Bango Script Running. Invalid if the script couldn't start.");
@@ -57,8 +87,12 @@ void UK2Node_SpawnBangoScript::CreateParamPins()
 	ParamDefaults.Reset();
 	LoadError.Reset();
 
-	if (ScriptPath.TrimStartAndEnd().IsEmpty())
+	if (!Script)
 	{
+		if (!ScriptPath.TrimStartAndEnd().IsEmpty())
+		{
+			LoadError = FString::Printf(TEXT("There's no Bango Script at '%s' any more: pick the script on the node."), *ScriptPath);
+		}
 		UpdateErrorDisplay();
 		return;
 	}
@@ -173,9 +207,10 @@ void UK2Node_SpawnBangoScript::PostReconstructNode()
 void UK2Node_SpawnBangoScript::PinDefaultValueChanged(UEdGraphPin* Pin)
 {
 	Super::PinDefaultValueChanged(Pin);
-	if (Pin && Pin->PinName == ScriptPinName && Pin->DefaultValue != ScriptPath)
+	if (Pin && Pin->PinName == ScriptPinName && Pin->DefaultObject != Script)
 	{
-		ScriptPath = Pin->DefaultValue;
+		Script = Cast<UBangoScriptAsset>(Pin->DefaultObject);
+		ScriptPath.Reset();
 		RefreshParamPins();
 	}
 }
@@ -183,17 +218,17 @@ void UK2Node_SpawnBangoScript::PinDefaultValueChanged(UEdGraphPin* Pin)
 FText UK2Node_SpawnBangoScript::GetNodeTitle(ENodeTitleType::Type TitleType) const
 {
 	const FText BaseTitle = LOCTEXT("Title", "Spawn Bango Script");
-	if (TitleType == ENodeTitleType::MenuTitle || TitleType == ENodeTitleType::ListView || ScriptPath.TrimStartAndEnd().IsEmpty())
+	if (TitleType == ENodeTitleType::MenuTitle || TitleType == ENodeTitleType::ListView || !Script)
 	{
 		return BaseTitle;
 	}
-	return FText::Format(LOCTEXT("TitleWithPath", "Spawn Bango Script\n{0}"), FText::FromString(ScriptPath));
+	return FText::Format(LOCTEXT("TitleWithPath", "Spawn Bango Script\n{0}"), FText::FromString(Script->GetName()));
 }
 
 FText UK2Node_SpawnBangoScript::GetTooltipText() const
 {
 	return LOCTEXT("Tooltip",
-		"Starts a Bango script. Type its path on the node (like Quest/Intro) to get a pin for each of the script's parameters.\n"
+		"Starts a Bango script. Pick it on the node to get a pin for each of the script's parameters.\n"
 		"Optional parameters use the script's default while their pin is unconnected and unchanged.\n"
 		"If the script's parameters change, right-click the node and choose Refresh Node.");
 }
@@ -221,7 +256,7 @@ void UK2Node_SpawnBangoScript::ValidateNodeDuringCompilation(FCompilerResultsLog
 	const UEdGraphPin* ScriptPin = FindPin(ScriptPinName);
 	if (ScriptPin && ScriptPin->LinkedTo.Num() > 0)
 	{
-		MessageLog.Error(*LOCTEXT("ScriptPinLinked", "@@: the script path must be typed on the node, not connected. To choose a script at runtime, use Spawn Bango Script (Dynamic Path).").ToString(), this);
+		MessageLog.Error(*LOCTEXT("ScriptPinLinked", "@@: the script must be picked on the node, not connected. To choose a script at runtime, use Spawn Bango Script (Dynamic Path).").ToString(), this);
 	}
 }
 
@@ -264,7 +299,7 @@ void UK2Node_SpawnBangoScript::ExpandNode(FKismetCompilerContext& CompilerContex
 		UEdGraphPin* Pin = FindPin(FName(*Param.Name), EGPD_Input);
 		if (!Pin || !BangoPinUtils::PinTypesMatch(Pin->PinType, Expected))
 		{
-			Fail(FString::Printf(TEXT("The parameters of '%s' have changed since this node was refreshed. Right-click the node and choose Refresh Node."), *ScriptPath));
+			Fail(FString::Printf(TEXT("The parameters of '%s' have changed since this node was refreshed. Right-click the node and choose Refresh Node."), *Script->GetScriptName()));
 			return;
 		}
 		ParamPins.Add(Pin);
@@ -312,8 +347,8 @@ void UK2Node_SpawnBangoScript::ExpandNode(FKismetCompilerContext& CompilerContex
 		ArgsPin = AddNode->GetReturnValuePin();
 	}
 
-	UK2Node_CallFunction* SpawnNode = SpawnLibraryCall(GET_FUNCTION_NAME_CHECKED(UBangoBlueprintLibrary, SpawnBangoScriptWithArgs));
-	SpawnNode->FindPinChecked(TEXT("ScriptPath"))->DefaultValue = ScriptPath;
+	UK2Node_CallFunction* SpawnNode = SpawnLibraryCall(GET_FUNCTION_NAME_CHECKED(UBangoBlueprintLibrary, SpawnBangoScriptAssetWithArgs));
+	SpawnNode->FindPinChecked(TEXT("Script"))->DefaultObject = Script;
 	Schema->TryCreateConnection(ArgsPin, SpawnNode->FindPinChecked(TEXT("Args")));
 
 	UK2Node_Self* SelfNode = CompilerContext.SpawnIntermediateNode<UK2Node_Self>(this, SourceGraph);

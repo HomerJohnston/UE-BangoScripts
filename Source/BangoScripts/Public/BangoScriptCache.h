@@ -38,18 +38,3 @@ private:
 	/** By script name ("/Game/Quests/Intro"). */
 	TMap<FString, FEntry> Entries;
 };
-
-namespace Bango
-{
-	// Legacy: script files in Content/<ScriptDirectory>, which the graph editor still opens until it uses script assets
-	// (spec section 15, stage 3). The runtime doesn't use these.
-
-	/**
-	 * Turns a script file path into its canonical form: forward slashes, no leading slash, ".bango" added if missing.
-	 * Rejects empty paths, absolute paths, drive letters and ".." segments.
-	 */
-	BANGOSCRIPTS_API bool NormalizeScriptPath(const FString& ScriptPath, FString& OutPath, FString& OutError);
-
-	/** The full file path for a normalized script file path. */
-	BANGOSCRIPTS_API FString GetScriptFilePath(const FString& NormalizedPath);
-}

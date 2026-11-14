@@ -489,6 +489,10 @@ namespace BangoParserPrivate
 				Fail(Lit->TextArgLocs[bHasNamespace ? 1 : 0], TEXT("The key can't be empty: every text needs a key that's unique in its namespace."));
 				return nullptr;
 			}
+			if (DisabledDepth == 0)
+			{
+				Script.TextLiterals.Add(Lit.Get()); // for localization gathering (the tree owns it; it doesn't move); not disabled code's
+			}
 			return MoveTemp(Lit);
 		}
 

@@ -554,14 +554,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 		]
 	];
 
-	if (InArgs._Script.IsEmpty())
-	{
-		ShowMessage(EmptyMessage);
-	}
-	else
-	{
-		LoadScript(InArgs._Script);
-	}
+	ShowMessage(EmptyMessage); // until a script asset is opened (OpenScriptAsset)
 	RegisterActiveTimer(0.25f, FWidgetActiveTimerDelegate::CreateSP(this, &SBangoScriptEditor::OnPoll));
 	RegisterActiveTimer(0.0f, FWidgetActiveTimerDelegate::CreateSP(this, &SBangoScriptEditor::SyncLineNumbers)); // every frame
 	RegisterActiveTimer(0.1f, FWidgetActiveTimerDelegate::CreateSP(this, &SBangoScriptEditor::UpdateDebugging));
@@ -586,12 +579,6 @@ FReply SBangoScriptEditor::OnKeyDown(const FGeometry& MyGeometry, const FKeyEven
 		return FReply::Handled();
 	}
 	return SCompoundWidget::OnKeyDown(MyGeometry, InKeyEvent);
-}
-
-FString SBangoScriptEditor::GetScriptFolder()
-{
-	const FString Folder = FPaths::Combine(FPaths::ProjectContentDir(), GetDefault<UBangoSettings>()->ScriptDirectory);
-	return FPaths::ConvertRelativePathToFull(Folder);
 }
 
 // ---- FUNCTIONS ----
@@ -2393,37 +2380,32 @@ void SBangoScriptEditor::LoadScript(const FString& Script)
 	CloseScript();
 	OpenScript = Script;
 
-	// A script asset: a linked one's text is its .bango file (the file wins), an embedded one's is in the asset.
-	// Otherwise, a file in the script folder.
+	// A linked script's text is its .bango file (the file wins); an embedded one's is in the asset.
 	FString Source;
 	UBangoScriptAsset* Asset = OpenAsset.Get();
-	if (Asset && Asset->GetScriptName() == Script)
+	if (!Asset)
 	{
-		OpenPath = Asset->bLinked ? FBangoScriptSync::GetLinkedFilePath(Script) : FString();
+		OpenScript.Reset();
+		ShowMessage(FText::Format(LOCTEXT("ScriptGone", "The Bango Script asset {0} isn't there any more (was it deleted?). Open a script from the Content Browser or the script list."), FText::FromString(Script)));
+		return;
+	}
+	OpenScript = Asset->GetScriptName(); // its name now, if it was renamed or moved while open
+	{
+		OpenPath = Asset->bLinked ? FBangoScriptSync::GetLinkedFilePath(OpenScript) : FString();
 		if (OpenPath.IsEmpty() || !FFileHelper::LoadFileToString(Source, *OpenPath))
 		{
 			if (!OpenPath.IsEmpty())
 			{
-				UE_LOG(LogBangoScriptEditor, Warning, TEXT("Couldn't read %s, so %s's own copy of its text is shown."), *OpenPath, *Script);
+				UE_LOG(LogBangoScriptEditor, Warning, TEXT("Couldn't read %s, so %s's own copy of its text is shown."), *OpenPath, *OpenScript);
 			}
 			Source = Asset->Source;
-		}
-	}
-	else
-	{
-		OpenAsset.Reset();
-		OpenPath = FPaths::Combine(GetScriptFolder(), Script + TEXT(".bango"));
-		if (!FFileHelper::LoadFileToString(Source, *OpenPath))
-		{
-			ShowMessage(FText::Format(LOCTEXT("CantRead", "Couldn't read {0}."), FText::FromString(OpenPath)));
-			return;
 		}
 	}
 	OpenFileTime = OpenPath.IsEmpty() ? FDateTime::MinValue() : IFileManager::Get().GetTimeStamp(*OpenPath);
 
 	FBangoGraphDocument Document;
 	FBangoCompileError Error;
-	if (!Bango::BuildGraph(Source, Script + TEXT(".bango"), Document, Error))
+	if (!Bango::BuildGraph(Source, OpenScript + TEXT(".bango"), Document, Error))
 	{
 		// The text pane shows the file, so it can be fixed there (and applied), or elsewhere and reloaded.
 		ShowMessage(FText::Format(LOCTEXT("CantOpen", "This script can't be shown as a graph until its text is fixed. Fix it in the script text pane (the Source Editor tab on the left) and Apply, or elsewhere and Reload:\n\n{0}"), FText::FromString(Error.ToString())));
@@ -3798,20 +3780,11 @@ void SBangoScriptEditor::RefreshDirty()
 
 void SBangoScriptEditor::GatherDebugEntries(TArray<FDebugEntry>& OutEntries) const
 {
-	FString Wanted;
-	FString PathError;
 	if (!GEngine || OpenScript.IsEmpty())
 	{
 		return;
 	}
-	if (OpenAsset.IsValid())
-	{
-		Wanted = OpenScript + TEXT(".bango"); // the runtime's name for it ("/Game/Quests/Intro.bango")
-	}
-	else if (!Bango::NormalizeScriptPath(OpenScript, Wanted, PathError))
-	{
-		return;
-	}
+	const FString Wanted = OpenScript + TEXT(".bango"); // the runtime's name for it ("/Game/Quests/Intro.bango")
 	for (const FWorldContext& Context : GEngine->GetWorldContexts())
 	{
 		UWorld* World = Context.WorldType == EWorldType::PIE ? Context.World() : nullptr;

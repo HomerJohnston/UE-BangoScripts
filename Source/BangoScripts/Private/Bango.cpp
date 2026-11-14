@@ -54,6 +54,18 @@ bool FBangoModule::GetScriptParams(const FString& ScriptPath, TArray<FBangoScrip
 	return true;
 }
 
+bool FBangoModule::GetScriptParams(const UBangoScriptAsset& Script, TArray<FBangoScriptParamInfo>& OutParams, FString& OutError)
+{
+	TSharedPtr<const FBangoProgram> Program;
+	FString DisplayPath;
+	if (!ScriptCache.GetProgram(Script, Commands, Program, DisplayPath, OutError))
+	{
+		return false;
+	}
+	OutParams = Program->Params;
+	return true;
+}
+
 #undef LOCTEXT_NAMESPACE
 
 IMPLEMENT_MODULE(FBangoModule, BangoScripts)
