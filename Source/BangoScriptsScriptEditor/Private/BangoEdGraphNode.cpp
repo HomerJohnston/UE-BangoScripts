@@ -510,8 +510,8 @@ FText UBangoEdGraphNode::GetPinDisplayName(const UEdGraphPin* Pin) const
 	}
 	if (IsSwitch())
 	{
-		// A case's values are in the box beside its pin, so the pin itself has no name; Default has.
-		return Pin->PinName == DefaultPinName ? LOCTEXT("DefaultPin", "Default") : FText::GetEmpty();
+		// A case's values are in the box beside its pin, and Default has a box saying so, so these pins have no names.
+		return FText::GetEmpty();
 	}
 	for (int32 Branch = 0; Branch < GetBranchCount(); ++Branch)
 	{

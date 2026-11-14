@@ -306,8 +306,10 @@ void SBangoGraphNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 			];
 		InputPins.Add(PinToAdd);
 	}
-	else if (const int32 Case = BangoNode ? BangoNode->GetCaseOfPin(PinToAdd->GetPinObj()) : INDEX_NONE; Case != INDEX_NONE && CaseEditBoxes.IsValidIndex(Case))
+	else if (const int32 Case = BangoNode ? BangoNode->GetCaseOfPin(PinToAdd->GetPinObj()) : INDEX_NONE;
+		(Case != INDEX_NONE && CaseEditBoxes.IsValidIndex(Case)) || IsSwitchDefaultPin(PinToAdd->GetPinObj()))
 	{
+		// (Default gets a row like a case's, with a box that can't be edited.)
 		// A switch's case: its values in a box just inside the node, then the pin. The row is exactly as tall as a
 		// plain pin's (PinRowGap above and below the circle), so the pins stay on the grid.
 		RightNodeBox->AddSlot()
@@ -337,7 +339,7 @@ void SBangoGraphNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 					.VAlign(VAlign_Fill) // the box fills its row (16 high)
 					.Padding(0.0f, 0.0f, 4.0f, 0.0f)
 					[
-						MakeCaseValueBox(Case)
+						Case != INDEX_NONE ? MakeCaseValueBox(Case) : MakeDefaultCaseBox()
 					]
 					+ SHorizontalBox::Slot()
 					.AutoWidth()
@@ -360,6 +362,33 @@ void SBangoGraphNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 			];
 		OutputPins.Add(PinToAdd);
 	}
+}
+
+bool SBangoGraphNode::IsSwitchDefaultPin(const UEdGraphPin* Pin) const
+{
+	return BangoNode && BangoNode->IsSwitch() && Pin && Pin->Direction == EGPD_Output && Pin->PinName == UBangoEdGraphNode::DefaultPinName;
+}
+
+TSharedRef<SWidget> SBangoGraphNode::MakeDefaultCaseBox() const
+{
+	using namespace BangoGraphNodeStyle;
+	// Looks like a case's box, greyed out: Default has no values to type.
+	return SNew(SBorder)
+		.BorderImage(FAppStyle::GetBrush("ToolPanel.DarkGroupBorder"))
+		.Padding(FMargin(4.0f, 0.0f, 3.0f, 0.0f))
+		.ColorAndOpacity(FLinearColor(1.0f, 1.0f, 1.0f, 0.6f))
+		.ToolTipText(LOCTEXT("DefaultCaseTip", "Default: runs when no case's value matches. It's only written to the script when something is wired to it."))
+		[
+			SNew(SBox)
+			.MinDesiredWidth(28.0f)
+			.VAlign(VAlign_Center)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("DefaultCase", "Default"))
+				.Font(FCoreStyle::GetDefaultFontStyle("Italic", 8))
+				.ColorAndOpacity(FSlateColor(EmptyColor))
+			]
+		];
 }
 
 TSharedRef<SWidget> SBangoGraphNode::MakeCaseValueBox(int32 Case)

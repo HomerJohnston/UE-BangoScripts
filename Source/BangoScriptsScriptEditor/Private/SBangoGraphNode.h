@@ -165,6 +165,9 @@ private:
 
 	/** The case's values, shown on one line beside its pin; clicking edits them in place. */
 	TSharedRef<SWidget> MakeCaseValueBox(int32 Case);
+	/** The box beside a switch's Default output: like a case's, but greyed out and not editable. */
+	TSharedRef<SWidget> MakeDefaultCaseBox() const;
+	bool IsSwitchDefaultPin(const UEdGraphPin* Pin) const;
 	void BeginEditingCase(int32 Case);
 	void OnCaseCommitted(const FText& NewText, ETextCommit::Type CommitType, int32 Case);
 	/** Enter applies and moves on to the next case (editing ends after the last); Tab wraps around; Shift goes back. */
