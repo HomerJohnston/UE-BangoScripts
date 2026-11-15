@@ -112,6 +112,11 @@ public:
 	/** True if any line of the text has node metadata (//@). */
 	bool HasNodeMetadata() const { return bGutterHasMetadata; }
 
+	/** True while the vertical scrollbar (the editor's own, or the one given) is shown: the text is taller than the box. */
+	bool IsVerticalScrollBarShown() const;
+	/** True while the horizontal scrollbar is shown: a line is wider than the box. */
+	bool IsHorizontalScrollBarShown() const;
+
 	// SWidget
 	/** Opens, filters or closes the autocomplete list once the text and cursor have settled. */
 	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;

@@ -8,6 +8,7 @@
 #include "BangoInlineScriptTarget.h"
 #include "DetailWidgetRow.h"
 #include "Dialog/SCustomDialog.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "PropertyHandle.h"
 #include "SBangoTextEditor.h"
@@ -30,6 +31,18 @@ namespace BangoInlineScriptCustomizationPrivate
 	/** While the script's window is open: the box is darkened by this much, and the note over it is this colour. */
 	constexpr float LockedDim = 0.75f;
 	const FLinearColor LockedNoteColor(1.0f, 0.85f, 0.0f);
+	/** The Edit button over the box's top-right corner is this opaque. */
+	constexpr float EditButtonOpacity = 0.75f;
+	/** Its space from the box's top and right edges, and how much further left it sits while the box's scrollbar is shown. */
+	constexpr float EditButtonTop = 3.0f;
+	constexpr float EditButtonRight = 2.0f;
+	constexpr float EditButtonScrollBarGap = 12.0f;
+	/** The Has graph layout note: how far up from the box's bottom it always sits (more over a scrollbar). */
+	constexpr float LayoutNoteBottom = 4.0f;
+	/** Clicking the box while it has graph layout flashes the note: this long, this many times, in the locked note's colour. */
+	constexpr double LayoutNoteFlashSeconds = 0.6;
+	constexpr int32 LayoutNoteFlashes = 2;
+	const FLinearColor LayoutNoteBackground(0.0f, 0.0f, 0.0f, 0.6f);
 
 	/**
 	 * The script without its graph layout: no node metadata (//@) and no section headings (// ====), so it can be
@@ -69,8 +82,8 @@ namespace BangoInlineScriptCustomizationPrivate
 
 /**
  * The details panel's box for one FBangoInlineScript property: its text, typed in and applied when the box loses
- * focus (as one undoable change), kept up to date with changes made elsewhere, and the Edit button on its right (which
- * shows the window instead once it's open).
+ * focus (as one undoable change), kept up to date with changes made elsewhere, and the Edit button over its top-right
+ * corner (which shows the window instead once it's open).
  */
 class SBangoInlineScriptBox : public SCompoundWidget
 {
@@ -138,22 +151,29 @@ public:
 						.ColorAndOpacity(FLinearColor(0.0f, 0.0f, 0.0f, LockedDim))
 						.Visibility_Lambda([this]() { return IsWindowOpen() ? EVisibility::HitTestInvisible : EVisibility::Collapsed; })
 					]
-					// A script with graph layout (node metadata) is edited in the window, or made editable here: a note says so.
+					// A script with graph layout (node metadata) is edited in the window, or made editable here: a note at the
+					// bottom says so (above and left of the scrollbars while they're shown), with how in its tooltip.
 					+ SOverlay::Slot()
-					.HAlign(HAlign_Right)
+					.HAlign(HAlign_Center)
 					.VAlign(VAlign_Bottom)
-					.Padding(2.0f)
+					.Padding(TAttribute<FMargin>::CreateLambda([this]()
+					{
+						const bool bVertical = TextBox.IsValid() && TextBox->IsVerticalScrollBarShown();
+						const bool bHorizontal = TextBox.IsValid() && TextBox->IsHorizontalScrollBarShown();
+						return FMargin(2.0f, 2.0f, 2.0f + (bVertical ? EditButtonScrollBarGap : 0.0f), LayoutNoteBottom + (bHorizontal ? EditButtonScrollBarGap : 0.0f));
+					}))
 					[
 						SNew(SBorder)
 						.BorderImage(FBangoEditorStyle::GetWhiteBrush())
-						.BorderBackgroundColor(FLinearColor(0.0f, 0.0f, 0.0f, 0.6f))
+						.BorderBackgroundColor_Lambda([this]() { return FSlateColor(FMath::Lerp(LayoutNoteBackground, FLinearColor(LockedNoteColor.R, LockedNoteColor.G, LockedNoteColor.B, 0.9f), GetFlash())); })
 						.Padding(FMargin(4.0f, 1.0f))
-						.Visibility_Lambda([this]() { return HasLayout() && !IsWindowOpen() && !bMultipleValues ? EVisibility::HitTestInvisible : EVisibility::Collapsed; })
+						.ToolTipText(LOCTEXT("HasLayoutTooltip", "Click Edit to use the full editor, or right-click > Make Editable Inline to remove graph layout."))
+						.Visibility_Lambda([this]() { return HasLayout() && !IsWindowOpen() && !bMultipleValues ? EVisibility::Visible : EVisibility::Collapsed; })
 						[
 							SNew(STextBlock)
-							.Text(LOCTEXT("HasLayout", "Has graph layout: click Edit, or right-click > Make Editable Inline."))
+							.Text(LOCTEXT("HasLayout", "Has graph layout"))
 							.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-							.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+							.ColorAndOpacity_Lambda([this]() { return GetFlash() > 0.5f ? FSlateColor(FLinearColor::Black) : FSlateColor::UseSubduedForeground(); })
 						]
 					]
 					+ SOverlay::Slot()
@@ -167,32 +187,40 @@ public:
 						.ColorAndOpacity(LockedNoteColor)
 						.Visibility_Lambda([this]() { return IsWindowOpen() ? EVisibility::HitTestInvisible : EVisibility::Collapsed; })
 					]
-				]
-				// The Edit button, as tall as the box beside it.
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.Padding(2.0f, 0.0f, 0.0f, 0.0f)
-				[
-					SNew(SButton)
-					.HAlign(HAlign_Center)
-					.VAlign(VAlign_Center)
-					.ContentPadding(FMargin(2.0f, 0.0f))
-					.ToolTipText_Lambda([this]()
+					// The Edit button, in the box's top-right corner (left of the scrollbar while it's shown): hover-only, and a
+					// little see-through so the text shows.
+					+ SOverlay::Slot()
+					.HAlign(HAlign_Right)
+					.VAlign(VAlign_Top)
+					.Padding(TAttribute<FMargin>::CreateLambda([this]()
 					{
-						if (!Target.IsValid())
-						{
-							return LOCTEXT("EditManyTooltip", "Select a single object to edit its script in a window.");
-						}
-						return IsWindowOpen()
-							? LOCTEXT("ShowWindowTooltip", "Bring this script's window to the front.")
-							: LOCTEXT("EditTooltip", "Edit this script in the full graph editor, in a window of its own. While the window is open, the box here can't be typed in.");
-					})
-					.IsEnabled_Lambda([this]() { return Target.IsValid() && !bMultipleValues && !StructHandle->IsEditConst(); })
-					.OnClicked(this, &SBangoInlineScriptBox::OnEditClicked)
+						const bool bScrollBar = TextBox.IsValid() && TextBox->IsVerticalScrollBarShown();
+						return FMargin(2.0f, EditButtonTop, EditButtonRight + (bScrollBar ? EditButtonScrollBarGap : 0.0f), 2.0f);
+					}))
 					[
-						SNew(SImage)
-						.Image(FBangoEditorStyle::GetEditScriptIcon())
-						.ColorAndOpacity(FSlateColor::UseForeground())
+						SAssignNew(EditButton, SButton)
+						.ButtonStyle(FAppStyle::Get(), "HoverHintOnly")
+						.RenderOpacity(EditButtonOpacity)
+						.HAlign(HAlign_Center)
+						.VAlign(VAlign_Center)
+						.ContentPadding(FMargin(2.0f))
+						.ToolTipText_Lambda([this]()
+						{
+							if (!Target.IsValid())
+							{
+								return LOCTEXT("EditManyTooltip", "Select a single object to edit its script in a window.");
+							}
+							return IsWindowOpen()
+								? LOCTEXT("ShowWindowTooltip", "Bring this script's window to the front.")
+								: LOCTEXT("EditTooltip", "Edit this script in the full graph editor, in a window of its own. While the window is open, the box here can't be typed in.");
+						})
+						.IsEnabled_Lambda([this]() { return Target.IsValid() && !bMultipleValues && !StructHandle->IsEditConst(); })
+						.OnClicked(this, &SBangoInlineScriptBox::OnEditClicked)
+						[
+							SNew(SImage)
+							.Image(FBangoEditorStyle::GetEditScriptIcon())
+							.ColorAndOpacity(FSlateColor::UseForeground())
+						]
 					]
 				]
 			]
@@ -224,6 +252,9 @@ private:
 	TSharedPtr<IPropertyHandle> SourceHandle;
 	TSharedPtr<FBangoInlineScriptTarget> Target;
 	TSharedPtr<SBangoTextEditor> TextBox;
+	TSharedPtr<SButton> EditButton;
+	/** When the Has graph layout note last started flashing (FSlateApplication time), or a negative number. */
+	double FlashStartTime = -1.0;
 	/** The text the box was last given (or that was last applied from it). */
 	FString Shown;
 	bool bMultipleValues = false;
@@ -241,6 +272,38 @@ private:
 	bool IsWindowOpen() const
 	{
 		return Target.IsValid() && FBangoInlineScriptWindows::IsOpen(Target->GetKey());
+	}
+
+	/** How lit the Has graph layout note is while it flashes: 0 (as usual) to 1 (fully lit). */
+	float GetFlash() const
+	{
+		using namespace BangoInlineScriptCustomizationPrivate;
+		if (FlashStartTime < 0.0)
+		{
+			return 0.0f;
+		}
+		const double Elapsed = FSlateApplication::Get().GetCurrentTime() - FlashStartTime;
+		if (Elapsed >= LayoutNoteFlashSeconds)
+		{
+			return 0.0f;
+		}
+		return (float)FMath::Abs(FMath::Sin(Elapsed / LayoutNoteFlashSeconds * LayoutNoteFlashes * PI));
+	}
+
+	/** A left click on the box while the note is shown (it can't be typed in): the note flashes, so it's seen. Selecting still works. */
+	virtual FReply OnPreviewMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
+	{
+		if (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && HasLayout() && !IsWindowOpen() && !bMultipleValues && !(EditButton.IsValid() && EditButton->IsHovered()))
+		{
+			FlashStartTime = FSlateApplication::Get().GetCurrentTime();
+			// Keep painting while it flashes, in case nothing else would.
+			RegisterActiveTimer(0.0f, FWidgetActiveTimerDelegate::CreateLambda([this](double, float)
+			{
+				return GetFlash() > 0.0f || FSlateApplication::Get().GetCurrentTime() - FlashStartTime < BangoInlineScriptCustomizationPrivate::LayoutNoteFlashSeconds
+					? EActiveTimerReturnType::Continue : EActiveTimerReturnType::Stop;
+			}));
+		}
+		return FReply::Unhandled();
 	}
 
 	/** The script has node metadata: it's laid out for the graph, so it's edited in the window (or made editable here). */

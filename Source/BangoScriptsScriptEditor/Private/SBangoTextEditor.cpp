@@ -277,6 +277,16 @@ const FSlateBrush* SBangoTextEditor::GetFrameBrush() const
 	return IsHovered() ? &BoxStyle.BackgroundImageHovered : &BoxStyle.BackgroundImageNormal;
 }
 
+bool SBangoTextEditor::IsVerticalScrollBarShown() const
+{
+	return VScrollBar.IsValid() && VScrollBar->ShouldBeVisible().IsVisible();
+}
+
+bool SBangoTextEditor::IsHorizontalScrollBarShown() const
+{
+	return HScrollBar.IsValid() && HScrollBar->ShouldBeVisible().IsVisible();
+}
+
 void SBangoTextEditor::SetMetadataShown(bool bShown)
 {
 	bMetadataShown = bShown && !bInlineScriptEditor;
