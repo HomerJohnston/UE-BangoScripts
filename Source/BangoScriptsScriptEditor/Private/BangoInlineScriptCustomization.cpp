@@ -203,7 +203,7 @@ public:
 						.RenderOpacity(EditButtonOpacity)
 						.HAlign(HAlign_Center)
 						.VAlign(VAlign_Center)
-						.ContentPadding(FMargin(2.0f))
+						.ContentPadding(FMargin(0.0f))
 						.ToolTipText_Lambda([this]()
 						{
 							if (!Target.IsValid())

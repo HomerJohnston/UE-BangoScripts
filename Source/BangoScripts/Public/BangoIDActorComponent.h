@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "BangoIDName.h"
 #include "BangoIDActorComponent.generated.h"
 
 /**
@@ -18,9 +19,12 @@ class BANGOSCRIPTS_API UBangoIDActorComponent : public UActorComponent
 public:
 	UBangoIDActorComponent();
 
-	/** The name scripts use for this actor, as @Name. Case-sensitive. Letters, digits and '_', not starting with a digit. */
+	/**
+	 * The name scripts use for this actor, as @Name. Case-sensitive. Letters, digits and '_', not starting with a digit.
+	 * An FBangoIDName: an FString that the details panel shows after an '@'.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bango")
-	FString BangoName;
+	FBangoIDName BangoName;
 
 	/** True if BangoName was registered successfully. */
 	UFUNCTION(BlueprintPure, Category = "Bango")

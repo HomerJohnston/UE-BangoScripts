@@ -6,6 +6,7 @@
 #include "BangoActorRegistry.generated.h"
 
 class AActor;
+class APawn;
 class FBangoValue;
 
 /**
@@ -32,9 +33,16 @@ public:
 	/** Removes Name, if it is registered to Actor. Entity values naming it stay; using them afterwards fails to find the actor. */
 	void Unregister(const FString& Name, const AActor* Actor);
 
-	/** The actor registered under Name, or nullptr. Names are case-sensitive. */
+	/**
+	 * The actor registered under Name, or nullptr. Names are case-sensitive. The `player` entity's name
+	 * (Bango::GetPlayerEntityName) finds the first local player's pawn instead.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "Bango")
 	AActor* FindActor(const FString& Name) const;
+
+	/** The first local player's pawn (what a script's `player` is), or nullptr if there's none right now. */
+	UFUNCTION(BlueprintCallable, Category = "Bango")
+	APawn* GetPlayerPawn() const;
 
 protected:
 	virtual bool DoesSupportWorldType(const EWorldType::Type WorldType) const override;
@@ -46,8 +54,9 @@ private:
 namespace Bango
 {
 	/**
-	 * The entity value for Actor, for passing to scripts: its Bango ID name, or nil if Actor is null.
-	 * Fails if the actor has no Bango ID component, or its name isn't registered (empty, invalid or duplicate).
+	 * The entity value for Actor, for passing to scripts: its Bango ID name, or nil if Actor is null. The first local
+	 * player's pawn, without a registered Bango ID, is the `player` entity. Fails if any other actor has no Bango ID
+	 * component, or its name isn't registered (empty, invalid or duplicate).
 	 */
 	BANGOSCRIPTS_API bool ActorToEntity(const AActor* Actor, FBangoValue& OutValue, FString& OutError);
 }

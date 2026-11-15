@@ -198,6 +198,7 @@ void FBangoCompletion::GetKeywordItems(TArray<FBangoCompletionItem>& OutItems, b
 		{ TEXT("true"),     TEXT("value"),       TEXT("The bool value true."), true },
 		{ TEXT("false"),    TEXT("value"),       TEXT("The bool value false."), true },
 		{ TEXT("nil"),      TEXT("value"),       TEXT("No value. Reading nil stops the script; check with IsNil."), true },
+		{ TEXT("player"),   TEXT("entity"),      TEXT("The first local player's pawn, found each time it's used: player SetPos(...)."), true },
 	};
 	for (const FKeyword& Keyword : Keywords)
 	{

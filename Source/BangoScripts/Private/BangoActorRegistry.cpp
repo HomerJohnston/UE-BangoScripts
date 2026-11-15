@@ -5,6 +5,8 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 
 UBangoActorRegistry* UBangoActorRegistry::Get(const UObject* WorldContext)
 {
@@ -65,8 +67,19 @@ void UBangoActorRegistry::Unregister(const FString& Name, const AActor* Actor)
 
 AActor* UBangoActorRegistry::FindActor(const FString& Name) const
 {
+	if (Bango::IsPlayerEntityName(Name))
+	{
+		return GetPlayerPawn();
+	}
 	const TWeakObjectPtr<AActor>* Found = Actors.Find(Name);
 	return Found ? Found->Get() : nullptr;
+}
+
+APawn* UBangoActorRegistry::GetPlayerPawn() const
+{
+	UWorld* World = GetWorld();
+	const APlayerController* Controller = World && GEngine ? GEngine->GetFirstLocalPlayerController(World) : nullptr;
+	return Controller ? Controller->GetPawn() : nullptr;
 }
 
 namespace Bango
@@ -79,6 +92,13 @@ namespace Bango
 			return true;
 		}
 		const UBangoIDActorComponent* Component = Actor->FindComponentByClass<UBangoIDActorComponent>();
+		const UBangoActorRegistry* Registry = UBangoActorRegistry::Get(Actor);
+		if ((!Component || !Component->IsRegistered()) && Registry && Registry->GetPlayerPawn() == Actor)
+		{
+			// The player's pawn needs no Bango ID: it's the `player` entity.
+			OutValue = FBangoValue::MakeEntity(GetPlayerEntityName());
+			return true;
+		}
 		if (!Component)
 		{
 			OutError = FString::Printf(TEXT("Actor '%s' has no Bango ID component, so it can't be passed to a script as an entity."), *Actor->GetName());

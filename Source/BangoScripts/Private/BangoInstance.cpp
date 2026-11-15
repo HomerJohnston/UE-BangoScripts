@@ -1041,6 +1041,10 @@ bool FBangoInstance::CallCommand(int32 NameIndex, int32 ArgCount, bool bHasTarge
 			{
 				return true;
 			}
+			if (Bango::IsPlayerEntityName(Value.GetEntityName()))
+			{
+				return RuntimeFail(FString::Printf(TEXT("%s: there's no player pawn right now (no local player, or it isn't possessing a pawn)."), *Signature.Name));
+			}
 			return RuntimeFail(FString::Printf(TEXT("%s: no actor is registered with the Bango ID name '%s'. Check the name on the actor's Bango ID component, and that the actor is in the level."),
 				*Signature.Name, *Value.GetEntityName()));
 		};

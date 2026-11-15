@@ -28,7 +28,7 @@ enum class EBangoSyntaxKind : uint8
 	Preprocessor,       // #set inputs LOCTEXT_NAMESPACE LARGE_SCRIPT_THRESHOLD
 	Local,              // a name the graph declares (set by FBangoScriptNames)
 	Global,             // any other name that isn't a call (the tokenizer gives every name this)
-	Entity,             // @john
+	Entity,             // @john, and player
 	Number,
 	String,
 	StringEscape,       // \n \" \\ and `x in a localized source

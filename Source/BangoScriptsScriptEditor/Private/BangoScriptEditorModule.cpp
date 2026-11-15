@@ -1,6 +1,8 @@
 #include "BangoConnectionDrawingPolicy.h"
 #include "BangoInlineScript.h"
 #include "BangoInlineScriptCustomization.h"
+#include "BangoIDName.h"
+#include "BangoIDNameCustomization.h"
 #include "PropertyEditorModule.h"
 #include "BangoEditorStyle.h"
 #include "BangoGraphCommands.h"
@@ -54,6 +56,9 @@ public:
 		FPropertyEditorModule& PropertyEditor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
 		PropertyEditor.RegisterCustomPropertyTypeLayout(FBangoInlineScript::StaticStruct()->GetFName(),
 			FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FBangoInlineScriptCustomization::MakeInstance));
+		// Bango ID names (FBangoIDName properties): their text box after an '@'.
+		PropertyEditor.RegisterCustomPropertyTypeLayout(FBangoIDName::StaticStruct()->GetFName(),
+			FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FBangoIDNameCustomization::MakeInstance));
 		PropertyEditor.NotifyCustomizationModuleChanged();
 
 		PinFactory = MakeShared<FBangoGraphPinFactory>();
@@ -94,6 +99,7 @@ public:
 		if (FPropertyEditorModule* PropertyEditor = FModuleManager::GetModulePtr<FPropertyEditorModule>(TEXT("PropertyEditor")))
 		{
 			PropertyEditor->UnregisterCustomPropertyTypeLayout(FBangoInlineScript::StaticStruct()->GetFName());
+			PropertyEditor->UnregisterCustomPropertyTypeLayout(FBangoIDName::StaticStruct()->GetFName());
 		}
 		if (ScriptSync.IsValid())
 		{

@@ -39,6 +39,17 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Editor", meta = (ClampMin = "0"))
 	int32 LargeScriptThreshold = 3;
 
+	/**
+	 * Bango ID labels in the level editor's viewport (Show > Bango IDs): beyond this distance from the camera, a label
+	 * starts to fade out...
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Editor", meta = (ClampMin = "0", Units = "cm"))
+	float IDLabelFadeDistance = 7500.0f;
+
+	/** ...and from this distance on, it isn't drawn. */
+	UPROPERTY(Config, EditAnywhere, Category = "Editor", meta = (ClampMin = "0", Units = "cm"))
+	float IDLabelHideDistance = 10000.0f;
+
 	/** How long a `WriteScreen` message stays on screen when the script doesn't say. */
 	UPROPERTY(Config, EditAnywhere, Category = "Commands", meta = (ClampMin = "0.5"))
 	float WriteScreenSeconds = 5.0f;

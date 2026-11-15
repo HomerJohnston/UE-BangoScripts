@@ -1,8 +1,14 @@
-# Bango Language Spec (draft v0.48)
+# Bango Language Spec (draft v0.51)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.51:** the level editor's viewport shows each Bango ID's name over its actor, fading with distance; problem names are red (section 4). Two new settings for the fade (section 11).
+
+**Changes in v0.50:** a **character's** position in `SetPos` and `GetPos` is its **feet** (the bottom of its capsule), not its middle. `SetPos` lifts it onto a slope if the ground rises under it (section 7).
+
+**Changes in v0.49:** a new keyword, **`player`**: an entity for the first local player's pawn, found each time it's used, with no Bango ID needed: `player SetPos(...)`, `entity _p = player;` (section 4). `player` can't be used as a name; `@player` is still an ordinary Bango ID.
 
 **Changes in v0.48:** the settings lines are written **`#set`** (it was `#define`): `#set inputs (...)`, `#set LOCTEXT_NAMESPACE "Name"`. **`#undef LOCTEXT_NAMESPACE` is gone**: Bango gathers its own texts, so nothing needs it. An old `#define` or `#undef` line is an error that says so (section 1). A new setting, **`#set LARGE_SCRIPT_THRESHOLD 5`**, and a project setting, **Large Script Threshold** (3 by default): a script with fewer nodes is saved **compact**, without section headings or node metadata (section 12). An inline script's box can't be typed in while its script has node metadata; **Make Editable Inline** on its right-click menu strips it (section 15).
 
@@ -272,7 +278,7 @@ _height = GetPos(_who).z;
 - Doubles: `2.5`, `1.0`, `1e3`, `2.5e-3`. There must be a digit on both sides of the `.` (`0.5`, not `.5`; `1.0`, not `1.`).
 - A number followed directly by a letter (`12abc`) is a compile error.
 - Strings must end on the line they start. Any other escape than `\" \\ \n \t` is a compile error.
-- Entities: `@` followed directly by a Bango ID name, like `@john` or `@door17` (section 4). No space is allowed after the `@`. An entity literal is a fixed value with the type `entity`, so it can be a parameter default and the compiler knows its type.
+- Entities: `@` followed directly by a Bango ID name, like `@john` or `@door17` (section 4), or the keyword **`player`** (the player's pawn, below). No space is allowed after the `@`. An entity literal is a fixed value with the type `entity`, so it can be a parameter default and the compiler knows its type.
 - Entity literals are never checked when the script compiles, since which actors exist depends on the level. Using one whose actor isn't in the level stops the script (see Conversions below).
 - Texts: `LOCTEXT("Key", "Source")`, `NSLOCTEXT("Namespace", "Key", "Source")`, `NOTELOCTEXT("Key", "Source", "Notes")`, `NSNOTELOCTEXT("Namespace", "Key", "Source", "Notes")`, and `INVTEXT("Source")` for a text that isn't translated. Every part must be a string literal.
 
@@ -344,7 +350,7 @@ WriteScreen(ToString(NSLOCTEXT("Shared.UI", "Continue", "Continue")));
 - **Names are case-sensitive**: `john` and `John` are different names. This covers variables, globals, functions, labels, commands, keywords, type names and Bango ID names (`@john` and `@John` are different actors).
 - Calling a command or function with the wrong capitalisation is a compile error that suggests the right name: *"Unknown command or function 'writeScreen'. Did you mean 'WriteScreen'? Names are case-sensitive."*
 - A name is letters, digits and `_`, and doesn't start with a digit.
-- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn switch case default break continue return label goto function global inputs true false nil bool int float double string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
+- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn switch case default break continue return label goto function global inputs player true false nil bool int float double string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
 
 ### Locals
 - Any name will do; a leading `_` is allowed but not needed (`count` and `_count` are both fine). The same goes for function parameters, script parameters and loop variables. Locals only exist inside the running script instance.
@@ -401,8 +407,16 @@ global string[] questLog;        // arrays can be global
 - Bango ID names are **their own set of names**, separate from variables and globals. They don't create globals, so `@john` and a global called `john` can both exist without clashing.
 - A name is letters, digits and `_`, and doesn't start with a digit. Keywords and a leading `_` are allowed (`@if`, `@_hidden`).
 - An empty or invalid name, or a name already used by another actor in the level, shows an error on screen. The name is then not registered.
+- **In the level editor**, each Bango ID's name is drawn over its actor (`@john`), just above its bounds, as screen-facing text. It fades out with distance from the camera (from the **ID Label Fade Distance** setting, 7,500 units, to the **ID Label Hide Distance**, 10,000, beyond which it isn't drawn; not in ortho views). A name scripts couldn't use is drawn in red with why: *no name*, *invalid name*, or *used by another actor*, so problems show up before play. Hidden actors have no label. The viewport's **Show > Bango IDs** flag turns them off and on (on by default). They aren't drawn while playing (PIE) or in asset editors' viewports.
 - When the actor is removed, its name is unregistered. Entity values naming it keep the name, and using them afterwards stops the script because the actor can't be found.
 - Loading a save or resetting state doesn't change which names are registered.
+- **`player`** is the **first local player's pawn**: the pawn that the game's first local player controller possesses. It's an entity like `@john` (`player SetPos(200, 500, 900);`, `entity _p = player;`, `if (_e == player)`), and needs no Bango ID component.
+  - It's looked up **each time it's used**, like any entity, so it follows the player into a new pawn after a respawn or a change of possession. A value stored from it (`_p = player;`) is still "the player", not the pawn it was then.
+  - Using it while there's no player pawn (no local player yet, or it isn't possessing a pawn) stops the script, as a missing actor does: *"there's no player pawn right now (no local player, or it isn't possessing a pawn)."*
+  - It's shown as `player` in `WriteLog`, `Format` and the debugger.
+  - It's a different value from the pawn's own Bango ID, if it has one: `player == @hero` is false even when `@hero` is the player's pawn.
+  - In C++, `UBangoActorRegistry::FindActor` finds it like a Bango ID name (its reserved name is `Bango::GetPlayerEntityName()`), and `GetPlayerPawn` gives the pawn. `Bango::ActorToEntity` gives `player` for the player's pawn when it has no registered Bango ID, so it can be passed to a script without one.
+  - `@player` is still an ordinary Bango ID name, unrelated to the keyword.
 - Writing a Bango ID without its `@` (`john Speak("Hi");`) reads a global called `john`. If there is no such global but there is an actor with that Bango ID, the error says so: *"Global 'john' doesn't exist. There is an actor with the Bango ID 'john': write @john to use it."*
 
 ### Undeclared globals (resolved at runtime)
@@ -668,8 +682,8 @@ Every placeholder needs a value. When the text is written as a literal (`WriteLo
 | `WaitFor(int Script)` | Waits until the script with this id has ended, for any reason. Carries on at once if it already has. Waiting for itself is an error. Needs a game world. |
 | `Time()` → `float` | The world's time (`GetWorld()->GetTimeSeconds()`): seconds since the level started; stops while the game is paused. |
 | `ToEntity(string Name)` → `entity` | The entity with this Bango ID name, for names that come from data (`ToEntity("john")` is the same as `@john`). A name that isn't letters, digits and `_` (or starts with a digit) is an error. |
-| `entity SetPos(vector3 Pos)` | Moves the actor. |
-| `GetPos(entity Entity)` → `vector3` | The actor's location. |
+| `entity SetPos(vector3 Pos)` | Moves the actor (as a teleport). A **character** (`ACharacter`) stands on `Pos`: its feet, the bottom of its capsule, go there, so its middle goes a half height above. If the ground rises into the capsule's rounded bottom there (a slope, a step), it's lifted until it rests on it, by up to its half height: a sphere the capsule's width is swept down onto `Pos` against static collision (`WorldStatic`). With nothing under `Pos`, or something in the way above it, it's placed as on flat ground. |
+| `GetPos(entity Entity)` → `vector3` | The actor's location. For a character, where its feet are (the bottom of its capsule), as `SetPos` takes it, so `_who SetPos(GetPos(_who));` doesn't move it. |
 | `entity SetHidden(bool Hidden)` | Hides or shows the actor in game. |
 | `entity DistanceTo(entity Other)` → `float` | Distance between two actors. |
 | `IsNull(entity Entity)` → `bool` | True if the entity is `nil`, or no actor in the level has its Bango ID: it was never there (or never registered, like a duplicate name), or it's been destroyed. It never stops the script for those: a `nil` variable, a global nobody made or an element past the end counts as `nil` here, and a missing actor isn't an error. Use it before a command that would stop the script: `if (!IsNull(_who)) { _who SetHidden(true); }`. |
@@ -1085,6 +1099,7 @@ The save data has a format version. Data from an older version (such as saves ma
 | Instructions per frame before the infinite-loop guard stops a script | 1,000,000 |
 | Nested function calls | 200 |
 | How long a WriteScreen message stays on screen when the script doesn't say (Write Screen Seconds) | 5 seconds |
+| ID Label Fade Distance / ID Label Hide Distance: where Bango ID labels in the level editor's viewport start to fade, and where they're gone (section 4) | 7,500 / 10,000 units |
 | Large Script Threshold: from how many nodes on the graph editor saves a script with section headings and node metadata (section 12, Compact scripts); 0: always | 3 |
 
 ---

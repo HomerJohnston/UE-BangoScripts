@@ -35,6 +35,7 @@ namespace BangoLineTokenizerPrivate
 	static const TCHAR* const TypeNames[]      = { TEXT("bool"), TEXT("int"), TEXT("float"), TEXT("string"), TEXT("entity"), TEXT("text"), TEXT("vector2"), TEXT("vector3"), TEXT("void") };
 	static const TCHAR* const Constants[]      = { TEXT("true"), TEXT("false") };
 	static const TCHAR* const NilWord[]        = { TEXT("nil") };
+	static const TCHAR* const PlayerWord[]     = { TEXT("player") }; // the first local player's pawn: an entity, coloured like @john
 	static const TCHAR* const PreprocWords[]   = { TEXT("inputs"), TEXT("LOCTEXT_NAMESPACE"), TEXT("LARGE_SCRIPT_THRESHOLD") };
 	static const TCHAR* const Builtins[]       = { TEXT("IsNil"), TEXT("Count"), TEXT("Push"), TEXT("InsertAt"), TEXT("Pop"), TEXT("RemoveAt") };
 	static const TCHAR* const InvalidWords[]   = { TEXT("double") };
@@ -288,6 +289,7 @@ namespace BangoLineTokenizerPrivate
 			else if (IsOneOf(Line, Start, WordLen, DeclKeywords))   { Kind = EBangoSyntaxKind::DeclKeyword; }
 			else if (IsOneOf(Line, Start, WordLen, Constants))      { Kind = EBangoSyntaxKind::Constant; }
 			else if (IsOneOf(Line, Start, WordLen, NilWord))        { Kind = EBangoSyntaxKind::Nil; }
+			else if (IsOneOf(Line, Start, WordLen, PlayerWord))     { Kind = EBangoSyntaxKind::Entity; }
 			else if (IsOneOf(Line, Start, WordLen, PreprocWords))   { Kind = EBangoSyntaxKind::Preprocessor; }
 			else if (IsOneOf(Line, Start, WordLen, Builtins))       { Kind = EBangoSyntaxKind::Builtin; }
 			else if (IsOneOf(Line, Start, WordLen, InvalidWords))   { Kind = EBangoSyntaxKind::Error; }

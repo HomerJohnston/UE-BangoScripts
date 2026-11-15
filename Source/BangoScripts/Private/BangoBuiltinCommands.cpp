@@ -9,6 +9,8 @@
 #include "BangoText.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Character.h"
+#include "Components/CapsuleComponent.h"
 
 namespace BangoBuiltinPrivate
 {
@@ -70,9 +72,55 @@ namespace BangoBuiltinPrivate
 		AActor* Actor = Registry ? Registry->FindActor(Entity.GetEntityName()) : nullptr;
 		if (!Actor)
 		{
-			Call.Error = FString::Printf(TEXT("No actor is registered with the Bango ID name '%s'."), *Entity.GetEntityName());
+			Call.Error = Bango::IsPlayerEntityName(Entity.GetEntityName())
+				? FString(TEXT("There's no player pawn right now (no local player, or it isn't possessing a pawn)."))
+				: FString::Printf(TEXT("No actor is registered with the Bango ID name '%s'."), *Entity.GetEntityName());
 		}
 		return Actor;
+	}
+
+	/**
+	 * A character's position, in SetPos and GetPos, is the bottom of its capsule (its feet), not its middle: a script
+	 * names the spot it stands on. False for an actor that isn't a character with a capsule.
+	 */
+	static bool GetCharacterCapsule(const AActor* Actor, float& OutHalfHeight, float& OutRadius)
+	{
+		const ACharacter* Character = Cast<ACharacter>(Actor);
+		const UCapsuleComponent* Capsule = Character ? Character->GetCapsuleComponent() : nullptr;
+		if (!Capsule)
+		{
+			return false;
+		}
+		OutHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+		OutRadius = FMath::Min(Capsule->GetScaledCapsuleRadius(), OutHalfHeight);
+		return true;
+	}
+
+	/**
+	 * Where a character standing at Feet goes (its capsule's middle). Feet + the half height, unless the ground there
+	 * slopes up into the capsule's rounded bottom: then it's lifted until it rests on it, by up to the half height. Found
+	 * with a sphere the capsule's width, swept down against static collision onto the spot.
+	 */
+	static FVector GetCharacterLocationForFeet(const AActor& Character, const FVector& Feet, float HalfHeight, float Radius)
+	{
+		const FVector Up = FVector::UpVector;
+		const FVector Resting = Feet + Up * HalfHeight;
+		UWorld* World = Character.GetWorld();
+		if (!World)
+		{
+			return Resting;
+		}
+		// The capsule's bottom sphere: from a half height above where it would rest down to resting on Feet.
+		const FVector Start = Feet + Up * (Radius + HalfHeight);
+		const FVector End = Feet + Up * Radius;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(BangoSetPos), false, &Character);
+		FHitResult Hit;
+		if (World->SweepSingleByObjectType(Hit, Start, End, FQuat::Identity, FCollisionObjectQueryParams(ECC_WorldStatic), FCollisionShape::MakeSphere(Radius), Params)
+			&& !Hit.bStartPenetrating)
+		{
+			return Hit.Location + Up * (HalfHeight - Radius);
+		}
+		return Resting; // nothing under it there (it may fall), or something in the way above: as on flat ground
 	}
 
 	/** For a ReturnsNumber command: true if every argument is an int, so the result must be one too. */
@@ -981,7 +1029,8 @@ namespace Bango
 		// entity SetPos(pos)
 		{
 			FBangoCommand Command;
-			Command.Signature = FBangoCommandSignature::Make(TEXT("SetPos")).Target(Entity).Param(TEXT("Pos"), Vector3).InCategory(TEXT("Actors")).Describe(TEXT("Moves the actor."));
+			Command.Signature = FBangoCommandSignature::Make(TEXT("SetPos")).Target(Entity).Param(TEXT("Pos"), Vector3).InCategory(TEXT("Actors"))
+				.Describe(TEXT("Moves the actor. A character stands on Pos: its feet go there, lifted onto a slope if the ground rises under it."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{
 				AActor* Actor = ResolveActor(Call, Call.Target);
@@ -990,7 +1039,14 @@ namespace Bango
 					return EBangoCommandResult::Failed;
 				}
 				const FBangoValue& Pos = Call.Args[0];
-				Actor->SetActorLocation(FVector(Pos.GetVectorPart(0), Pos.GetVectorPart(1), Pos.GetVectorPart(2)));
+				FVector Location(Pos.GetVectorPart(0), Pos.GetVectorPart(1), Pos.GetVectorPart(2));
+				float HalfHeight = 0.0f;
+				float Radius = 0.0f;
+				if (GetCharacterCapsule(Actor, HalfHeight, Radius))
+				{
+					Location = GetCharacterLocationForFeet(*Actor, Location, HalfHeight, Radius);
+				}
+				Actor->SetActorLocation(Location, false, nullptr, ETeleportType::TeleportPhysics);
 				return EBangoCommandResult::Done;
 			};
 			Add(Commands, Command);
@@ -1000,7 +1056,8 @@ namespace Bango
 		// what it works on as its only argument (SetPos, with a position to give, keeps a target).
 		{
 			FBangoCommand Command;
-			Command.Signature = FBangoCommandSignature::Make(TEXT("GetPos")).Param(TEXT("Entity"), Entity).Returns(Vector3).InCategory(TEXT("Actors")).Describe(TEXT("The actor's location."));
+			Command.Signature = FBangoCommandSignature::Make(TEXT("GetPos")).Param(TEXT("Entity"), Entity).Returns(Vector3).InCategory(TEXT("Actors"))
+				.Describe(TEXT("The actor's location. For a character, where its feet are (the bottom of its capsule), as SetPos takes it."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{
 				if (!RequireArgs(Call, 1))
@@ -1012,7 +1069,13 @@ namespace Bango
 				{
 					return EBangoCommandResult::Failed;
 				}
-				const FVector Location = Actor->GetActorLocation();
+				FVector Location = Actor->GetActorLocation();
+				float HalfHeight = 0.0f;
+				float Radius = 0.0f;
+				if (GetCharacterCapsule(Actor, HalfHeight, Radius))
+				{
+					Location -= FVector::UpVector * HalfHeight;
+				}
 				Call.Result = FBangoValue::MakeVector3(Location.X, Location.Y, Location.Z);
 				return EBangoCommandResult::Done;
 			};

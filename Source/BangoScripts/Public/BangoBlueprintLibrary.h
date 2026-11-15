@@ -6,6 +6,7 @@
 #include "BangoScriptSubsystem.h"
 class UBangoScriptAsset;
 
+#include "BangoIDName.h"
 #include "BangoInlineScript.h"
 #include "BangoBlueprintLibrary.generated.h"
 
@@ -72,6 +73,14 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Bango", meta = (WorldContext = "WorldContextObject", DisplayName = "Spawn Bango Script (Dynamic Path)"))
 	static FBangoScriptHandle SpawnBangoScript(UObject* WorldContextObject, const FString& ScriptPath);
+
+	// ---- Bango ID names: converted to and from strings by themselves where one is wired to the other ----
+
+	UFUNCTION(BlueprintPure, Category = "Bango", meta = (DisplayName = "To String (Bango ID Name)", CompactNodeTitle = "->", BlueprintAutocast))
+	static FString Conv_BangoIDNameToString(const FBangoIDName& IDName) { return IDName.Name; }
+
+	UFUNCTION(BlueprintPure, Category = "Bango", meta = (DisplayName = "To Bango ID Name (String)", CompactNodeTitle = "->", BlueprintAutocast))
+	static FBangoIDName Conv_StringToBangoIDName(const FString& Name) { return FBangoIDName(Name); }
 
 	// ---- Arguments for a script's parameters: Spawn Bango Inline Script's Args (the Spawn Bango Script node builds them itself) ----
 

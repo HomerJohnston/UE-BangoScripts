@@ -1,6 +1,7 @@
 #include "BangoLexer.h"
 
 #include "BangoParser.h"
+#include "BangoTypes.h"
 
 namespace BangoLexerPrivate
 {
@@ -384,6 +385,14 @@ namespace BangoLexerPrivate
 				}
 			}
 
+			// `player` is an entity literal for the first local player's pawn (Bango::GetPlayerEntityName).
+			if (Kind == EBangoTokenKind::Identifier && Text.Equals(TEXT("player"), ESearchCase::CaseSensitive))
+			{
+				FBangoToken& Token = AddToken(EBangoTokenKind::EntityLiteral, Loc);
+				Token.Text = Bango::GetPlayerEntityName();
+				return true;
+			}
+
 			FBangoToken& Token = AddToken(Kind, Loc);
 			Token.Text = Text;
 			return true;
@@ -663,7 +672,7 @@ namespace Bango
 		case EBangoTokenKind::EndOfFile: return TEXT("end of file");
 		case EBangoTokenKind::Identifier: return FString::Printf(TEXT("'%s'"), *Token.Text);
 		case EBangoTokenKind::StringLiteral: return TEXT("a string");
-		case EBangoTokenKind::EntityLiteral: return FString::Printf(TEXT("'@%s'"), *Token.Text);
+		case EBangoTokenKind::EntityLiteral: return Bango::IsPlayerEntityName(Token.Text) ? FString(TEXT("'player'")) : FString::Printf(TEXT("'@%s'"), *Token.Text);
 		default: return FString::Printf(TEXT("'%s'"), *Token.Text);
 		}
 	}

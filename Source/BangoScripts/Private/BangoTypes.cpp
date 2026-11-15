@@ -634,7 +634,7 @@ FString FBangoValue::ToDebugString() const
 	case EBangoBaseType::Int:    return FString::Printf(TEXT("%d"), IntValue);
 	case EBangoBaseType::Double: return FString::SanitizeFloat(DoubleValue);
 	case EBangoBaseType::String: return FString::Printf(TEXT("\"%s\""), *StringValue.ReplaceCharWithEscapedChar());
-	case EBangoBaseType::Entity: return FString::Printf(TEXT("@%s"), *StringValue);
+	case EBangoBaseType::Entity: return Bango::IsPlayerEntityName(StringValue) ? FString(TEXT("player")) : FString::Printf(TEXT("@%s"), *StringValue);
 	case EBangoBaseType::Text:   return FString::Printf(TEXT("text(\"%s\")"), *TextValue.ToString().ReplaceCharWithEscapedChar());
 	case EBangoBaseType::Vector2:
 	case EBangoBaseType::Vector3:
@@ -669,8 +669,9 @@ FString FBangoValue::ToDisplayString() const
 	switch (Type.Base)
 	{
 	case EBangoBaseType::String:
-	case EBangoBaseType::Entity:
 		return StringValue;
+	case EBangoBaseType::Entity:
+		return Bango::IsPlayerEntityName(StringValue) ? FString(TEXT("player")) : StringValue;
 	case EBangoBaseType::Text:
 		return TextValue.ToString();
 	default:
@@ -790,6 +791,17 @@ namespace Bango
 		return true;
 	}
 
+	const FString& GetPlayerEntityName()
+	{
+		static const FString Name(TEXT("#player"));
+		return Name;
+	}
+
+	bool IsPlayerEntityName(const FString& Name)
+	{
+		return Name.Equals(GetPlayerEntityName(), ESearchCase::CaseSensitive);
+	}
+
 	bool IsReservedWord(const FString& Name)
 	{
 		static const TCHAR* Words[] =
@@ -798,7 +810,7 @@ namespace Bango
 			TEXT("break"), TEXT("continue"), TEXT("return"), TEXT("label"), TEXT("goto"),
 			TEXT("function"), TEXT("global"), TEXT("true"), TEXT("false"), TEXT("nil"),
 			TEXT("bool"), TEXT("int"), TEXT("float"), TEXT("double"), TEXT("string"), TEXT("entity"), TEXT("void"),
-			TEXT("text"), TEXT("vector2"), TEXT("vector3"), TEXT("inputs"), TEXT("IsNil"),
+			TEXT("text"), TEXT("vector2"), TEXT("vector3"), TEXT("inputs"), TEXT("IsNil"), TEXT("player"),
 			TEXT("LOCTEXT"), TEXT("NSLOCTEXT"), TEXT("NOTELOCTEXT"), TEXT("NSNOTELOCTEXT"), TEXT("INVTEXT"),
 		};
 		for (const TCHAR* Word : Words)

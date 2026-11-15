@@ -12,7 +12,8 @@ class FBangoTestEntities : public IBangoEntityResolver
 public:
 	virtual bool IsEntityRegistered(const FString& Name) const override
 	{
-		return Name.Equals(TEXT("john"), ESearchCase::CaseSensitive) || Name.Equals(TEXT("player"), ESearchCase::CaseSensitive);
+		return Name.Equals(TEXT("john"), ESearchCase::CaseSensitive) || Name.Equals(TEXT("player"), ESearchCase::CaseSensitive)
+			|| Bango::IsPlayerEntityName(Name);
 	}
 };
 
@@ -451,6 +452,7 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 	{ TEXT("string placeholders: {n}, backtick escapes, and what's left as it is"), TEXT("Talk(\"`{0`} is {0}, `` and {Name}, 100% and {1\", 5);"), TEXT("{0} is 5, ` and {Name}, 100% and {1"), nullptr, nullptr },
 	{ TEXT("IsNull on nil and missing actors"), TEXT("entity _e;\nentity[] _a = [@john];\nTalk(\"{0} {1} {2}\", IsNull(@john), IsNull(@ghost), IsNull(_e));\nTalk(\"{0} {1} {2}\", IsNull(_a[0]), IsNull(_a[5]), IsNull(nobody));\n_e = @player;\nTalk(\"{0}\", IsNull(_e));"), TEXT("false true true|false true true|false"), nullptr, nullptr },
 	{ TEXT("IsNull on something that isn't an entity"), TEXT("bool _b;\n_b = IsNull(lots);"), TEXT(""), TEXT("(2:6)"), TEXT("Expected an entity here, but the value is a string") },
+	{ TEXT("the player keyword"), TEXT("entity _p = player;\nplayer Speak(\"hi\");\nTalk(\"{0} {1} {2}\", _p, _p == player, player == @player);"), TEXT("#player: hi|player true false"), nullptr, nullptr },
 	{ TEXT("unregistered entity"), TEXT("@ghost Speak(\"boo\");"), TEXT(""), TEXT("(1:1)"), TEXT("no actor is registered with the Bango ID name 'ghost'") },
 	{ TEXT("Bango ID written without @"), TEXT("john Speak(\"hi\");"), TEXT(""), TEXT("(1:1)"), TEXT("Global 'john' doesn't exist. There is an actor with the Bango ID 'john': write @john to use it.") },
 	{ TEXT("missing global that isn't a Bango ID"), TEXT("ghost Speak(\"hi\");"), TEXT(""), TEXT("(1:1)"), TEXT("Global 'ghost' doesn't exist. No script or Blueprint has declared it.") },

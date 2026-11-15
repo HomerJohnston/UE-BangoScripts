@@ -233,6 +233,13 @@ namespace Bango
 	/** Keywords and type names that can't be used as names. */
 	BANGOSCRIPTS_API bool IsReservedWord(const FString& Name);
 
+	/**
+	 * The `player` keyword: an entity value with this reserved name (not an identifier, so no Bango ID can have it).
+	 * It's the first local player's pawn, looked up each time it's used (UBangoActorRegistry::FindActor).
+	 */
+	BANGOSCRIPTS_API const FString& GetPlayerEntityName();
+	BANGOSCRIPTS_API bool IsPlayerEntityName(const FString& Name);
+
 	/** True if the name starts with '_'. Command names can't; variable names (locals and globals alike) may. */
 	BANGOSCRIPTS_API bool IsLocalName(const FString& Name);
 
