@@ -111,7 +111,7 @@ public:
 
 	/**
 	 * The main Script Start node only: the script's `#define LOCTEXT_NAMESPACE "..."` line, shown as its Loc Namespace row
-	 * (see Bango::AddLocNamespaceField). Kept here, not in Text, since it isn't part of the params line.
+	 * (see Bango::AddLocNamespaceField). Kept here, not in Text, since it isn't part of the inputs line.
 	 */
 	UPROPERTY()
 	bool bHasLocNamespace = false;

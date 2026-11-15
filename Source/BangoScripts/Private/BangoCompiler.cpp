@@ -181,7 +181,7 @@ namespace BangoCompilerPrivate
 			}
 			else
 			{
-				return Fail(Lit.Loc, TEXT("This text needs the script's namespace: add the line #define LOCTEXT_NAMESPACE \"Bango.Intro\" at the top of the script (after #define params, if there is one) and #undef LOCTEXT_NAMESPACE as its last line. (NSLOCTEXT and NSNOTELOCTEXT give their own namespace instead.)"));
+				return Fail(Lit.Loc, TEXT("This text needs the script's namespace: add the line #define LOCTEXT_NAMESPACE \"Bango.Intro\" at the top of the script (after #define inputs, if there is one) and #undef LOCTEXT_NAMESPACE as its last line. (NSLOCTEXT and NSNOTELOCTEXT give their own namespace instead.)"));
 			}
 
 			const FString Id = Namespace + TEXT("\n") + Lit.TextKey;
@@ -1072,7 +1072,7 @@ namespace BangoCompilerPrivate
 			return ResolveGotos();
 		}
 
-		/** Evaluates a params default (a literal, negated number or array of those) as a value of Type. */
+		/** Evaluates a inputs default (a literal, negated number or array of those) as a value of Type. */
 		bool EvaluateConstant(const FBangoExpr& Expr, const FBangoType& Type, const FString& ParamName, FBangoValue& OutValue)
 		{
 			FBangoValue Raw;
@@ -1154,7 +1154,7 @@ namespace BangoCompilerPrivate
 			return true;
 		}
 
-		/** Declares the params line's parameters as the first slots of the top level. */
+		/** Declares the inputs line's parameters as the first slots of the top level. */
 		bool DeclareScriptParams(const FBangoBlock& Body)
 		{
 			const FBangoParamsStmt* ParamsStmt = Body.Num() > 0 ? Body[0]->As<FBangoParamsStmt>() : nullptr;

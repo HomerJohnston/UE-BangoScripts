@@ -159,7 +159,7 @@ namespace Bango
 				}
 				Parts.Add(Part);
 			}
-			Result += FString::Printf(TEXT("params: %s;\n"), *FString::Join(Parts, TEXT(", ")));
+			Result += FString::Printf(TEXT("inputs: %s;\n"), *FString::Join(Parts, TEXT(", ")));
 		}
 		if (Program.Globals.Num() > 0)
 		{

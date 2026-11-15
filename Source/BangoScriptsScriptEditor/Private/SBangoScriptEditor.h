@@ -42,6 +42,7 @@ struct FBangoNodeMenuEntry;
  * For an embedded script, the asset's text is. Unsaved changes show as a * in the title.
  */
 class UBangoScriptAsset;
+class FBangoInlineScriptTarget;
 
 class SBangoScriptEditor : public SCompoundWidget, public FSelfRegisteringEditorUndoClient
 {
@@ -68,6 +69,12 @@ public:
 	 * changes either.
 	 */
 	void OpenScriptAsset(UBangoScriptAsset* Asset);
+	/**
+	 * Opens an inline script (an FBangoInlineScript property of an object), replacing the open script. Save writes
+	 * the property, as an undoable change. Changes to the property made elsewhere (undo, paste, Reset to Default)
+	 * are picked up as an outside change to a file is. Doesn't ask about unsaved changes.
+	 */
+	void OpenInlineScript(const TSharedPtr<FBangoInlineScriptTarget>& Target);
 	/** Opens the open script again from its file, to pick up changes made outside the editor. Doesn't ask either. */
 	void ReloadScript();
 	/** Saves the open script (as the Save button does). False if it wasn't saved. */
@@ -109,7 +116,7 @@ private:
 	TArray<TSharedPtr<FGraphEntry>> FunctionItems;
 	TSharedPtr<SListView<TSharedPtr<FGraphEntry>>> FunctionList;
 
-	// INPUTS: the shown graph's parameters (the script's #define params, or the function's), from its entry node.
+	// INPUTS: the shown graph's parameters (the script's #define inputs, or the function's), from its entry node.
 	struct FInputEntry
 	{
 		int32 Index = INDEX_NONE;
@@ -242,6 +249,14 @@ private:
 	FDateTime OpenFileTime;
 	/** The open Bango Script asset (OpenScriptAsset). */
 	TWeakObjectPtr<UBangoScriptAsset> OpenAsset;
+	/** The open inline script (OpenInlineScript), or null. OpenScript is then its name (FBangoInlineScriptTarget::GetScriptName). */
+	TSharedPtr<FBangoInlineScriptTarget> InlineTarget;
+	/** The inline script's text as last read or saved, to notice changes made to the property elsewhere. */
+	FString InlineSource;
+	/** The property's text when the user chose to keep their changes over an outside change, so it isn't offered again. */
+	FString KeptInlineSource;
+	/** What messages and the runtime call the open script: "/Game/Quests/Intro.bango", or an inline script's name. */
+	FString GetScriptFileLabel() const;
 
 	/** Editor graphs for the open script: [0] is the main graph, then one per function. */
 	TArray<TStrongObjectPtr<UEdGraph>> EdGraphs;

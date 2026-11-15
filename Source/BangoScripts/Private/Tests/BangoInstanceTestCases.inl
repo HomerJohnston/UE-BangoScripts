@@ -364,8 +364,8 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 	{ TEXT("vector parts"),
 		TEXT("vector3 _vec = [1, 2, 3];\nvector3[] _path;\n_vec.x = 10;\n_vec.y += 0.5;\n_vec += [1, 1, 1];\n_vec *= 2;\nHint(\"{0} {1}\", _vec, _vec.z);\n_path = [[0, 0, 0], _vec];\n_path[1].z = 9;\n_path Push(_path[0] + [0, 0, 100]);\nHint(\"{0} {1}\", _path, _path[2].z);"),
 		TEXT("(22.0, 7.0, 8.0) 8.0|[(0.0, 0.0, 0.0), (22.0, 7.0, 9.0), (0.0, 0.0, 100.0)] 100.0"), nullptr, nullptr },
-	{ TEXT("vector params, functions and globals"),
-		TEXT("#define params (vector3 _p = [1, 2, 3], vector2 _q = [-1, 0.5])\nglobal vector3 home;\nhome = [1, 1, 1];\nhome.y = 7;\nHint(\"{0} {1} {2} {3} {4}\", _p, _q, Up(5), Up(2).z, home);\nHint(\"{0} {1}\", spot.y, spot + spot);\nfunction vector3 Up(float _h)\n{\n\treturn [0, 0, _h];\n};"),
+	{ TEXT("vector inputs, functions and globals"),
+		TEXT("#define inputs (vector3 _p = [1, 2, 3], vector2 _q = [-1, 0.5])\nglobal vector3 home;\nhome = [1, 1, 1];\nhome.y = 7;\nHint(\"{0} {1} {2} {3} {4}\", _p, _q, Up(5), Up(2).z, home);\nHint(\"{0} {1}\", spot.y, spot + spot);\nfunction vector3 Up(float _h)\n{\n\treturn [0, 0, _h];\n};"),
 		TEXT("(1.0, 2.0, 3.0) (-1.0, 0.5) (0.0, 0.0, 5.0) 2.0 (1.0, 7.0, 1.0)|2.0 (2.0, 4.0, 6.0)"), nullptr, nullptr },
 	{ TEXT("a vector divided by zero"), TEXT("vector3 _v = [1, 2, 3];\nHint(\"{0}\", _v / 0);"), nullptr, TEXT("(2:16)"), TEXT("Division by zero") },
 	{ TEXT("setting a part of a nil vector"), TEXT("vector2 _v;\n_v.x = 1;"), nullptr, TEXT("(2:1)"), TEXT("'_v' is nil, so its x can't be set on its own. Give it a whole vector first, like _v = [0, 0];") },
@@ -421,7 +421,7 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 	{ TEXT("undeclared globals"), TEXT("if (flag)\n{\n\tboss Speak(\"hi\");\n};\nHint(\"{0}\", boss GetName());"), TEXT("john: hi|john"), nullptr, nullptr },
 	{ TEXT("Bango IDs"), TEXT("entity _e = @john;\n_e Speak(\"a\");\n@player Speak(\"b\");\nHint(\"{0} {1} {2} {3}\", _e, [@john, @ghost], @john == _e, @john != @player);"), TEXT("john: a|player: b|john [john, ghost] true true"), nullptr, nullptr },
 	{ TEXT("Bango ID that isn't in the level, unused"), TEXT("entity _g = @ghost;\nHint(\"{0}\", _g);"), TEXT("ghost"), nullptr, nullptr },
-	{ TEXT("Bango IDs as parameter defaults"), TEXT("#define params (entity _who = @john, entity[] _all = [@john, @player])\n_who Speak(\"hi\");\nforEach (_x in _all)\n{\n\t_x Speak(\"all\");\n};"), TEXT("john: hi|john: all|player: all"), nullptr, nullptr },
+	{ TEXT("Bango IDs as parameter defaults"), TEXT("#define inputs (entity _who = @john, entity[] _all = [@john, @player])\n_who Speak(\"hi\");\nforEach (_x in _all)\n{\n\t_x Speak(\"all\");\n};"), TEXT("john: hi|john: all|player: all"), nullptr, nullptr },
 	{ TEXT("IsNil on globals"), TEXT("Hint(\"{0} {1}\", !IsNil(nothere), !IsNil(flag));"), TEXT("false true"), nullptr, nullptr },
 	{ TEXT("short-circuit"), TEXT("bool _b;\nbool _c;\n_b = !IsNil(nothere) && nothere;\n_c = flag || nothere;\nHint(\"{0} {1}\", _b, _c);"), TEXT("false true"), nullptr, nullptr },
 	{ TEXT("latent commands"), TEXT("Hint(\"start\");\nSleep(1.0);\nif (AskChoice(\"a\", \"b\") == 2)\n{\n\tHint(\"two\");\n};"), TEXT("start|two"), nullptr, nullptr },
@@ -866,7 +866,7 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			{
 				{ TEXT("expression"), TEXT("lots == \"lots\""), 1, nullptr, nullptr },
 				{ TEXT("expression, false"), TEXT("Count([1, 2]) > 2"), 0, nullptr, nullptr },
-				{ TEXT("expression with comments and a params line"), TEXT("// Is it big?\n#define params (int _n = 7)\n\n_n > 5    // more than five"), 1, nullptr, nullptr },
+				{ TEXT("expression with comments and a inputs line"), TEXT("// Is it big?\n#define inputs (int _n = 7)\n\n_n > 5    // more than five"), 1, nullptr, nullptr },
 				{ TEXT("expression with a string holding ;"), TEXT("lots != \"a;b\" && lots != \"//\""), 1, nullptr, nullptr },
 				{ TEXT("a script that returns"), TEXT("int _n = 0;\nfor (int _i = 0; _i < 4; _i++)\n{\n\t_n += _i;\n};\nreturn _n == 6;"), 1, nullptr, nullptr },
 				{ TEXT("a script with a function"), TEXT("function bool Big(int _v)\n{\n\treturn _v > 10;\n};\n\nreturn Big(3);"), 0, nullptr, nullptr },
@@ -969,29 +969,29 @@ static void BangoRunArgumentTests(TArray<FString>& OutFailures)
 	};
 
 	const FBangoValue John = FBangoValue::MakeEntity(TEXT("john"));
-	const TCHAR* Greet = TEXT("#define params (entity _who, string _line, int _times = 2, entity _listener = nil)\n")
+	const TCHAR* Greet = TEXT("#define inputs (entity _who, string _line, int _times = 2, entity _listener = nil)\n")
 		TEXT("for (int _i = 0; _i < _times; _i++)\n{\n\t_who Speak(_line);\n};\nHint(\"{0}\", !IsNil(_listener));");
 
 	const FArgCase Cases[] =
 	{
 		{ TEXT("all arguments"), Greet, { John, FBangoValue::MakeString(TEXT("hi")), FBangoValue::MakeInt(1), FBangoValue::MakeEntity(TEXT("player")) }, TEXT("john: hi|true"), nullptr },
 		{ TEXT("defaults for trailing arguments"), Greet, { John, FBangoValue::MakeString(TEXT("hi")) }, TEXT("john: hi|john: hi|false"), nullptr },
-		{ TEXT("int argument for a float parameter"), TEXT("#define params (float _d)\nHint(\"{0}\", _d);"), { FBangoValue::MakeInt(3) }, TEXT("3.0"), nullptr },
-		{ TEXT("explicit nil overrides a default"), TEXT("#define params (int _n = 5)\nHint(\"{0}\", !IsNil(_n));"), { FBangoValue::MakeNil(FBangoType::Int()) }, TEXT("false"), nullptr },
-		{ TEXT("nil of any type fits any parameter"), TEXT("#define params (int _n)\nHint(\"{0}\", !IsNil(_n));"), { FBangoValue::MakeNil(FBangoType::String()) }, TEXT("false"), nullptr },
-		{ TEXT("array argument"), TEXT("#define params (int[] _list)\n_list Push(3);\nHint(\"{0}\", _list);"), { FBangoValue::MakeArray(FBangoType::Int(), { FBangoValue::MakeInt(1), FBangoValue::MakeInt(2) }) }, TEXT("[1, 2, 3]"), nullptr },
-		{ TEXT("array default is fresh each spawn"), TEXT("#define params (int[] _a = [1, 2])\n_a Push(3);\nHint(\"{0}\", _a);"), {}, TEXT("[1, 2, 3]"), nullptr },
-		{ TEXT("no params, no arguments"), TEXT("Hint(\"ok\");"), {}, TEXT("ok"), nullptr },
-		{ TEXT("empty params line"), TEXT("#define params ()\nHint(\"ok\");"), {}, TEXT("ok"), nullptr },
+		{ TEXT("int argument for a float parameter"), TEXT("#define inputs (float _d)\nHint(\"{0}\", _d);"), { FBangoValue::MakeInt(3) }, TEXT("3.0"), nullptr },
+		{ TEXT("explicit nil overrides a default"), TEXT("#define inputs (int _n = 5)\nHint(\"{0}\", !IsNil(_n));"), { FBangoValue::MakeNil(FBangoType::Int()) }, TEXT("false"), nullptr },
+		{ TEXT("nil of any type fits any parameter"), TEXT("#define inputs (int _n)\nHint(\"{0}\", !IsNil(_n));"), { FBangoValue::MakeNil(FBangoType::String()) }, TEXT("false"), nullptr },
+		{ TEXT("array argument"), TEXT("#define inputs (int[] _list)\n_list Push(3);\nHint(\"{0}\", _list);"), { FBangoValue::MakeArray(FBangoType::Int(), { FBangoValue::MakeInt(1), FBangoValue::MakeInt(2) }) }, TEXT("[1, 2, 3]"), nullptr },
+		{ TEXT("array default is fresh each spawn"), TEXT("#define inputs (int[] _a = [1, 2])\n_a Push(3);\nHint(\"{0}\", _a);"), {}, TEXT("[1, 2, 3]"), nullptr },
+		{ TEXT("no inputs, no arguments"), TEXT("Hint(\"ok\");"), {}, TEXT("ok"), nullptr },
+		{ TEXT("empty inputs line"), TEXT("#define inputs ()\nHint(\"ok\");"), {}, TEXT("ok"), nullptr },
 
-		{ TEXT("too few"), TEXT("#define params (int _a, int _b)\nHint(\"x\");"), { FBangoValue::MakeInt(1) }, nullptr, TEXT("Missing argument 2 ('_b', an int). This script needs at least 2 argument(s), but 1 were passed.") },
+		{ TEXT("too few"), TEXT("#define inputs (int _a, int _b)\nHint(\"x\");"), { FBangoValue::MakeInt(1) }, nullptr, TEXT("Missing argument 2 ('_b', an int). This script needs at least 2 argument(s), but 1 were passed.") },
 		{ TEXT("none for required"), Greet, {}, nullptr, TEXT("Missing argument 1 ('_who', an entity)") },
-		{ TEXT("too many"), TEXT("#define params (int _a)\nHint(\"x\");"), { FBangoValue::MakeInt(1), FBangoValue::MakeInt(2) }, nullptr, TEXT("Too many arguments: this script takes at most 1, but 2 were passed.") },
-		{ TEXT("arguments to a script without params"), TEXT("Hint(\"x\");"), { FBangoValue::MakeInt(1) }, nullptr, TEXT("takes no arguments") },
-		{ TEXT("wrong type"), TEXT("#define params (int _a, string _b)\nHint(\"x\");"), { FBangoValue::MakeInt(1), FBangoValue::MakeInt(2) }, nullptr, TEXT("Argument 2 ('_b') must be a string, but it is an int.") },
-		{ TEXT("float for an int"), TEXT("#define params (int _a)\nHint(\"x\");"), { FBangoValue::MakeDouble(1.5) }, nullptr, TEXT("Argument 1 ('_a') must be an int, but it is a float.") },
-		{ TEXT("argument error points at the params line"), Greet, { FBangoValue::MakeString(TEXT("oops")), FBangoValue::MakeString(TEXT("hi")) }, nullptr, TEXT("test.bango(1:1) [node 0]: Argument 1 ('_who') must be an entity") },
-		{ TEXT("reading a nil parameter"), TEXT("#define params (string _line = nil)\nHint(_line);"), {}, nullptr, TEXT("'_line' is nil. It's a parameter of this script; check what the caller passed.") },
+		{ TEXT("too many"), TEXT("#define inputs (int _a)\nHint(\"x\");"), { FBangoValue::MakeInt(1), FBangoValue::MakeInt(2) }, nullptr, TEXT("Too many arguments: this script takes at most 1, but 2 were passed.") },
+		{ TEXT("arguments to a script without inputs"), TEXT("Hint(\"x\");"), { FBangoValue::MakeInt(1) }, nullptr, TEXT("takes no arguments") },
+		{ TEXT("wrong type"), TEXT("#define inputs (int _a, string _b)\nHint(\"x\");"), { FBangoValue::MakeInt(1), FBangoValue::MakeInt(2) }, nullptr, TEXT("Argument 2 ('_b') must be a string, but it is an int.") },
+		{ TEXT("float for an int"), TEXT("#define inputs (int _a)\nHint(\"x\");"), { FBangoValue::MakeDouble(1.5) }, nullptr, TEXT("Argument 1 ('_a') must be an int, but it is a float.") },
+		{ TEXT("argument error points at the inputs line"), Greet, { FBangoValue::MakeString(TEXT("oops")), FBangoValue::MakeString(TEXT("hi")) }, nullptr, TEXT("test.bango(1:1) [node 0]: Argument 1 ('_who') must be an entity") },
+		{ TEXT("reading a nil parameter"), TEXT("#define inputs (string _line = nil)\nHint(_line);"), {}, nullptr, TEXT("'_line' is nil. It's a parameter of this script; check what the caller passed.") },
 		{ TEXT("reading a nil function parameter"), TEXT("function void F(string _s)\n{\n\tHint(_s);\n};\nF(nil);"), {}, nullptr, TEXT("It's a parameter of function 'F'") },
 	};
 

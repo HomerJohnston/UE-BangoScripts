@@ -78,7 +78,7 @@ namespace Bango
 		switch (Kind)
 		{
 		case EBangoGraphNodeKind::Entry:
-			Source = bInFunctionGraph ? FString(TEXT("function ")) + Text + TEXT("\n{\n};") : FString(TEXT("#define params (")) + Text + TEXT(")");
+			Source = bInFunctionGraph ? FString(TEXT("function ")) + Text + TEXT("\n{\n};") : FString(TEXT("#define inputs (")) + Text + TEXT(")");
 			break;
 		case EBangoGraphNodeKind::Assign:
 		case EBangoGraphNodeKind::IncDec:
@@ -241,7 +241,7 @@ namespace Bango
 		if (!CanEditField(Layout, FieldIndex))
 		{
 			OutError = Field.bLocked ? TEXT("Fill in the values before this one first.")
-				: Field.bReadOnly ? TEXT("A parameter's default is edited in the SCRIPT INPUT panel.")
+				: Field.bReadOnly ? TEXT("A parameter's default is edited in the SCRIPT INPUTS panel.")
 				: TEXT("This can't be edited here.");
 			return false;
 		}
@@ -1175,7 +1175,7 @@ namespace Bango
 			TSet<FString> Names;
 			int32 AnchorLine = 0; // the hoisted declarations go after the last declaration, or before the first statement
 			bool bAfterAnchor = true;
-			// The graph's leading declarations, after its #define params line (a statement too) and any reroutes among them.
+			// The graph's leading declarations, after its #define inputs line (a statement too) and any reroutes among them.
 			while (FirstLate < Body.Num() && (Body[FirstLate]->Kind == EBangoStmtKind::VarDecl || Body[FirstLate]->Kind == EBangoStmtKind::Reroute
 				|| Body[FirstLate]->Kind == EBangoStmtKind::Params))
 			{

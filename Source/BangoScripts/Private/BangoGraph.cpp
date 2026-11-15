@@ -416,7 +416,7 @@ namespace BangoGraphPrivate
 			}
 			if (Script.bHasLocNamespace)
 			{
-				// Comments on (or just above) the #define LOCTEXT_NAMESPACE line belong to Script Start, like the params line's.
+				// Comments on (or just above) the #define LOCTEXT_NAMESPACE line belong to Script Start, like the inputs line's.
 				FTarget Target;
 				Target.Line = Script.LocNamespaceLoc.Line;
 				Target.Graph = -1;
@@ -921,7 +921,7 @@ namespace BangoGraphPrivate
 			}
 			if (SnippetScript.GetParams())
 			{
-				return Fail(SnippetScript.TopLevel[0]->Loc.Line, TEXT("Disconnected nodes (//~ lines) can't contain a params line."));
+				return Fail(SnippetScript.TopLevel[0]->Loc.Line, TEXT("Disconnected nodes (//~ lines) can't contain a inputs line."));
 			}
 			if (SnippetScript.TopLevel.Num() == 0)
 			{
@@ -1075,7 +1075,7 @@ namespace Bango
 {
 	const TCHAR* GetScriptInputHeadingComment()
 	{
-		return TEXT(" ============ SCRIPT INPUT ====================");
+		return TEXT(" ============ SCRIPT INPUTS ===================");
 	}
 
 	const TCHAR* GetGlobalVarsHeadingComment()

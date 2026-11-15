@@ -116,7 +116,7 @@ class BANGOSCRIPTS_API FBangoInstance
 public:
 	/**
 	 * Prepares the instance to run Program: finds every command it calls, checks Args against the script's
-	 * params line, declares the script's globals, and sets up the top-level frame.
+	 * inputs line, declares the script's globals, and sets up the top-level frame.
 	 *
 	 * Args are positional. Leaving off trailing parameters that have defaults uses the defaults; passing nil
 	 * passes nil. Fails (and returns false) for too few or too many arguments, an argument of the wrong type,

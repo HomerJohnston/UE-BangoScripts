@@ -6,6 +6,7 @@
 #include "BangoScriptSubsystem.h"
 class UBangoScriptAsset;
 
+#include "BangoInlineScript.h"
 #include "BangoBlueprintLibrary.generated.h"
 
 class AActor;
@@ -72,60 +73,78 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Bango", meta = (WorldContext = "WorldContextObject", DisplayName = "Spawn Bango Script (Dynamic Path)"))
 	static FBangoScriptHandle SpawnBangoScript(UObject* WorldContextObject, const FString& ScriptPath);
 
-	// ---- Used by the Spawn Bango Script node (hidden from the Blueprint menu) ----
+	// ---- Arguments for a script's parameters: Spawn Bango Inline Script's Args (the Spawn Bango Script node builds them itself) ----
 
-	UFUNCTION(BlueprintPure, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
+	/** An empty list of values for a Bango script's parameters. Add to it with the Add Bango Arg nodes, in the order of the script's #define inputs line, then give it to Spawn Bango Inline Script. */
+	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Make Bango Args"))
 	static FBangoBlueprintArgs MakeBangoArgs();
 
-	UFUNCTION(BlueprintPure, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
+	/** Leaves out the next parameter (one with a default value in the script's #define inputs line), so it gets its default. */
+	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Skip Bango Arg"))
 	static FBangoBlueprintArgs SkipBangoArg(const FBangoBlueprintArgs& Args);
 
-	UFUNCTION(BlueprintPure, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
+	/** Adds the next parameter's value. */
+	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Add Bango Arg (Bool)"))
 	static FBangoBlueprintArgs AddBangoArgBool(const FBangoBlueprintArgs& Args, bool Value);
 
-	UFUNCTION(BlueprintPure, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
+	/** Adds the next parameter's value. */
+	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Add Bango Arg (Int)"))
 	static FBangoBlueprintArgs AddBangoArgInt(const FBangoBlueprintArgs& Args, int32 Value);
 
-	UFUNCTION(BlueprintPure, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
+	/** Adds the next parameter's value. */
+	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Add Bango Arg (Float)"))
 	static FBangoBlueprintArgs AddBangoArgDouble(const FBangoBlueprintArgs& Args, double Value);
 
-	UFUNCTION(BlueprintPure, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
+	/** Adds the next parameter's value. */
+	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Add Bango Arg (String)"))
 	static FBangoBlueprintArgs AddBangoArgString(const FBangoBlueprintArgs& Args, const FString& Value);
 
-	UFUNCTION(BlueprintPure, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
+	/** Adds the next parameter's value. */
+	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Add Bango Arg (Text)"))
 	static FBangoBlueprintArgs AddBangoArgText(const FBangoBlueprintArgs& Args, const FText& Value);
 
-	UFUNCTION(BlueprintPure, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
+	/** Adds the next parameter's value. */
+	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Add Bango Arg (Actor (Entity))"))
 	static FBangoBlueprintArgs AddBangoArgActor(const FBangoBlueprintArgs& Args, AActor* Value);
 
-	UFUNCTION(BlueprintPure, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
+	/** Adds the next parameter's value. */
+	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Add Bango Arg (Vector2)"))
 	static FBangoBlueprintArgs AddBangoArgVector2(const FBangoBlueprintArgs& Args, FVector2D Value);
 
-	UFUNCTION(BlueprintPure, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
+	/** Adds the next parameter's value. */
+	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Add Bango Arg (Vector3)"))
 	static FBangoBlueprintArgs AddBangoArgVector3(const FBangoBlueprintArgs& Args, FVector Value);
 
-	UFUNCTION(BlueprintPure, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
+	/** Adds the next parameter's value: an array. */
+	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Add Bango Arg (Bool Array)"))
 	static FBangoBlueprintArgs AddBangoArgBoolArray(const FBangoBlueprintArgs& Args, const TArray<bool>& Value);
 
-	UFUNCTION(BlueprintPure, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
+	/** Adds the next parameter's value: an array. */
+	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Add Bango Arg (Int Array)"))
 	static FBangoBlueprintArgs AddBangoArgIntArray(const FBangoBlueprintArgs& Args, const TArray<int32>& Value);
 
-	UFUNCTION(BlueprintPure, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
+	/** Adds the next parameter's value: an array. */
+	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Add Bango Arg (Float Array)"))
 	static FBangoBlueprintArgs AddBangoArgDoubleArray(const FBangoBlueprintArgs& Args, const TArray<double>& Value);
 
-	UFUNCTION(BlueprintPure, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
+	/** Adds the next parameter's value: an array. */
+	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Add Bango Arg (String Array)"))
 	static FBangoBlueprintArgs AddBangoArgStringArray(const FBangoBlueprintArgs& Args, const TArray<FString>& Value);
 
-	UFUNCTION(BlueprintPure, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
+	/** Adds the next parameter's value: an array. */
+	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Add Bango Arg (Text Array)"))
 	static FBangoBlueprintArgs AddBangoArgTextArray(const FBangoBlueprintArgs& Args, const TArray<FText>& Value);
 
-	UFUNCTION(BlueprintPure, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
+	/** Adds the next parameter's value: an array. */
+	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Add Bango Arg (Actor (Entity) Array)"))
 	static FBangoBlueprintArgs AddBangoArgActorArray(const FBangoBlueprintArgs& Args, const TArray<AActor*>& Value);
 
-	UFUNCTION(BlueprintPure, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
+	/** Adds the next parameter's value: an array. */
+	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Add Bango Arg (Vector2 Array)"))
 	static FBangoBlueprintArgs AddBangoArgVector2Array(const FBangoBlueprintArgs& Args, const TArray<FVector2D>& Value);
 
-	UFUNCTION(BlueprintPure, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
+	/** Adds the next parameter's value: an array. */
+	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Add Bango Arg (Vector3 Array)"))
 	static FBangoBlueprintArgs AddBangoArgVector3Array(const FBangoBlueprintArgs& Args, const TArray<FVector>& Value);
 
 	/** Spawns ScriptPath with collected arguments. */
@@ -133,6 +152,15 @@ public:
 	static FBangoScriptHandle SpawnBangoScriptWithArgs(UObject* WorldContextObject, const FString& ScriptPath, const FBangoBlueprintArgs& Args);
 
 	/** Spawns a script asset with collected arguments (the Spawn Bango Script node). */
+	/**
+	 * Starts an inline script (a Bango Inline Script variable or property, spec section 15). Args fill its #define inputs
+	 * line, in order: make them with Make Bango Args and the Add Bango Arg nodes (leave it unconnected for a script with
+	 * no parameters). They're checked when it starts: if they don't fit, it doesn't start, and the error says why. An
+	 * empty script does nothing. Owner names it in errors and the debugger (Self, unless something else is connected).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Bango", meta = (WorldContext = "WorldContextObject", AutoCreateRefTerm = "Args", DefaultToSelf = "Owner", DisplayName = "Spawn Bango Inline Script"))
+	static FBangoScriptHandle SpawnBangoInlineScript(UObject* WorldContextObject, const FBangoInlineScript& Script, const FBangoBlueprintArgs& Args, UObject* Owner);
+
 	UFUNCTION(BlueprintCallable, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
 	static FBangoScriptHandle SpawnBangoScriptAssetWithArgs(UObject* WorldContextObject, const UBangoScriptAsset* Script, const FBangoBlueprintArgs& Args);
 

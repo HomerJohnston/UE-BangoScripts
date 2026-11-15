@@ -28,7 +28,7 @@ static constexpr int32 BangoGraphGridSize = 16;
 
 enum class EBangoGraphNodeKind : uint8
 {
-	/** Nodes[0] of every graph. Text: the inside of params (...) for the main graph, the signature for a function. */
+	/** Nodes[0] of every graph. Text: the inside of inputs (...) for the main graph, the signature for a function. */
 	Entry,
 
 	Assign,
@@ -150,7 +150,7 @@ struct BANGOSCRIPTS_API FBangoGraphDocument
 	 */
 	FString Description;
 
-	/** The script's `#define LOCTEXT_NAMESPACE "..."` line (see FBangoScript::LocNamespace). Saved right after the params line, with `#undef LOCTEXT_NAMESPACE` at the end. */
+	/** The script's `#define LOCTEXT_NAMESPACE "..."` line (see FBangoScript::LocNamespace). Saved right after the inputs line, with `#undef LOCTEXT_NAMESPACE` at the end. */
 	bool bHasLocNamespace = false;
 	FString LocNamespace;
 
@@ -194,7 +194,7 @@ namespace Bango
 	BANGOSCRIPTS_API TArray<int32> GetFunctionWriteOrder(const FBangoGraphDocument& Document);
 
 	/**
-	 * The section headings the writer puts in a file (the text after the //): SCRIPT INPUT above the #define lines,
+	 * The section headings the writer puts in a file (the text after the //): SCRIPT INPUTS above the #define lines,
 	 * GLOBAL VARS and LOCAL VARS above the declarations, SCRIPT BODY above the main graph's code, and FUNCTIONS
 	 * above the first function. Every heading starts with "====".
 	 */

@@ -62,7 +62,7 @@ namespace BangoParserPrivate
 		}
 	}
 
-	/** A fixed value allowed as a params default: a literal, a negated number, or an array of those. */
+	/** A fixed value allowed as a inputs default: a literal, a negated number, or an array of those. */
 	static bool IsConstantExpr(const FBangoExpr& Expr)
 	{
 		if (Expr.Kind == EBangoExprKind::Literal)
@@ -294,7 +294,7 @@ namespace BangoParserPrivate
 			return Token.Kind == EBangoTokenKind::Identifier && Token.Text.Equals(TEXT("LOCTEXT_NAMESPACE"), ESearchCase::CaseSensitive);
 		}
 
-		/** `#define params (...)` or `#define LOCTEXT_NAMESPACE "Name"` at the top of the script. */
+		/** `#define inputs (...)` or `#define LOCTEXT_NAMESPACE "Name"` at the top of the script. */
 		bool ParseDefine()
 		{
 			const FBangoToken& First = Cur();
@@ -305,17 +305,17 @@ namespace BangoParserPrivate
 			const FBangoToken& Name = Cur();
 			if (Name.Loc.Line != First.Loc.Line)
 			{
-				return Fail(First.Loc, TEXT("Expected 'params' or 'LOCTEXT_NAMESPACE' after '#define'."));
+				return Fail(First.Loc, TEXT("Expected 'inputs' or 'LOCTEXT_NAMESPACE' after '#define'."));
 			}
 
-			if (Name.Kind == EBangoTokenKind::KwParams)
+			if (Name.Kind == EBangoTokenKind::KwInputs)
 			{
 				if (!bFirstItem)
 				{
-					return Fail(First.Loc, TEXT("'#define params' must be the first line of the script, before any other statement or function."));
+					return Fail(First.Loc, TEXT("'#define inputs' must be the first line of the script, before any other statement or function."));
 				}
 				FBangoStmtPtr Stmt = ParseParams();
-				if (!Stmt || !RequireOneLine(First.Loc.Line, Previous().Loc) || !FinishDirectiveLine(First, TEXT("#define params")))
+				if (!Stmt || !RequireOneLine(First.Loc.Line, Previous().Loc) || !FinishDirectiveLine(First, TEXT("#define inputs")))
 				{
 					return false;
 				}
@@ -324,7 +324,7 @@ namespace BangoParserPrivate
 				{
 					return false;
 				}
-				// Inside params ( ... )
+				// Inside inputs ( ... )
 				SetTextSpan(*Stmt, NameTok + 2, Pos - 1);
 				Stmt->Node.bHasMetadata = true;
 				Stmt->Node.NodeID = 0;
@@ -334,9 +334,13 @@ namespace BangoParserPrivate
 				return true;
 			}
 
+			if (Name.Kind == EBangoTokenKind::Identifier && Name.Text.Equals(TEXT("params"), ESearchCase::CaseSensitive))
+			{
+				return Fail(Name.Loc, TEXT("'#define params' is now written '#define inputs'."));
+			}
 			if (!IsLocNamespaceName(Name))
 			{
-				return Fail(Name.Loc, FString::Printf(TEXT("Bango only has '#define params (...)' and '#define LOCTEXT_NAMESPACE \"Name\"', but found %s."), *Bango::DescribeToken(Name)));
+				return Fail(Name.Loc, FString::Printf(TEXT("Bango only has '#define inputs (...)' and '#define LOCTEXT_NAMESPACE \"Name\"', but found %s."), *Bango::DescribeToken(Name)));
 			}
 			const bool bOnlyParamsBefore = Script.Functions.Num() == 0
 				&& (Script.TopLevel.Num() == 0 || (Script.TopLevel.Num() == 1 && Script.GetParams()));
@@ -346,7 +350,7 @@ namespace BangoParserPrivate
 			}
 			if (!bOnlyParamsBefore)
 			{
-				return Fail(First.Loc, TEXT("'#define LOCTEXT_NAMESPACE' must come at the top of the script: after the '#define params' line (if there is one) and before any other statement or function."));
+				return Fail(First.Loc, TEXT("'#define LOCTEXT_NAMESPACE' must come at the top of the script: after the '#define inputs' line (if there is one) and before any other statement or function."));
 			}
 			Advance();
 			const FBangoToken& Namespace = Cur();
@@ -506,7 +510,7 @@ namespace BangoParserPrivate
 		/** How many disabled regions are open where the parser is. */
 		int32 DisabledDepth = 0;
 		bool bFailed = false;
-		/** True only while parsing the first top-level statement, where `params` may appear. */
+		/** True only while parsing the first top-level statement, where `inputs` may appear. */
 		bool bParamsAllowed = false;
 		TSet<int32> NodeLines;
 
@@ -649,9 +653,11 @@ namespace BangoParserPrivate
 
 		bool RegisterNode(FBangoStmt& Stmt, int32 Line)
 		{
-			if (NodeLines.Contains(Line))
+			// Several statements can share a line (`Sleep(4); Hint(...);`, handy in an inline script), but not one with
+			// node metadata: that line is one graph node. (The graph editor writes each statement on a line of its own.)
+			if (NodeLines.Contains(Line) && Lex.Metadata.Contains(Line))
 			{
-				return Fail(Stmt.Loc, TEXT("Only one statement is allowed per line, because each line is one graph node."));
+				return Fail(Stmt.Loc, TEXT("A line with node metadata (//@) is one graph node, so it can only hold one statement. Put the others on lines of their own."));
 			}
 			NodeLines.Add(Line);
 
@@ -694,8 +700,9 @@ namespace BangoParserPrivate
 				return true;
 			}
 			const FBangoToken& Next = Cur();
+			// (On a line without node metadata, statements may share the line: `if (_a) { Hint(...); } Sleep(1);`.)
 			if (Next.Loc.Line == Close.Loc.Line && Next.Kind != EBangoTokenKind::EndOfFile && Next.Kind != EBangoTokenKind::RBrace
-				&& Next.Kind != EBangoTokenKind::DisabledEnd)
+				&& Next.Kind != EBangoTokenKind::DisabledEnd && Lex.Metadata.Contains(Close.Loc.Line))
 			{
 				return Fail(Next.Loc, FString::Printf(TEXT("Expected a new line after '}', but found %s. Start the next statement on a line of its own."),
 					*Bango::DescribeToken(Next)));
@@ -959,10 +966,10 @@ namespace BangoParserPrivate
 			case EBangoTokenKind::HashUndef:
 				Fail(First.Loc, TEXT("'#undef LOCTEXT_NAMESPACE' must be the last line of the script, outside any block or function."));
 				return nullptr;
-			case EBangoTokenKind::KwParams:
+			case EBangoTokenKind::KwInputs:
 				Fail(First.Loc, bAllowParams
-					? TEXT("The parameters line is written '#define params (...)', with no ';'.")
-					: TEXT("'#define params' must be the first line of the script, before any other statement or function."));
+					? TEXT("The parameters line is written '#define inputs (...)', with no ';'.")
+					: TEXT("'#define inputs' must be the first line of the script, before any other statement or function."));
 				return nullptr;
 			default:
 				if (First.Kind == EBangoTokenKind::Identifier && First.Text.Equals(TEXT("locNamespace"), ESearchCase::CaseSensitive) && Tokens.IsValidIndex(Pos + 1) && Tokens[Pos + 1].Kind == EBangoTokenKind::LParen)
@@ -1161,12 +1168,12 @@ namespace BangoParserPrivate
 			return MoveTemp(Stmt);
 		}
 
-		/** `params (type _name [= literal], ...)`, without the ';'. */
+		/** `inputs (type _name [= literal], ...)`, without the ';'. */
 		FBangoStmtPtr ParseParams()
 		{
 			Advance();
 			TUniquePtr<FBangoParamsStmt> Stmt = MakeUnique<FBangoParamsStmt>();
-			if (!Expect(EBangoTokenKind::LParen, TEXT("after 'params'")))
+			if (!Expect(EBangoTokenKind::LParen, TEXT("after 'inputs'")))
 			{
 				return nullptr;
 			}

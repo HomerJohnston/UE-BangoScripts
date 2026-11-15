@@ -1,8 +1,12 @@
-# Bango Language Spec (draft v0.43)
+# Bango Language Spec (draft v0.45)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.45:** the parameters line is now **`#define inputs (...)`** (it was `#define params`); `inputs` is a keyword and `params` no longer is. An old `#define params` line is an error that says so (section 10). The editor's panel and the file's section heading are now **SCRIPT INPUTS** (section 12).
+
+**Changes in v0.44:** **inline scripts**: an `FBangoInlineScript` property on any class or Blueprint holds a script, typed in the details panel, with an **Edit** button that opens the graph editor in a window of its own (section 15). They're spawned with `UBangoScriptSubsystem::Spawn(Script, Args, Owner)` or Blueprint's **Spawn Bango Inline Script**, whose arguments are built with the **Make Bango Args** and **Add Bango Arg** nodes (section 10). Several statements may now share a line that has no node metadata: `Sleep(4); player AddItem("Pistol");` (section 1).
 
 **Changes in v0.43:** scripts can manage other running scripts by id: **`Abort(Script, Children)`** stops one (with no id, this script), and with `Children` true, every script it started with `Exec` or `spawn`, and theirs; **`IsRunning(Script)`** and **`WaitFor(Script)`** (section 7). **`_id = spawn { ... }`** keeps the spawned copy's id (section 8). Blueprint's **Terminate Bango Script** has an **And Children** option. Save data from earlier versions can't be loaded (section 11).
 
@@ -36,7 +40,7 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
 
 **Changes in v0.30, continued:** a local's name no longer has to start with `_`, and a global's may (section 4). A name means the graph's local, parameter or loop variable if there is one, and otherwise a global.
 
-**Changes in v0.30, continued:** a script can have a **description**: the `//` lines it starts with, edited in the new **Script Description** box at the top of the script editor's left pane, and not shown in the graph (section 12). When saving, each part of the file gets a section heading: `// ============ SCRIPT INPUT ====================`, `GLOBAL VARS`, `SCRIPT VARS`, `SCRIPT BODY` and `FUNCTIONS`, and a `// ----------------------------------------------` line goes between functions. Reading skips any comment that starts with `// ====` (section 12). The script editor has a **script text pane** beside the graph, opened with the **Source Editor** tab on the graph area's left edge. It shows the script as it would be saved, and follows the graph; text typed there is applied to the graph with **Apply** (Ctrl+Enter), and a script whose text doesn't read can be fixed there (section 12).
+**Changes in v0.30, continued:** a script can have a **description**: the `//` lines it starts with, edited in the new **Script Description** box at the top of the script editor's left pane, and not shown in the graph (section 12). When saving, each part of the file gets a section heading: `// ============ SCRIPT INPUTS ===================`, `GLOBAL VARS`, `SCRIPT VARS`, `SCRIPT BODY` and `FUNCTIONS`, and a `// ----------------------------------------------` line goes between functions. Reading skips any comment that starts with `// ====` (section 12). The script editor has a **script text pane** beside the graph, opened with the **Source Editor** tab on the graph area's left edge. It shows the script as it would be saved, and follows the graph; text typed there is applied to the graph with **Apply** (Ctrl+Enter), and a script whose text doesn't read can be fixed there (section 12).
 
 **Changes in v0.29:** `IsDefined(x)` is replaced by **`IsNil(x)`**, which gives the opposite answer: `if (!IsDefined(_x))` is now `if (IsNil(_x))` (section 3). New **`IsNull`** command: `IsNull(_who)` is true if the entity is `nil`, or no actor in the level has its Bango ID because it was never there or has been destroyed (section 7).
 
@@ -88,7 +92,7 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
 
 - **One statement line = one graph node.** So is a reroute line (below).
 - **A statement must fit on one line**, from its first token to its `;` (or, for `if`, `while`, `for` and `forEach`, to the `)` that ends the header). A statement that continues onto the next line is a compile error.
-- **Only one statement per line.** `a(); b();` is a compile error, and so is `if (x) { a(); }` written on one line.
+- **Several statements can share a line, if it has no node metadata:** `Sleep(4); player AddItem("Pistol"); Hint(LOCTEXT("Got", "You got a pistol!"));`, or `if (_a) { Hint(...); } Sleep(1);`. Each is still a node of its own; they just haven't been placed yet. A line with node metadata (`//@`) is one node, so it holds one statement: a second one there is a compile error. The graph editor writes every statement on a line of its own, with its metadata. (This is mostly for inline scripts, section 15, which are often one line.)
 - Lines that contain only `{`, `}`, `};` or `else` are structure. In the graph they become wires and pins, not nodes. Structure tokens may share a line with a statement (`if (a) {`, `} else if (b) {`).
 - Node metadata goes in a trailing comment that the compiler ignores:
 
@@ -116,7 +120,7 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
                   //@7(4, 9) @8(8, 13) @9(23, 12)
   ```
   Only a reroute line can have more than one entry; a statement line is one node. Comments directly above a reroute line are its comment bubble, as for other nodes. A reroute can't go anywhere else, such as between an `if (...)` line and its `{`, before the `#define` lines, or after a function's `function` line and before its `{`.
-- **The entry node is always node 0 at (0,0).** In the main graph that is the `#define params` line (or an implicit entry if there is none), and in a function's graph it is the function's implicit entry. Scripters move the rest of the graph around it.
+- **The entry node is always node 0 at (0,0).** In the main graph that is the `#define inputs` line (or an implicit entry if there is none), and in a function's graph it is the function's implicit entry. Scripters move the rest of the graph around it.
 - These are compile errors:
   - Badly formed metadata
   - Text after the `)`
@@ -125,7 +129,7 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
   - Metadata on a `#define` or `#undef` line, or on a declaration
   - Metadata on a line with no statement, including a `function` line or a line with only `{`, `}` or `};`
   - A reroute line where a statement couldn't go
-- Errors about the `params` line, and argument errors for a script with no `params` line, show `[node 0]`.
+- Errors about the `inputs` line, and argument errors for a script with no `inputs` line, show `[node 0]`.
 - Ordinary comments: `// ...`. A comment starting with `//@` is always metadata. There are no block comments: `/*` and `*/` mark **disabled nodes** (below), and what's between them must be code.
 
 ### Disabled nodes
@@ -151,13 +155,13 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
 - Only statements can be disabled. A declaration, a `#define` or `#undef` line or a `function` can't be: each is an error.
 - A disabled `label` isn't in the compiled script, so a `goto` to it (or to a label inside a disabled block) is a compile error that says the label is disabled. A disabled `goto`, `break`, `continue` or `return` does nothing.
 - `//~` lines are still only for disconnected nodes (section 12). A disconnected node can be disabled too: `//~ /* WriteLog("x"); */`.
-- **Lines starting with `#` are the script's settings**, written like C++ preprocessor lines: `#define params (...)` (section 10), `#define LOCTEXT_NAMESPACE "Name"` and `#undef LOCTEXT_NAMESPACE` (section 3). They start their line, have a space after `#define` / `#undef`, don't end with `;`, aren't graph nodes and can't have metadata. Any other `#` line is a compile error. Future settings will use the same form.
+- **Lines starting with `#` are the script's settings**, written like C++ preprocessor lines: `#define inputs (...)` (section 10), `#define LOCTEXT_NAMESPACE "Name"` and `#undef LOCTEXT_NAMESPACE` (section 3). They start their line, have a space after `#define` / `#undef`, don't end with `;`, aren't graph nodes and can't have metadata. Any other `#` line is a compile error. Future settings will use the same form.
 
 ### Statements that become nodes
 
 | Statement | Node pins |
 |---|---|
-| `#define params (...)` | the script's entry node (node 0): exec out; shows the parameter list |
+| `#define inputs (...)` | the script's entry node (node 0): exec out; shows the parameter list |
 | Assignment / `+=` etc. / `++` / `--` | exec in → exec out |
 | Command or function call | exec in → exec out |
 | `if (cond)` | exec in → Do, Else, Then |
@@ -272,7 +276,7 @@ _height = GetPos(_who).z;
 A text literal copies Unreal's macros. Each text has a **namespace**, a **key** and its **source** (the native-language text), and optionally **notes** for translators:
 
 ```
-#define params (text _line = nil)
+#define inputs (text _line = nil)
 #define LOCTEXT_NAMESPACE "Quest.Intro"
 
 if (IsNil(_line))
@@ -286,7 +290,7 @@ Hint(NSLOCTEXT("Shared.UI", "Continue", "Continue"));
 #undef LOCTEXT_NAMESPACE
 ```
 
-- **`#define LOCTEXT_NAMESPACE "..."`** gives the namespace for every `LOCTEXT` / `NOTELOCTEXT` in the script, exactly as in Unreal C++ source, so Unreal's localization tools read it (section 11). It must come right after the `#define params` line (or first, if there is none), before any other statement or function, and only once. The namespace is a string and can't be empty. `NSLOCTEXT` / `NSNOTELOCTEXT` give their own namespace instead.
+- **`#define LOCTEXT_NAMESPACE "..."`** gives the namespace for every `LOCTEXT` / `NOTELOCTEXT` in the script, exactly as in Unreal C++ source, so Unreal's localization tools read it (section 11). It must come right after the `#define inputs` line (or first, if there is none), before any other statement or function, and only once. The namespace is a string and can't be empty. `NSLOCTEXT` / `NSNOTELOCTEXT` give their own namespace instead.
 - A script with `#define LOCTEXT_NAMESPACE` **must end with `#undef LOCTEXT_NAMESPACE`**: the last line of the file, after the functions; only comments can follow it. An `#undef` anywhere else, or without a `#define`, is a compile error.
 - A `LOCTEXT` in a script with no `#define LOCTEXT_NAMESPACE` is a compile error that says to add one.
 - Keys and namespaces can't be empty. **The same key can't be used for two different texts** in one namespace: *"The key 'GuardHello' is already used in namespace 'Quest.Intro' for a different text, on line 2."* Writing the same text with the same key twice is fine.
@@ -337,7 +341,7 @@ Hint(NSLOCTEXT("Shared.UI", "Continue", "Continue"));
 - **Names are case-sensitive**: `john` and `John` are different names. This covers variables, globals, functions, labels, commands, keywords, type names and Bango ID names (`@john` and `@John` are different actors).
 - Calling a command or function with the wrong capitalisation is a compile error that suggests the right name: *"Unknown command or function 'hint'. Did you mean 'Hint'? Names are case-sensitive."*
 - A name is letters, digits and `_`, and doesn't start with a digit.
-- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn switch case default break continue return label goto function global params true false nil bool int float double string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
+- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn switch case default break continue return label goto function global inputs true false nil bool int float double string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
 
 ### Locals
 - Any name will do; a leading `_` is allowed but not needed (`count` and `_count` are both fine). The same goes for function parameters, script parameters and loop variables. Locals only exist inside the running script instance.
@@ -351,7 +355,7 @@ Hint(NSLOCTEXT("Shared.UI", "Continue", "Continue"));
 - Functions can't see the top level's locals (including script parameters), and the top level can't see a function's.
 
 ```
-#define params (int _rounds = 3)
+#define inputs (int _rounds = 3)
 
 global int foundThings;
 
@@ -832,10 +836,10 @@ function void Greet(entity _who)
 
 ## 10. Script parameters
 
-A script can take arguments when it's spawned, declared with a `#define params` line:
+A script can take arguments when it's spawned, declared with a `#define inputs` line:
 
 ```
-#define params (entity _speaker, string _line, int _repeats = 1, entity _listener = nil)
+#define inputs (entity _speaker, string _line, int _repeats = 1, entity _listener = nil)
 
 for (int _i = 0; _i < _repeats; _i++)
 {
@@ -844,8 +848,8 @@ for (int _i = 0; _i < _repeats; _i++)
 ```
 
 ### Declaring
-- **`#define params (...)` is optional.** If present, it must be the **first line in the file** (comments aside), before any other statement or function, and can appear only once. A `#define params` line anywhere else (later in the file, in a block, in a function) is a compile error, and so is `params` written without `#define`. Like every `#` line, it has no `;` and must fit on one line.
-- Parameters are comma-separated `type _name` or `type _name = default`. `#define params ()` is allowed and means the same as no params line.
+- **`#define inputs (...)` is optional.** If present, it must be the **first line in the file** (comments aside), before any other statement or function, and can appear only once. A `#define inputs` line anywhere else (later in the file, in a block, in a function) is a compile error, and so is `inputs` written without `#define`. Like every `#` line, it has no `;` and must fit on one line.
+- Parameters are comma-separated `type _name` or `type _name = default`. `#define inputs ()` is allowed and means the same as no inputs line.
 - **Parameters without a default are required. Parameters with a default are optional**, as with C++ default arguments.
 - **All required parameters must come first.** A required parameter after one with a default is a compile error.
 - **`= nil` makes a parameter optional with no particular default.** It is `nil` when left out.
@@ -854,8 +858,8 @@ for (int _i = 0; _i < _repeats; _i++)
 - A default must fit its parameter's type (int → float is allowed). `int _a = "x"` and `int[] _a = [1, 2.5]` are compile errors.
 - Parameters are ordinary locals of the top level. Two parameters can't share a name, and a local can't have a parameter's name. Functions in the file can't see them.
 - They are saved with the instance like any other local.
-- In the graph, the `#define params` line is the script's **entry node** (node 0 at (0,0)). It shows the parameter list; it has no data pins, since Bango expressions are text.
-- The `#define params` line can't have node metadata (section 1).
+- In the graph, the `#define inputs` line is the script's **entry node** (node 0 at (0,0)). It shows the parameter list; it has no data pins, since Bango expressions are text.
+- The `#define inputs` line can't have node metadata (section 1).
 
 ### Passing arguments
 Arguments are **positional**: the first argument goes to the first parameter, and so on.
@@ -865,7 +869,7 @@ Spawn("Dialogue/Greet", @john, "Hello!");               // _repeats = 1, _listen
 Spawn("Dialogue/Greet", @john, "Hello!", 3, @player);
 ```
 
-These checks happen when the script is spawned. If any fails, the script doesn't start, no globals are declared, and an error pointing at the `params` line is shown:
+These checks happen when the script is spawned. If any fails, the script doesn't start, no globals are declared, and an error pointing at the `inputs` line is shown:
 1. **Too few:** fewer arguments than required parameters. The error names the first missing parameter, its position and type: *"Missing argument 2 ('_line', a string). This script needs at least 2 argument(s), but 1 were passed."*
 2. **Too many:** more arguments than parameters, or any arguments to a script with no parameters.
 3. **Types:** each argument is checked in order (1, 2, 3, ...) against its parameter's type. The first mismatch is an error: *"Argument 2 ('_line') must be a string, but it is an int."* int → float is allowed.
@@ -879,12 +883,20 @@ These checks happen when the script is spawned. If any fails, the script doesn't
 - `UBangoScriptSubsystem::Spawn(ScriptPath, Args)`, where `Args` is a `TArray<FBangoValue>` in parameter order. It returns an `FBangoScriptHandle` for `Terminate` and `IsRunning`. Its `Id` is an `int32`, given out in order from 1 by each world's subsystem (and saved with it), so two running scripts never have the same one; a script started with `Exec` gets the same id back as an `int`. `Spawn(ScriptPath, Args, Error)` is the same, except that an error starting the script is put in `Error` instead of being shown.
 - `UBangoScriptSubsystem::SpawnFromSource(Source, Name, Args)` starts a script from its **text** instead of a file, for scripts made at runtime or kept somewhere else (a data asset, a string table, a server). It's compiled on every call, then started exactly like `Spawn`: the same arguments, checks and errors, and the same handle. `Name` stands in for the file name in its errors (`Dialogue.Intro(3:5) [node 2]: ...`) and in the editor's debugger; it defaults to `Script`.
   ```cpp
-  const FString Source = TEXT("#define params (entity _who)\n_who Speak(\"Hello.\");");
+  const FString Source = TEXT("#define inputs (entity _who)\n_who Speak(\"Hello.\");");
   TArray<FBangoValue> Args;
   Args.Add(FBangoValue::MakeEntity(TEXT("john")));
   UBangoScriptSubsystem::Get(this)->SpawnFromSource(Source, TEXT("Greeting"), Args);
   ```
   A script spawned from text keeps its text: saving the state saves it, and loading compiles it again (section 11). It isn't hot reloaded, since there's no file to watch, and no script editor tab follows it.
+- `UBangoScriptSubsystem::Spawn(InlineScript, Args, Owner)` starts an **inline script** (an `FBangoInlineScript` property, section 15), like `SpawnFromSource`, except that its compiled program is kept (`FBangoModule::GetInlineProgram`), so the same text is compiled once. `Owner` (usually `this`) names it in errors: `Door_1 (inline script)(1:7): ...`. An empty inline script does nothing and gives an invalid handle, without an error. `Spawn(InlineScript, Args, Owner, Error)` puts an error starting it in `Error` instead of showing it.
+  ```cpp
+  TArray<FBangoValue> Args;
+  Args.Add(FBangoValue::MakeString(EnemyType));
+  Args.Add(FBangoValue::MakeVector3(SpawnPoint.X, SpawnPoint.Y, SpawnPoint.Z));
+  UBangoScriptSubsystem::Get(this)->Spawn(OnTriggerActivation, Args, this);   // #define inputs (string _type, vector3 _at)
+  ```
+  The editor's debugger finds running copies of the inline script open in a window by its text (as last saved there).
 - `Bango::RegisterCondition(Source, Name, Error)` and `Bango::UnregisterCondition(Handle)` compile a **condition** once and keep it, and `UBangoScriptSubsystem::EvaluateBoolCondition(Handle, bResult, Error, Args)` runs it and gives its answer (see Conditions below).
 - `Bango::ActorToEntity(Actor, Value, Error)` turns an actor into an entity argument: its Bango ID name, or `nil` for a null pointer. An actor with no Bango ID component, or whose Bango ID name isn't registered, is an error.
 - `FBangoModule::Get().GetScriptParams(ScriptPath, Params, Error)` reads a script's parameters (names, types, whether each has a default, and the default value) without running it.
@@ -895,9 +907,9 @@ A **condition** is a script that answers **true or false**, for C++ and other pl
   ```
   foundThings >= 10 && !IsNull(@door)
   ```
-- or **a script whose main graph returns** `true` or `false`, with everything a script can have (`#define params`, globals, locals, loops, functions):
+- or **a script whose main graph returns** `true` or `false`, with everything a script can have (`#define inputs`, globals, locals, loops, functions):
   ```
-  #define params (entity _who)
+  #define inputs (entity _who)
   global int foundThings;
 
   if (IsNull(_who))
@@ -933,14 +945,14 @@ Bango::UnregisterCondition(Condition); // and Condition is made invalid
 - `RegisterCondition` gives an invalid handle, and the compile error, if the condition doesn't compile. Commands it calls must be registered before it is (built-in commands always are). `Name` stands in for the file name in its errors.
 - There's **no limit** on how many are registered. Registering the same text with the same name again gives the **same handle**; it's kept until it has been unregistered as many times as it was registered. Registrations are shared by every world, and last until they're unregistered (or the game ends).
 - `UBangoScriptSubsystem::EvaluateBoolCondition(Source, bResult, Error, Args, Name)` checks a condition given as text, without registering it. It's compiled on every call, so it's for conditions checked once in a while.
-- It runs straight away, to the end, in that world: with its globals and its actors' Bango IDs. `Args` fill its `#define params` line, as for spawning (section 10).
+- It runs straight away, to the end, in that world: with its globals and its actors' Bango IDs. `Args` fill its `#define inputs` line, as for spawning (section 10).
 - **A condition must answer at once:** calling a command that waits (`Sleep`, a dialogue choice) is an error.
 - `EvaluateBoolCondition` returns `true` with the answer in `bResult` if it ran and answered, and `false` with the error in `Error` (and `bResult` false) if the handle isn't registered (or the text doesn't compile), its arguments don't fit, it stopped with an error, it didn't return a `bool`, or it waited. Errors aren't shown or logged by it, so a caller asking often can show each once (`Bango::ReportError`).
 - A condition isn't a running script: it isn't listed in the debugger, saved or reloaded, and it has no handle. Globals it sets stay set.
 - For C++ that compiles it itself: `Bango::CompileCondition`, and `FBangoInstance::GetResult` after it finishes. `Bango::GetNumRegisteredConditions()` says how many are registered, for checking that a plugin unregisters its own.
 
 ### From Blueprint: the Spawn Bango Script node
-The **Spawn Bango Script** node reads the script's `params` line and creates one input pin per parameter:
+The **Spawn Bango Script** node reads the script's `inputs` line and creates one input pin per parameter:
 
 - The script is **picked on the node** with an asset picker (a Bango Script asset, section 15) and is fixed, not computed at runtime: the Blueprint references the asset, so it's loaded and packaged with the Blueprint, and renaming or moving the script keeps the node pointing at it. The script can't be connected. To choose a script at runtime, use **Spawn Bango Script (Dynamic Path)** (section 11), which passes no arguments. (A node made when scripts were typed paths picks up its script asset when it's next refreshed, if there's one at that path under `/Game` or `/Game/Bango`.)
 - Pins are named after the parameters, in order. Pin types:
@@ -963,7 +975,7 @@ The **Spawn Bango Script** node reads the script's `params` line and creates one
 - **An optional pin that is unconnected and still at the script's default counts as "not passed"**, so the script uses its own default. Unlike script and C++ calls, this works for an optional parameter in the middle too.
 - Text pins start empty. An empty, unconnected Text pin for an optional parameter counts as "not passed" (the parameter is `nil`); typing a text in the pin passes it.
 - Actor pins can't show a default, so an unconnected Actor pin for an optional parameter always counts as "not passed": the script uses its default (`@john`, or `nil`). An unconnected Actor pin for a required parameter, or a connected one whose actor is null, passes `nil`. An Actor without a registered Bango ID stops the spawn with an error. The pin's tooltip shows the script's default.
-- Refreshing the node (or recompiling the Blueprint) rebuilds its pins from the script's current `params` line, and wires on pins whose names haven't changed are kept.
+- Refreshing the node (or recompiling the Blueprint) rebuilds its pins from the script's current `inputs` line, and wires on pins whose names haven't changed are kept.
 - Missing scripts, scripts that don't compile, and pin type mismatches are shown when the Blueprint compiles.
 - The node returns a script handle, like the dynamic-path node.
 
@@ -995,6 +1007,8 @@ The **Spawn Bango Script** node reads the script's `params` line and creates one
 | Node | Effect |
 |---|---|
 | **Spawn Bango Script** (fixed path, one pin per parameter) → Handle | Starts a script with arguments (section 10). Returns an invalid handle (and shows an error) if it can't start. |
+| **Spawn Bango Inline Script** (Script, Args, Owner) → Handle | Starts an inline script (a Bango Inline Script variable or property, section 15). **Args** fill its `#define inputs` line in order; leave it unconnected for a script with no parameters. They're checked when it starts: if they don't fit, it doesn't start, and an error says why. Owner (Self by default) names it in errors. An empty script does nothing. |
+| **Make Bango Args** → Args, then **Add Bango Arg (Int)**, **(Bool)**, **(Float)**, **(String)**, **(Text)**, **(Actor (Entity))**, **(Vector2)**, **(Vector3)** and their **Array** versions, and **Skip Bango Arg** | Build Spawn Bango Inline Script's arguments, one per parameter, in order: chain them (Make Bango Args → Add Bango Arg (String) → Add Bango Arg (Vector3) → Args). Skip Bango Arg leaves out a parameter that has a default. An actor becomes its Bango ID (an actor without one is an error when the script starts). |
 | **Spawn Bango Script (Dynamic Path)** (path) → Handle | Starts a script from a path chosen at runtime, with no arguments, so the script can't have required parameters. Returns an invalid handle (and shows an error) if it can't start. |
 | **Terminate Bango Script** (Handle, And Children) | Stops a script. A script stopped while one of its commands is running stays stopped. With And Children, also stops the scripts it started (with `Exec` or `spawn`), and theirs, as `Abort`'s `Children` does. |
 | **Is Bango Script Running** (Handle) → bool | True while running or paused; false once it has finished, failed or been terminated. |
@@ -1079,7 +1093,7 @@ The graph editor shows a script as nodes and wires and saves it back as text. Th
 
 ### Graphs and nodes
 - A file has a **main graph** (the top-level code) and **one graph per function**.
-- Each graph starts at its **entry node**, node 0 at (0,0) (section 1). The main graph's entry, **Script Start**, shows the `#define params` list under an **Input Params** heading (left out when there are none), and a **Namespace** row under a **Localization** heading for the `#define LOCTEXT_NAMESPACE` line (section 3): typing a name there adds or changes the line (and the `#undef LOCTEXT_NAMESPACE` at the end), and clearing it removes both. A function's entry shows its signature, like `int AddScore(int _amount)`.
+- Each graph starts at its **entry node**, node 0 at (0,0) (section 1). The main graph's entry, **Script Start**, shows the `#define inputs` list under an **Input Params** heading (left out when there are none), and a **Namespace** row under a **Localization** heading for the `#define LOCTEXT_NAMESPACE` line (section 3): typing a name there adds or changes the line (and the `#undef LOCTEXT_NAMESPACE` at the end), and clearing it removes both. A function's entry shows its signature, like `int AddScore(int _amount)`.
 - **Declarations aren't nodes.** A graph's locals, and the file's globals, are listed in the script editor's **Locals** and **Globals** lists and edited there (below); in the text they're the declarations at the top (section 4). The Script Start node and a function's entry node don't show them.
 - Every other statement line is one node, and so is every reroute line (a line with only `//@` metadata, section 1). A reroute is drawn like Blueprint's: one dot that is both its input and its output, with a larger area around it to grab and move it. Dragging from the dot to the left wires its input, and to the right its output; Ctrl-dragging it moves it. Its grab area is two grid squares each way with the dot in the middle, so the dot is on a grid line. Every node's pins are a whole number of grid squares apart (currently two) and on grid lines too, so a wire between a pin and a reroute at the same height on the grid runs straight. **Double-clicking a wire adds a reroute** on it there, like in Blueprint; it gets the next free NodeID. **Deleting a reroute keeps its wire**: what led into it is wired to where it led.
 - A node shows its kind as the title and its text as one editable line, without keywords, brackets or `;`: the condition of `if`/`while`, the header of `for`/`forEach`, the name of `label`/`goto`, the value of `return`, and the whole statement for assignments and calls.
@@ -1119,17 +1133,17 @@ The graph editor shows a script as nodes and wires and saves it back as text. Th
 - `//` comment lines directly above a statement become that node's **comment bubble**. A comment after the code on a statement line joins that node's bubble too.
 - Other comments go to the next node below them in the same graph, or to the graph's last node if none follows. Comments just above a `function` line go to that function's entry node, and comments above the `#define` lines go to the main entry node.
 - When saved, each bubble is written as `//` lines directly above its node. So a comment at the end of a block, or after a `}`, moves down to the node that follows it.
-- A main-graph entry bubble with no parameters is saved above the `#define LOCTEXT_NAMESPACE` line, or above an empty `#define params ()` line if there is none, which means the same as no params line.
+- A main-graph entry bubble with no parameters is saved above the `#define LOCTEXT_NAMESPACE` line, or above an empty `#define inputs ()` line if there is none, which means the same as no inputs line.
 - Carriage returns in comments are dropped, so comments read the same whatever the file's line endings.
 
 ### Saved layout
 When the graph editor saves, it writes the whole file in a fixed layout:
 0. The script's description, if it has one, as `//` lines from the first line of the file (see Comments above).
-1. The entry node's comment, then the `#define params` line (if there are parameters, or a comment and no namespace line), then the `#define LOCTEXT_NAMESPACE` line.
+1. The entry node's comment, then the `#define inputs` line (if there are parameters, or a comment and no namespace line), then the `#define LOCTEXT_NAMESPACE` line.
 2. The global declarations, in the order the Globals list shows them; then the main graph's local declarations, in the order of the Locals list. Each declaration's comment goes directly above it.
 3. The main graph's code, then its disconnected chains.
 
-   Each of these parts that has anything in it starts with a **section heading** and a blank line, after a blank line (unless it's the first line of the file): `// ============ SCRIPT INPUT ====================` above the `#define` lines, `// ============ GLOBAL VARS =====================` above the globals, `// ============ LOCAL VARS ======================` above the main graph's locals, and `// ============ SCRIPT BODY =====================` above the code.
+   Each of these parts that has anything in it starts with a **section heading** and a blank line, after a blank line (unless it's the first line of the file): `// ============ SCRIPT INPUTS ===================` above the `#define` lines, `// ============ GLOBAL VARS =====================` above the globals, `// ============ LOCAL VARS ======================` above the main graph's locals, and `// ============ SCRIPT BODY =====================` above the code.
 4. Each function, after a blank line and a separator line and another blank line: its comment, `function <signature>`, `{`, its local declarations and a blank line (if it has any), its code and disconnected chains, `}`. The separator before the first function is `// ============ FUNCTIONS =======================`; before each of the others it's `// ----------------------------------------------`. When a file is read, **any comment line starting with `// ====`** is skipped wherever it is, as a section heading (they're all written again on save), so headings never become comment bubbles; don't start a comment of your own that way, as it would be lost. The `// ---...` line between functions is skipped outside function bodies only; inside a function's body it's an ordinary comment.
 5. After a blank line, `#undef LOCTEXT_NAMESPACE`, if the script has a namespace. Comments below the last node, including one next to the `#undef`, move up to it, like other comments with no node after them (see Comments above).
 
@@ -1140,7 +1154,7 @@ Other details:
 - Every node line gets its `//@` comment, aligned in one column 4 spaces past the longest node line (lines over 100 characters don't move the column; they get 4 spaces). A reroute line is its block's indentation, then spaces to that column, then the `//@` comment (with an ` @<NodeID>(<X>, <Y>)` for each further reroute in the run); in a disconnected chain it's `//~ ` and the same.
 - Nodes without metadata get the next free NodeID and a position next to the node that leads into them.
 - Statements of the same kind sit together with no blank line between them: **assignments** (`=`, `+=` and the like, `++`, `--`), and **calls** (commands and functions). A blank line goes between statements of different kinds, before and after **flow control** (`if`, `while`, `for`, `forEach`, `break`, `continue`, `return`, `label`, `goto`), above a statement with a comment (its comment stays directly above it, after the blank line), and after the `#define` lines. Reroutes get no blank lines around them: they're written right after the statement before them, and reroutes in a row share one line (a reroute with a comment starts a new line, under its comment). Inside a disconnected chain the line between nodes is a bare `//~` instead, since a blank line would end the chain. There's no blank line just inside a `{` or before a `}`.
-- Other blank lines, `#define params ()` with no comment, and an empty `else { }` block are not kept; none of them change what the script does.
+- Other blank lines, `#define inputs ()` with no comment, and an empty `else { }` block are not kept; none of them change what the script does.
 - Lines end with `\n`.
 
 Opening a file and saving it without changes gives the same script: the same statements with the same meaning (functions may move, per the order above). Saving again changes nothing.
@@ -1153,14 +1167,14 @@ The graph editor is the **Bango Scripts** tab (Tools menu). It doesn't need the 
   - **Toolbar** (across the top, styled like an asset editor's, such as Blueprint's: each button an icon with its label): **Save** (also Ctrl+S) and **Reload**, then **Compile Test**, then the **Debug** dropdown, with a separator between each group. Compile Test is only a check: scripts are always compiled when they're loaded at runtime. Its icon shows its status as Blueprint's does. The script is test-compiled quietly when it's opened (only the icon changes: no notification, nothing marked on its nodes), and the icon shows a yellow `?` once it's changed (or its text is typed in) after, a green tick when it compiled without errors, a warning when it compiled with warnings, a red cross when it didn't compile (its tooltip says which). The tab shows the script's name, with a `*` while it has unsaved changes. **Reload** reads the script again from its file, so edits made to the text elsewhere show up; it asks first whether to save unsaved changes (Cancel keeps them and doesn't reload). It works on a script whose text didn't read too, so the text can be fixed elsewhere and reloaded. Reloading keeps the shown graph (if the script still has it) and its view.
   - **Script Description** (left, first): a box holding the script's description (section 12, Comments), as several lines of text. Enter starts a new line; clicking elsewhere applies it, as one undoable edit (trailing spaces and empty lines at the end are dropped). Saving while typing in it saves what's typed.
   - **Functions** (left, last, after Local Vars): the script's functions, in the order they are in the file. Clicking one shows its graph. **+ Add** adds `function void NewFunction()` (numbered if that name is taken), shows it, and starts renaming it. Double-clicking a function, or clicking it again once it's selected, renames it: the name must be a valid identifier that no other function and no command has, and every call to it in the script is renamed too, as one undoable edit. Dragging a function onto a graph adds a call to it where it's dropped (dropped on a pin, the call is wired to it, as with a node from the add-node menu). Its × deletes it, after asking; calls to it are left alone and won't compile until they're removed. Deleting a function can't be undone with Undo (Reload brings it back while it's unsaved). An option to sort functions alphabetically is planned.
-  - **Script Description**, **Script Input**, **Global Vars**, **Local Vars** and **Functions** are one after another in a single scrolling pane on the left, in the order their parts come in the script's text, and with the same names as its section headings. Each list is as tall as its rows, so only the pane scrolls; the splitter between the pane and the graph area sets its width.
+  - **Script Description**, **Script Inputs**, **Global Vars**, **Local Vars** and **Functions** are one after another in a single scrolling pane on the left, in the order their parts come in the script's text, and with the same names as its section headings. Each list is as tall as its rows, so only the pane scrolls; the splitter between the pane and the graph area sets its width.
   - **Side panes keep their width.** The Scripts list, the left pane, the script text pane and the reference pane each have a width in pixels, set by dragging the splitter beside it (no narrower than 120 pixels); resizing the window only changes the graph's width. The Scripts list's width is remembered between sessions.
   - Each of the five sections is a **foldout**: clicking its header (the arrow or the title) opens or closes it, and a closed one is just its header. The **+ Add** buttons are on the headers' right. All five start open.
   - **Reference pane** (right): two tabs at its top, **COMMANDS** and **NODES** (the tab shown is remembered between sessions). Each tab has a **search box** that shows only the names that contain what's typed, and a dropdown beside it that picks the order: **Alphabetical** (two groups, **Native** for what's built into Bango and **Game** for the project's own, each by name) or **Category** (a group per category, by name within it). Each group is a foldout like the left pane's sections, with its number of entries in its title, and remembers whether it's open while the editor's open. Each tab's order is remembered between sessions.
     - **COMMANDS** lists every command a script can call (the registered commands, the plugin's and the project's own, and the built-in array commands). By category, commands with no category are under OTHER, last, and the array commands under ARRAYS. Hovering a name shows how it's called, its description, and whether it's built into Bango or the project's own.
     - **NODES** lists every node that can be placed in the graph: the same nodes as the graph's right-click menu, by their titles (flow control, variables, arrays, every command that can be a line of its own, and the script's own functions). Commands whose value must be used aren't nodes, so they aren't listed. Native is flow control, variables, arrays and the plugin's commands; Game is the project's own commands and the script's own functions. By category, the groups are the right-click menu's, with COMMANDS (commands with no category) and THIS SCRIPT last. Each node is a small card with a grab handle that lights up under the mouse: **dragging it onto the graph places the node** where it's dropped, and dropping it on a pin wires it there, just like picking it from the right-click menu (names the node makes up, like a For's `_i`, are picked when it's dragged, so they don't clash with the script's). Hovering one shows the node's description, and whether it's built into Bango, the project's own command or the script's own function. (COMMANDS' names can't be dragged: a command is placed as a node from NODES, or used in an expression.)
     - It's hidden to start with: the **Command Palette** tab, a folder tab floating on the graph's right edge with its name written down it (reading top to bottom), slides it out from the right, like the Source Editor tab does the text pane on the left. Clicking the tab again puts it away; when it's open, the splitter beside it sets its width. Both lists are read again each time it's opened (and NODES when the script's functions change), so commands added by other modules show up.
-  - **Script Input** (left, after Script Description): the shown graph's parameters: the script's `#define params` in the main graph, or the function's in a function graph. Each row has a grab handle, its type's icon, its name and its type, and in the main graph a box for its default. **+ Add** adds a `bool` parameter at the end (`_newParam`, numbered if taken) and starts renaming it; after an optional script parameter it gets `= nil`, since required parameters come first. Dragging a row by its handle moves the parameter up or down (a script's required parameters must stay before its optional ones). Clicking the type icon opens a menu of the types and arrays of them (deeper arrays, like `int[][]`, aren't offered). Changing an optional parameter's type resets its default to `nil`. Double-clicking a name, or clicking it again once it's selected, renames it, and its uses in that graph are renamed too; the name must be a valid name (letters, digits and `_`, not starting with a digit, not a keyword) and not clash with another parameter or a local of the graph. The default box is typed like a node's field (a string without quotes); leaving it empty makes the parameter required, and `nil` makes it optional with no particular value. × removes a parameter; its uses are left alone, so they won't compile until changed. Each of these is one undoable edit. Calls to a function aren't changed when its parameters are; they show errors until their arguments match. The type and default columns have fixed widths, so rows line up. A required parameter's default box is locked unless every parameter after it is optional (required parameters come before optional ones). The Script Start node lists the parameters' names and types, but not their defaults, which are shown and edited only here.
+  - **Script Inputs** (left, after Script Description): the shown graph's parameters: the script's `#define inputs` in the main graph, or the function's in a function graph. Each row has a grab handle, its type's icon, its name and its type, and in the main graph a box for its default. **+ Add** adds a `bool` parameter at the end (`_newParam`, numbered if taken) and starts renaming it; after an optional script parameter it gets `= nil`, since required parameters come first. Dragging a row by its handle moves the parameter up or down (a script's required parameters must stay before its optional ones). Clicking the type icon opens a menu of the types and arrays of them (deeper arrays, like `int[][]`, aren't offered). Changing an optional parameter's type resets its default to `nil`. Double-clicking a name, or clicking it again once it's selected, renames it, and its uses in that graph are renamed too; the name must be a valid name (letters, digits and `_`, not starting with a digit, not a keyword) and not clash with another parameter or a local of the graph. The default box is typed like a node's field (a string without quotes); leaving it empty makes the parameter required, and `nil` makes it optional with no particular value. × removes a parameter; its uses are left alone, so they won't compile until changed. Each of these is one undoable edit. Calls to a function aren't changed when its parameters are; they show errors until their arguments match. The type and default columns have fixed widths, so rows line up. A required parameter's default box is locked unless every parameter after it is optional (required parameters come before optional ones). The Script Start node lists the parameters' names and types, but not their defaults, which are shown and edited only here.
   - **Global Vars** (left, below Script Input): the file's globals, the same in every graph. Each row has a grab handle, its type's icon (a button with the type menu, as in Inputs), its name and its type; a global has no value (section 4). **+ Add** adds `global bool newGlobal;` (numbered if taken) and starts renaming it. Dragging a row by its handle reorders the declarations. Renaming one (double-click, or click it again once it's selected) renames its uses everywhere in the file, as one undoable edit; the name must be a valid name and can't clash with another global; in a graph whose local or parameter has the old name, that graph's uses aren't renamed, since they're the local's. Its × removes the declaration, after asking if the script uses it; its uses are left alone. Under the list, **Used here, declared elsewhere** lists, greyed out and without a type, the globals the shown graph uses but the file doesn't declare (declared by another script or a Blueprint, or a typo); the + on one opens the type menu, and picking a type declares it here.
   - **Local Vars** (left, below Global Vars): the shown graph's locals. Each row is like an Inputs row: grab handle, type icon and menu, name, type, and a box for its starting value, typed like a node's field (a string without quotes, a text as its source text); empty means it starts as `nil`. Only fixed values are allowed there (section 4). **+ Add** adds `bool _newLocal` (numbered if taken) and starts renaming it. Renaming renames its uses in the graph; the name must be a valid name and not clash with another local, a parameter or a loop variable of the graph. × removes it; its uses are left alone. Changing its type clears its starting value (unless it's `nil`, which fits any type). Under the list, greyed out, are the graph's `for` and `forEach` loop variables, with their type; clicking one shows and selects its loop.
   - Each of the changes in Globals and Locals is one undoable edit.
@@ -1365,6 +1379,16 @@ Scripts become assets: a **Bango Script** asset (`UBangoScriptAsset`, a `.uasset
 - **Opening a script asset** (double-clicking it in the Content Browser) opens the **Bango Script editor** *(built)*: a **Script** tab with the graph editor, in front, and a **Details** tab behind it in the same tab stack. Its script's name is its asset path. A linked script is read from its `.bango` file (if the file can't be read, the asset's copy is shown); Save writes the file (checking it out with source control), then the asset's copy, and saves the asset; for an embedded script, Save writes the asset and saves it. The window's own Save (File menu) does the same, and closing it asks about unsaved changes. Running copies of the script pick up the saved text (hot reload).
 - **The Bango Scripts tab** *(built)* lists every Bango Script asset from the Asset Registry, by asset path without `/Game/` (`Quests/Intro`), or in their folders (a root per content root: Content first, then plugins'; only folders that hold a script). It follows script assets as they're added, renamed and deleted. Opening one gives it a tab there, titled with its name, with the same editor as the asset's own window (above).
 - A linked script shows its file's path under the toolbar, and the editor's existing changed-on-disk handling (section 12) watches the `.bango` file. For an embedded script it watches the asset instead (changed by source control, say).
+
+### Inline scripts
+An **`FBangoInlineScript`** (a struct, usable in C++ and Blueprint) holds a script in a property of any class: `UPROPERTY(EditAnywhere) FBangoInlineScript OnTriggerActivation;`. It's for small scripts that belong to one thing, usually a line or two: `Sleep(4); player AddItem("Pistol"); Hint(LOCTEXT("Got", "You got a pistol!"));`. It can start with a `#define inputs (...)` line, whose values its spawner passes, in order.
+
+- **In the details panel**, it's a box to type the script in, with the script text pane's colours and autocomplete. It grows with the script up to about ten lines, then scrolls. What's typed is applied when the box loses focus, as one undoable change (for every selected object). With several objects selected whose scripts differ, it says **Multiple Values** and can't be typed in.
+- **Edit** opens the full graph editor on the script, in a **window of its own**, titled with the object and the property ("Door 1: On Opened", with a `*` while it has unsaved changes). **Save** there writes the property, as one undoable change; closing the window asks about unsaved changes. While the window is open, the property's box can't be typed in ("Open in a script window."), and Edit becomes **Show Window**, which brings the window to the front. Each property has at most one window. Edit needs a single selected object.
+- A change made to the property elsewhere while its window is open (undo, paste, Reset to Default) is treated as an outside change to a file: with no unsaved changes, the window reloads it; otherwise a bar offers Reload or Keep Mine, and Save asks before overwriting it.
+- Saving from the graph editor writes the script in the saved layout (each statement on a line of its own, with node metadata), as for any script. Inline scripts have no `.bango` file to link.
+- **Spawning** one: from C++ with `UBangoScriptSubsystem::Spawn(Script, Args, Owner)`, or Blueprint's **Spawn Bango Inline Script**, whose arguments are built with Make Bango Args and the Add Bango Arg nodes (section 10). The values are matched to its `#define inputs` line when it starts. Its compiled program is kept by its text, so spawning it again doesn't compile it again. A running copy is saved with its text, and isn't hot reloaded. While its window is open, the Debug dropdown lists the running copies of it (found by its text, as last saved there).
+- *Still to come (stage 3):* gathering their `LOCTEXT`s for translation, through an editor-only list of `FText`s kept in the struct, which Gather from Packages finds like any text property.
 
 ### Building it, in stages
 1. **Runtime** *(built)*: the asset class (text, link data, localized texts), the script cache by asset, path resolution (relative paths for `Exec`), the Blueprint/C++ spawn functions, saved state, hot reload from assets. Spawning by asset path works; the K2 node still takes a typed path.

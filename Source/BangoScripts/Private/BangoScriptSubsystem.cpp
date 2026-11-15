@@ -134,6 +134,41 @@ bool UBangoScriptSubsystem::StartSpawnBlock(const FBangoInstance& Parent, int32 
 	return true;
 }
 
+FString UBangoScriptSubsystem::GetInlineScriptName(const UObject* Owner)
+{
+	return Owner ? FString::Printf(TEXT("%s (inline script)"), *Owner->GetName()) : FString(TEXT("Inline script"));
+}
+
+FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FBangoInlineScript& Script, const TArray<FBangoValue>& Args, const UObject* Owner)
+{
+	FString Error;
+	const FBangoScriptHandle Handle = Spawn(Script, Args, Owner, Error);
+	if (!Handle.IsValid() && !Error.IsEmpty())
+	{
+		Bango::ReportError(Error);
+	}
+	return Handle;
+}
+
+FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FBangoInlineScript& Script, const TArray<FBangoValue>& Args, const UObject* Owner, FString& OutError)
+{
+	if (Script.IsEmpty())
+	{
+		return FBangoScriptHandle(); // nothing to run (an inline script left empty is normal)
+	}
+	const FString Name = GetInlineScriptName(Owner);
+	TSharedPtr<const FBangoProgram> Program;
+	if (!FBangoModule::Get().GetInlineProgram(Script.Source, Name, Program, OutError))
+	{
+		return FBangoScriptHandle();
+	}
+	TSharedPtr<FRunningScript> Running = MakeShared<FRunningScript>();
+	Running->Path = Name;
+	Running->bFromSource = true; // saved with its text; not hot reloaded (it has no file)
+	Running->Source = Script.Source;
+	return StartScript(Program, Running, Args, &OutError);
+}
+
 FBangoScriptHandle UBangoScriptSubsystem::SpawnChild(int64 ParentId, const FString& ScriptPath, const TArray<FBangoValue>& Args, FString& OutError)
 {
 	PendingParentId = (int32)ParentId;
@@ -236,6 +271,7 @@ void UBangoScriptSubsystem::GetDebugInfo(TArray<FBangoScriptDebugInfo>& OutScrip
 		Info.Status = Script.Instance.GetStatus();
 		Script.Instance.GetCallStack(Info.CallStack);
 		Info.WaitingOn = Script.Instance.GetWaitingCommandName();
+		Info.SourceHash = Script.bFromSource ? FCrc::StrCrc32(*Script.Source) : 0;
 	}
 	OutScripts.Append(EndedScripts);
 }
@@ -253,6 +289,7 @@ void UBangoScriptSubsystem::ReportFailure(const FRunningScript& Script)
 	FBangoScriptDebugInfo& Ended = EndedScripts.AddDefaulted_GetRef();
 	Ended.Id = Script.Instance.GetId();
 	Ended.Path = Script.Path;
+	Ended.SourceHash = Script.bFromSource ? FCrc::StrCrc32(*Script.Source) : 0;
 	Ended.Status = EBangoInstanceStatus::Failed;
 	Ended.Error = Script.Instance.GetError();
 	Ended.TrailCount = Script.Instance.GetTrail(0, Ended.Trail); // the way it came to the error

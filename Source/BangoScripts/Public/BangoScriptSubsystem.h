@@ -4,6 +4,7 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "BangoConditions.h"
 #include "BangoInstance.h"
+#include "BangoInlineScript.h"
 class UBangoScriptAsset;
 
 #include "BangoScriptSubsystem.generated.h"
@@ -35,6 +36,11 @@ struct FBangoScriptDebugInfo
 	TArray<FBangoCallFrameInfo> CallStack;
 	/** The command it's waiting on, like "Sleep", or empty. */
 	FString WaitingOn;
+	/**
+	 * For a script spawned from text (an inline script, SpawnFromSource): FCrc::StrCrc32 of its text, so the graph
+	 * editor can find the copies of the inline script it has open. 0 for a script asset.
+	 */
+	uint32 SourceHash = 0;
 	/** Failed only: the error, with the node it happened at. */
 	FBangoRuntimeError Error;
 	/**
@@ -67,7 +73,7 @@ public:
 	/**
 	 * Compiles (if needed) and starts the script at ScriptPath: a Bango Script asset's path, full ("/Game/Quests/Intro")
 	 * or relative to /Game ("Quests/Intro"). Its asset is loaded if it isn't (a synchronous load).
-	 * Args are matched to the script's params line in order (see FBangoInstance::Start); use Bango::ActorToEntity
+	 * Args are matched to the script's inputs line in order (see FBangoInstance::Start); use Bango::ActorToEntity
 	 * for entity arguments. The script runs straight away until it first pauses. Returns an invalid handle and
 	 * shows an error if the script can't be found, doesn't compile, the arguments don't fit its parameters, or
 	 * one of its globals conflicts with an existing global.
@@ -93,6 +99,19 @@ public:
 	FBangoScriptHandle SpawnChild(int64 ParentId, const FString& ScriptPath, const TArray<FBangoValue>& Args, FString& OutError);
 
 	/**
+	 * Starts an inline script (an FBangoInlineScript property, spec section 15), as Spawn does a script asset: Args fill
+	 * its #define inputs line, in order, and it runs straight away until it first pauses. Its compiled program is kept
+	 * (FBangoModule::GetInlineProgram), so the same text isn't compiled again. Owner, the object it belongs to (usually
+	 * `this`), only names it in errors and the debugger ("Door_1 (inline script)"). An empty script does nothing and
+	 * gives an invalid handle, without an error. Its text is saved with it, so SaveState saves it.
+	 */
+	FBangoScriptHandle Spawn(const FBangoInlineScript& Script, const TArray<FBangoValue>& Args = TArray<FBangoValue>(), const UObject* Owner = nullptr);
+	/** Spawn of an inline script, for callers that report errors themselves (OutError, as above). */
+	FBangoScriptHandle Spawn(const FBangoInlineScript& Script, const TArray<FBangoValue>& Args, const UObject* Owner, FString& OutError);
+	/** What errors and the debugger call an inline script of Owner's: "Door_1 (inline script)", or "Inline script". */
+	static FString GetInlineScriptName(const UObject* Owner);
+
+	/**
 	 * The name of the running script with this id ("/Game/Quests/Intro.bango"), for paths relative to it (Exec).
 	 * Empty if there's none, or it was spawned from text (SpawnFromSource).
 	 */
@@ -101,7 +120,7 @@ public:
 	/**
 	 * Compiles Source, the text of a script, and starts it, like Spawn does with a file. Name is what errors show in
 	 * place of a file name (like "Dialogue.Intro"), and what the debugger lists it as. Everything else is as for Spawn:
-	 * Args fill its params line, it runs straight away until it first pauses, and an invalid handle is returned (with
+	 * Args fill its inputs line, it runs straight away until it first pauses, and an invalid handle is returned (with
 	 * an error shown) if it doesn't compile or can't start. It's compiled on every call. Its text is kept with it, so
 	 * SaveState saves it and LoadState can restore it; it isn't hot reloaded, since it has no file.
 	 */
@@ -109,7 +128,7 @@ public:
 
 	/**
 	 * Runs a condition registered with Bango::RegisterCondition and gives its answer. It runs straight away, to the end,
-	 * in this world, with its globals and actors; Args fill its #define params line, if it has one.
+	 * in this world, with its globals and actors; Args fill its #define inputs line, if it has one.
 	 *
 	 * Returns true, with the answer in bOutResult, if it ran and returned true or false. Returns false, with the error in
 	 * OutError (and bOutResult false), if the handle isn't registered, its arguments don't fit, it stops with an error, it

@@ -72,8 +72,8 @@ namespace BangoGraphWriterPrivate
 			AddComment(MainEntry.Comment, 0, -1);
 			if (bWriteParams)
 			{
-				// An empty params line still anchors the entry node's comment (the namespace line does too).
-				AddCode(0, -1, FString(TEXT("#define params (")) + MainEntry.Text + TEXT(")"), nullptr);
+				// An empty inputs line still anchors the entry node's comment (the namespace line does too).
+				AddCode(0, -1, FString(TEXT("#define inputs (")) + MainEntry.Text + TEXT(")"), nullptr);
 			}
 			if (Doc.bHasLocNamespace)
 			{

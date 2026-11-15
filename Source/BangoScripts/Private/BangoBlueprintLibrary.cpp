@@ -93,7 +93,7 @@ namespace Bango
 			}
 			if (!Params.IsValidIndex(i) || !Params[i].bHasDefault)
 			{
-				OutError = FString::Printf(TEXT("Argument %d was left out, but that parameter has no default. Refresh the Spawn Bango Script node."), i + 1);
+				OutError = FString::Printf(TEXT("Argument %d was left out, but that parameter has no default. (On a Spawn Bango Script node, refresh the node.)"), i + 1);
 				return false;
 			}
 			OutValues.Add(Params[i].Default);
@@ -305,6 +305,30 @@ FBangoScriptHandle UBangoBlueprintLibrary::SpawnBangoScriptAssetWithArgs(UObject
 		return FBangoScriptHandle();
 	}
 	return Subsystem->Spawn(Script, Values);
+}
+
+FBangoScriptHandle UBangoBlueprintLibrary::SpawnBangoInlineScript(UObject* WorldContextObject, const FBangoInlineScript& Script, const FBangoBlueprintArgs& Args, UObject* Owner)
+{
+	UBangoScriptSubsystem* Subsystem = GetScripts(WorldContextObject, TEXT("Spawn Bango Inline Script"));
+	if (!Subsystem || Script.IsEmpty())
+	{
+		return FBangoScriptHandle();
+	}
+	const FString Name = UBangoScriptSubsystem::GetInlineScriptName(Owner);
+	TSharedPtr<const FBangoProgram> Program;
+	FString Error;
+	if (!FBangoModule::Get().GetInlineProgram(Script.Source, Name, Program, Error))
+	{
+		Bango::ReportError(Error);
+		return FBangoScriptHandle();
+	}
+	TArray<FBangoValue> Values;
+	if (!Bango::ResolveBlueprintArgs(Args, Program->Params, Values, Error))
+	{
+		Bango::ReportError(FString::Printf(TEXT("Spawn Bango Inline Script (%s): %s"), *Name, *Error));
+		return FBangoScriptHandle();
+	}
+	return Subsystem->Spawn(Script, Values, Owner);
 }
 
 FBangoScriptHandle UBangoBlueprintLibrary::SpawnBangoScript(UObject* WorldContextObject, const FString& ScriptPath)

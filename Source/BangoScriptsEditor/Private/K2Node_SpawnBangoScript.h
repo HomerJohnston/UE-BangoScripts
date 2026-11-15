@@ -14,12 +14,12 @@ class UBangoScriptAsset;
  * Blueprint node: Spawn Bango Script.
  *
  * Pick a Bango Script asset on the node and it shows one input pin per parameter in the
- * script's params line, named after the parameter, with the script's defaults filled in.
+ * script's inputs line, named after the parameter, with the script's defaults filled in.
  *  - Required parameters always pass the pin's value.
  *  - Optional parameters count as "not passed" (so the script uses its own default) while their pin is
  *    unconnected and still shows the script's default.
  *  - Entities are Actor pins; an unconnected or null actor passes nil.
- * When the script's params line changes, right-click the node and choose Refresh Node. Wires on pins
+ * When the script's inputs line changes, right-click the node and choose Refresh Node. Wires on pins
  * whose name and type didn't change are kept.
  *
  * When the Blueprint compiles, the node becomes a chain of UBangoBlueprintLibrary calls that collect

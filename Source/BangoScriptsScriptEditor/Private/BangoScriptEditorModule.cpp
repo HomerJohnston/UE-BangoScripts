@@ -1,4 +1,7 @@
 #include "BangoConnectionDrawingPolicy.h"
+#include "BangoInlineScript.h"
+#include "BangoInlineScriptCustomization.h"
+#include "PropertyEditorModule.h"
 #include "BangoEditorStyle.h"
 #include "BangoGraphCommands.h"
 #include "BangoScriptSync.h"
@@ -47,6 +50,12 @@ public:
 		ScriptSync = MakeUnique<FBangoScriptSync>();
 		ScriptSync->Startup();
 
+		// Inline scripts (FBangoInlineScript properties): a box to type in, and Edit for a window of their own.
+		FPropertyEditorModule& PropertyEditor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
+		PropertyEditor.RegisterCustomPropertyTypeLayout(FBangoInlineScript::StaticStruct()->GetFName(),
+			FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FBangoInlineScriptCustomization::MakeInstance));
+		PropertyEditor.NotifyCustomizationModuleChanged();
+
 		PinFactory = MakeShared<FBangoGraphPinFactory>();
 		FEdGraphUtilities::RegisterVisualPinFactory(PinFactory);
 		ConnectionFactory = MakeShared<FBangoConnectionDrawingPolicyFactory>();
@@ -81,6 +90,10 @@ public:
 		{
 			FEdGraphUtilities::UnregisterVisualNodeFactory(NodeFactory);
 			NodeFactory.Reset();
+		}
+		if (FPropertyEditorModule* PropertyEditor = FModuleManager::GetModulePtr<FPropertyEditorModule>(TEXT("PropertyEditor")))
+		{
+			PropertyEditor->UnregisterCustomPropertyTypeLayout(FBangoInlineScript::StaticStruct()->GetFName());
 		}
 		if (ScriptSync.IsValid())
 		{

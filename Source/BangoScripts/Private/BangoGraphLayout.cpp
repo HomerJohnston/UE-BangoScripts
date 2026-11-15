@@ -795,7 +795,7 @@ namespace BangoGraphLayoutPrivate
 		}
 	};
 
-	/** The parameters a graph's entry declares: the script's params, or the function's. */
+	/** The parameters a graph's entry declares: the script's inputs, or the function's. */
 	static void AddEntryParams(const FBangoGraph& Graph, FVarScope& Scope)
 	{
 		if (Graph.Nodes.Num() == 0)
@@ -815,7 +815,7 @@ namespace BangoGraphLayoutPrivate
 			}
 		}
 		else if (!Graph.Nodes[0].Text.IsEmpty()
-			&& Bango::ParseScript(FString(TEXT("#define params (")) + Graph.Nodes[0].Text + TEXT(")"), TEXT("node"), Script, Error))
+			&& Bango::ParseScript(FString(TEXT("#define inputs (")) + Graph.Nodes[0].Text + TEXT(")"), TEXT("node"), Script, Error))
 		{
 			if (const FBangoParamsStmt* Params = Script.GetParams())
 			{

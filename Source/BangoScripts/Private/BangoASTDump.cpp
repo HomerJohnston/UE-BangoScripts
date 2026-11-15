@@ -264,7 +264,7 @@ namespace BangoDumpPrivate
 			return TEXT("(reroute)");
 		case EBangoStmtKind::Params:
 		{
-			FString Result = TEXT("(params");
+			FString Result = TEXT("(inputs");
 			for (const FBangoScriptParamDecl& Param : Stmt.As<FBangoParamsStmt>()->Params)
 			{
 				Result += FString::Printf(TEXT(" (%s %s"), *Param.Type.ToString(), *Param.Name);

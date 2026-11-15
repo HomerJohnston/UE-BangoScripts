@@ -42,7 +42,7 @@ namespace BangoLexerPrivate
 		{ TEXT("vector2"), EBangoTokenKind::KwVector2 },
 		{ TEXT("vector3"), EBangoTokenKind::KwVector3 },
 		{ TEXT("void"), EBangoTokenKind::KwVoid },
-		{ TEXT("params"), EBangoTokenKind::KwParams },
+		{ TEXT("inputs"), EBangoTokenKind::KwInputs },
 		{ TEXT("IsNil"), EBangoTokenKind::KwIsNil },
 	};
 
@@ -238,7 +238,7 @@ namespace BangoLexerPrivate
 
 			if (NodeID == 0)
 			{
-				return Fail(EntryLoc, TEXT("Node ID 0 is reserved for the script's entry node (the params line), which never has metadata. Use another ID."));
+				return Fail(EntryLoc, TEXT("Node ID 0 is reserved for the script's entry node (the inputs line), which never has metadata. Use another ID."));
 			}
 			if (SeenNodeIDs.Contains(NodeID))
 			{
@@ -326,7 +326,7 @@ namespace BangoLexerPrivate
 		 */
 		bool LexDirective(const FBangoSourceLocation& Loc)
 		{
-			static const TCHAR* Usage = TEXT("Lines starting with '#' are #define params (...), #define LOCTEXT_NAMESPACE \"Name\" and #undef LOCTEXT_NAMESPACE.");
+			static const TCHAR* Usage = TEXT("Lines starting with '#' are #define inputs (...), #define LOCTEXT_NAMESPACE \"Name\" and #undef LOCTEXT_NAMESPACE.");
 			Advance(); // #
 			const int32 Start = Pos;
 			while (!AtEnd() && IsIdentChar(Peek()))

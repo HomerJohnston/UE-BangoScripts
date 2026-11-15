@@ -26,7 +26,7 @@ struct FBangoNodeInfo
 	/** Line the statement is on. Every statement node is on exactly one line. */
 	int32 Line = 0;
 
-	/** True if the line had a `//@ id (x,y)` comment. The params line always counts as node 0 at (0,0), so it's true there too. */
+	/** True if the line had a `//@ id (x,y)` comment. The inputs line always counts as node 0 at (0,0), so it's true there too. */
 	bool bHasMetadata = false;
 	int64 NodeID = -1;
 	int32 X = 0;
@@ -35,7 +35,7 @@ struct FBangoNodeInfo
 	/**
 	 * Where the node's editable text is on its line (1-based columns, end exclusive), for the graph editor:
 	 * the condition of if/while, the header of for/forEach, the name of label/goto, the value of return,
-	 * the inside of params (...), and the whole statement without ';' otherwise. Empty for break/continue.
+	 * the inside of inputs (...), and the whole statement without ';' otherwise. Empty for break/continue.
 	 */
 	int32 TextBegin = 0;
 	int32 TextEnd = 0;
@@ -517,7 +517,7 @@ struct FBangoRerouteStmt : FBangoStmt
 	FBangoRerouteStmt() : FBangoStmt(StaticKind) {}
 };
 
-/** One parameter in a script's `params (...)` line. */
+/** One parameter in a script's `inputs (...)` line. */
 struct FBangoScriptParamDecl
 {
 	FBangoType Type;
@@ -527,7 +527,7 @@ struct FBangoScriptParamDecl
 	FBangoExprPtr Default;
 };
 
-/** `#define params (int _a, string _b = "x")` Always the first statement of a script, if present. */
+/** `#define inputs (int _a, string _b = "x")` Always the first statement of a script, if present. */
 struct FBangoParamsStmt : FBangoStmt
 {
 	static constexpr EBangoStmtKind StaticKind = EBangoStmtKind::Params;
@@ -565,7 +565,7 @@ struct FBangoScript
 {
 	FString FileName;
 	TArray<TUniquePtr<FBangoFunction>> Functions;
-	/** The script's entry point: every top-level statement, in order. If the script has a params line, it is TopLevel[0]. */
+	/** The script's entry point: every top-level statement, in order. If the script has a inputs line, it is TopLevel[0]. */
 	FBangoBlock TopLevel;
 	/** Ordinary comments, in file order, for the graph editor. The compiler ignores them. */
 	TArray<FBangoSourceComment> Comments;
@@ -578,7 +578,7 @@ struct FBangoScript
 
 	/**
 	 * `#define LOCTEXT_NAMESPACE "Bango.Intro"`: the namespace for the script's LOCTEXT and NOTELOCTEXT texts,
-	 * written like C++ so Unreal's localization gatherer reads it. Comes after the params line (if any) and before
+	 * written like C++ so Unreal's localization gatherer reads it. Comes after the inputs line (if any) and before
 	 * everything else; the script must then end with `#undef LOCTEXT_NAMESPACE` (LocNamespaceEndLoc). Neither is a
 	 * statement: they have no graph nodes.
 	 */
@@ -587,7 +587,7 @@ struct FBangoScript
 	FBangoSourceLocation LocNamespaceLoc;
 	FBangoSourceLocation LocNamespaceEndLoc;
 
-	/** The params line, or null if the script has none. Points into TopLevel. */
+	/** The inputs line, or null if the script has none. Points into TopLevel. */
 	const FBangoParamsStmt* GetParams() const
 	{
 		return TopLevel.Num() > 0 ? TopLevel[0]->As<FBangoParamsStmt>() : nullptr;

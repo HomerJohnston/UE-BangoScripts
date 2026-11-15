@@ -21,7 +21,7 @@ enum class EBangoTokenKind : uint8
 	KwBreak, KwContinue, KwReturn, KwLabel, KwGoto,
 	KwFunction, KwGlobal, KwTrue, KwFalse, KwNil,
 	KwBool, KwInt, KwDouble, KwString, KwEntity, KwText, KwVector2, KwVector3, KwVoid,
-	KwParams,
+	KwInputs,
 	KwIsNil,
 
 	/** `#define` / `#undef` at the start of a line: the script's settings lines (see FBangoScript). */

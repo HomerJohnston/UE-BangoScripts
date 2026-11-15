@@ -146,7 +146,7 @@ struct FBangoFunctionCode
 	TArray<FBangoDebugLoc> Debug;
 };
 
-/** One parameter of a script, from its `params (...)` line. */
+/** One parameter of a script, from its `inputs (...)` line. */
 struct FBangoScriptParamInfo
 {
 	FString Name;
@@ -181,11 +181,11 @@ struct FBangoProgram
 	/** Every global the script declares. They are declared when an instance starts, before any code runs. */
 	TArray<FBangoGlobalDecl> Globals;
 
-	/** The script's parameters, in order. They occupy the first slots of Functions[0]. Empty if there is no params line. */
+	/** The script's parameters, in order. They occupy the first slots of Functions[0]. Empty if there is no inputs line. */
 	TArray<FBangoScriptParamInfo> Params;
-	/** True if the script has a params line (even an empty one). */
+	/** True if the script has a inputs line (even an empty one). */
 	bool bHasParamsLine = false;
-	/** Where the params line is, for errors about arguments. */
+	/** Where the inputs line is, for errors about arguments. */
 	FBangoDebugLoc ParamsLoc;
 
 	/** How many arguments a spawn must pass at least. */

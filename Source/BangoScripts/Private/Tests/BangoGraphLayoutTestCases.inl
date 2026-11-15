@@ -156,7 +156,7 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 	// The VARIABLES list: parameters, locals and globals of one graph, with types and where each is declared.
 	{
 		const TCHAR* Source =
-			TEXT("#define params (string _who, int _times = 1)\n")
+			TEXT("#define inputs (string _who, int _times = 1)\n")
 			TEXT("global int gold;\n")
 			TEXT("global string[] names;\n")
 			TEXT("int _count = 0;\n")
@@ -370,7 +370,7 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 			}
 			if (Read != Case.Read)
 			{
-				OutFailures.Add(FString::Printf(TEXT("read params: `%s` should read `%s`, got `%s`"), Case.Text, Case.Read, *Read));
+				OutFailures.Add(FString::Printf(TEXT("read inputs: `%s` should read `%s`, got `%s`"), Case.Text, Case.Read, *Read));
 			}
 		}
 
@@ -396,14 +396,14 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 			FString Written, WriteError;
 			if (!Bango::WriteEntryParams(Case.Text, Case.bFunction, Params, Written, WriteError) || Written != Case.Expected)
 			{
-				OutFailures.Add(FString::Printf(TEXT("write params: `%s` should become `%s`, got `%s` (%s)"), Case.Text, Case.Expected, *Written, *WriteError));
+				OutFailures.Add(FString::Printf(TEXT("write inputs: `%s` should become `%s`, got `%s` (%s)"), Case.Text, Case.Expected, *Written, *WriteError));
 			}
 			// And removing them all again.
 			Params.Reset();
 			const TCHAR* Empty = Case.Empty;
 			if (!Bango::WriteEntryParams(Case.Text, Case.bFunction, Params, Written, WriteError) || Written != Empty)
 			{
-				OutFailures.Add(FString::Printf(TEXT("write params: `%s` without params should be `%s`, got `%s` (%s)"), Case.Text, Empty, *Written, *WriteError));
+				OutFailures.Add(FString::Printf(TEXT("write inputs: `%s` without inputs should be `%s`, got `%s` (%s)"), Case.Text, Empty, *Written, *WriteError));
 			}
 		}
 		// Text that isn't a parameter list is refused.
@@ -414,7 +414,7 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 		FString Written, WriteError;
 		if (Bango::WriteEntryParams(TEXT("void Greet()"), true, Bad, Written, WriteError))
 		{
-			OutFailures.Add(FString::Printf(TEXT("write params: a bad name should be refused, got `%s`"), *Written));
+			OutFailures.Add(FString::Printf(TEXT("write inputs: a bad name should be refused, got `%s`"), *Written));
 		}
 	}
 
@@ -555,11 +555,11 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 		}
 	}
 
-	// Variable types: each node sees the params, the file's globals, the graph's locals, and the variables of the loops
+	// Variable types: each node sees the inputs, the file's globals, the graph's locals, and the variables of the loops
 	// it's inside. Set nodes and the like show the variable's type, and their value takes it too.
 	{
 		const TCHAR* Source =
-			TEXT("#define params (int _count, string[] _names = [])\n")
+			TEXT("#define inputs (int _count, string[] _names = [])\n")
 			TEXT("global float speed;\n")
 			TEXT("string _title = \"x\";\n")
 			TEXT("int _n = 1;\n")

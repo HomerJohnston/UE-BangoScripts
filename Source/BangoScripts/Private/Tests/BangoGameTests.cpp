@@ -11,6 +11,7 @@
 #include "BangoLocalization.h"
 #include "BangoScriptAsset.h"
 #include "BangoScriptCache.h"
+#include "BangoScriptSubsystem.h"
 #include "UObject/Package.h"
 
 // Run from the editor: Tools > Session Frontend > Automation, filter "Bango".
@@ -295,7 +296,7 @@ bool FBangoModuleTest::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("module has built-in commands"), Module.GetCommands().FindCommandImpl(TEXT("Hint")));
 
 	// A script asset made for the test (in memory, under /Temp), found by its path.
-	UBangoScriptAsset* Asset = BangoGameTestsPrivate::MakeTestScript(TEXT("Hello"), TEXT("#define params (string _name = \"you\")\nHint(ToText(_name));"));
+	UBangoScriptAsset* Asset = BangoGameTestsPrivate::MakeTestScript(TEXT("Hello"), TEXT("#define inputs (string _name = \"you\")\nHint(ToText(_name));"));
 	TSharedPtr<const FBangoProgram> Program;
 	FString DisplayPath;
 	FString Error;
@@ -316,7 +317,7 @@ bool FBangoModuleTest::RunTest(const FString& Parameters)
 	TSharedPtr<const FBangoProgram> Changed;
 	TestTrue(TEXT("changed script compiles"), Module.GetScriptCache().GetProgram(*Asset, Module.GetCommands(), Changed, DisplayPath, Error));
 	TestTrue(TEXT("changed text is compiled again"), Changed.IsValid() && Changed != Program);
-	Asset->Source = TEXT("#define params (string _name = \"you\")\nHint(ToText(_name));");
+	Asset->Source = TEXT("#define inputs (string _name = \"you\")\nHint(ToText(_name));");
 
 	TArray<FBangoScriptParamInfo> Params;
 	TestTrue(TEXT("GetScriptParams succeeds"), Module.GetScriptParams(TEXT("/Temp/BangoTests/Hello"), Params, Error));
@@ -327,6 +328,17 @@ bool FBangoModuleTest::RunTest(const FString& Parameters)
 
 	TestFalse(TEXT("missing script fails"), Module.GetScriptCache().GetProgram(TEXT("/Temp/BangoTests/DoesNotExist"), Module.GetCommands(), Program, DisplayPath, Error));
 	TestTrue(TEXT("missing script error"), Error.Contains(TEXT("not found"), ESearchCase::CaseSensitive));
+
+	// Inline scripts: compiled once per text (and name), with their parameters; an error isn't kept.
+	const FString Inline = TEXT("#define inputs (int _count, string _name = \"you\")\nSleep(1); Hint(ToText(_name));");
+	TSharedPtr<const FBangoProgram> InlineProgram;
+	TSharedPtr<const FBangoProgram> InlineAgain;
+	TestTrue(TEXT("inline script compiles"), Module.GetInlineProgram(Inline, TEXT("Test (inline script)"), InlineProgram, Error));
+	TestTrue(TEXT("inline script: the same text comes from the cache"), Module.GetInlineProgram(Inline, TEXT("Test (inline script)"), InlineAgain, Error) && InlineAgain == InlineProgram);
+	TestTrue(TEXT("inline script: its parameters"), InlineProgram.IsValid() && InlineProgram->Params.Num() == 2);
+	TestFalse(TEXT("inline script that doesn't compile"), Module.GetInlineProgram(TEXT("Sleep("), TEXT("Test (inline script)"), InlineProgram, Error));
+	TestTrue(TEXT("inline script error names it"), Error.Contains(TEXT("Test (inline script)"), ESearchCase::CaseSensitive));
+	TestEqual(TEXT("inline script name"), UBangoScriptSubsystem::GetInlineScriptName(nullptr), FString(TEXT("Inline script")));
 	return true;
 }
 
@@ -335,10 +347,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoBlueprintArgsTest, "Bango.Game.BlueprintA
 
 bool FBangoBlueprintArgsTest::RunTest(const FString& Parameters)
 {
-	// params (string _name, int _times = 3, double _delay = 0.5, entity _who = nil)
+	// inputs (string _name, int _times = 3, double _delay = 0.5, entity _who = nil)
 	TArray<FBangoScriptParamInfo> Params;
 	FString Error;
-	BangoGameTestsPrivate::MakeTestScript(TEXT("Greet"), TEXT("#define params (string _name, int _times = 3, float _delay = 0.5, entity _who = nil)\nSleep(_delay);"));
+	BangoGameTestsPrivate::MakeTestScript(TEXT("Greet"), TEXT("#define inputs (string _name, int _times = 3, float _delay = 0.5, entity _who = nil)\nSleep(_delay);"));
 	TestTrue(TEXT("Greet has parameters"), FBangoModule::Get().GetScriptParams(TEXT("/Temp/BangoTests/Greet"), Params, Error) && Params.Num() == 4);
 	if (Params.Num() != 4)
 	{

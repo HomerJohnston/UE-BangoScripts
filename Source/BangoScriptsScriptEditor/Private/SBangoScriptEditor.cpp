@@ -1,6 +1,7 @@
 #include "SBangoScriptEditor.h"
 
 #include "BangoScriptAsset.h"
+#include "BangoInlineScriptTarget.h"
 #include "BangoScriptSync.h"
 
 #include "Bango.h"
@@ -64,6 +65,7 @@
 #include "BangoEditorStyle.h"
 #include "BangoCommand.h"
 #include "Styling/CoreStyle.h"
+#include "Styling/SlateTypes.h"
 #include "Widgets/SNullWidget.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/STableRow.h"
@@ -171,8 +173,14 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 				.IsEnabled_Lambda([this]() { return !bTextEdited; })
 				.ToolTipText_Lambda([this]() { return bTextEdited ? LOCTEXT("PaneLockedTooltip", "The script's text has been edited. Apply it (Ctrl+Enter) or Revert it to use these again.") : FText::GetEmpty(); })
 				[
-					// SCRIPT DESCRIPTION, SCRIPT INPUT, GLOBAL VARS, LOCAL VARS and FUNCTIONS (the order of the script's text): foldouts one after another in a single scrolling pane.
+					// SCRIPT DESCRIPTION, SCRIPT INPUTS, GLOBAL VARS, LOCAL VARS and FUNCTIONS (the order of the script's text): foldouts one after another in a single scrolling pane.
 					// Each list is as tall as its rows, so only the pane scrolls. A closed foldout is just its header.
+					// Its background is a standalone window's (what the inline script window shows behind it), so it's the same
+					// in the asset editor, where a tab's content area would otherwise show through.
+					SNew(SBorder)
+					.BorderImage(&FCoreStyle::Get().GetWidgetStyle<FWindowStyle>("Window").BackgroundBrush)
+					.Padding(0.0f)
+					[
 					SNew(SScrollBox)
 					+ SScrollBox::Slot()
 					[
@@ -199,12 +207,12 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 								])
 						]
 
-						// SCRIPT INPUT
+						// SCRIPT INPUTS
 						+ SVerticalBox::Slot()
 						.AutoHeight()
 						.Padding(0.0f, 0.0f, 0.0f, 2.0f)
 						[
-							MakeFoldout(LOCTEXT("InputsHeading", "SCRIPT INPUT"), &bInputsExpanded,
+							MakeFoldout(LOCTEXT("InputsHeading", "SCRIPT INPUTS"), &bInputsExpanded,
 								SNew(SBox)
 								.HeightOverride_Lambda([this]() { return VariableListHeight(InputItems.Num()); })
 								[
@@ -230,7 +238,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 								{
 									return ShownGraph > 0
 										? LOCTEXT("AddFunctionInputTooltip", "Add a parameter to this function. Calls to it need a value for it.")
-										: LOCTEXT("AddScriptInputTooltip", "Add a parameter to this script (#define params): a value it's spawned with.");
+										: LOCTEXT("AddScriptInputTooltip", "Add a parameter to this script (#define inputs): a value it's spawned with.");
 								})
 								.IsEnabled_Lambda([this]() { return GetShownEntryNode() != nullptr; })
 								.OnClicked(this, &SBangoScriptEditor::OnAddInputClicked)
@@ -282,7 +290,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 						[
 							MakeFoldout(LOCTEXT("LocalsHeading", "LOCAL VARS"), &bLocalsExpanded,
 								SNew(SBox)
-								.Padding(0.0f, 0.0f, 0.0f, 6.0f)
+								.Padding(0.0f, 0.0f, 0.0f, 0.0f)
 								[
 									SNew(SBox)
 									.HeightOverride_Lambda([this]() { return VariableListHeight(LocalItems.Num()); })
@@ -352,6 +360,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 								])
 						]
 					]
+					]
 				]
 			]
 
@@ -412,7 +421,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 									.Text_Lambda([this]()
 									{
 										return FText::Format(LOCTEXT("ChangedOnDiskBar", "{0} was changed outside the graph editor, and you have unsaved changes here."),
-											FText::FromString(OpenScript + TEXT(".bango")));
+											FText::FromString(GetScriptFileLabel()));
 									})
 									.AutoWrapText(true)
 								]
@@ -438,7 +447,14 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 									.OnClicked_Lambda([this]()
 									{
 										bChangedOnDisk = false;
-										KeptFileTime = IFileManager::Get().GetTimeStamp(*OpenPath);
+										if (InlineTarget.IsValid())
+										{
+											InlineTarget->Read(KeptInlineSource);
+										}
+										else
+										{
+											KeptFileTime = IFileManager::Get().GetTimeStamp(*OpenPath);
+										}
 										return FReply::Handled();
 									})
 								]
@@ -2354,8 +2370,28 @@ void SBangoScriptEditor::CloseScript()
 	UpdateDescriptionBox(); // empty, with no graphs
 }
 
+FString SBangoScriptEditor::GetScriptFileLabel() const
+{
+	return InlineTarget.IsValid() ? OpenScript : OpenScript + TEXT(".bango");
+}
+
+void SBangoScriptEditor::OpenInlineScript(const TSharedPtr<FBangoInlineScriptTarget>& Target)
+{
+	OpenAsset.Reset();
+	InlineTarget = Target;
+	if (Target.IsValid())
+	{
+		LoadScript(Target->GetScriptName());
+	}
+	else
+	{
+		CloseScript();
+	}
+}
+
 void SBangoScriptEditor::OpenScriptAsset(UBangoScriptAsset* Asset)
 {
+	InlineTarget.Reset();
 	OpenAsset = Asset;
 	if (Asset)
 	{
@@ -2380,17 +2416,32 @@ void SBangoScriptEditor::LoadScript(const FString& Script)
 	CloseScript();
 	OpenScript = Script;
 
-	// A linked script's text is its .bango file (the file wins); an embedded one's is in the asset.
+	// A linked script's text is its .bango file (the file wins); an embedded one's is in the asset; an inline one's is
+	// in its property.
 	FString Source;
 	UBangoScriptAsset* Asset = OpenAsset.Get();
-	if (!Asset)
+	if (InlineTarget.IsValid())
+	{
+		if (!InlineTarget->Read(Source))
+		{
+			OpenScript.Reset();
+			ShowMessage(FText::Format(LOCTEXT("InlineGone", "{0} isn't there any more (was its object deleted?)."), InlineTarget->GetDisplayName()));
+			return;
+		}
+		InlineSource = Source;
+		KeptInlineSource.Reset();
+		OpenPath.Reset();
+		OpenFileTime = FDateTime::MinValue();
+	}
+	else if (!Asset)
 	{
 		OpenScript.Reset();
 		ShowMessage(FText::Format(LOCTEXT("ScriptGone", "The Bango Script asset {0} isn't there any more (was it deleted?). Open a script from the Content Browser or the script list."), FText::FromString(Script)));
 		return;
 	}
-	OpenScript = Asset->GetScriptName(); // its name now, if it was renamed or moved while open
+	else
 	{
+		OpenScript = Asset->GetScriptName(); // its name now, if it was renamed or moved while open
 		OpenPath = Asset->bLinked ? FBangoScriptSync::GetLinkedFilePath(OpenScript) : FString();
 		if (OpenPath.IsEmpty() || !FFileHelper::LoadFileToString(Source, *OpenPath))
 		{
@@ -2400,12 +2451,12 @@ void SBangoScriptEditor::LoadScript(const FString& Script)
 			}
 			Source = Asset->Source;
 		}
+		OpenFileTime = OpenPath.IsEmpty() ? FDateTime::MinValue() : IFileManager::Get().GetTimeStamp(*OpenPath);
 	}
-	OpenFileTime = OpenPath.IsEmpty() ? FDateTime::MinValue() : IFileManager::Get().GetTimeStamp(*OpenPath);
 
 	FBangoGraphDocument Document;
 	FBangoCompileError Error;
-	if (!Bango::BuildGraph(Source, OpenScript + TEXT(".bango"), Document, Error))
+	if (!Bango::BuildGraph(Source, GetScriptFileLabel(), Document, Error))
 	{
 		// The text pane shows the file, so it can be fixed there (and applied), or elsewhere and reloaded.
 		ShowMessage(FText::Format(LOCTEXT("CantOpen", "This script can't be shown as a graph until its text is fixed. Fix it in the script text pane (the Source Editor tab on the left) and Apply, or elsewhere and Reload:\n\n{0}"), FText::FromString(Error.ToString())));
@@ -3624,7 +3675,7 @@ bool SBangoScriptEditor::ApplyScriptText()
 	FBangoCompileError Error;
 	if (!Bango::HoistLateLocals(Typed, Text, Error))
 	{
-		Error.FileName = OpenScript + TEXT(".bango");
+		Error.FileName = GetScriptFileLabel();
 		SetTextError(Error.ToString());
 		if (Error.Line > 0)
 		{
@@ -3633,7 +3684,7 @@ bool SBangoScriptEditor::ApplyScriptText()
 		return false;
 	}
 	FBangoGraphDocument Document;
-	if (!Bango::BuildGraph(Text, OpenScript + TEXT(".bango"), Document, Error))
+	if (!Bango::BuildGraph(Text, GetScriptFileLabel(), Document, Error))
 	{
 		SetTextError(Error.ToString());
 		if (Error.Line > 0)
@@ -3680,7 +3731,7 @@ FText SBangoScriptEditor::GetTitle() const
 	{
 		return FText::GetEmpty();
 	}
-	FString Title = OpenScript + TEXT(".bango");
+	FString Title = GetScriptFileLabel();
 	if (bDirty || bTextEdited)
 	{
 		Title += TEXT(" *");
@@ -3713,6 +3764,25 @@ bool SBangoScriptEditor::BuildCurrentDocument(FBangoGraphDocument& OutDocument, 
 
 void SBangoScriptEditor::CheckFileOnDisk()
 {
+	if (InlineTarget.IsValid() && !OpenScript.IsEmpty() && !bChangedOnDisk)
+	{
+		// An inline script: its property, changed elsewhere (undo, paste, Reset to Default).
+		FString Current;
+		if (!InlineTarget->Read(Current) || Current.Equals(InlineSource, ESearchCase::CaseSensitive) || Current.Equals(KeptInlineSource, ESearchCase::CaseSensitive))
+		{
+			return;
+		}
+		RefreshDirty();
+		if (bDirty || bTextEdited)
+		{
+			bChangedOnDisk = true; // the bar asks
+		}
+		else
+		{
+			ReloadKeepingView(); // nothing to lose
+		}
+		return;
+	}
 	if (OpenScript.IsEmpty() || OpenPath.IsEmpty() || bChangedOnDisk)
 	{
 		return;
@@ -3784,7 +3854,9 @@ void SBangoScriptEditor::GatherDebugEntries(TArray<FDebugEntry>& OutEntries) con
 	{
 		return;
 	}
-	const FString Wanted = OpenScript + TEXT(".bango"); // the runtime's name for it ("/Game/Quests/Intro.bango")
+	const FString Wanted = GetScriptFileLabel(); // the runtime's name for it ("/Game/Quests/Intro.bango")
+	// An inline script is found by its text instead (as last saved): copies of it are named by whoever spawned them.
+	const uint32 WantedHash = InlineTarget.IsValid() ? FCrc::StrCrc32(*InlineSource) : 0;
 	for (const FWorldContext& Context : GEngine->GetWorldContexts())
 	{
 		UWorld* World = Context.WorldType == EWorldType::PIE ? Context.World() : nullptr;
@@ -3797,7 +3869,7 @@ void SBangoScriptEditor::GatherDebugEntries(TArray<FDebugEntry>& OutEntries) con
 		Subsystem->GetDebugInfo(Scripts);
 		for (FBangoScriptDebugInfo& Info : Scripts)
 		{
-			if (Info.Path.Equals(Wanted, ESearchCase::IgnoreCase))
+			if (InlineTarget.IsValid() ? Info.SourceHash == WantedHash : Info.Path.Equals(Wanted, ESearchCase::IgnoreCase))
 			{
 				FDebugEntry& Entry = OutEntries.AddDefaulted_GetRef();
 				Entry.PIEInstance = Context.PIEInstance;
@@ -4529,7 +4601,7 @@ void SBangoScriptEditor::CompileQuietly(FString* OutError)
 	CompiledDocument = Document;
 	FBangoProgram Program;
 	FBangoCompileError CompileError;
-	if (!Bango::CompileSource(Text, OpenScript + TEXT(".bango"), FBangoModule::Get().GetCommands(), Program, CompileError))
+	if (!Bango::CompileSource(Text, GetScriptFileLabel(), FBangoModule::Get().GetCommands(), Program, CompileError))
 	{
 		CompileStatus = ECompileStatus::Error;
 		if (OutError)
@@ -4600,7 +4672,7 @@ FReply SBangoScriptEditor::OnCompileClicked()
 
 	FBangoProgram Program;
 	FBangoCompileError CompileError;
-	const FString FileName = OpenScript + TEXT(".bango");
+	const FString FileName = GetScriptFileLabel();
 	if (Bango::CompileSource(Text, FileName, FBangoModule::Get().GetCommands(), Program, CompileError))
 	{
 		CompileStatus = NumWarnings == 0 ? ECompileStatus::Good : ECompileStatus::Warning;
@@ -4688,14 +4760,36 @@ bool SBangoScriptEditor::Save()
 	{
 		const EAppReturnType::Type Answer = FMessageDialog::Open(EAppMsgType::YesNo, FText::Format(
 			LOCTEXT("ChangedOnDisk", "{0} was changed outside the graph editor since it was opened. Overwrite those changes?"),
-			FText::FromString(OpenScript + TEXT(".bango"))));
+			FText::FromString(GetScriptFileLabel())));
 		if (Answer != EAppReturnType::Yes)
 		{
 			return false;
 		}
 	}
 
-	if (UBangoScriptAsset* Asset = OpenAsset.Get())
+	if (InlineTarget.IsValid())
+	{
+		// An inline script: its property, as one undoable change. Not over a change made to it elsewhere without asking.
+		FString Current;
+		if (InlineTarget->Read(Current) && !Current.Equals(InlineSource, ESearchCase::CaseSensitive) && !Current.Equals(KeptInlineSource, ESearchCase::CaseSensitive))
+		{
+			const EAppReturnType::Type Answer = FMessageDialog::Open(EAppMsgType::YesNo, FText::Format(
+				LOCTEXT("InlineChangedElsewhere", "{0} was changed outside the graph editor since it was opened. Overwrite those changes?"), InlineTarget->GetDisplayName()));
+			if (Answer != EAppReturnType::Yes)
+			{
+				return false;
+			}
+		}
+		FString WriteError;
+		if (!InlineTarget->Write(Text, WriteError))
+		{
+			Notify(FText::FromString(WriteError), false);
+			return false;
+		}
+		InlineSource = Text;
+		KeptInlineSource.Reset();
+	}
+	else if (UBangoScriptAsset* Asset = OpenAsset.Get())
 	{
 		// A linked script: its file first (checked out with source control), then the asset's copy of it. An embedded
 		// one: just the asset. Either way the asset is saved, and running copies of the script pick up the new text.
@@ -4735,10 +4829,10 @@ bool SBangoScriptEditor::Save()
 	CompileQuietly(&CompileError);
 	if (CompileStatus == ECompileStatus::Error && !CompileError.IsEmpty())
 	{
-		Notify(FText::Format(LOCTEXT("SavedWithError", "Saved {0}, but it doesn't compile: {1}"), FText::FromString(OpenScript + TEXT(".bango")), FText::FromString(CompileError)), false);
+		Notify(FText::Format(LOCTEXT("SavedWithError", "Saved {0}, but it doesn't compile: {1}"), FText::FromString(GetScriptFileLabel()), FText::FromString(CompileError)), false);
 		return true;
 	}
-	Notify(FText::Format(LOCTEXT("Saved", "Saved {0}."), FText::FromString(OpenScript + TEXT(".bango"))), true);
+	Notify(FText::Format(LOCTEXT("Saved", "Saved {0}."), FText::FromString(GetScriptFileLabel())), true);
 	return true;
 }
 
@@ -4751,7 +4845,7 @@ bool SBangoScriptEditor::ConfirmCloseScript()
 		return true;
 	}
 	const EAppReturnType::Type Answer = FMessageDialog::Open(EAppMsgType::YesNoCancel, FText::Format(
-		LOCTEXT("SaveChanges", "Save the changes to {0}?"), FText::FromString(OpenScript + TEXT(".bango"))));
+		LOCTEXT("SaveChanges", "Save the changes to {0}?"), FText::FromString(GetScriptFileLabel())));
 	if (Answer == EAppReturnType::Yes)
 	{
 		return Save();
@@ -4784,6 +4878,10 @@ void SBangoScriptEditor::WriteRecoveryCopy() const
 	}
 	FString Relative = OpenScript;
 	Relative.RemoveFromStart(TEXT("/")); // an asset's path ("/Game/Quests/Intro")
+	if (InlineTarget.IsValid())
+	{
+		Relative = FString(TEXT("Inline/")) + FPaths::MakeValidFileName(OpenScript, TEXT('_'));
+	}
 	const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Bango"), TEXT("Unsaved"), Relative + TEXT(".bango"));
 	if (FFileHelper::SaveStringToFile(Text, *Path, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 	{

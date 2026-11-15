@@ -1,6 +1,7 @@
 #include "Bango.h"
 
 #include "BangoBuiltinCommands.h"
+#include "BangoCompiler.h"
 #include "BangoLog.h"
 
 #define LOCTEXT_NAMESPACE "FBangoModule"
@@ -15,8 +16,35 @@ void FBangoModule::StartupModule()
 	Bango::RegisterBuiltinCommands(Commands);
 }
 
+bool FBangoModule::GetInlineProgram(const FString& Source, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError)
+{
+	const FString Key = Name + TEXT("\n") + Source;
+	if (const TSharedPtr<const FBangoProgram>* Found = InlinePrograms.Find(Key))
+	{
+		OutProgram = *Found;
+		return true;
+	}
+	TSharedPtr<FBangoProgram> Compiled = MakeShared<FBangoProgram>();
+	FBangoCompileError Error;
+	if (!Bango::CompileSource(Source, Name, Commands, *Compiled, Error))
+	{
+		OutError = Error.ToString(); // not kept: the text is probably being fixed
+		return false;
+	}
+	if (InlinePrograms.Num() >= MaxInlinePrograms)
+	{
+		// Running scripts keep their own reference, so emptying this doesn't affect them.
+		UE_LOG(LogBango, Warning, TEXT("More than %d different inline scripts were compiled, so the compiled inline scripts were cleared. They're compiled again as they're spawned. If this repeats, raise FBangoModule::MaxInlinePrograms."), MaxInlinePrograms);
+		InlinePrograms.Reset();
+	}
+	InlinePrograms.Add(Key, Compiled);
+	OutProgram = Compiled;
+	return true;
+}
+
 void FBangoModule::ShutdownModule()
 {
+	InlinePrograms.Reset();
 	ScriptCache.Clear();
 }
 

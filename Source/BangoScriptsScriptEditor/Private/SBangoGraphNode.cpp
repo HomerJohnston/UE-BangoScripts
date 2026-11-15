@@ -792,7 +792,7 @@ TSharedRef<SWidget> SBangoGraphNode::MakeFieldValue(int32 FieldIndex)
 	}
 	if (Field.bReadOnly)
 	{
-		ValueTip += (ValueTip.IsEmpty() ? FString() : FString(TEXT("\n\n"))) + LOCTEXT("ReadOnlyDefaultTip", "Edit parameters and their defaults in the SCRIPT INPUT panel.").ToString();
+		ValueTip += (ValueTip.IsEmpty() ? FString() : FString(TEXT("\n\n"))) + LOCTEXT("ReadOnlyDefaultTip", "Edit parameters and their defaults in the SCRIPT INPUTS panel.").ToString();
 	}
 	const FText OutlineTip = bHasError ? FText::FromString(BangoNode->ErrorMsg)
 		: Warning ? FText::FromString(Warning->Message)

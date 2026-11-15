@@ -231,7 +231,7 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 		TEXT("  6 Halt\n"),
 		nullptr, nullptr },
 	{ TEXT("Bango IDs in many places"),
-		TEXT("#define params (entity _who = @john, entity[] _crowd = [@bob, @alice], entity _other = nil)\nentity _e;\nbool _same;\nstring _n;\n@door17 SetLocked(true);\n_e = @john;\n_same = _e == @john && _who != @if;\nforEach (_x in [@a, @b])\n{\n\t_x Speak(\"hi\");\n};\n_crowd Push(@carol);\n_n = @john GetName();\nHint(\"{0} {1}\", @john, [@a]);"),
+		TEXT("#define inputs (entity _who = @john, entity[] _crowd = [@bob, @alice], entity _other = nil)\nentity _e;\nbool _same;\nstring _n;\n@door17 SetLocked(true);\n_e = @john;\n_same = _e == @john && _who != @if;\nforEach (_x in [@a, @b])\n{\n\t_x Speak(\"hi\");\n};\n_crowd Push(@carol);\n_n = @john GetName();\nHint(\"{0} {1}\", @john, [@a]);"),
 		TEXT("*"), nullptr, nullptr },
 	{ TEXT("undeclared globals in many places"),
 		TEXT("string _n;\nint _x;\nbool _b;\nfloat _d;\nint _e;\n_n = boss GetName();\n_x = gold + 1;\n_b = gold == 3 || flag;\nHint(\"{0}\", boss);\n_d = -speed;\n_e = list[2];\nif (!IsNil(list[1][2]))\n{\n};"),
@@ -264,12 +264,12 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 		TEXT("global int gold;\nfunction void Pay(int _amount)\n{\n\tgold -= _amount;\n\tjohn Speak(\"Thanks\");\n};\ngold = 10;\nPay(3);"),
 		TEXT("*"), nullptr, nullptr },
 
-	{ TEXT("params used in the script"),
-		TEXT("#define params (int _a, string _b = \"x\", float _c = 1, int[] _d = [1, 2])\nHint(\"{0} {1} {2} {3}\", _a, _b, _c, _d);\n_a = 5;"),
+	{ TEXT("inputs used in the script"),
+		TEXT("#define inputs (int _a, string _b = \"x\", float _c = 1, int[] _d = [1, 2])\nHint(\"{0} {1} {2} {3}\", _a, _b, _c, _d);\n_a = 5;"),
 		TEXT("*"), nullptr, nullptr },
-	{ TEXT("listing: params"),
-		TEXT("#define params (int _a, float _b = 2, entity _e = nil)\nHint(\"{0}\", _a + _b);"),
-		TEXT("params: int _a, float _b = 2.0, entity _e = nil;\n")
+	{ TEXT("listing: inputs"),
+		TEXT("#define inputs (int _a, float _b = 2, entity _e = nil)\nHint(\"{0}\", _a + _b);"),
+		TEXT("inputs: int _a, float _b = 2.0, entity _e = nil;\n")
 		TEXT("function <main>:\n")
 		TEXT("  0 Nop\n")
 		TEXT("  1 PushConst \"{0}\"\n")
@@ -299,7 +299,7 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 	{ TEXT("Bango ID where a string is needed"), TEXT("string _s = @john;"), nullptr, TEXT("(1:13)"), TEXT("'_s' needs a string, but this is an entity") },
 	{ TEXT("Bango ID as a string argument"), TEXT("@john Speak(@bob);"), nullptr, TEXT("(1:13)"), TEXT("Argument 1 of 'Speak' needs a string") },
 	{ TEXT("Bango ID arithmetic"), TEXT("Hint(\"{0}\", @john + 1);"), nullptr, TEXT("(1:19)"), TEXT("'+' needs numbers, but this is an entity + an int") },
-	{ TEXT("Bango ID with the wrong default type"), TEXT("#define params (string _s = @john)"), nullptr, TEXT("(1:29)"), TEXT("The default for '_s' must be a string") },
+	{ TEXT("Bango ID with the wrong default type"), TEXT("#define inputs (string _s = @john)"), nullptr, TEXT("(1:29)"), TEXT("The default for '_s' must be a string") },
 	{ TEXT("Bango ID compared with a string"), TEXT("bool _b;\n_b = @john == \"john\";"), nullptr, TEXT("(2:12)"), TEXT("an entity == a string") },
 	{ TEXT("indexing a Bango ID"), TEXT("Hint(\"{0}\", @john[0]);"), nullptr, TEXT("(1:18)"), TEXT("Only arrays can be indexed, but this is an entity") },
 	{ TEXT("void used as value"), TEXT("int _x;\n_x = QuitGame();"), nullptr, TEXT("(2:6)"), TEXT("doesn't return a value") },
@@ -376,12 +376,12 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 	{ TEXT("&& on a non-bool"), TEXT("bool _b;\n_b = 1 && true;"), nullptr, TEXT("(2:6)"), TEXT("needs bools") },
 	{ TEXT("! on a non-bool"), TEXT("bool _b;\n_b = !1;"), nullptr, TEXT("(2:6)"), TEXT("needs a bool") },
 	{ TEXT("less-than on strings"), TEXT("bool _b;\n_b = \"a\" < \"b\";"), nullptr, TEXT("(2:10)"), TEXT("compares numbers") },
-	{ TEXT("params default of the wrong type"), TEXT("#define params (int _a = \"x\")"), nullptr, TEXT("(1:26)"), TEXT("The default for '_a' must be an int, but it is a string") },
-	{ TEXT("params array default of the wrong type"), TEXT("#define params (int[] _a = [1, 2.5])"), nullptr, TEXT("(1:32)"), TEXT("The default for '_a' must be an int, but it is a float") },
-	{ TEXT("params array default for a scalar"), TEXT("#define params (int _a = [1])"), nullptr, TEXT("(1:26)"), TEXT("but it is an array") },
-	{ TEXT("params duplicate name"), TEXT("#define params (int _a, string _a)"), nullptr, TEXT("(1:32)"), TEXT("Two parameters are named '_a'") },
-	{ TEXT("params shadowed by a local"), TEXT("#define params (int _a)\nint _a = 1;"), nullptr, TEXT("(2:1)"), TEXT("already declared") },
-	{ TEXT("params not visible in functions"), TEXT("#define params (int _a)\nfunction void F()\n{\n\t_a = 1;\n};"), nullptr, TEXT("(4:2)"), TEXT("'_a' isn't declared in this script") },   // (a read there is of a global _a),
+	{ TEXT("inputs default of the wrong type"), TEXT("#define inputs (int _a = \"x\")"), nullptr, TEXT("(1:26)"), TEXT("The default for '_a' must be an int, but it is a string") },
+	{ TEXT("inputs array default of the wrong type"), TEXT("#define inputs (int[] _a = [1, 2.5])"), nullptr, TEXT("(1:32)"), TEXT("The default for '_a' must be an int, but it is a float") },
+	{ TEXT("inputs array default for a scalar"), TEXT("#define inputs (int _a = [1])"), nullptr, TEXT("(1:26)"), TEXT("but it is an array") },
+	{ TEXT("inputs duplicate name"), TEXT("#define inputs (int _a, string _a)"), nullptr, TEXT("(1:32)"), TEXT("Two parameters are named '_a'") },
+	{ TEXT("inputs shadowed by a local"), TEXT("#define inputs (int _a)\nint _a = 1;"), nullptr, TEXT("(2:1)"), TEXT("already declared") },
+	{ TEXT("inputs not visible in functions"), TEXT("#define inputs (int _a)\nfunction void F()\n{\n\t_a = 1;\n};"), nullptr, TEXT("(4:2)"), TEXT("'_a' isn't declared in this script") },   // (a read there is of a global _a),
 	{ TEXT("error carries node id"), TEXT("int _x;\n_x = \"no\"; //@42(0, 0)"), nullptr, TEXT("[node 42]"), TEXT("needs an int") },
 	{ TEXT("fixed starting values"), TEXT("int[] _a = [1, -2];\nvector3 _v = [0, 0, 1];\nentity _e = @john;\nbool _b = true;\nstring _s = nil;\nfloat _f = -2.5;\nHint(\"{0} {1} {2} {3} {4}\", _a, _v, _e, _b, _f);"), TEXT("*"), nullptr, nullptr },
 
@@ -398,7 +398,7 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 
 	// ---- Localized text ----
 	{ TEXT("text literals and LOCTEXT_NAMESPACE"),
-		TEXT("#define params (text _line = nil)\n#define LOCTEXT_NAMESPACE \"Bango.Intro\"\nglobal text gt;\ntext _a = LOCTEXT(\"Greet\", \"Hello\");\ntext[] _b;\nbool _same;\ntext _f;\n_b = [_a, NSLOCTEXT(\"Other\", \"Greet\", \"x\"), ToText(\"Bob\")];\nSay(_a);\nSay(LOCTEXT(\"Greet\", \"Hello\"));\n_same = _a == _line;\n_f = FormatText(LOCTEXT(\"Count\", \"{1} has {0}\"), 3, _a);\ngt = nil;\nfunction text F(text _t)\n{\n\treturn _t;\n};\n#undef LOCTEXT_NAMESPACE"),
+		TEXT("#define inputs (text _line = nil)\n#define LOCTEXT_NAMESPACE \"Bango.Intro\"\nglobal text gt;\ntext _a = LOCTEXT(\"Greet\", \"Hello\");\ntext[] _b;\nbool _same;\ntext _f;\n_b = [_a, NSLOCTEXT(\"Other\", \"Greet\", \"x\"), ToText(\"Bob\")];\nSay(_a);\nSay(LOCTEXT(\"Greet\", \"Hello\"));\n_same = _a == _line;\n_f = FormatText(LOCTEXT(\"Count\", \"{1} has {0}\"), 3, _a);\ngt = nil;\nfunction text F(text _t)\n{\n\treturn _t;\n};\n#undef LOCTEXT_NAMESPACE"),
 		TEXT("*"), nullptr, nullptr },
 	{ TEXT("LOCTEXT needs LOCTEXT_NAMESPACE"), TEXT("Say(LOCTEXT(\"Key\", \"Hi\"));"), nullptr, TEXT("(1:5)"), TEXT("needs the script's namespace: add the line #define LOCTEXT_NAMESPACE") },
 	{ TEXT("NSLOCTEXT doesn't need LOCTEXT_NAMESPACE"), TEXT("Say(NSLOCTEXT(\"Ns\", \"Key\", \"Hi\"));\nSay(NSNOTELOCTEXT(\"Ns\", \"Other\", \"Hi\", \"Notes\"));"), TEXT("*"), nullptr, nullptr },
@@ -446,7 +446,7 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 	{ TEXT("empty for bounds"), TEXT("for (int _i = ; _i <= ; _i++)\n{\n};"), nullptr, TEXT("(1:15)"), TEXT("This value is missing. Fill it in.") },
 	{ TEXT("empty label"), TEXT("label ;"), nullptr, TEXT("(1:7)"), TEXT("This label has no name. Fill it in.") },
 	{ TEXT("empty goto"), TEXT("goto ;"), nullptr, TEXT("(1:6)"), TEXT("This goto doesn't say which label to jump to. Fill it in.") },
-	{ TEXT("vector default of the wrong size"), TEXT("#define params (vector3 _p = [1, 2])"), nullptr, TEXT("(1:30)"), TEXT("A vector3 needs exactly 3 numbers") },
+	{ TEXT("vector default of the wrong size"), TEXT("#define inputs (vector3 _p = [1, 2])"), nullptr, TEXT("(1:30)"), TEXT("A vector3 needs exactly 3 numbers") },
 
 	// ---- INVTEXT ----
 	{ TEXT("INVTEXT is reserved"), TEXT("int INVTEXT = 1;"), nullptr, TEXT("(1:"), TEXT("INVTEXT") },
