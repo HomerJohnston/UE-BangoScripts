@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.46)
+# Bango Language Spec (draft v0.47)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.47:** the `Hint` command is gone: showing text to players is up to each game's own commands. **`WriteScreen(string Text, float Seconds?)`** takes its place for testing and debugging: it shows a message on screen (and writes it to the output log), for the given seconds or the **Write Screen Seconds** setting (5 by default). The script subsystem's **OnHint** event and the **Hint Display Seconds** setting are gone too (sections 7 and 11). A localized text is shown with `WriteScreen(ToString(...))`.
 
 **Changes in v0.46:** `#define LOCTEXT_NAMESPACE` may come before or after the `#define inputs` line, and the graph editor saves it first, under the description and above the SCRIPT INPUTS heading (sections 3, 10 and 12). The namespace is edited in the script editor's new **Script Config** panel; Script Start no longer has a Localization row (section 12).
 
@@ -94,7 +96,7 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
 
 - **One statement line = one graph node.** So is a reroute line (below).
 - **A statement must fit on one line**, from its first token to its `;` (or, for `if`, `while`, `for` and `forEach`, to the `)` that ends the header). A statement that continues onto the next line is a compile error.
-- **Several statements can share a line, if it has no node metadata:** `Sleep(4); player AddItem("Pistol"); Hint(LOCTEXT("Got", "You got a pistol!"));`, or `if (_a) { Hint(...); } Sleep(1);`. Each is still a node of its own; they just haven't been placed yet. A line with node metadata (`//@`) is one node, so it holds one statement: a second one there is a compile error. The graph editor writes every statement on a line of its own, with its metadata. (This is mostly for inline scripts, section 15, which are often one line.)
+- **Several statements can share a line, if it has no node metadata:** `Sleep(4); player AddItem("Pistol"); WriteScreen("You got a pistol!");`, or `if (_a) { WriteScreen(...); } Sleep(1);`. Each is still a node of its own; they just haven't been placed yet. A line with node metadata (`//@`) is one node, so it holds one statement: a second one there is a compile error. The graph editor writes every statement on a line of its own, with its metadata. (This is mostly for inline scripts, section 15, which are often one line.)
 - Lines that contain only `{`, `}`, `};` or `else` are structure. In the graph they become wires and pins, not nodes. Structure tokens may share a line with a statement (`if (a) {`, `} else if (b) {`).
 - Node metadata goes in a trailing comment that the compiler ignores:
 
@@ -261,7 +263,7 @@ _height = GetPos(_who).z;
 - A part is never `nil` on its own, so `IsNil(_v.x)` is a compile error; use `IsNil(_v)`.
 - `++` and `--` don't work on parts, since they are floats.
 - Vectors are values, like arrays: `_b = _a;` copies the vector.
-- `Format`, `WriteLog` and `Hint` show a vector as `(1.0, 2.0, 3.0)`.
+- `Format` and `WriteLog` show a vector as `(1.0, 2.0, 3.0)`.
 
 ### Literals
 - Integers: `0`, `42`. A value larger than 2147483647 is a compile error; the message suggests writing it as a float (`2147483648.0`). Negative numbers are written with unary minus (`-5`). Because the minus is applied to `2147483648`, which is too large, the smallest int can't be written as a literal; use `-2147483647 - 1`.
@@ -285,9 +287,9 @@ if (IsNil(_line))
 {
 	_line = LOCTEXT("GuardHello", "Halt! Who goes there?");
 }
-Hint(_line);
-Hint(NOTELOCTEXT("GuardBye", "Move along.", "Said by the gate guard, annoyed"));
-Hint(NSLOCTEXT("Shared.UI", "Continue", "Continue"));
+WriteScreen(ToString(_line));
+WriteScreen(ToString(NOTELOCTEXT("GuardBye", "Move along.", "Said by the gate guard, annoyed")));
+WriteScreen(ToString(NSLOCTEXT("Shared.UI", "Continue", "Continue")));
 
 #undef LOCTEXT_NAMESPACE
 ```
@@ -341,7 +343,7 @@ Hint(NSLOCTEXT("Shared.UI", "Continue", "Continue"));
 
 ### Names
 - **Names are case-sensitive**: `john` and `John` are different names. This covers variables, globals, functions, labels, commands, keywords, type names and Bango ID names (`@john` and `@John` are different actors).
-- Calling a command or function with the wrong capitalisation is a compile error that suggests the right name: *"Unknown command or function 'hint'. Did you mean 'Hint'? Names are case-sensitive."*
+- Calling a command or function with the wrong capitalisation is a compile error that suggests the right name: *"Unknown command or function 'writeScreen'. Did you mean 'WriteScreen'? Names are case-sensitive."*
 - A name is letters, digits and `_`, and doesn't start with a digit.
 - Keywords and type names can't be used as names: `if else while for forEach in sequence spawn switch case default break continue return label goto function global inputs true false nil bool int float double string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
 
@@ -458,7 +460,7 @@ All binary operators are left-associative: `a - b - c` is `(a - b) - c`.
 - Expressions can be nested up to 64 levels deep (parentheses, unary operators and blocks combined).
 
 ### Empty values
-A value can be **left empty** where it comes right before a `)` or `;`: `if ()`, `while ()`, `_x = ;`, `_a > ;`, `forEach (_e in )`. So can the variable of an assignment or `++`/`--` (`= 5;`, `+= 2;`, `++;`) and the name after `label` or `goto` (`label ;`). Such a line reads, so it can be saved, but **it doesn't compile**: the error says what's missing ("This value is missing. Fill it in."). This is how the graph editor saves a new node whose fields haven't been filled in yet (section 12). A value can't be left out before a `,` (`Hint("{0}", , 2);` is an error), and a missing argument at the end is simply an argument that wasn't given.
+A value can be **left empty** where it comes right before a `)` or `;`: `if ()`, `while ()`, `_x = ;`, `_a > ;`, `forEach (_e in )`. So can the variable of an assignment or `++`/`--` (`= 5;`, `+= 2;`, `++;`) and the name after `label` or `goto` (`label ;`). Such a line reads, so it can be saved, but **it doesn't compile**: the error says what's missing ("This value is missing. Fill it in."). This is how the graph editor saves a new node whose fields haven't been filled in yet (section 12). A value can't be left out before a `,` (`WriteLog("{0}", , 2);` is an error), and a missing argument at the end is simply an argument that wasn't given.
 
 ### Assignment statements
 | Form | Meaning | Allowed types |
@@ -498,7 +500,7 @@ int[][] _grid = [[1, 2], [3]];
 
 ### Array literals
 - Where the expected type is known (a declaration, an assignment, a typed argument, a return value), each element must fit the element type: `_a = [1, "x"];` for an `int[] _a` is a compile error.
-- Where it isn't known (e.g. an extra argument to `Hint`), the type is worked out from the elements: `[1, 2]` is `int[]`, `[1, 2.5]` is `float[]`, `[[], [1]]` is `int[][]`. Mixing types that don't fit together (`[1, "x"]`) is a compile error.
+- Where it isn't known (e.g. an extra argument to `WriteLog`), the type is worked out from the elements: `[1, 2]` is `int[]`, `[1, 2.5]` is `float[]`, `[[], [1]]` is `int[][]`. Mixing types that don't fit together (`[1, "x"]`) is a compile error.
 - `[]` (or an array of only `nil`s) whose type can't be worked out is a compile error, e.g. `Count([])`. Declare a typed variable first.
 - An array literal where a non-array is expected is a compile error, except where a vector is expected (section 3, Vectors).
 
@@ -579,14 +581,14 @@ WriteLog("There are {0} things left.", _thingCount);
 _t = Random(3.0, 5.0);
 ```
 
-- Command names are written in PascalCase (`Hint`, `SetPos`, `RandomInt`), and so are their parameter names (`Msg`, `Time`, `Min`), since they label the fields of the command's graph node. A parameter can also have a short description, shown when hovering its value on the node: `.Param(TEXT("Time"), Double, TEXT("Seconds"))`. Registering a command with a parameter name that starts with a lowercase letter logs a warning.
-- For the graph editor, a signature can also have a category and a one-line description (`.InCategory(TEXT("Actors")).Describe(TEXT("Moves the actor."))`), and a variadic command can choose how its extra values are labelled (`.Variadic(TEXT("{"), 0, TEXT("}"))` gives `{0}`, `{1}`, ...; the default gives `Value 1`, `Value 2`, ...). `.WithPlaceholders()` after a parameter marks it as a text whose `{0}`, `{1}`, ... the extra values fill, as `Hint`, `WriteLog` and `Format` do; the graph editor then shows a row for each placeholder (section 12).
+- Command names are written in PascalCase (`WriteScreen`, `SetPos`, `RandomInt`), and so are their parameter names (`Text`, `Time`, `Min`), since they label the fields of the command's graph node. A parameter can also have a short description, shown when hovering its value on the node: `.Param(TEXT("Time"), Double, TEXT("Seconds"))`. Registering a command with a parameter name that starts with a lowercase letter logs a warning.
+- For the graph editor, a signature can also have a category and a one-line description (`.InCategory(TEXT("Actors")).Describe(TEXT("Moves the actor."))`), and a variadic command can choose how its extra values are labelled (`.Variadic(TEXT("{"), 0, TEXT("}"))` gives `{0}`, `{1}`, ...; the default gives `Value 1`, `Value 2`, ...). `.WithPlaceholders()` after a parameter marks it as a text whose `{0}`, `{1}`, ... the extra values fill, as `WriteLog`, `Format` and `FormatText` do; the graph editor then shows a row for each placeholder (section 12).
 - A signature also says whether the command is one of the plugin's own (`bBuiltIn`). `Bango::RegisterBuiltinCommands` sets it on every command it registers; a game's commands leave it false (the default), so there's nothing extra to set when defining one. The plugin's categories are Actors, Flow Control (`Sleep`, `Exec`), Math, Text, Time and Vectors.
 - A command's signature declares:
   - **Target:** either none, or a required target of one type. A command with a target can't be called without one, and vice versa. *Guideline (not yet a fixed rule):* give a command a target only if it also takes at least one argument (`@john Speak("Hi")`, `_who SetPos(_p)`). A command that only needs the thing it works on takes it as its first and only argument instead (`GetPos(_who)`, `IsNull(_who)`).
   - **Parameters:** typed. Trailing parameters may be **optional**. Normally a `nil` variable passed to a command, or an entity naming no actor, stops the script before the command runs. `.MayBeNil()` after a `.Param(...)` hands the command that argument as it is instead, `nil` included, and leaves the actor check to the command (as `IsNull` does).
   - **Number parameters:** `.NumberParam(TEXT("A"))` adds a parameter that takes an `int` or a `float` and hands it on as it is (a `float` parameter would turn an `int` into a `float`). Signatures, errors and the graph editor show its type as `number`. An undeclared global passed to one is checked to be a number when the command is called.
-  - **Variadic:** optionally, any number of extra arguments of any type after the parameters (like `Hint`'s `{0}` values).
+  - **Variadic:** optionally, any number of extra arguments of any type after the parameters (like `WriteLog`'s `{0}` values).
   - **Return type:** optional. `.ReturnsNumber()` gives back a **number** whose type follows the number parameters, like `+` (section 5): an `int` if every number argument is an `int`, a `float` if any is a `float`. The compiler works the type out at each call, so `_i = Max(_a, 2.5);` for an `int _i` is a compile error, the same as `_i = _a + 2.5;`; say how to make it an int (`_i = Round(Max(_a, 2.5));`). If one of them is an undeclared global (and none is a `float`), the type is known only when the script runs, and storing a `float` in an `int` stops the script then. The command must give back that type (an `int` where a `float` is expected is turned into a `float`; a `float` where an `int` is expected stops the script), and such a command can't be latent.
   - **Discardable:** for a command with a return type, whether a script may call it on a line of its own and throw the value away (`.Discardable()`). Without it, the value **must be used** (see below).
 - Calling a command with the wrong number of arguments, or an argument or target of the wrong type, is a compile error. The error shows the command's signature.
@@ -606,19 +608,19 @@ _t = Random(3.0, 5.0);
 Strings and texts use the same placeholders, Unreal's: `{0}`, `{1}`, ..., with a backtick escaping the next character (`` `{ `` is a literal `{`, ``` `` ``` a backtick). `%` is just a character.
 
 - **Strings** (`WriteLog`, `Format`): described below.
-- **Texts** (`Hint`, `FormatText`): filled by `FText::Format`, so translators can move them around: `Hint(LOCTEXT("Left", "{0} things left"), _count)`. Ints and floats are formatted as numbers for the current language, texts are inserted as they are, and anything else (strings, entities, arrays, bools) is inserted as it would be by `Format`, untranslated. A backtick escapes the next character (`` `{ `` is a literal `{`). Named placeholders like `{Name}` aren't supported: they're a compile error when the text is a literal, and stop the script otherwise. Unreal's plural and gender forms (`{0}|plural(one=thing,other=things)`) work, since they're part of the translated text.
+- **Texts** (`FormatText`): filled by `FText::Format`, so translators can move them around: `FormatText(LOCTEXT("Left", "{0} things left"), _count)`. Ints and floats are formatted as numbers for the current language, texts are inserted as they are, and anything else (strings, entities, arrays, bools) is inserted as it would be by `Format`, untranslated. A backtick escapes the next character (`` `{ `` is a literal `{`). Named placeholders like `{Name}` aren't supported: they're a compile error when the text is a literal, and stop the script otherwise. Unreal's plural and gender forms (`{0}|plural(one=thing,other=things)`) work, since they're part of the translated text.
 
 The rules for which placeholders need values below apply to both kinds.
 
 `WriteLog` and `Format` replace `{0}`, `{1}`, ... in their text with the extra arguments, in one pass, with `FText::Format`'s rules: a backtick makes the next character literal, and anything else that isn't a numbered placeholder (`{Name}`, a `{` with no `}`) is shown as it is. Strings appear without quotes, entities as their name, arrays as `[1, 2]`. A `nil` value shows as `nil`.
 
-Every placeholder needs a value. When the text is written as a literal (`WriteLog("{0} and {1}", _a);`, `Hint(LOCTEXT("K", "{0} and {1}"), _a);`), a placeholder with no value after it is a **compile error**: *"This text uses {1}, but only 1 value comes after it."* This applies to any command marked `.WithPlaceholders()`, wherever the call is (`_s = Format("{0}", _a) + Format("{1}", _b);` fails on the second). When the text is worked out while the script runs (`WriteLog(_text, 1);`), a placeholder with no value stops the script. A `nil` value for a text placeholder stops the script too.
+Every placeholder needs a value. When the text is written as a literal (`WriteLog("{0} and {1}", _a);`, `_t = FormatText(LOCTEXT("K", "{0} and {1}"), _a);`), a placeholder with no value after it is a **compile error**: *"This text uses {1}, but only 1 value comes after it."* This applies to any command marked `.WithPlaceholders()`, wherever the call is (`_s = Format("{0}", _a) + Format("{1}", _b);` fails on the second). When the text is worked out while the script runs (`WriteLog(_text, 1);`), a placeholder with no value stops the script. A `nil` value for a text placeholder stops the script too.
 
 ### Built-in commands
 
 | Command | Effect |
 |---|---|
-| `Hint(text Msg, ...)` | Shows text to the player, with `{0}`, `{1}`, ... filled in. Games show it in their own UI by binding the script subsystem's **OnHint** event (which gets a Text); otherwise it appears as on-screen debug text. |
+| `WriteScreen(string Text, float Seconds?)` | Shows a message on screen for `Seconds` (none: the **Write Screen Seconds** setting, 5 by default), and writes it to the output log. Fails for a negative time. For testing and debugging, like Blueprint's Print String; text a game shows its players goes through the game's own commands. Without a game world, it only writes to the log. A localized text is shown with `WriteScreen(ToString(...))`, a formatted one with `WriteScreen(Format("...", ...))`. |
 | `WriteLog(string Msg, ...)` | Writes text to the output log. |
 | `Format(string Text, ...)` → `string` | Returns the formatted text. Also the way to turn numbers into strings. |
 | `FormatText(text Text, ...)` → `text` | Returns the text with `{0}`, `{1}`, ... filled in, still translatable. |
@@ -727,7 +729,7 @@ sequence                              //@5(20, 0)
 	Sleep(2);
 }
 {
-	Hint(LOCTEXT("Open", "The gate is open."));
+	WriteScreen("The gate is open.");
 }
 WriteLog("both done");                // after both blocks
 ```
@@ -741,7 +743,7 @@ WriteLog("both done");                // after both blocks
 `spawn` is followed by one block. It starts the block as a **separate running copy of the script** and carries on with what follows straight away, without waiting for it. Written as an assignment, `_id = spawn { ... }`, it also stores the copy's id in an `int` variable (or an element of an `int` array), so it can be stopped or waited for: `Abort(_id)`, `WaitFor(_id)`. Only `=` works (not `+=` and the like), and only on its own line: a spawn isn't a value to use in other expressions. The id is stored after the variables are copied, so the copy doesn't see its own id:
 
 ```
-Hint(LOCTEXT("Wait", "The gate opens in two seconds."));
+WriteScreen("The gate opens in two seconds.");
 spawn                                 //@7(20, 0)
 {
 	Sleep(2);
@@ -766,16 +768,16 @@ switch (_answer)                      //@6(20, 0)
 {
 	case 1:
 	{
-		Hint(LOCTEXT("Yes", "Agreed."));
+		WriteScreen("Agreed.");
 	}
 	case 2, 3:
 	{
-		Hint(LOCTEXT("Maybe", "Let me think."));
+		WriteScreen("Let me think.");
 		Sleep(1);
 	}
 	default:
 	{
-		Hint(LOCTEXT("No", "No deal."));
+		WriteScreen("No deal.");
 	}
 }
 WriteLog("answered");                 // after whichever case ran
@@ -1022,9 +1024,7 @@ The **Spawn Bango Script** node reads the script's `inputs` line and creates one
 | **Load Bango State** (bytes) | Replaces all running scripts and globals with saved ones. |
 | **Reset Bango State** | Stops all scripts and clears all globals, e.g. for a new game. |
 
-The script subsystem (`UBangoScriptSubsystem`) also has two Blueprint events:
-- **OnHint** (Text) for showing `Hint` text in game UI. It gets an `FText`, already formatted, in the current language.
-- **OnScriptFailed** (handle, error), fired when a script stops with an error.
+The script subsystem (`UBangoScriptSubsystem`) also has a Blueprint event, **OnScriptFailed** (handle, error), fired when a script stops with an error.
 
 ### Translation
 Bango scripts are translated with Unreal's localization tools. Each Bango Script asset (section 15) reports its texts to Unreal's asset gathering itself: every `LOCTEXT`, `NSLOCTEXT`, `NOTELOCTEXT` and `NSNOTELOCTEXT`, with its namespace (from `#define LOCTEXT_NAMESPACE` for `LOCTEXT` and `NOTELOCTEXT`), its key, and for `NOTELOCTEXT` its notes for translators. This happens when the asset is saved (the texts are kept in the package), so a script saved before this existed needs saving once more (or a gather with the gather cache skipped).
@@ -1085,7 +1085,7 @@ The save data has a format version. Data from an older version (such as saves ma
 | Reload running scripts when their file is saved, in the editor (hot reload) | on |
 | Instructions per frame before the infinite-loop guard stops a script | 1,000,000 |
 | Nested function calls | 200 |
-| How long Hint text stays on screen when OnHint isn't bound | 5 seconds |
+| How long a WriteScreen message stays on screen when the script doesn't say (Write Screen Seconds) | 5 seconds |
 
 ---
 
@@ -1222,11 +1222,11 @@ A statement that is exactly one call (`[target] Name(args);`) gets a **dedicated
 |---|---|
 | **Target** | the command takes a target (`@john Speak(...)`) |
 | one field per parameter | labelled with the parameter's name; optional ones may be left empty |
-| extra values | variadic commands; labelled from the signature (`{0}`, `{1}`, ... for `WriteLog`, `Format`, `Hint` and `FormatText`; `Value 1`, `Value 2`, ... by default). For these commands (and others marked `.WithPlaceholders()`), when the text is a literal there is a row for every placeholder it uses, up to `{31}`, even if it has no value yet: changing `"Test {0} {1}"` to `"Test {0} {1} {2}"` adds a `{2}` row, shown as *missing* until it's filled in. A row left *missing* is **saved as `nil`** (`WriteLog("Test {0} {1} {2}", 1, 2, nil);`), so the text shows `nil` there; after reopening, the row shows `nil`. Values beyond the placeholders still get rows. |
+| extra values | variadic commands; labelled from the signature (`{0}`, `{1}`, ... for `WriteLog`, `Format` and `FormatText`; `Value 1`, `Value 2`, ... by default). For these commands (and others marked `.WithPlaceholders()`), when the text is a literal there is a row for every placeholder it uses, up to `{31}`, even if it has no value yet: changing `"Test {0} {1}"` to `"Test {0} {1} {2}"` adds a `{2}` row, shown as *missing* until it's filled in. A row left *missing* is **saved as `nil`** (`WriteLog("Test {0} {1} {2}", 1, 2, nil);`), so the text shows `nil` there; after reopening, the row shows `nil`. Values beyond the placeholders still get rows. |
 
 This covers registered commands, this script's functions, and the array commands. A command whose value can be thrown away (`_a Pop();`, `AskChoice("A", "B");`, a script function) can be a node on its own; the node shows no row for the value.
 
-**Commands whose value must be used never get a node of their own** (section 7): `Format`, `Random`, `Count` and the like only appear inside a field's text, such as a Set's To (`_s = Format("{0}", _n)`) or a Hint's value. A file that has one on a line of its own shows it as that command's node with an **ERROR!** banner saying so, and it doesn't compile. The add-node menu leaves these commands out.
+**Commands whose value must be used never get a node of their own** (section 7): `Format`, `Random`, `Count` and the like only appear inside a field's text, such as a Set's To (`_s = Format("{0}", _n)`) or a WriteScreen's Text. A file that has one on a line of its own shows it as that command's node with an **ERROR!** banner saying so, and it doesn't compile. The add-node menu leaves these commands out.
 
 **A line that stores a value is about storing it.** Any assignment is a **Set** node (or Add To and the like), even when its value is a call: `_t = Random(1.0, 2.0);` is a **Set** node with Var `_t` and To `Random(1.0, 2.0)`. So a line never changes kind depending on what its value is.
 
@@ -1244,7 +1244,7 @@ Problems visible from the line alone show Blueprint's **ERROR!** banner on the n
 - **Fields:** click a value to edit it. Enter or clicking elsewhere applies it; Escape cancels. Every edit is checked before it's applied: the node's text must still read as code for its kind (one line, valid syntax). A refused edit leaves the node alone and a notification says why. Types and names aren't checked until Compile.
   - Clearing an optional field removes it with its separator (`, ` or ` = `). Only the last argument can be removed. An optional argument after a missing one is locked ("fill in the values above first").
   - **Text fields** (any field whose type is `string`, like WriteLog's Msg or a string default) are typed as plain text, without quotes: typing `Say "hi"` saves `"Say \"hi\""`. The string escapes of section 3 are added when saving and removed for editing, so quotes never need escaping. Typing `\n` or `\t` gives a line break or tab, and `\\` a backslash; a backslash before anything else is just a backslash. The field shows the text itself in a normal font (line breaks and tabs as `\n` and `\t`), or *empty text* for `""`.
-  - **Localized text fields** (type `text`, like Hint's Msg) are typed the same way, and show the source text. Typing in an empty one makes a `LOCTEXT` with a new random key; retyping one keeps its key, namespace and notes (or keeps an `INVTEXT` an `INVTEXT`). The arrow at the end of the field opens rows under it, like an FText property's advanced options:
+  - **Localized text fields** (type `text`, like FormatText's Text) are typed the same way, and show the source text. Typing in an empty one makes a `LOCTEXT` with a new random key; retyping one keeps its key, namespace and notes (or keeps an `INVTEXT` an `INVTEXT`). The arrow at the end of the field opens rows under it, like an FText property's advanced options:
     - **Translated**: a checkbox. Unchecking it makes the text an `INVTEXT` (its key, namespace and notes are dropped, and the rows below are hidden); checking it makes it a `LOCTEXT` again, with a new key.
     - **Key**: can't be empty.
     - **Namespace**: empty means the script's namespace, from Script Start (`LOCTEXT`); filling it in gives `NSLOCTEXT`.
@@ -1300,13 +1300,13 @@ function void Nag()
 
 if (!IsNil(foundThings) && foundThings >= 10)   //@4(0, 3)
 {
-	Hint(LOCTEXT("FoundTen", "You found at least 10 things!"));    //@5(1, 4)
+	WriteScreen(ToString(LOCTEXT("FoundTen", "You found at least 10 things!")));    //@5(1, 4)
 	questLog Push("Found 10 things");              //@6(1, 5)
 }
 
 for (int _i = 0; _i < 3; _i++)     //@7(0, 6)
 {
-	Hint(LOCTEXT("Countdown", "Countdown: {0}"), 3 - _i);          //@8(1, 7)
+	WriteScreen(ToString(FormatText(LOCTEXT("Countdown", "Countdown: {0}"), 3 - _i)));    //@8(1, 7)
 	Sleep(1.0);                    //@9(1, 8)
 }
 
@@ -1385,7 +1385,7 @@ Scripts become assets: a **Bango Script** asset (`UBangoScriptAsset`, a `.uasset
 - A linked script shows its file's path under the toolbar, and the editor's existing changed-on-disk handling (section 12) watches the `.bango` file. For an embedded script it watches the asset instead (changed by source control, say).
 
 ### Inline scripts
-An **`FBangoInlineScript`** (a struct, usable in C++ and Blueprint) holds a script in a property of any class: `UPROPERTY(EditAnywhere) FBangoInlineScript OnTriggerActivation;`. It's for small scripts that belong to one thing, usually a line or two: `Sleep(4); player AddItem("Pistol"); Hint(LOCTEXT("Got", "You got a pistol!"));`. It can start with a `#define inputs (...)` line, whose values its spawner passes, in order.
+An **`FBangoInlineScript`** (a struct, usable in C++ and Blueprint) holds a script in a property of any class: `UPROPERTY(EditAnywhere) FBangoInlineScript OnTriggerActivation;`. It's for small scripts that belong to one thing, usually a line or two: `Sleep(4); player AddItem("Pistol"); WriteScreen("You got a pistol!");`. It can start with a `#define inputs (...)` line, whose values its spawner passes, in order.
 
 - **In the details panel**, it's a box to type the script in, with the script text pane's colours and autocomplete. It grows with the script up to about ten lines, then scrolls. What's typed is applied when the box loses focus, as one undoable change (for every selected object). With several objects selected whose scripts differ, it says **Multiple Values** and can't be typed in.
 - **Edit** opens the full graph editor on the script, in a **window of its own**, titled with the object and the property ("Door 1: On Opened", with a `*` while it has unsaved changes). **Save** there writes the property, as one undoable change; closing the window asks about unsaved changes. While the window is open, the property's box can't be typed in ("Open in a script window."), and Edit becomes **Show Window**, which brings the window to the front. Each property has at most one window. Edit needs a single selected object.

@@ -46,12 +46,12 @@ struct BANGOSCRIPTS_API FBangoCommandSignature
 	TArray<FBangoCommandParam> Params;
 	/** How many of Params must be given. The rest are optional. -1 means all are required. */
 	int32 NumRequiredParams = -1;
-	/** If true, any number of extra arguments of any type may follow Params: `Hint("{0} of {1}", _a, _b);` */
+	/** If true, any number of extra arguments of any type may follow Params: `WriteLog("{0} of {1}", _a, _b);` */
 	bool bVariadic = false;
 	/**
 	 * How the graph editor labels the extra values: the prefix, a number counting from VariadicFirstIndex, then
-	 * the suffix. The default gives "Value 1", "Value 2", ...; Log, Format and Hint use "{", 0 and "}" to match {0}, {1}, ...,
-	 * and Hint and FormatText use "{", 0 and "}" to match {0}, {1}, ...
+	 * the suffix. The default gives "Value 1", "Value 2", ...; WriteLog, Format and FormatText use "{", 0 and "}"
+	 * to match {0}, {1}, ...
 	 */
 	FString VariadicLabelPrefix = TEXT("Value ");
 	int32 VariadicFirstIndex = 1;
@@ -113,7 +113,7 @@ struct BANGOSCRIPTS_API FBangoCommandSignature
 	FBangoCommandSignature& Optional();
 	/** Any number of extra values may follow the parameters. LabelPrefix and FirstIndex only change how the graph editor labels them. */
 	FBangoCommandSignature& Variadic(const FString& LabelPrefix = TEXT("Value "), int32 FirstIndex = 1, const FString& LabelSuffix = FString());
-	/** The parameter added last is a text whose {0}, {1}, ... the extra values fill (like Hint's). Only changes the graph editor's rows. */
+	/** The parameter added last is a text whose {0}, {1}, ... the extra values fill (like WriteLog's). Only changes the graph editor's rows. */
 	FBangoCommandSignature& WithPlaceholders();
 	/** The command returns a value. Scripts must use it (`_x = Name(...)`), unless Discardable() is also called. */
 	FBangoCommandSignature& Returns(const FBangoType& Type);

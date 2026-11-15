@@ -55,9 +55,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoParserMetadataTest, "Bango.Parser.NodeMet
 bool FBangoParserMetadataTest::RunTest(const FString& Parameters)
 {
 	const TCHAR* Source =
-		TEXT("Hint(\"x\");\n")
-		TEXT("Hint(\"y\"); //@12(4,7)\n")
-		TEXT("Hint(\"z\"); //@ 13 ( -1 , 7 )\n")
+		TEXT("Talk(\"x\");\n")
+		TEXT("Talk(\"y\"); //@12(4,7)\n")
+		TEXT("Talk(\"z\"); //@ 13 ( -1 , 7 )\n")
 		TEXT("if (a) //@14(2, 2)\n")
 		TEXT("{\n")
 		TEXT("\tb(); //@15(3, 3)\n")
@@ -94,7 +94,7 @@ bool FBangoParserMetadataTest::RunTest(const FString& Parameters)
 	// Errors report the node of the line they're on.
 	FBangoScript Broken;
 	FBangoCompileError BrokenError;
-	TestFalse(TEXT("broken script fails"), Bango::ParseScript(TEXT("Hint(\"a\" 5); //@5(0, 0)"), TEXT("Quest/Intro.bango"), Broken, BrokenError));
+	TestFalse(TEXT("broken script fails"), Bango::ParseScript(TEXT("Talk(\"a\" 5); //@5(0, 0)"), TEXT("Quest/Intro.bango"), Broken, BrokenError));
 	TestEqual(TEXT("error node id"), BrokenError.NodeID, (int64)5);
 	TestTrue(TEXT("error text"), BrokenError.ToString().Contains(TEXT("Quest/Intro.bango(1:10) [node 5]"), ESearchCase::CaseSensitive));
 	return true;

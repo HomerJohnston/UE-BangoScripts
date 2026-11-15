@@ -3817,7 +3817,7 @@ bool SBangoScriptEditor::BuildCurrentDocument(FBangoGraphDocument& OutDocument, 
 	{
 		return false;
 	}
-	// A placeholder left without a value (Hint's {2} shown as "missing") is saved as nil.
+	// A placeholder left without a value (WriteLog's {2} shown as "missing") is saved as nil.
 	if (LayoutContext.IsValid())
 	{
 		Bango::FillMissingPlaceholders(OutDocument, *LayoutContext);

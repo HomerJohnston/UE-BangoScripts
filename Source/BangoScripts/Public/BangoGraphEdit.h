@@ -179,14 +179,14 @@ namespace Bango
 	};
 
 	/**
-	 * Warnings Compile shows for a node: each placeholder (Hint's {2}) that has no value, or `nil`.
+	 * Warnings Compile shows for a node: each placeholder (WriteLog's {2}) that has no value, or `nil`.
 	 * A missing one is saved as nil (see FillMissingPlaceholders), so the text shows "nil" there.
 	 */
 	BANGOSCRIPTS_API void GetNodeWarnings(const FBangoNodeLayout& Layout, TArray<FBangoFieldWarning>& OutWarnings);
 
 	/**
-	 * Gives every placeholder without a value a `nil`, in order: `Hint("{0} {1} {2}", 1)` becomes
-	 * `Hint("{0} {1} {2}", 1, nil, nil)`. This is how the graph editor saves (and compiles) a node whose
+	 * Gives every placeholder without a value a `nil`, in order: `WriteLog("{0} {1} {2}", 1)` becomes
+	 * `WriteLog("{0} {1} {2}", 1, nil, nil)`. This is how the graph editor saves (and compiles) a node whose
 	 * placeholder rows are left missing. Returns true if the text changed.
 	 */
 	BANGOSCRIPTS_API bool FillMissingPlaceholders(FBangoGraphNode& Node, bool bInFunctionGraph, const FBangoNodeLayoutContext& Context);

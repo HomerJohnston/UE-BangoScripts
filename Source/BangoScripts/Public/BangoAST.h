@@ -344,7 +344,7 @@ struct FBangoIncDecStmt : FBangoStmt
 	FBangoExprPtr Target;
 };
 
-/** A call used as a statement: `Hint("x");` Call is always an FBangoCallExpr. */
+/** A call used as a statement: `WriteScreen("x");` Call is always an FBangoCallExpr. */
 struct FBangoCallStmt : FBangoStmt
 {
 	static constexpr EBangoStmtKind StaticKind = EBangoStmtKind::Call;
@@ -598,7 +598,7 @@ namespace Bango
 {
 	/**
 	 * A compact one-line dump of the tree, for tests and debugging. For example:
-	 * `(global int gold) (if (> gold 10) ((call Hint "rich")))`
+	 * `(global int gold) (if (> gold 10) ((call WriteScreen "rich")))`
 	 */
 	BANGOSCRIPTS_API FString DumpScript(const FBangoScript& Script);
 	BANGOSCRIPTS_API FString DumpExpr(const FBangoExpr& Expr);

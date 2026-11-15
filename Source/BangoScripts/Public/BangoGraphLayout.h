@@ -22,7 +22,7 @@ enum class EBangoNodeStyle : uint8
 	ScriptEntry,
 	/** A function graph's entry: the return type, then one row per parameter. */
 	FunctionEntry,
-	/** A registered C++ command, like Hint or SetPos. */
+	/** A registered C++ command, like WriteScreen or SetPos. */
 	Command,
 	/** A call to a function defined in this script. */
 	ScriptFunction,
@@ -63,7 +63,7 @@ struct BANGOSCRIPTS_API FBangoNodeField
 	 * the editor's INPUTS panel edits. Bango::SetNodeField refuses it.
 	 */
 	bool bReadOnly = false;
-	/** True for an extra value that a placeholder in a literal text uses (Hint's {0}, {1}, ...). */
+	/** True for an extra value that a placeholder in a literal text uses (WriteLog's {0}, {1}, ...). */
 	bool bPlaceholder = false;
 
 	/**

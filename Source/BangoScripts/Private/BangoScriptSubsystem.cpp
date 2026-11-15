@@ -715,16 +715,12 @@ void UBangoScriptSubsystem::Tick(float DeltaTime)
 	}
 }
 
-void UBangoScriptSubsystem::ShowHint(const FText& Text)
+void UBangoScriptSubsystem::WriteScreen(const FString& Text, float Seconds)
 {
-	UE_LOG(LogBango, Display, TEXT("Hint: %s"), *Text.ToString());
-	if (OnHint.IsBound())
+	UE_LOG(LogBango, Display, TEXT("WriteScreen: %s"), *Text);
+	if (GEngine)
 	{
-		OnHint.Broadcast(Text);
-	}
-	else if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, GetDefault<UBangoSettings>()->HintDisplaySeconds, FColor::White, Text.ToString());
+		GEngine->AddOnScreenDebugMessage(-1, Seconds, FColor::White, Text);
 	}
 }
 

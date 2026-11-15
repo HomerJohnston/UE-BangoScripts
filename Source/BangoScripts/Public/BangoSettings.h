@@ -30,7 +30,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Limits", meta = (ClampMin = "8"))
 	int32 MaxCallDepth = 200;
 
-	/** How long `Hint` messages stay on screen when nothing is bound to the Bango script subsystem's OnHint event. */
+	/** How long a `WriteScreen` message stays on screen when the script doesn't say. */
 	UPROPERTY(Config, EditAnywhere, Category = "Commands", meta = (ClampMin = "0.5"))
-	float HintDisplaySeconds = 5.0f;
+	float WriteScreenSeconds = 5.0f;
 };

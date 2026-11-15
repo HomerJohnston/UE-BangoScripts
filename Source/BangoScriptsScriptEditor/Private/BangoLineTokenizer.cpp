@@ -434,7 +434,7 @@ namespace BangoLineTokenizerPrivate
 					continue;
 				}
 
-				// Plain strings (Log, Format, Hint) and a localized text's source have the same placeholders, as in
+				// Plain strings (WriteLog, Format) and a localized text's source have the same placeholders, as in
 				// FText::Format: {0}, {1}, ..., with a backtick escaping the next character.
 				if (Style == EStringStyle::LocSource || Style == EStringStyle::Plain)
 				{

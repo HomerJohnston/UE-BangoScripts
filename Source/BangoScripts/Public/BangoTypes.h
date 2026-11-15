@@ -253,7 +253,7 @@ namespace Bango
 	BANGOSCRIPTS_API int32 CountFormatValues(const FString& Text);
 
 	/**
-	 * How many values a text pattern (FormatText, Hint) needs: one more than its highest {n}, or 0 if it has none.
+	 * How many values a text pattern (FormatText, WriteLog) needs: one more than its highest {n}, or 0 if it has none.
 	 * A backtick escapes the next character, as in FText::Format (`{ is a literal brace). If the pattern has a
 	 * named placeholder like {Name}, returns -1 and puts the name in OutNamedPlaceholder.
 	 */

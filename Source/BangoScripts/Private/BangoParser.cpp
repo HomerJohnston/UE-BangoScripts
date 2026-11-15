@@ -658,7 +658,7 @@ namespace BangoParserPrivate
 
 		bool RegisterNode(FBangoStmt& Stmt, int32 Line)
 		{
-			// Several statements can share a line (`Sleep(4); Hint(...);`, handy in an inline script), but not one with
+			// Several statements can share a line (`Sleep(4); WriteScreen(...);`, handy in an inline script), but not one with
 			// node metadata: that line is one graph node. (The graph editor writes each statement on a line of its own.)
 			if (NodeLines.Contains(Line) && Lex.Metadata.Contains(Line))
 			{
@@ -705,7 +705,7 @@ namespace BangoParserPrivate
 				return true;
 			}
 			const FBangoToken& Next = Cur();
-			// (On a line without node metadata, statements may share the line: `if (_a) { Hint(...); } Sleep(1);`.)
+			// (On a line without node metadata, statements may share the line: `if (_a) { WriteScreen(...); } Sleep(1);`.)
 			if (Next.Loc.Line == Close.Loc.Line && Next.Kind != EBangoTokenKind::EndOfFile && Next.Kind != EBangoTokenKind::RBrace
 				&& Next.Kind != EBangoTokenKind::DisabledEnd && Lex.Metadata.Contains(Close.Loc.Line))
 			{

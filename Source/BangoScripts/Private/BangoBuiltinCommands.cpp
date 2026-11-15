@@ -5,13 +5,14 @@
 #include "BangoActorRegistry.h"
 #include "BangoLog.h"
 #include "BangoScriptSubsystem.h"
+#include "BangoSettings.h"
 #include "BangoText.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 
 namespace BangoBuiltinPrivate
 {
-	/** Formats Args[0] with Args[1...] the way Hint does. */
+	/** Formats Args[0] with Args[1...] the way WriteLog and Format do. */
 	static bool FormatArgs(FBangoCommandCall& Call, FString& OutText)
 	{
 		TArray<FBangoValue> Values;
@@ -28,7 +29,7 @@ namespace BangoBuiltinPrivate
 		return true;
 	}
 
-	/** Formats the text Args[0] with Args[1...] the way Hint and FormatText do ({0}, {1}, ...). */
+	/** Formats the text Args[0] with Args[1...] the way FormatText does ({0}, {1}, ...). */
 	static bool FormatTextArgs(FBangoCommandCall& Call, FText& OutText)
 	{
 		TArray<FBangoValue> Values;
@@ -187,26 +188,35 @@ namespace Bango
 		const FBangoType TextType = FBangoType::Text();
 		const FBangoType Vector3 = FBangoType::Vector3();
 
-		// Hint(text, ...): shows localized text to the player, with {0}, {1}, ... filled in. Bind
-		// UBangoScriptSubsystem::OnHint to show it in your own UI.
+		// WriteScreen(text, seconds?): shows a message on screen (and in the output log), like Print String. Text a game
+		// shows its players goes through commands of the game's own.
 		{
 			FBangoCommand Command;
-			Command.Signature = FBangoCommandSignature::Make(TEXT("Hint")).Param(TEXT("Msg"), TextType).WithPlaceholders().Variadic(TEXT("{"), 0, TEXT("}")).InCategory(TEXT("Text"))
-				.Describe(TEXT("Shows text to the player, with {0}, {1}, ... replaced by the extra values."));
+			Command.Signature = FBangoCommandSignature::Make(TEXT("WriteScreen"))
+				.Param(TEXT("Text"), String)
+				.Optional()
+				.Param(TEXT("Seconds"), Double, TEXT("How long it stays on screen (none: the Write Screen Seconds setting, 5 by default)"))
+				.InCategory(TEXT("Text"))
+				.Describe(TEXT("Shows a message on screen for a few seconds, and writes it to the output log. For testing and debugging, like Print String."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{
-				FText Shown;
-				if (!RequireArgs(Call, 1) || !FormatTextArgs(Call, Shown))
+				if (!RequireArgs(Call, 1))
 				{
 					return EBangoCommandResult::Failed;
 				}
+				const FString Text = Call.Args[0].GetString();
+				const double Seconds = Call.Args.Num() > 1 && !Call.Args[1].IsNil() ? Call.Args[1].GetDouble() : (double)GetDefault<UBangoSettings>()->WriteScreenSeconds;
+				if (Seconds < 0.0)
+				{
+					return Call.Fail(FString::Printf(TEXT("Can't show a message for a negative time (%s seconds)."), *FString::SanitizeFloat(Seconds)));
+				}
 				if (UBangoScriptSubsystem* Subsystem = UBangoScriptSubsystem::Get(Call.WorldContext))
 				{
-					Subsystem->ShowHint(Shown);
+					Subsystem->WriteScreen(Text, (float)Seconds);
 				}
 				else
 				{
-					UE_LOG(LogBango, Display, TEXT("Hint: %s"), *Shown.ToString());
+					UE_LOG(LogBango, Display, TEXT("WriteScreen: %s"), *Text);
 				}
 				return EBangoCommandResult::Done;
 			};

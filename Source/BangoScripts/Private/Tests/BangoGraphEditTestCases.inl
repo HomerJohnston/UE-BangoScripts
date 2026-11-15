@@ -28,15 +28,15 @@ static const FBangoFieldEditTestCase GBangoFieldEditTestCases[] =
 	{ EBangoGraphNodeKind::Call, false, TEXT("Wave()"), 0, TEXT("2"), TEXT("Wave(2)"), EBangoGraphNodeKind::Call },
 	{ EBangoGraphNodeKind::Call, false, TEXT("Wave(2)"), 1, TEXT("1.5"), TEXT("Wave(2, 1.5)"), EBangoGraphNodeKind::Call },
 	{ EBangoGraphNodeKind::Call, false, TEXT("Wave(2, 1.5)"), 1, TEXT(""), TEXT("Wave(2)"), EBangoGraphNodeKind::Call },
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"a\", 1, 2)"), 2, TEXT(""), TEXT("Hint(\"a\", 1)"), EBangoGraphNodeKind::Call },
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"a\", 1, 2)"), 1, TEXT(""), nullptr, EBangoGraphNodeKind::Call },   // a value in the middle can't be removed
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"a\", 1, 2)"), 1, TEXT("_x"), TEXT("Hint(\"a\", _x, 2)"), EBangoGraphNodeKind::Call },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Talk(\"a\", 1, 2)"), 2, TEXT(""), TEXT("Talk(\"a\", 1)"), EBangoGraphNodeKind::Call },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Talk(\"a\", 1, 2)"), 1, TEXT(""), nullptr, EBangoGraphNodeKind::Call },   // a value in the middle can't be removed
+	{ EBangoGraphNodeKind::Call, false, TEXT("Talk(\"a\", 1, 2)"), 1, TEXT("_x"), TEXT("Talk(\"a\", _x, 2)"), EBangoGraphNodeKind::Call },
 	// Placeholder rows without a value can be filled in, in order.
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"Test {0} {1} {2}\", 1, 2)"), 3, TEXT("3"), TEXT("Hint(\"Test {0} {1} {2}\", 1, 2, 3)"), EBangoGraphNodeKind::Call },
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"{0} {1}\")"), 1, TEXT("_a"), TEXT("Hint(\"{0} {1}\", _a)"), EBangoGraphNodeKind::Call },
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"{0} {1}\")"), 2, TEXT("_b"), nullptr, EBangoGraphNodeKind::Call },   // locked: {0} comes first
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"{0} {1}\", 1, 2)"), 2, TEXT(""), TEXT("Hint(\"{0} {1}\", 1)"), EBangoGraphNodeKind::Call },   // the row stays, now missing
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"Test {0} {1}\", 1, 2)"), 0, TEXT("\"Test {0} {1} {2}\""), TEXT("Hint(\"Test {0} {1} {2}\", 1, 2)"), EBangoGraphNodeKind::Call },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Talk(\"Test {0} {1} {2}\", 1, 2)"), 3, TEXT("3"), TEXT("Talk(\"Test {0} {1} {2}\", 1, 2, 3)"), EBangoGraphNodeKind::Call },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Talk(\"{0} {1}\")"), 1, TEXT("_a"), TEXT("Talk(\"{0} {1}\", _a)"), EBangoGraphNodeKind::Call },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Talk(\"{0} {1}\")"), 2, TEXT("_b"), nullptr, EBangoGraphNodeKind::Call },   // locked: {0} comes first
+	{ EBangoGraphNodeKind::Call, false, TEXT("Talk(\"{0} {1}\", 1, 2)"), 2, TEXT(""), TEXT("Talk(\"{0} {1}\", 1)"), EBangoGraphNodeKind::Call },   // the row stays, now missing
+	{ EBangoGraphNodeKind::Call, false, TEXT("Talk(\"Test {0} {1}\", 1, 2)"), 0, TEXT("\"Test {0} {1} {2}\""), TEXT("Talk(\"Test {0} {1} {2}\", 1, 2)"), EBangoGraphNodeKind::Call },
 
 	// Targets
 	{ EBangoGraphNodeKind::Call, false, TEXT("@john Speak(\"Hi\")"), 0, TEXT("@mary"), TEXT("@mary Speak(\"Hi\")"), EBangoGraphNodeKind::Call },
@@ -112,7 +112,7 @@ static const FBangoFieldEditTestCase GBangoFieldEditTestCases[] =
 	{ EBangoGraphNodeKind::Call, false, TEXT("Sleep(1.0)"), 0, TEXT("1.0) // x"), nullptr, EBangoGraphNodeKind::Call },
 	{ EBangoGraphNodeKind::Call, false, TEXT("Sleep(1.0)"), 0, TEXT("1.0); Sleep(2.0"), nullptr, EBangoGraphNodeKind::Call },
 	{ EBangoGraphNodeKind::Call, false, TEXT("Sleep(1.0)"), 0, TEXT("1.0 //@4(1, 1)"), nullptr, EBangoGraphNodeKind::Call },
-	{ EBangoGraphNodeKind::Call, false, TEXT("Hint(\"a\")"), 0, TEXT("\"two\nlines\""), nullptr, EBangoGraphNodeKind::Call },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Talk(\"a\")"), 0, TEXT("\"two\nlines\""), nullptr, EBangoGraphNodeKind::Call },
 	{ EBangoGraphNodeKind::If, false, TEXT("true"), 0, TEXT("true) {"), nullptr, EBangoGraphNodeKind::If },
 };
 
@@ -251,7 +251,7 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 		}
 
 		FBangoTextLiteral Bad;
-		if (Bango::ParseTextLiteral(TEXT("LOCTEXT(\"K\")"), Bad) || Bango::ParseTextLiteral(TEXT("LOCTEXT(\"K\", _s)"), Bad) || Bango::ParseTextLiteral(TEXT("Hint(\"K\", \"S\")"), Bad))
+		if (Bango::ParseTextLiteral(TEXT("LOCTEXT(\"K\")"), Bad) || Bango::ParseTextLiteral(TEXT("LOCTEXT(\"K\", _s)"), Bad) || Bango::ParseTextLiteral(TEXT("Talk(\"K\", \"S\")"), Bad))
 		{
 			OutFailures.Add(TEXT("text: only real text literals are read as one"));
 		}
@@ -312,16 +312,16 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 			}
 		}
 
-		// On a node: Hint's text, Speak's text, and a field that isn't a string.
+		// On a node: Talk's text, Speak's text, and a field that isn't a string.
 		struct FNodeTextCase { const TCHAR* Text; int32 Field; const TCHAR* EditText; const TCHAR* Typed; const TCHAR* After; };
 		const FNodeTextCase NodeCases[] =
 		{
-			{ TEXT("Hint(\"x\")"), 0, TEXT("x"), TEXT("Hi \"there\""), TEXT("Hint(\"Hi \\\"there\\\"\")") },
-			{ TEXT("Hint(\"a\\\"b\")"), 0, TEXT("a\"b"), TEXT("two\\nlines"), TEXT("Hint(\"two\\nlines\")") },
-			{ TEXT("Hint(_name)"), 0, TEXT("=_name"), TEXT("=Format(\"{0}\", 1)"), TEXT("Hint(Format(\"{0}\", 1))") },
-			{ TEXT("Hint(\"x\")"), 0, TEXT("x"), TEXT("=_line"), TEXT("Hint(_line)") },
-			{ TEXT("Hint(\"x\")"), 0, TEXT("x"), TEXT(""), TEXT("Hint(\"\")") },
-			{ TEXT("Hint(\"x\")"), 0, TEXT("x"), TEXT("\\=x"), TEXT("Hint(\"=x\")") },
+			{ TEXT("Talk(\"x\")"), 0, TEXT("x"), TEXT("Hi \"there\""), TEXT("Talk(\"Hi \\\"there\\\"\")") },
+			{ TEXT("Talk(\"a\\\"b\")"), 0, TEXT("a\"b"), TEXT("two\\nlines"), TEXT("Talk(\"two\\nlines\")") },
+			{ TEXT("Talk(_name)"), 0, TEXT("=_name"), TEXT("=Format(\"{0}\", 1)"), TEXT("Talk(Format(\"{0}\", 1))") },
+			{ TEXT("Talk(\"x\")"), 0, TEXT("x"), TEXT("=_line"), TEXT("Talk(_line)") },
+			{ TEXT("Talk(\"x\")"), 0, TEXT("x"), TEXT(""), TEXT("Talk(\"\")") },
+			{ TEXT("Talk(\"x\")"), 0, TEXT("x"), TEXT("\\=x"), TEXT("Talk(\"=x\")") },
 			{ TEXT("@john Speak(\"Hi\")"), 1, TEXT("Hi"), TEXT("It's \"fine\"."), TEXT("@john Speak(\"It's \\\"fine\\\".\")") },
 			{ TEXT("Speak()"), 1, TEXT(""), TEXT("Hello"), TEXT("Speak(\"Hello\")") },
 			{ TEXT("Sleep(1.0)"), 0, TEXT("1.0"), TEXT("2.5"), TEXT("Sleep(2.5)") },
@@ -354,11 +354,11 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 		struct FFillCase { const TCHAR* Text; const TCHAR* Filled; };
 		const FFillCase FillCases[] =
 		{
-			{ TEXT("Hint(\"{0} {1} {2}\", 1)"), TEXT("Hint(\"{0} {1} {2}\", 1, nil, nil)") },
-			{ TEXT("Hint(\"{0}\")"), TEXT("Hint(\"{0}\", nil)") },
-			{ TEXT("Hint(\"{0}\", 1)"), TEXT("Hint(\"{0}\", 1)") },
-			{ TEXT("Hint(\"100% sure\")"), TEXT("Hint(\"100% sure\")") },
-			{ TEXT("Hint(_text)"), TEXT("Hint(_text)") },
+			{ TEXT("Talk(\"{0} {1} {2}\", 1)"), TEXT("Talk(\"{0} {1} {2}\", 1, nil, nil)") },
+			{ TEXT("Talk(\"{0}\")"), TEXT("Talk(\"{0}\", nil)") },
+			{ TEXT("Talk(\"{0}\", 1)"), TEXT("Talk(\"{0}\", 1)") },
+			{ TEXT("Talk(\"100% sure\")"), TEXT("Talk(\"100% sure\")") },
+			{ TEXT("Talk(_text)"), TEXT("Talk(_text)") },
 			{ TEXT("Collect(1)"), TEXT("Collect(1)") },
 		};
 		for (const FFillCase& Case : FillCases)
@@ -375,7 +375,7 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 
 		FBangoGraphNode Node;
 		Node.Kind = EBangoGraphNodeKind::Call;
-		Node.Text = TEXT("Hint(\"{0} {1} {2}\", 1, nil)");
+		Node.Text = TEXT("Talk(\"{0} {1} {2}\", 1, nil)");
 		TArray<Bango::FBangoFieldWarning> Warnings;
 		Bango::GetNodeWarnings(Bango::GetNodeLayout(Node, false, Context), Warnings);
 		if (Warnings.Num() != 2 || Warnings[0].Field != 2 || Warnings[1].Field != 3
@@ -383,7 +383,7 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 		{
 			OutFailures.Add(FString::Printf(TEXT("warnings: expected {1} (nil) on field 2 and {2} (missing) on field 3, got %d warning(s)"), Warnings.Num()));
 		}
-		Node.Text = TEXT("Hint(\"{0}\", 1, nil)");
+		Node.Text = TEXT("Talk(\"{0}\", 1, nil)");
 		Bango::GetNodeWarnings(Bango::GetNodeLayout(Node, false, Context), Warnings);
 		if (Warnings.Num() != 0)
 		{
@@ -392,7 +392,7 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 
 		// A whole document: filled, written and compiled.
 		FBangoGraphDocument Doc;
-		if (!Bango::BuildGraph(TEXT("Hint(\"{0} and {1}\", 1); //@1(0, 0)\nfunction void F()\n{\n\tHint(\"{0}\"); //@2(0, 0)\n};\nF(); //@3(0, 1)\n"), TEXT("test.bango"), Doc, Error))
+		if (!Bango::BuildGraph(TEXT("Talk(\"{0} and {1}\", 1); //@1(0, 0)\nfunction void F()\n{\n\tTalk(\"{0}\"); //@2(0, 0)\n};\nF(); //@3(0, 1)\n"), TEXT("test.bango"), Doc, Error))
 		{
 			OutFailures.Add(FString(TEXT("fill document: build: ")) + Error.ToString());
 		}
@@ -403,7 +403,7 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 			FString WriteError;
 			FBangoProgram Program;
 			if (!Bango::FillMissingPlaceholders(Doc, DocContext) || !Bango::WriteGraphText(Doc, Written, WriteError)
-				|| !Written.Contains(TEXT("Hint(\"{0} and {1}\", 1, nil);")) || !Written.Contains(TEXT("Hint(\"{0}\", nil);"))
+				|| !Written.Contains(TEXT("Talk(\"{0} and {1}\", 1, nil);")) || !Written.Contains(TEXT("Talk(\"{0}\", nil);"))
 				|| !Bango::CompileSource(Written, TEXT("test.bango"), Commands, Program, Error))
 			{
 				OutFailures.Add(FString(TEXT("fill document: expected nils that compile, got:\n")) + Written + Error.ToString());
@@ -414,7 +414,7 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 	// Compile errors land on the right node and field.
 	{
 		const TCHAR* Source =
-			TEXT("Hint(\"ok\");             //@1(0, 0)\n")
+			TEXT("Talk(\"ok\");             //@1(0, 0)\n")
 			TEXT("Sleep(\"not a number\");  //@2(10, 0)\n");
 		FBangoGraphDocument Doc;
 		if (!Bango::BuildGraph(Source, TEXT("test.bango"), Doc, Error))
@@ -454,7 +454,7 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 	// the error is on the first empty field.
 	{
 		FBangoGraphDocument Doc;
-		Bango::BuildGraph(TEXT("int _i = 1;\nHint(\"x\");   //@1(0, 0)\nfunction int Twice(int _n)\n{\n\treturn _n * 2; //@2(0, 0)\n};\n"), TEXT("test.bango"), Doc, Error);
+		Bango::BuildGraph(TEXT("int _i = 1;\nTalk(\"x\");   //@1(0, 0)\nfunction int Twice(int _n)\n{\n\treturn _n * 2; //@2(0, 0)\n};\n"), TEXT("test.bango"), Doc, Error);
 		const FBangoNodeLayoutContext MenuContext = Bango::MakeNodeLayoutContext(Doc, &Commands);
 		TArray<FBangoNodeMenuEntry> Entries;
 		Bango::GetNodeMenuEntries(Doc, MenuContext, Entries);

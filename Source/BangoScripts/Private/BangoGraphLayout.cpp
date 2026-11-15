@@ -435,7 +435,7 @@ namespace BangoGraphLayoutPrivate
 			SetArgumentEdits(Tok, Field, Args, i, NameTok);
 			Out.Fields.Add(Field);
 		}
-		// Extra values: the ones given, plus a row for each placeholder in a literal text (like Hint's "{0} {1}")
+		// Extra values: the ones given, plus a row for each placeholder in a literal text (like WriteLog's "{0} {1}")
 		// that has no value yet, so it can be filled in.
 		int32 NumPlaceholders = 0;
 		if (Callee.bVariadic && Args.IsValidIndex(Callee.PlaceholderParam))

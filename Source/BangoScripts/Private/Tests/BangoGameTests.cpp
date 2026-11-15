@@ -108,13 +108,13 @@ bool FBangoLocalizedTextsTest::RunTest(const FString& Parameters)
 	// INVTEXT, and not texts in disabled nodes.
 	const FString Source =
 		TEXT("#define LOCTEXT_NAMESPACE \"Bango.Test\"\n")
-		TEXT("Hint(LOCTEXT(\"Hello\", \"Hello there\"));\n")
-		TEXT("Hint(NOTELOCTEXT(\"Bye\", \"Goodbye\", \"Said at the door\"));\n")
-		TEXT("Hint(NSLOCTEXT(\"Other.NS\", \"Hey\", \"Hey!\"));\n")
-		TEXT("Hint(LOCTEXT(\"Hello\", \"Hello there\"));\n")
-		TEXT("Hint(INVTEXT(\"not translated\"));\n")
+		TEXT("WriteScreen(ToString(LOCTEXT(\"Hello\", \"Hello there\")));\n")
+		TEXT("WriteScreen(ToString(NOTELOCTEXT(\"Bye\", \"Goodbye\", \"Said at the door\")));\n")
+		TEXT("WriteScreen(ToString(NSLOCTEXT(\"Other.NS\", \"Hey\", \"Hey!\")));\n")
+		TEXT("WriteScreen(ToString(LOCTEXT(\"Hello\", \"Hello there\")));\n")
+		TEXT("WriteScreen(ToString(INVTEXT(\"not translated\")));\n")
 		TEXT("/*\n")
-		TEXT("Hint(LOCTEXT(\"Hidden\", \"Disabled text\"));   //@ 9 (0,0)\n")
+		TEXT("WriteScreen(ToString(LOCTEXT(\"Hidden\", \"Disabled text\")));   //@ 9 (0,0)\n")
 		TEXT("*/\n")
 		TEXT("#undef LOCTEXT_NAMESPACE\n");
 	TArray<FBangoLocalizedTextInfo> Texts;
@@ -127,7 +127,7 @@ bool FBangoLocalizedTextsTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("NOTELOCTEXT"), Texts[1].Key == TEXT("Bye") && Texts[1].Notes == TEXT("Said at the door"));
 		TestTrue(TEXT("NSLOCTEXT"), Texts[2].Namespace == TEXT("Other.NS") && Texts[2].Key == TEXT("Hey"));
 	}
-	TestFalse(TEXT("a script that doesn't read"), Bango::GetLocalizedTexts(TEXT("Hint(LOCTEXT(\"A\""), TEXT("bad.bango"), Texts, Error));
+	TestFalse(TEXT("a script that doesn't read"), Bango::GetLocalizedTexts(TEXT("WriteScreen(ToString(LOCTEXT(\"A\""), TEXT("bad.bango"), Texts, Error));
 	return true;
 }
 
@@ -139,7 +139,7 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 	using namespace BangoGameTestsPrivate;
 	FBangoCommandTable Commands;
 	Bango::RegisterBuiltinCommands(Commands);
-	for (const TCHAR* Name : { TEXT("Hint"), TEXT("WriteLog"), TEXT("Format"), TEXT("FormatText"), TEXT("ToText"), TEXT("ToString"), TEXT("Sleep"), TEXT("Random"), TEXT("RandomInt"), TEXT("Floor"), TEXT("Round"),
+	for (const TCHAR* Name : { TEXT("WriteScreen"), TEXT("WriteLog"), TEXT("Format"), TEXT("FormatText"), TEXT("ToText"), TEXT("ToString"), TEXT("Sleep"), TEXT("Random"), TEXT("RandomInt"), TEXT("Floor"), TEXT("Round"),
 		TEXT("Min"), TEXT("Max"), TEXT("Abs"), TEXT("Clamp"), TEXT("Sin"), TEXT("Cos"), TEXT("SinDegrees"), TEXT("CosDegrees"), TEXT("Time"), TEXT("ToEntity"), TEXT("SetPos"), TEXT("GetPos"), TEXT("SetHidden"), TEXT("DistanceTo"), TEXT("IsNull"),
 		TEXT("Ceil"), TEXT("Sign"), TEXT("Sqrt"), TEXT("Pow"), TEXT("Log"), TEXT("Ln"), TEXT("Lerp"), TEXT("MapRange"), TEXT("InterpTo"), TEXT("DeltaTime"),
 		TEXT("Tan"), TEXT("TanDegrees"), TEXT("Asin"), TEXT("AsinDegrees"), TEXT("Acos"), TEXT("AcosDegrees"), TEXT("Atan"), TEXT("AtanDegrees"), TEXT("Atan2"), TEXT("Atan2Degrees"),
@@ -186,7 +186,8 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 		TEXT("Sleep(0.5);\n")
 		TEXT("Sleep(0);\n")
 		TEXT("WriteLog(\"logged {0}\", 1);\n")
-		TEXT("Hint(LOCTEXT(\"NoWorld\", \"a hint with no world goes to the log, {0}\"), 1);\n")
+		TEXT("WriteScreen(\"a message with no world goes to the log\");\n")
+		TEXT("WriteScreen(Format(\"for {0} seconds\", 2), 2);\n")
 		TEXT("tf = FormatText(LOCTEXT(\"Count\", \"{1}: {0}\"), 2, ToText(\"x\"));\n")
 		TEXT("ts = ToString(NSLOCTEXT(\"Bango.Other\", \"Hello\", \"Hello\"));\n")
 		TEXT("teq = LOCTEXT(\"Hello\", \"Hello\") == ToText(\"Hello\");\n")
@@ -267,9 +268,11 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 		{ TEXT("int _x;\n_x = Abs(-2147483647 - 1);"), TEXT("has no positive int") },
 		{ TEXT("int _x;\n_x = Clamp(5, 10, 1);"), TEXT("Min (10) is greater than Max (1)") },
 		{ TEXT("string _text = \"{2}\";\nLog(_text, 1);"), TEXT("uses {2}") },   // a literal text is checked when compiling instead
-		{ TEXT("text _t;\n_t = ToText(\"{2}\");\nHint(_t, 1);"), TEXT("uses {2}") },
-		{ TEXT("text _t;\n_t = ToText(\"{Name}\");\nHint(_t);"), TEXT("uses {Name}") },
-		{ TEXT("text _s;\nHint(_s);"), TEXT("'_s' is nil") },
+		{ TEXT("text _t;\n_t = ToText(\"{2}\");\n_t = FormatText(_t, 1);"), TEXT("uses {2}") },
+		{ TEXT("text _t;\n_t = ToText(\"{Name}\");\n_t = FormatText(_t);"), TEXT("uses {Name}") },
+		{ TEXT("text _s;\ntext _t;\n_t = FormatText(_s);"), TEXT("'_s' is nil") },
+		{ TEXT("string _n;\nWriteScreen(_n);"), TEXT("'_n' is nil") },
+		{ TEXT("WriteScreen(\"x\", -1);"), TEXT("negative time") },
 		{ TEXT("entity _e;\n_e = ToEntity(\"two words\");"), TEXT("'two words' isn't a valid Bango ID name") },
 		{ TEXT("entity _e;\n_e = ToEntity(\"\");"), TEXT("isn't a valid Bango ID name") },
 	};
@@ -293,10 +296,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoModuleTest, "Bango.Game.Module",
 bool FBangoModuleTest::RunTest(const FString& Parameters)
 {
 	FBangoModule& Module = FBangoModule::Get();
-	TestNotNull(TEXT("module has built-in commands"), Module.GetCommands().FindCommandImpl(TEXT("Hint")));
+	TestNotNull(TEXT("module has built-in commands"), Module.GetCommands().FindCommandImpl(TEXT("WriteScreen")));
 
 	// A script asset made for the test (in memory, under /Temp), found by its path.
-	UBangoScriptAsset* Asset = BangoGameTestsPrivate::MakeTestScript(TEXT("Hello"), TEXT("#define inputs (string _name = \"you\")\nHint(ToText(_name));"));
+	UBangoScriptAsset* Asset = BangoGameTestsPrivate::MakeTestScript(TEXT("Hello"), TEXT("#define inputs (string _name = \"you\")\nWriteScreen(_name);"));
 	TSharedPtr<const FBangoProgram> Program;
 	FString DisplayPath;
 	FString Error;
@@ -313,11 +316,11 @@ bool FBangoModuleTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("second load comes from the cache"), Again.IsValid() && Again == Program);
 
 	// Changing the asset's text (as the editor does) compiles it again.
-	Asset->Source = TEXT("Hint(ToText(\"changed\"));");
+	Asset->Source = TEXT("WriteScreen(\"changed\");");
 	TSharedPtr<const FBangoProgram> Changed;
 	TestTrue(TEXT("changed script compiles"), Module.GetScriptCache().GetProgram(*Asset, Module.GetCommands(), Changed, DisplayPath, Error));
 	TestTrue(TEXT("changed text is compiled again"), Changed.IsValid() && Changed != Program);
-	Asset->Source = TEXT("#define inputs (string _name = \"you\")\nHint(ToText(_name));");
+	Asset->Source = TEXT("#define inputs (string _name = \"you\")\nWriteScreen(_name);");
 
 	TArray<FBangoScriptParamInfo> Params;
 	TestTrue(TEXT("GetScriptParams succeeds"), Module.GetScriptParams(TEXT("/Temp/BangoTests/Hello"), Params, Error));
@@ -330,7 +333,7 @@ bool FBangoModuleTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("missing script error"), Error.Contains(TEXT("not found"), ESearchCase::CaseSensitive));
 
 	// Inline scripts: compiled once per text (and name), with their parameters; an error isn't kept.
-	const FString Inline = TEXT("#define inputs (int _count, string _name = \"you\")\nSleep(1); Hint(ToText(_name));");
+	const FString Inline = TEXT("#define inputs (int _count, string _name = \"you\")\nSleep(1); WriteScreen(_name);");
 	TSharedPtr<const FBangoProgram> InlineProgram;
 	TSharedPtr<const FBangoProgram> InlineAgain;
 	TestTrue(TEXT("inline script compiles"), Module.GetInlineProgram(Inline, TEXT("Test (inline script)"), InlineProgram, Error));

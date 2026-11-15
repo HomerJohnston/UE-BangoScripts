@@ -213,7 +213,7 @@ namespace Bango
 	/** True if a comment's text is the line between functions (ignoring spaces around it). Reading skips it outside function bodies. */
 	BANGOSCRIPTS_API bool IsFunctionSeparatorComment(const FString& CommentText);
 
-	/** "Hint", "If", "Set", ... a short title for the node. */
+	/** "WriteScreen", "If", "Set", ... a short title for the node. */
 	BANGOSCRIPTS_API FString GetGraphNodeKindName(EBangoGraphNodeKind Kind);
 
 	/**

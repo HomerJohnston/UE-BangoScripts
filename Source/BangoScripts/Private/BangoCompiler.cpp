@@ -2801,7 +2801,7 @@ namespace BangoCompilerPrivate
 			}
 			for (int32 i = Signature->Params.Num(); i < Call.Args.Num(); ++i)
 			{
-				// An extra value may be a plain nil (Hint shows it as "nil"). The graph editor saves a placeholder
+				// An extra value may be a plain nil (WriteLog shows it as "nil"). The graph editor saves a placeholder
 				// that was left without a value this way.
 				const FBangoLiteralExpr* Literal = Call.Args[i]->As<FBangoLiteralExpr>();
 				if (Literal && Literal->LiteralKind == EBangoLiteralKind::Nil)
@@ -2826,7 +2826,7 @@ namespace BangoCompilerPrivate
 		}
 
 		/**
-		 * For a command whose text has {0}, {1}, ... placeholders (Hint, Log, Format): when the text is written out as a
+		 * For a command whose text has {0}, {1}, ... placeholders (WriteLog, Format, FormatText): when the text is written out as a
 		 * string, every placeholder it uses needs a value after it. (A text worked out while the script runs is
 		 * only checked then.)
 		 */

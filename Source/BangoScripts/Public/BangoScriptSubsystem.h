@@ -51,7 +51,6 @@ struct FBangoScriptDebugInfo
 	uint64 TrailCount = 0;
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FBangoHintEvent, const FText&, Text);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FBangoScriptFailedEvent, FBangoScriptHandle, Handle, const FString&, Error);
 
 /**
@@ -188,15 +187,8 @@ public:
 	/** Stops all scripts and clears all globals (except those for actors in the level), e.g. when starting a new game. */
 	void ResetState();
 
-	/** Used by the Hint command: broadcasts OnHint, or shows the text on screen if nothing is bound. */
-	void ShowHint(const FText& Text);
-
-	/**
-	 * Fired by the Hint command, with the text in the current language. Bind this to show hints in your own UI;
-	 * while bound, hints aren't shown as debug text. The text follows language changes, so a UI can keep it.
-	 */
-	UPROPERTY(BlueprintAssignable, Category = "Bango")
-	FBangoHintEvent OnHint;
+	/** Used by the WriteScreen command: writes the text to the output log and shows it on screen for Seconds. */
+	void WriteScreen(const FString& Text, float Seconds);
 
 	/** Fired when a script stops with an error (the error is also logged and shown on screen). */
 	UPROPERTY(BlueprintAssignable, Category = "Bango")

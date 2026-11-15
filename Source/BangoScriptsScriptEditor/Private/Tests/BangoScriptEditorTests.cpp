@@ -226,28 +226,28 @@ bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 
 	// A placeholder without a value: a warning on its field (not an error), and a nil when saved.
 	{
-		FBangoGraphDocument HintDoc;
-		if (TestTrue(TEXT("build WriteLog graph"), Bango::BuildGraph(TEXT("WriteLog(\"a {0} {1}\", 1); //@1(0, 0)\n"), TEXT("hint.bango"), HintDoc, Error)))
+		FBangoGraphDocument LogDoc;
+		if (TestTrue(TEXT("build WriteLog graph"), Bango::BuildGraph(TEXT("WriteLog(\"a {0} {1}\", 1); //@1(0, 0)\n"), TEXT("log.bango"), LogDoc, Error)))
 		{
-			const TSharedPtr<FBangoNodeLayoutContext> HintContext = MakeShared<FBangoNodeLayoutContext>(Bango::MakeNodeLayoutContext(HintDoc, &FBangoModule::Get().GetCommands()));
-			TStrongObjectPtr<UEdGraph> HintGraph(BangoScriptEditor::CreateEdGraph(HintDoc.Main, HintContext));
-			UBangoEdGraphNode* HintNode = HintGraph->Nodes.Num() == 2 ? Cast<UBangoEdGraphNode>(HintGraph->Nodes[1]) : nullptr;
-			if (TestNotNull(TEXT("WriteLog node"), HintNode))
+			const TSharedPtr<FBangoNodeLayoutContext> LogContext = MakeShared<FBangoNodeLayoutContext>(Bango::MakeNodeLayoutContext(LogDoc, &FBangoModule::Get().GetCommands()));
+			TStrongObjectPtr<UEdGraph> LogGraph(BangoScriptEditor::CreateEdGraph(LogDoc.Main, LogContext));
+			UBangoEdGraphNode* LogNode = LogGraph->Nodes.Num() == 2 ? Cast<UBangoEdGraphNode>(LogGraph->Nodes[1]) : nullptr;
+			if (TestNotNull(TEXT("WriteLog node"), LogNode))
 			{
-				TestEqual(TEXT("rows: text, {0}, {1}"), HintNode->Layout.Fields.Num(), 3);
-				TestEqual(TEXT("one warning"), HintNode->UpdateCompileWarnings(), 1);
-				TestTrue(TEXT("the warning is on {1}"), HintNode->FindFieldWarning(2) != nullptr && HintNode->FindFieldWarning(1) == nullptr);
-				TestTrue(TEXT("the banner is a warning, not an error"), HintNode->bHasCompilerMessage && HintNode->ErrorType == EMessageSeverity::Warning);
-				HintNode->UpdateLayout();
-				TestTrue(TEXT("a new layout clears the warning"), HintNode->FieldWarnings.Num() == 0 && !HintNode->bHasCompilerMessage);
+				TestEqual(TEXT("rows: text, {0}, {1}"), LogNode->Layout.Fields.Num(), 3);
+				TestEqual(TEXT("one warning"), LogNode->UpdateCompileWarnings(), 1);
+				TestTrue(TEXT("the warning is on {1}"), LogNode->FindFieldWarning(2) != nullptr && LogNode->FindFieldWarning(1) == nullptr);
+				TestTrue(TEXT("the banner is a warning, not an error"), LogNode->bHasCompilerMessage && LogNode->ErrorType == EMessageSeverity::Warning);
+				LogNode->UpdateLayout();
+				TestTrue(TEXT("a new layout clears the warning"), LogNode->FieldWarnings.Num() == 0 && !LogNode->bHasCompilerMessage);
 
 				FBangoGraphDocument Saved;
 				FString BuildError;
-				TArray<UEdGraph*> HintGraphs = { HintGraph.Get() };
-				TestTrue(TEXT("read back"), BangoScriptEditor::BuildDocument(HintGraphs, Saved, nullptr, BuildError));
-				Bango::FillMissingPlaceholders(Saved, *HintContext);
+				TArray<UEdGraph*> LogGraphs = { LogGraph.Get() };
+				TestTrue(TEXT("read back"), BangoScriptEditor::BuildDocument(LogGraphs, Saved, nullptr, BuildError));
+				Bango::FillMissingPlaceholders(Saved, *LogContext);
 				TestEqual(TEXT("saved with a nil"), Saved.Main.Nodes.Num() == 2 ? Saved.Main.Nodes[1].Text : FString(), FString(TEXT("WriteLog(\"a {0} {1}\", 1, nil)")));
-				TestEqual(TEXT("the node itself still shows {1} as missing"), HintNode->Text, FString(TEXT("WriteLog(\"a {0} {1}\", 1)")));
+				TestEqual(TEXT("the node itself still shows {1} as missing"), LogNode->Text, FString(TEXT("WriteLog(\"a {0} {1}\", 1)")));
 			}
 		}
 	}
@@ -258,17 +258,21 @@ bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 		const TCHAR* TextSource =
 			TEXT("#define LOCTEXT_NAMESPACE \"Bango.Tests\"\n")
 			TEXT("\n")
-			TEXT("Hint(LOCTEXT(\"Greeting\", \"Hi there\"));    //@1(0, 0)\n")
+			TEXT("Say(LOCTEXT(\"Greeting\", \"Hi there\"));    //@1(0, 0)\n")
 			TEXT("\n")
 			TEXT("#undef LOCTEXT_NAMESPACE\n");
 		if (TestTrue(TEXT("build text graph"), Bango::BuildGraph(TextSource, TEXT("text.bango"), TextDoc, Error)))
 		{
-			const TSharedPtr<FBangoNodeLayoutContext> TextContext = MakeShared<FBangoNodeLayoutContext>(Bango::MakeNodeLayoutContext(TextDoc, &FBangoModule::Get().GetCommands()));
+			// No built-in command shows a text as a statement, so the test has one: Say(text).
+			FBangoCommandTable SayCommands;
+			FString SayError;
+			SayCommands.Add(FBangoCommandSignature::Make(TEXT("Say")).Param(TEXT("Msg"), FBangoType::Text()), SayError);
+			const TSharedPtr<FBangoNodeLayoutContext> TextContext = MakeShared<FBangoNodeLayoutContext>(Bango::MakeNodeLayoutContext(TextDoc, &SayCommands));
 			TStrongObjectPtr<UEdGraph> TextGraph(BangoScriptEditor::CreateEdGraph(TextDoc.Main, TextContext));
 			BangoScriptEditor::SetLocNamespace(TextGraph.Get(), TextDoc.bHasLocNamespace, TextDoc.LocNamespace);
 			UBangoEdGraphNode* TextEntry = TextGraph->Nodes.Num() == 2 ? Cast<UBangoEdGraphNode>(TextGraph->Nodes[0]) : nullptr;
-			UBangoEdGraphNode* HintNode = TextGraph->Nodes.Num() == 2 ? Cast<UBangoEdGraphNode>(TextGraph->Nodes[1]) : nullptr;
-			if (TestNotNull(TEXT("Script Start"), TextEntry) && TestNotNull(TEXT("Hint node"), HintNode))
+			UBangoEdGraphNode* SayNode = TextGraph->Nodes.Num() == 2 ? Cast<UBangoEdGraphNode>(TextGraph->Nodes[1]) : nullptr;
+			if (TestNotNull(TEXT("Script Start"), TextEntry) && TestNotNull(TEXT("Say node"), SayNode))
 			{
 				TestEqual(TEXT("Script Start keeps the namespace"), TextEntry->LocNamespace, FString(TEXT("Bango.Tests")));
 				TestEqual(TEXT("but has no row for it"), TextEntry->Layout.Fields.Num(), 0);
@@ -286,18 +290,18 @@ bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 				TestFalse(TEXT("cleared"), TextEntry->bHasLocNamespace);
 				TestTrue(TEXT("put it back"), TextEntry->SetLocNamespace(TEXT("Bango.Tests")));
 
-				const FBangoNodeField& TextField = HintNode->Layout.Fields[0];
-				TestTrue(TEXT("Hint's Text is a localized text field"), Bango::IsLocalizedTextField(TextField));
+				const FBangoNodeField& TextField = SayNode->Layout.Fields[0];
+				TestTrue(TEXT("Say's Msg is a localized text field"), Bango::IsLocalizedTextField(TextField));
 				TestEqual(TEXT("it shows the source text"), Bango::GetFieldDisplayText(TextField), FString(TEXT("Hi there")));
 				const FString Retyped = Bango::GetFieldValueFromTyped(TextField, TEXT("Hello"));
-				TestTrue(TEXT("retyping keeps the key"), HintNode->SetFieldValue(0, Retyped, EditError));
-				TestEqual(TEXT("retyped"), HintNode->Text, FString(TEXT("Hint(LOCTEXT(\"Greeting\", \"Hello\"))")));
+				TestTrue(TEXT("retyping keeps the key"), SayNode->SetFieldValue(0, Retyped, EditError));
+				TestEqual(TEXT("retyped"), SayNode->Text, FString(TEXT("Say(LOCTEXT(\"Greeting\", \"Hello\"))")));
 
 				FBangoTextLiteral Literal;
-				TestTrue(TEXT("the field is a text literal"), Bango::ParseTextLiteral(HintNode->Layout.Fields[0].Text, Literal));
+				TestTrue(TEXT("the field is a text literal"), Bango::ParseTextLiteral(SayNode->Layout.Fields[0].Text, Literal));
 				Literal.Notes = TEXT("Said by the guard");
-				TestTrue(TEXT("add notes"), HintNode->SetFieldValue(0, Bango::MakeTextLiteral(Literal), EditError));
-				TestEqual(TEXT("with notes"), HintNode->Text, FString(TEXT("Hint(NOTELOCTEXT(\"Greeting\", \"Hello\", \"Said by the guard\"))")));
+				TestTrue(TEXT("add notes"), SayNode->SetFieldValue(0, Bango::MakeTextLiteral(Literal), EditError));
+				TestEqual(TEXT("with notes"), SayNode->Text, FString(TEXT("Say(NOTELOCTEXT(\"Greeting\", \"Hello\", \"Said by the guard\"))")));
 			}
 		}
 	}
