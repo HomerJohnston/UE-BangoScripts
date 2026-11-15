@@ -25,7 +25,7 @@ bool FBangoNodeField::operator==(const FBangoNodeField& Other) const
 		&& Text.Equals(Other.Text, ESearchCase::CaseSensitive)
 		&& Begin == Other.Begin && End == Other.End
 		&& bPresent == Other.bPresent && bOptional == Other.bOptional && bHasValue == Other.bHasValue
-		&& bLocked == Other.bLocked && bReadOnly == Other.bReadOnly && bPlaceholder == Other.bPlaceholder && bLocNamespace == Other.bLocNamespace
+		&& bLocked == Other.bLocked && bReadOnly == Other.bReadOnly && bPlaceholder == Other.bPlaceholder
 		&& bVariable == Other.bVariable && VariableType.Equals(Other.VariableType, ESearchCase::CaseSensitive)
 		&& MirrorBegins == Other.MirrorBegins
 		&& bHideLabel == Other.bHideLabel && bHideIcon == Other.bHideIcon
@@ -1304,20 +1304,6 @@ namespace Bango
 			}
 		}
 		return true;
-	}
-
-	void AddLocNamespaceField(FBangoNodeLayout& Layout, bool bHasLocNamespace, const FString& LocNamespace)
-	{
-		FBangoNodeField Field;
-		Field.Label = TEXT("Namespace");
-		Field.SectionHeader = TEXT("Localization");
-		Field.TypeHint = TEXT("string");
-		Field.Description = TEXT("The namespace of this script's LOCTEXT texts, for translators' tools. Saved as #define LOCTEXT_NAMESPACE \"...\" after the parameters, with #undef LOCTEXT_NAMESPACE at the end of the file.");
-		Field.bPresent = bHasLocNamespace;
-		Field.Text = bHasLocNamespace ? MakeStringLiteral(LocNamespace) : FString();
-		Field.bOptional = true;
-		Field.bLocNamespace = true;
-		Layout.Fields.Add(Field);
 	}
 
 	bool ParseTextLiteral(const FString& Text, FBangoTextLiteral& OutLiteral)

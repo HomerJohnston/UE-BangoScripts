@@ -110,8 +110,8 @@ public:
 	TSharedPtr<const FBangoNodeLayoutContext> LayoutContext;
 
 	/**
-	 * The main Script Start node only: the script's `#define LOCTEXT_NAMESPACE "..."` line, shown as its Loc Namespace row
-	 * (see Bango::AddLocNamespaceField). Kept here, not in Text, since it isn't part of the inputs line.
+	 * The main Script Start node only: the script's `#define LOCTEXT_NAMESPACE "..."` line, edited in the SCRIPT CONFIG panel
+	 * (SetLocNamespace). Kept here, not in Text, since it isn't part of the inputs line.
 	 */
 	UPROPERTY()
 	bool bHasLocNamespace = false;
@@ -177,6 +177,13 @@ public:
 	 * says why.
 	 */
 	bool SetFieldValue(int32 FieldIndex, const FString& Value, FString& OutError);
+
+	/**
+	 * The main Script Start node only: sets the script's namespace (the #define LOCTEXT_NAMESPACE line) as an undoable
+	 * edit, from what was typed in SCRIPT CONFIG (a name, without quotes). Spaces around it are dropped; empty removes the
+	 * line. False if nothing changed.
+	 */
+	bool SetLocNamespace(const FString& Typed);
 
 	/**
 	 * Shows a compile error on the node, pointing at a field if FieldIndex isn't INDEX_NONE (or at a switch's case, if

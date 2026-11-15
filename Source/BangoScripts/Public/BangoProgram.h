@@ -183,7 +183,7 @@ struct FBangoProgram
 
 	/** The script's parameters, in order. They occupy the first slots of Functions[0]. Empty if there is no inputs line. */
 	TArray<FBangoScriptParamInfo> Params;
-	/** True if the script has a inputs line (even an empty one). */
+	/** True if the script has an inputs line (even an empty one). */
 	bool bHasParamsLine = false;
 	/** Where the inputs line is, for errors about arguments. */
 	FBangoDebugLoc ParamsLoc;

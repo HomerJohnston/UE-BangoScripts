@@ -21,6 +21,7 @@ class SGraphEditor;
 class SBangoLineMarkers;
 class SInlineEditableTextBlock;
 class SMultiLineEditableTextBox;
+class SEditableTextBox;
 class SBangoTextEditor;
 class SScrollBox;
 class SScrollBar;
@@ -155,6 +156,7 @@ private:
 
 	/** The left pane's foldouts, open or closed. */
 	bool bDescriptionExpanded = true;
+	bool bConfigExpanded = true;
 	bool bFunctionsExpanded = true;
 	bool bInputsExpanded = true;
 	bool bGlobalsExpanded = true;
@@ -204,6 +206,8 @@ private:
 
 	/** SCRIPT DESCRIPTION: the box for the script's description (kept on the main Script Start node). */
 	TSharedPtr<SMultiLineEditableTextBox> DescriptionBox;
+	/** SCRIPT CONFIG: the box for the script's localization namespace (kept on the main Script Start node). */
+	TSharedPtr<SEditableTextBox> NamespaceBox;
 
 	// The script text pane, left of the graph: the script as it would be saved, which can be edited and applied.
 	TSharedPtr<SBangoTextEditor> TextBox;
@@ -414,6 +418,14 @@ private:
 	void SetScriptDescription(const FString& Typed);
 	/** Puts the description in its box again if it changed (after an undo, a reload, Apply), unless the box is being typed in. */
 	void UpdateDescriptionBox();
+
+	// SCRIPT CONFIG
+	/** The script's localization namespace (#define LOCTEXT_NAMESPACE), from the main Script Start node; empty if it has none. */
+	FString GetScriptNamespace() const;
+	/** Sets the namespace from what was typed (empty removes the line), as one undoable edit. */
+	void SetScriptNamespace(const FString& Typed);
+	/** Puts the namespace in its box again if it changed (after an undo, a reload, Apply), unless the box is being typed in. */
+	void UpdateNamespaceBox();
 
 	// Script text pane
 	TSharedRef<SWidget> MakeTextPane();

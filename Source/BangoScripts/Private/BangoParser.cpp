@@ -62,7 +62,7 @@ namespace BangoParserPrivate
 		}
 	}
 
-	/** A fixed value allowed as a inputs default: a literal, a negated number, or an array of those. */
+	/** A fixed value allowed as an inputs default: a literal, a negated number, or an array of those. */
 	static bool IsConstantExpr(const FBangoExpr& Expr)
 	{
 		if (Expr.Kind == EBangoExprKind::Literal)
@@ -156,6 +156,11 @@ namespace BangoParserPrivate
 					if (!ParseDefine())
 					{
 						return false;
+					}
+					// The namespace line may come before the inputs line: the inputs line is still the first item.
+					if (Script.bHasLocNamespace && Script.TopLevel.Num() == 0 && Script.Functions.Num() == 0)
+					{
+						bFirstItem = true;
 					}
 					continue;
 				}
@@ -312,7 +317,7 @@ namespace BangoParserPrivate
 			{
 				if (!bFirstItem)
 				{
-					return Fail(First.Loc, TEXT("'#define inputs' must be the first line of the script, before any other statement or function."));
+					return Fail(First.Loc, TEXT("'#define inputs' must come at the top of the script, before any other statement or function (only '#define LOCTEXT_NAMESPACE' may come before it)."));
 				}
 				FBangoStmtPtr Stmt = ParseParams();
 				if (!Stmt || !RequireOneLine(First.Loc.Line, Previous().Loc) || !FinishDirectiveLine(First, TEXT("#define inputs")))
@@ -350,7 +355,7 @@ namespace BangoParserPrivate
 			}
 			if (!bOnlyParamsBefore)
 			{
-				return Fail(First.Loc, TEXT("'#define LOCTEXT_NAMESPACE' must come at the top of the script: after the '#define inputs' line (if there is one) and before any other statement or function."));
+				return Fail(First.Loc, TEXT("'#define LOCTEXT_NAMESPACE' must come at the top of the script, before any other statement or function (only the '#define inputs' line may come before it)."));
 			}
 			Advance();
 			const FBangoToken& Namespace = Cur();
@@ -969,7 +974,7 @@ namespace BangoParserPrivate
 			case EBangoTokenKind::KwInputs:
 				Fail(First.Loc, bAllowParams
 					? TEXT("The parameters line is written '#define inputs (...)', with no ';'.")
-					: TEXT("'#define inputs' must be the first line of the script, before any other statement or function."));
+					: TEXT("'#define inputs' must come at the top of the script, before any other statement or function (only '#define LOCTEXT_NAMESPACE' may come before it)."));
 				return nullptr;
 			default:
 				if (First.Kind == EBangoTokenKind::Identifier && First.Text.Equals(TEXT("locNamespace"), ESearchCase::CaseSensitive) && Tokens.IsValidIndex(Pos + 1) && Tokens[Pos + 1].Kind == EBangoTokenKind::LParen)

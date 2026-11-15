@@ -565,7 +565,7 @@ struct FBangoScript
 {
 	FString FileName;
 	TArray<TUniquePtr<FBangoFunction>> Functions;
-	/** The script's entry point: every top-level statement, in order. If the script has a inputs line, it is TopLevel[0]. */
+	/** The script's entry point: every top-level statement, in order. If the script has an inputs line, it is TopLevel[0]. */
 	FBangoBlock TopLevel;
 	/** Ordinary comments, in file order, for the graph editor. The compiler ignores them. */
 	TArray<FBangoSourceComment> Comments;
@@ -578,8 +578,8 @@ struct FBangoScript
 
 	/**
 	 * `#define LOCTEXT_NAMESPACE "Bango.Intro"`: the namespace for the script's LOCTEXT and NOTELOCTEXT texts,
-	 * written like C++ so Unreal's localization gatherer reads it. Comes after the inputs line (if any) and before
-	 * everything else; the script must then end with `#undef LOCTEXT_NAMESPACE` (LocNamespaceEndLoc). Neither is a
+	 * written like C++ so Unreal's localization gatherer reads it. Comes before or after the inputs line (it's
+	 * written before it), and before everything else; the script must then end with `#undef LOCTEXT_NAMESPACE` (LocNamespaceEndLoc). Neither is a
 	 * statement: they have no graph nodes.
 	 */
 	bool bHasLocNamespace = false;

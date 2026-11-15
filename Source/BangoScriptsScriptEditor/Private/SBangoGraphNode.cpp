@@ -965,7 +965,7 @@ int32 SBangoGraphNode::AddTextPartRows(const TSharedRef<SGridPanel>& Grid, int32
 		{ ETextPart::Key, LOCTEXT("KeyLabel", "Key"), Literal.Key, FText(),
 			LOCTEXT("KeyTip", "Identifies this text for translators. Made up for you when the text is first typed; change it to something readable if you like.\nEach key can be used for only one text in its namespace.") },
 		{ ETextPart::Namespace, LOCTEXT("NamespaceLabel", "Namespace"), Literal.bHasNamespace ? Literal.Namespace : FString(), LOCTEXT("NamespaceHint", "script's namespace"),
-			LOCTEXT("NamespaceTip", "Leave empty to use the script's namespace (Localization on the Script Start node). Fill in to use another one (NSLOCTEXT).") },
+			LOCTEXT("NamespaceTip", "Leave empty to use the script's namespace (Namespace in the SCRIPT CONFIG panel). Fill in to use another one (NSLOCTEXT).") },
 		{ ETextPart::Notes, LOCTEXT("NotesLabel", "Notes"), Literal.Notes, LOCTEXT("NotesHint", "none"),
 			LOCTEXT("NotesTip", "Shown to translators with this text, like who's speaking or where it appears (NOTELOCTEXT).") },
 	};

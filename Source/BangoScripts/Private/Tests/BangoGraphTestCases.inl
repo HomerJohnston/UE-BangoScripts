@@ -387,7 +387,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		Expect(Bango::BuildGraph(ElseText, TEXT("disabled.bango"), ElseDoc, Error) && ElseDoc == Doc, FString(TEXT("Disabled nodes: a disabled else-if reads back the same: ")) + Error.ToString());
 	}
 
-	// ---- LOCTEXT_NAMESPACE and text: #define after the inputs line, #undef at the end, text literals kept as written ----
+	// ---- LOCTEXT_NAMESPACE and text: #define above the inputs (read after them too), #undef at the end, text literals kept as written ----
 	{
 		const TCHAR* Source =
 			TEXT("\n") // so the comment below isn't the script's description (that's only on line 1)
@@ -399,11 +399,12 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			TEXT("function void F()\n{\n\tSay(LOCTEXT(\"F\", \"In F\")); //@2(0, 0)\n}\n")
 			TEXT("#undef LOCTEXT_NAMESPACE // the end\n");
 		const TCHAR* Expected =
+			TEXT("#define LOCTEXT_NAMESPACE \"Bango.Intro\"\n")
+			TEXT("\n")
 			TEXT("// ============ SCRIPT INPUTS ===================\n")
 			TEXT("\n")
 			TEXT("// About the script\n")
 			TEXT("#define inputs (text _line = nil)\n")
-			TEXT("#define LOCTEXT_NAMESPACE \"Bango.Intro\"\n")
 			TEXT("\n")
 			TEXT("// ============ SCRIPT BODY =====================\n")
 			TEXT("\n")
@@ -425,7 +426,33 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		FString WriteError;
 		const bool bBuilt = Bango::BuildGraph(Source, TEXT("text.bango"), Doc, Error);
 		Expect(bBuilt && Doc.bHasLocNamespace && Doc.LocNamespace == FString(TEXT("Bango.Intro")), FString(TEXT("LOCTEXT_NAMESPACE: read into the document: ")) + Error.ToString());
-		Expect(bBuilt && Bango::WriteGraphText(Doc, Text, WriteError) && Text == FString(Expected), FString(TEXT("LOCTEXT_NAMESPACE: saved after inputs, #undef at the end:\n")) + Text);
+		Expect(bBuilt && Bango::WriteGraphText(Doc, Text, WriteError) && Text == FString(Expected), FString(TEXT("LOCTEXT_NAMESPACE: saved above the inputs, #undef at the end:\n")) + Text);
+
+		// The namespace line comes after the description, then the inputs.
+		{
+			const TCHAR* Configured =
+				TEXT("// Description line\n")
+				TEXT("// More description lines\n")
+				TEXT("\n")
+				TEXT("#define LOCTEXT_NAMESPACE \"BangoTest\"\n")
+				TEXT("\n")
+				TEXT("// ============ SCRIPT INPUTS ===================\n")
+				TEXT("\n")
+				TEXT("#define inputs (entity _who, int _count = 3)\n")
+				TEXT("\n")
+				TEXT("// ============ GLOBAL VARS =====================\n")
+				TEXT("\n")
+				TEXT("global bool _newGlobal;\n")
+				TEXT("\n")
+				TEXT("#undef LOCTEXT_NAMESPACE\n");
+			FBangoGraphDocument ConfigDoc;
+			FString ConfigText;
+			const bool bConfigBuilt = Bango::BuildGraph(Configured, TEXT("config.bango"), ConfigDoc, Error);
+			Expect(bConfigBuilt && ConfigDoc.Description == FString(TEXT("Description line\nMore description lines")) && ConfigDoc.LocNamespace == FString(TEXT("BangoTest"))
+				&& ConfigDoc.Main.Nodes[0].Comment.IsEmpty(), FString(TEXT("LOCTEXT_NAMESPACE: read under the description: ")) + Error.ToString());
+			Expect(bConfigBuilt && Bango::WriteGraphText(ConfigDoc, ConfigText, WriteError) && ConfigText == FString(Configured),
+				FString(TEXT("LOCTEXT_NAMESPACE: under the description, written back the same:\n")) + ConfigText + WriteError);
+		}
 
 		// The FUNCTIONS heading and the lines between functions: written on save, skipped when read (outside function
 		// bodies), so they don't pile up or turn into comment bubbles. A function's own comment, and the same line
@@ -500,10 +527,10 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 
 		FBangoGraphDocument NoParams;
 		Expect(Bango::BuildGraph(TEXT("#define LOCTEXT_NAMESPACE \"A\"\n#undef LOCTEXT_NAMESPACE\n"), TEXT("ns.bango"), NoParams, Error) && Bango::WriteGraphText(NoParams, Text, WriteError)
-			&& Text == FString(TEXT("// ============ SCRIPT INPUTS ===================\n\n#define LOCTEXT_NAMESPACE \"A\"\n\n#undef LOCTEXT_NAMESPACE\n")), FString(TEXT("LOCTEXT_NAMESPACE: without inputs or statements:\n")) + Text);
+			&& Text == FString(TEXT("#define LOCTEXT_NAMESPACE \"A\"\n\n#undef LOCTEXT_NAMESPACE\n")), FString(TEXT("LOCTEXT_NAMESPACE: without inputs or statements:\n")) + Text);
 		FBangoGraphDocument Commented;
 		Expect(Bango::BuildGraph(TEXT("\n// Hi\n#define LOCTEXT_NAMESPACE \"A\"\n#undef LOCTEXT_NAMESPACE\n"), TEXT("ns.bango"), Commented, Error) && Bango::WriteGraphText(Commented, Text, WriteError)
-			&& Text == FString(TEXT("// ============ SCRIPT INPUTS ===================\n\n// Hi\n#define LOCTEXT_NAMESPACE \"A\"\n\n#undef LOCTEXT_NAMESPACE\n")), FString(TEXT("LOCTEXT_NAMESPACE: anchors the entry comment without a inputs line:\n")) + Text);
+			&& Text == FString(TEXT("#define LOCTEXT_NAMESPACE \"A\"\n\n// ============ SCRIPT INPUTS ===================\n\n// Hi\n#define inputs ()\n\n#undef LOCTEXT_NAMESPACE\n")), FString(TEXT("LOCTEXT_NAMESPACE: a comment on it is Script Start's, written above an empty inputs line:\n")) + Text);
 		FBangoGraphDocument Changed = NoParams;
 		Changed.LocNamespace = TEXT("B");
 		Expect(Changed != NoParams, TEXT("LOCTEXT_NAMESPACE: part of what makes two documents different"));
@@ -742,10 +769,11 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		// top in a fixed layout.
 		{
 			const TCHAR* DeclSource =
+				TEXT("#define LOCTEXT_NAMESPACE \"Decls\"\n")
+				TEXT("\n")
 				TEXT("// ============ SCRIPT INPUTS ===================\n")
 				TEXT("\n")
 				TEXT("#define inputs (int _a)\n")
-				TEXT("#define LOCTEXT_NAMESPACE \"Decls\"\n")
 				TEXT("\n")
 				TEXT("// ============ GLOBAL VARS =====================\n")
 				TEXT("\n")
@@ -838,7 +866,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		Expect(!Bango::ParseScript(TEXT("if (true)\n//@1(0, 0)\n{\n}\n"), TEXT("bad.bango"), Script, Error)
 			&& Error.Line == 2 && Error.Message.Contains(TEXT("reroute")), FString(TEXT("reroute: not allowed between 'if (...)' and '{': ")) + Error.ToString());
 		Expect(!Bango::ParseScript(TEXT("//@1(0, 0)\n#define inputs (int _a)\n"), TEXT("bad.bango"), Script, Error)
-			&& Error.Message.Contains(TEXT("first line")), FString(TEXT("reroute: not before #define inputs: ")) + Error.ToString());
+			&& (Error.Message.Contains(TEXT("must come at the top")) || Error.Message.Contains(TEXT("reroute"))), FString(TEXT("reroute: not before #define inputs: ")) + Error.ToString());
 	}
 
 	// ---- Building: structure, text, metadata, comments, automatic IDs and positions ----

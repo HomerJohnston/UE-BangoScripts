@@ -67,12 +67,6 @@ struct BANGOSCRIPTS_API FBangoNodeField
 	bool bPlaceholder = false;
 
 	/**
-	 * True for the Script Start node's Loc Namespace row: the script's #define LOCTEXT_NAMESPACE line, not part of the node's
-	 * text (see Bango::AddLocNamespaceField). Bango::SetNodeField refuses it; the editor stores it itself.
-	 */
-	bool bLocNamespace = false;
-
-	/**
 	 * True for a field that names a variable (or array element) the node stores into or declares: Set's Var, a
 	 * Declare node's Name, For Each's Variable, an array command's Target. The editor shows these with the variable
 	 * icon, tinted for VariableType.
@@ -93,7 +87,7 @@ struct BANGOSCRIPTS_API FBangoNodeField
 	/** Don't show the type icon (If and While: the condition is always a bool, so the icon adds nothing). TypeHint is still set. */
 	bool bHideIcon = false;
 
-	/** A heading the editor shows on its own row above this field ("Input Params", "Localization"), or empty. */
+	/** A heading the editor shows on its own row above this field (like "Input Params"), or empty. */
 	FString SectionHeader;
 
 	/**
@@ -226,12 +220,6 @@ namespace Bango
 	BANGOSCRIPTS_API FBangoNodeLayoutContext MakeNodeLayoutContext(const FBangoGraphDocument& Document, const IBangoCommandLookup* Commands);
 
 	/** The layout of one node. bInFunctionGraph says whether an entry node is a function's entry. */
-	/**
-	 * Adds the Loc Namespace row to the main Script Start node's layout: the script's `#define LOCTEXT_NAMESPACE "..."`, a
-	 * string field that is optional (clearing it removes the line).
-	 */
-	BANGOSCRIPTS_API void AddLocNamespaceField(FBangoNodeLayout& Layout, bool bHasLocNamespace, const FString& LocNamespace);
-
 	/** Reads Text as exactly one text literal (`LOCTEXT("Key", "Hi")`, ...). False if it's anything else. */
 	BANGOSCRIPTS_API bool ParseTextLiteral(const FString& Text, FBangoTextLiteral& OutLiteral);
 

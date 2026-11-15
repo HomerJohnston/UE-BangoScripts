@@ -241,11 +241,6 @@ void UBangoEdGraphNode::UpdateLayout()
 	Source.Text = Text;
 	Source.NodeID = IsEntry() ? 0 : NodeID; // the layout context's variable types are kept by NodeID
 	Layout = LayoutContext.IsValid() ? Bango::GetNodeLayout(Source, bInFunctionGraph, *LayoutContext, bShowExpression) : Bango::GetNodeLayout(Source, bInFunctionGraph, FBangoNodeLayoutContext(), bShowExpression);
-	if (IsScriptEntry())
-	{
-		Bango::AddLocNamespaceField(Layout, bHasLocNamespace, LocNamespace);
-	}
-
 	ErrorField = INDEX_NONE;
 	ErrorCase = INDEX_NONE;
 	FieldWarnings.Reset();
@@ -254,33 +249,23 @@ void UBangoEdGraphNode::UpdateLayout()
 	ErrorMsg = Layout.Error;
 }
 
+bool UBangoEdGraphNode::SetLocNamespace(const FString& Typed)
+{
+	const FString NewNamespace = Typed.TrimStartAndEnd();
+	const bool bHas = !NewNamespace.IsEmpty();
+	if (bHas == bHasLocNamespace && NewNamespace.Equals(LocNamespace, ESearchCase::CaseSensitive))
+	{
+		return false;
+	}
+	const FScopedTransaction Transaction(LOCTEXT("EditLocNamespace", "Edit Localization Namespace"));
+	Modify();
+	bHasLocNamespace = bHas;
+	LocNamespace = NewNamespace;
+	return true;
+}
+
 bool UBangoEdGraphNode::SetFieldValue(int32 FieldIndex, const FString& Value, FString& OutError)
 {
-	// The Loc Namespace row is the script's #define LOCTEXT_NAMESPACE line, not part of this node's text.
-	if (Layout.Fields.IsValidIndex(FieldIndex) && Layout.Fields[FieldIndex].bLocNamespace)
-	{
-		// Typing nothing (which arrives as "") removes the line.
-		FString NewNamespace;
-		const FString Trimmed = Value.TrimStartAndEnd();
-		if (!Trimmed.IsEmpty() && !Bango::TryGetStringLiteral(Trimmed, NewNamespace))
-		{
-			OutError = TEXT("The Namespace is a name, like Bango.Intro.");
-			return false;
-		}
-		NewNamespace.TrimStartAndEndInline();
-		const bool bHas = !NewNamespace.IsEmpty();
-		if (bHas == bHasLocNamespace && NewNamespace.Equals(LocNamespace, ESearchCase::CaseSensitive))
-		{
-			return true;
-		}
-		const FScopedTransaction Transaction(LOCTEXT("EditLocNamespace", "Edit Localization Namespace"));
-		Modify();
-		bHasLocNamespace = bHas;
-		LocNamespace = NewNamespace;
-		UpdateLayout(); // the node's widget rebuilds itself after an edit (SBangoGraphNode::RefreshSoon)
-		return true;
-	}
-
 	FBangoGraphNode Edited;
 	Edited.Kind = GetKind();
 	Edited.Text = Text;

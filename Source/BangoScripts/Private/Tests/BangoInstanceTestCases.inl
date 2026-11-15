@@ -866,7 +866,7 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			{
 				{ TEXT("expression"), TEXT("lots == \"lots\""), 1, nullptr, nullptr },
 				{ TEXT("expression, false"), TEXT("Count([1, 2]) > 2"), 0, nullptr, nullptr },
-				{ TEXT("expression with comments and a inputs line"), TEXT("// Is it big?\n#define inputs (int _n = 7)\n\n_n > 5    // more than five"), 1, nullptr, nullptr },
+				{ TEXT("expression with comments and an inputs line"), TEXT("// Is it big?\n#define inputs (int _n = 7)\n\n_n > 5    // more than five"), 1, nullptr, nullptr },
 				{ TEXT("expression with a string holding ;"), TEXT("lots != \"a;b\" && lots != \"//\""), 1, nullptr, nullptr },
 				{ TEXT("a script that returns"), TEXT("int _n = 0;\nfor (int _i = 0; _i < 4; _i++)\n{\n\t_n += _i;\n};\nreturn _n == 6;"), 1, nullptr, nullptr },
 				{ TEXT("a script with a function"), TEXT("function bool Big(int _v)\n{\n\treturn _v > 10;\n};\n\nreturn Big(3);"), 0, nullptr, nullptr },

@@ -173,7 +173,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 				.IsEnabled_Lambda([this]() { return !bTextEdited; })
 				.ToolTipText_Lambda([this]() { return bTextEdited ? LOCTEXT("PaneLockedTooltip", "The script's text has been edited. Apply it (Ctrl+Enter) or Revert it to use these again.") : FText::GetEmpty(); })
 				[
-					// SCRIPT DESCRIPTION, SCRIPT INPUTS, GLOBAL VARS, LOCAL VARS and FUNCTIONS (the order of the script's text): foldouts one after another in a single scrolling pane.
+					// SCRIPT DESCRIPTION, SCRIPT CONFIG, SCRIPT INPUTS, GLOBAL VARS, LOCAL VARS and FUNCTIONS (the order of the script's text): foldouts one after another in a single scrolling pane.
 					// Each list is as tall as its rows, so only the pane scrolls. A closed foldout is just its header.
 					// Its background is a standalone window's (what the inline script window shows behind it), so it's the same
 					// in the asset editor, where a tab's content area would otherwise show through.
@@ -203,6 +203,37 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 									.OnTextCommitted_Lambda([this](const FText& NewText, ETextCommit::Type CommitType)
 									{
 										SetScriptDescription(NewText.ToString());
+									})
+								])
+						]
+
+						// SCRIPT CONFIG: the script's settings lines, saved under the description (#define LOCTEXT_NAMESPACE).
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(0.0f, 0.0f, 0.0f, 2.0f)
+						[
+							MakeFoldout(LOCTEXT("ConfigHeading", "SCRIPT CONFIG"), &bConfigExpanded,
+								SNew(SVerticalBox)
+								+ SVerticalBox::Slot()
+								.AutoHeight()
+								.Padding(8.0f, 4.0f, 6.0f, 2.0f)
+								[
+									SNew(STextBlock)
+									.Text(LOCTEXT("LocalizationHeading", "LOCALIZATION NAMESPACE"))
+									.Font(FCoreStyle::GetDefaultFontStyle("Bold", 8))
+									.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+								]
+								+ SVerticalBox::Slot()
+								.AutoHeight()
+								.Padding(8.0f, 0.0f, 6.0f, 4.0f)
+								[
+									SAssignNew(NamespaceBox, SEditableTextBox)
+									.HintText(LOCTEXT("NamespaceHint", "none"))
+									.ToolTipText(LOCTEXT("NamespaceTooltip", "The namespace of this script's LOCTEXT texts, for translators' tools, like Bango.Intro. It's saved as #define LOCTEXT_NAMESPACE \"...\" under the description, with #undef LOCTEXT_NAMESPACE at the end of the file. Leave it empty for none."))
+									.IsReadOnly_Lambda([this]() { return EdGraphs.Num() == 0; })
+									.OnTextCommitted_Lambda([this](const FText& NewText, ETextCommit::Type CommitType)
+									{
+										SetScriptNamespace(NewText.ToString());
 									})
 								])
 						]
@@ -1281,7 +1312,7 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateInputRow(TSharedPtr<FInputEn
 		const UBangoEdGraphNode* Entry = GetShownEntryNode();
 		const FBangoNodeField* Field = Entry ? Entry->Layout.Fields.FindByPredicate([&Param](const FBangoNodeField& Each)
 		{
-			return !Each.bLocNamespace && Each.Label == Param.Name;
+			return Each.Label == Param.Name;
 		}) : nullptr;
 		DefaultBox = SNew(SEditableTextBox)
 				.Text(FText::FromString(Field ? Bango::GetFieldEditText(*Field) : Param.Default))
@@ -1573,7 +1604,7 @@ void SBangoScriptEditor::SetInputDefault(int32 Index, const FString& Typed)
 	FBangoEntryParam& Param = Params[Index];
 	const FBangoNodeField* Field = Entry->Layout.Fields.FindByPredicate([&Param](const FBangoNodeField& Each)
 	{
-		return !Each.bLocNamespace && Each.Label == Param.Name;
+		return Each.Label == Param.Name;
 	});
 	// As the node's field did: a string or text is typed as plain text (or =expression), anything else as code.
 	const FString Value = (Field ? Bango::GetFieldValueFromTyped(*Field, Typed) : Typed).TrimStartAndEnd();
@@ -2368,6 +2399,7 @@ void SBangoScriptEditor::CloseScript()
 	SetScriptText(FString());
 	TextError.Reset();
 	UpdateDescriptionBox(); // empty, with no graphs
+	UpdateNamespaceBox();
 }
 
 FString SBangoScriptEditor::GetScriptFileLabel() const
@@ -2503,6 +2535,7 @@ void SBangoScriptEditor::ShowDocument(const FBangoGraphDocument& Document)
 	RebuildFunctionItems();
 	ShowGraph(0);
 	UpdateDescriptionBox();
+	UpdateNamespaceBox();
 	RefreshNodeList();
 }
 
@@ -2928,6 +2961,36 @@ void SBangoScriptEditor::UpdateDescriptionBox()
 	if (!DescriptionBox->GetText().ToString().Equals(Description, ESearchCase::CaseSensitive))
 	{
 		DescriptionBox->SetText(FText::FromString(Description));
+	}
+}
+
+// ---- SCRIPT CONFIG ----
+
+FString SBangoScriptEditor::GetScriptNamespace() const
+{
+	const UBangoEdGraphNode* Entry = EdGraphs.Num() > 0 ? BangoScriptEditor::FindEntryNode(EdGraphs[0].Get()) : nullptr;
+	return Entry && Entry->bHasLocNamespace ? Entry->LocNamespace : FString();
+}
+
+void SBangoScriptEditor::SetScriptNamespace(const FString& Typed)
+{
+	if (UBangoEdGraphNode* Entry = EdGraphs.Num() > 0 ? BangoScriptEditor::FindEntryNode(EdGraphs[0].Get()) : nullptr)
+	{
+		Entry->SetLocNamespace(Typed); // the script text and the dirty state follow on the next tick, as for any edit
+	}
+	UpdateNamespaceBox();
+}
+
+void SBangoScriptEditor::UpdateNamespaceBox()
+{
+	if (!NamespaceBox.IsValid() || NamespaceBox->HasAnyUserFocusOrFocusedDescendants())
+	{
+		return;
+	}
+	const FString Namespace = GetScriptNamespace();
+	if (!NamespaceBox->GetText().ToString().Equals(Namespace, ESearchCase::CaseSensitive))
+	{
+		NamespaceBox->SetText(FText::FromString(Namespace));
 	}
 }
 
@@ -4389,6 +4452,7 @@ EActiveTimerReturnType SBangoScriptEditor::OnPoll(double CurrentTime, float Delt
 	UpdateVariables(Current, Fresh);
 	UpdateScriptText(&Current);
 	UpdateDescriptionBox();
+	UpdateNamespaceBox();
 	return EActiveTimerReturnType::Continue;
 }
 
@@ -4738,6 +4802,10 @@ bool SBangoScriptEditor::Save()
 	if (DescriptionBox.IsValid() && DescriptionBox->HasAnyUserFocusOrFocusedDescendants())
 	{
 		SetScriptDescription(DescriptionBox->GetText().ToString()); // Ctrl+S while typing it: what's typed is saved
+	}
+	if (NamespaceBox.IsValid() && NamespaceBox->HasAnyUserFocusOrFocusedDescendants())
+	{
+		SetScriptNamespace(NamespaceBox->GetText().ToString());
 	}
 	if (bTextEdited && !ApplyScriptText())
 	{

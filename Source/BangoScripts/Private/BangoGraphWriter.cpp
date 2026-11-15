@@ -62,22 +62,24 @@ namespace BangoGraphWriterPrivate
 			// The description comes first: nothing may come before it. The heading after it gives it its blank line.
 			AddComment(Doc.Description, 0, -1);
 
-			// Main graph. Each part gets a section heading (// ==== ...) above it, if it has anything.
-			const FBangoGraphNode& MainEntry = Doc.Main.Nodes[0];
-			const bool bWriteParams = !MainEntry.Text.IsEmpty() || (!MainEntry.Comment.IsEmpty() && !Doc.bHasLocNamespace);
-			if (bWriteParams || Doc.bHasLocNamespace)
-			{
-				AddHeading(Bango::GetScriptInputHeadingComment());
-			}
-			AddComment(MainEntry.Comment, 0, -1);
-			if (bWriteParams)
-			{
-				// An empty inputs line still anchors the entry node's comment (the namespace line does too).
-				AddCode(0, -1, FString(TEXT("#define inputs (")) + MainEntry.Text + TEXT(")"), nullptr);
-			}
+			// The script's settings (SCRIPT CONFIG in the editor), under the description and above every heading.
 			if (Doc.bHasLocNamespace)
 			{
+				if (Out.Num() > 0)
+				{
+					AddBlank();
+				}
 				AddCode(0, -1, FString(TEXT("#define LOCTEXT_NAMESPACE ")) + Bango::MakeStringLiteral(Doc.LocNamespace), nullptr);
+			}
+
+			// Main graph. Each part gets a section heading (// ==== ...) above it, if it has anything.
+			const FBangoGraphNode& MainEntry = Doc.Main.Nodes[0];
+			if (!MainEntry.Text.IsEmpty() || !MainEntry.Comment.IsEmpty())
+			{
+				AddHeading(Bango::GetScriptInputHeadingComment());
+				AddComment(MainEntry.Comment, 0, -1);
+				// An empty inputs line still anchors the entry node's comment.
+				AddCode(0, -1, FString(TEXT("#define inputs (")) + MainEntry.Text + TEXT(")"), nullptr);
 			}
 			// The declarations: globals, then the main graph's locals.
 			if (Doc.Globals.Num() > 0)

@@ -89,8 +89,7 @@ bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("plain exec out has no label"), SleepNode->GetPinDisplayName(SleepNode->GetNextPin()).ToString(), FString());
 	TestEqual(TEXT("if title"), If->GetNodeTitle(ENodeTitleType::FullTitle).ToString(), FString(TEXT("If")));
 	TestEqual(TEXT("if field"), If->Layout.Fields.Num() == 1 ? If->Layout.Fields[0].Text : FString(), FString(TEXT("_n > 0")));
-	TestEqual(TEXT("entry fields (one per parameter, then Loc Namespace)"), Entry->Layout.Fields.Num(), 2);
-	TestTrue(TEXT("the last entry field is Loc Namespace"), Entry->Layout.Fields.Num() == 2 && Entry->Layout.Fields[1].bLocNamespace);
+	TestEqual(TEXT("entry fields (one per parameter; the namespace is in SCRIPT CONFIG, not on the node)"), Entry->Layout.Fields.Num(), 1);
 
 	// A built-in command gets its own node, with a field per parameter.
 	TestEqual(TEXT("Sleep title"), SleepNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString(), FString(TEXT("Sleep")));
@@ -253,7 +252,7 @@ bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// Localized text: the Loc Namespace row on Script Start, and a text field that keeps its key when retyped.
+	// Localized text: the namespace kept on Script Start (edited in SCRIPT CONFIG), and a text field that keeps its key when retyped.
 	{
 		FBangoGraphDocument TextDoc;
 		const TCHAR* TextSource =
@@ -271,8 +270,8 @@ bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 			UBangoEdGraphNode* HintNode = TextGraph->Nodes.Num() == 2 ? Cast<UBangoEdGraphNode>(TextGraph->Nodes[1]) : nullptr;
 			if (TestNotNull(TEXT("Script Start"), TextEntry) && TestNotNull(TEXT("Hint node"), HintNode))
 			{
-				const int32 NsField = TextEntry->Layout.Fields.IndexOfByPredicate([](const FBangoNodeField& F) { return F.bLocNamespace; });
-				TestTrue(TEXT("Script Start has a Loc Namespace row"), NsField != INDEX_NONE);
+				TestEqual(TEXT("Script Start keeps the namespace"), TextEntry->LocNamespace, FString(TEXT("Bango.Tests")));
+				TestEqual(TEXT("but has no row for it"), TextEntry->Layout.Fields.Num(), 0);
 				TArray<UEdGraph*> TextGraphs = { TextGraph.Get() };
 				FBangoGraphDocument Back;
 				FString BuildError;
@@ -280,14 +279,12 @@ bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 				TestTrue(TEXT("the namespace reads back"), Back == TextDoc);
 
 				FString EditError;
-				if (NsField != INDEX_NONE)
-				{
-					TestTrue(TEXT("rename the namespace"), TextEntry->SetFieldValue(NsField, TEXT("\"Bango.Other\""), EditError));
-					TestEqual(TEXT("renamed"), TextEntry->LocNamespace, FString(TEXT("Bango.Other")));
-					TestTrue(TEXT("clear the namespace"), TextEntry->SetFieldValue(NsField, TEXT("\"\""), EditError));
-					TestFalse(TEXT("cleared"), TextEntry->bHasLocNamespace);
-					TestTrue(TEXT("put it back"), TextEntry->SetFieldValue(NsField, TEXT("\"Bango.Tests\""), EditError));
-				}
+				TestTrue(TEXT("rename the namespace"), TextEntry->SetLocNamespace(TEXT(" Bango.Other ")));
+				TestEqual(TEXT("renamed, without the spaces"), TextEntry->LocNamespace, FString(TEXT("Bango.Other")));
+				TestFalse(TEXT("the same name changes nothing"), TextEntry->SetLocNamespace(TEXT("Bango.Other")));
+				TestTrue(TEXT("clear the namespace"), TextEntry->SetLocNamespace(FString()));
+				TestFalse(TEXT("cleared"), TextEntry->bHasLocNamespace);
+				TestTrue(TEXT("put it back"), TextEntry->SetLocNamespace(TEXT("Bango.Tests")));
 
 				const FBangoNodeField& TextField = HintNode->Layout.Fields[0];
 				TestTrue(TEXT("Hint's Text is a localized text field"), Bango::IsLocalizedTextField(TextField));

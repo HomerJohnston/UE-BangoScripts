@@ -255,19 +255,6 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 		{
 			OutFailures.Add(TEXT("text: only real text literals are read as one"));
 		}
-
-		// The Script Start node's Loc Namespace row.
-		FBangoNodeLayout Start;
-		Bango::AddLocNamespaceField(Start, true, TEXT("Bango.Intro"));
-		Bango::AddLocNamespaceField(Start, false, FString());
-		FBangoGraphNode Entry;
-		Entry.Kind = EBangoGraphNodeKind::Entry;
-		FString EntryError;
-		if (Start.Fields.Num() != 2 || Bango::GetFieldDisplayText(Start.Fields[0]) != TEXT("Bango.Intro") || !Start.Fields[0].bLocNamespace || Start.Fields[1].bPresent
-			|| Bango::SetNodeField(Entry, false, Context, 0, TEXT("\"X\""), EntryError))
-		{
-			OutFailures.Add(TEXT("text: the Loc Namespace row shows the namespace, and isn't part of the node's text"));
-		}
 	}
 
 	// Text fields: typed without quotes, escaped when saved.

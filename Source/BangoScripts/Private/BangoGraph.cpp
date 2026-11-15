@@ -921,7 +921,7 @@ namespace BangoGraphPrivate
 			}
 			if (SnippetScript.GetParams())
 			{
-				return Fail(SnippetScript.TopLevel[0]->Loc.Line, TEXT("Disconnected nodes (//~ lines) can't contain a inputs line."));
+				return Fail(SnippetScript.TopLevel[0]->Loc.Line, TEXT("Disconnected nodes (//~ lines) can't contain an inputs line."));
 			}
 			if (SnippetScript.TopLevel.Num() == 0)
 			{

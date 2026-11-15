@@ -233,11 +233,6 @@ namespace Bango
 			return false;
 		}
 		const FBangoNodeField& Field = Layout.Fields[FieldIndex];
-		if (Field.bLocNamespace)
-		{
-			OutError = TEXT("The Namespace isn't part of the node's text.");
-			return false;
-		}
 		if (!CanEditField(Layout, FieldIndex))
 		{
 			OutError = Field.bLocked ? TEXT("Fill in the values before this one first.")
