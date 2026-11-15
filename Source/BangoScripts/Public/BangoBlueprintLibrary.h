@@ -75,11 +75,11 @@ public:
 
 	// ---- Arguments for a script's parameters: Spawn Bango Inline Script's Args (the Spawn Bango Script node builds them itself) ----
 
-	/** An empty list of values for a Bango script's parameters. Add to it with the Add Bango Arg nodes, in the order of the script's #define inputs line, then give it to Spawn Bango Inline Script. */
+	/** An empty list of values for a Bango script's parameters. Add to it with the Add Bango Arg nodes, in the order of the script's #set inputs line, then give it to Spawn Bango Inline Script. */
 	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Make Bango Args"))
 	static FBangoBlueprintArgs MakeBangoArgs();
 
-	/** Leaves out the next parameter (one with a default value in the script's #define inputs line), so it gets its default. */
+	/** Leaves out the next parameter (one with a default value in the script's #set inputs line), so it gets its default. */
 	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Skip Bango Arg"))
 	static FBangoBlueprintArgs SkipBangoArg(const FBangoBlueprintArgs& Args);
 
@@ -153,7 +153,7 @@ public:
 
 	/** Spawns a script asset with collected arguments (the Spawn Bango Script node). */
 	/**
-	 * Starts an inline script (a Bango Inline Script variable or property, spec section 15). Args fill its #define inputs
+	 * Starts an inline script (a Bango Inline Script variable or property, spec section 15). Args fill its #set inputs
 	 * line, in order: make them with Make Bango Args and the Add Bango Arg nodes (leave it unconnected for a script with
 	 * no parameters). They're checked when it starts: if they don't fit, it doesn't start, and the error says why. An
 	 * empty script does nothing. Owner names it in errors and the debugger (Self, unless something else is connected).

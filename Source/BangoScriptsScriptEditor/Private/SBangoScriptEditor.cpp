@@ -207,7 +207,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 								])
 						]
 
-						// SCRIPT CONFIG: the script's settings lines, saved under the description (#define LOCTEXT_NAMESPACE).
+						// SCRIPT CONFIG: the script's settings lines, saved under the description (#set LOCTEXT_NAMESPACE).
 						+ SVerticalBox::Slot()
 						.AutoHeight()
 						.Padding(0.0f, 0.0f, 0.0f, 2.0f)
@@ -229,11 +229,36 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 								[
 									SAssignNew(NamespaceBox, SEditableTextBox)
 									.HintText(LOCTEXT("NamespaceHint", "none"))
-									.ToolTipText(LOCTEXT("NamespaceTooltip", "The namespace of this script's LOCTEXT texts, for translators' tools, like Bango.Intro. It's saved as #define LOCTEXT_NAMESPACE \"...\" under the description, with #undef LOCTEXT_NAMESPACE at the end of the file. Leave it empty for none."))
+									.ToolTipText(LOCTEXT("NamespaceTooltip", "The namespace of this script's LOCTEXT texts, for translators' tools, like Bango.Intro. It's saved as #set LOCTEXT_NAMESPACE \"...\" at the top of the script, under the description. Leave it empty for none."))
 									.IsReadOnly_Lambda([this]() { return EdGraphs.Num() == 0; })
 									.OnTextCommitted_Lambda([this](const FText& NewText, ETextCommit::Type CommitType)
 									{
 										SetScriptNamespace(NewText.ToString());
+									})
+								]
+								+ SVerticalBox::Slot()
+								.AutoHeight()
+								.Padding(8.0f, 4.0f, 6.0f, 2.0f)
+								[
+									SNew(STextBlock)
+									.Text(LOCTEXT("ThresholdHeading", "LARGE SCRIPT THRESHOLD"))
+									.Font(FCoreStyle::GetDefaultFontStyle("Bold", 8))
+									.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+								]
+								+ SVerticalBox::Slot()
+								.AutoHeight()
+								.Padding(8.0f, 0.0f, 6.0f, 4.0f)
+								[
+									SAssignNew(ThresholdBox, SEditableTextBox)
+									.HintText_Lambda([]()
+									{
+										return FText::Format(LOCTEXT("ThresholdHint", "project setting ({0})"), FText::AsNumber(GetDefault<UBangoSettings>()->LargeScriptThreshold));
+									})
+									.ToolTipText(LOCTEXT("ThresholdTooltip", "From how many nodes on this script is saved with section headings (// ==== ...) and node metadata (//@). With fewer, it's saved as plain code, and its nodes are laid out afresh each time it's opened. 0: always. Leave it empty to use the project setting (Project Settings > Bango > Large Script Threshold). It's saved as #set LARGE_SCRIPT_THRESHOLD at the top of the script."))
+									.IsReadOnly_Lambda([this]() { return EdGraphs.Num() == 0; })
+									.OnTextCommitted_Lambda([this](const FText& NewText, ETextCommit::Type CommitType)
+									{
+										SetScriptThreshold(NewText.ToString());
 									})
 								])
 						]
@@ -269,7 +294,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 								{
 									return ShownGraph > 0
 										? LOCTEXT("AddFunctionInputTooltip", "Add a parameter to this function. Calls to it need a value for it.")
-										: LOCTEXT("AddScriptInputTooltip", "Add a parameter to this script (#define inputs): a value it's spawned with.");
+										: LOCTEXT("AddScriptInputTooltip", "Add a parameter to this script (#set inputs): a value it's spawned with.");
 								})
 								.IsEnabled_Lambda([this]() { return GetShownEntryNode() != nullptr; })
 								.OnClicked(this, &SBangoScriptEditor::OnAddInputClicked)
@@ -2399,7 +2424,7 @@ void SBangoScriptEditor::CloseScript()
 	SetScriptText(FString());
 	TextError.Reset();
 	UpdateDescriptionBox(); // empty, with no graphs
-	UpdateNamespaceBox();
+	UpdateConfigBoxes();
 }
 
 FString SBangoScriptEditor::GetScriptFileLabel() const
@@ -2517,6 +2542,7 @@ void SBangoScriptEditor::ShowDocument(const FBangoGraphDocument& Document)
 	LayoutContext = MakeShared<FBangoNodeLayoutContext>(Bango::MakeNodeLayoutContext(Document, &FBangoModule::Get().GetCommands()));
 	EdGraphs.Add(TStrongObjectPtr<UEdGraph>(BangoScriptEditor::CreateEdGraph(Document.Main, LayoutContext)));
 	BangoScriptEditor::SetLocNamespace(EdGraphs[0].Get(), Document.bHasLocNamespace, Document.LocNamespace);
+	BangoScriptEditor::SetLargeScriptThreshold(EdGraphs[0].Get(), Document.bHasLargeScriptThreshold, Document.LargeScriptThreshold);
 	BangoScriptEditor::SetGlobals(EdGraphs[0].Get(), Document.Globals);
 	BangoScriptEditor::SetDescription(EdGraphs[0].Get(), Document.Description);
 	TSharedPtr<FGraphEntry> Main = MakeShared<FGraphEntry>();
@@ -2535,7 +2561,7 @@ void SBangoScriptEditor::ShowDocument(const FBangoGraphDocument& Document)
 	RebuildFunctionItems();
 	ShowGraph(0);
 	UpdateDescriptionBox();
-	UpdateNamespaceBox();
+	UpdateConfigBoxes();
 	RefreshNodeList();
 }
 
@@ -2978,7 +3004,7 @@ void SBangoScriptEditor::SetScriptNamespace(const FString& Typed)
 	{
 		Entry->SetLocNamespace(Typed); // the script text and the dirty state follow on the next tick, as for any edit
 	}
-	UpdateNamespaceBox();
+	UpdateConfigBoxes();
 }
 
 void SBangoScriptEditor::UpdateNamespaceBox()
@@ -2992,6 +3018,46 @@ void SBangoScriptEditor::UpdateNamespaceBox()
 	{
 		NamespaceBox->SetText(FText::FromString(Namespace));
 	}
+}
+
+FString SBangoScriptEditor::GetScriptThresholdText() const
+{
+	const UBangoEdGraphNode* Entry = EdGraphs.Num() > 0 ? BangoScriptEditor::FindEntryNode(EdGraphs[0].Get()) : nullptr;
+	return Entry && Entry->bHasLargeScriptThreshold ? FString::FromInt(Entry->LargeScriptThreshold) : FString();
+}
+
+void SBangoScriptEditor::SetScriptThreshold(const FString& Typed)
+{
+	const FString Trimmed = Typed.TrimStartAndEnd();
+	UBangoEdGraphNode* Entry = EdGraphs.Num() > 0 ? BangoScriptEditor::FindEntryNode(EdGraphs[0].Get()) : nullptr;
+	if (Entry && (Trimmed.IsEmpty() || (Trimmed.IsNumeric() && !Trimmed.Contains(TEXT(".")) && !Trimmed.StartsWith(TEXT("-")) && Trimmed.Len() <= 9)))
+	{
+		Entry->SetLargeScriptThreshold(!Trimmed.IsEmpty(), Trimmed.IsEmpty() ? 0 : FCString::Atoi(*Trimmed));
+	}
+	if (ThresholdBox.IsValid())
+	{
+		ThresholdBox->SetText(FText::FromString(GetScriptThresholdText())); // what's kept, or back to it if what was typed isn't a number
+	}
+}
+
+void SBangoScriptEditor::UpdateConfigBoxes()
+{
+	UpdateNamespaceBox();
+	if (ThresholdBox.IsValid() && !ThresholdBox->HasAnyUserFocusOrFocusedDescendants())
+	{
+		const FString Threshold = GetScriptThresholdText();
+		if (!ThresholdBox->GetText().ToString().Equals(Threshold, ESearchCase::CaseSensitive))
+		{
+			ThresholdBox->SetText(FText::FromString(Threshold));
+		}
+	}
+}
+
+FBangoGraphWriteOptions SBangoScriptEditor::GetWriteOptions() const
+{
+	FBangoGraphWriteOptions Options;
+	Options.LargeScriptThreshold = GetDefault<UBangoSettings>()->LargeScriptThreshold;
+	return Options;
 }
 
 // ---- Script text pane ----
@@ -3716,7 +3782,7 @@ void SBangoScriptEditor::UpdateScriptText(const FBangoGraphDocument* Document)
 		Document = &Built;
 	}
 	FString Text;
-	if (!Bango::WriteGraphText(*Document, Text, Error))
+	if (!Bango::WriteGraphText(*Document, Text, Error, GetWriteOptions()))
 	{
 		return;
 	}
@@ -4452,7 +4518,7 @@ EActiveTimerReturnType SBangoScriptEditor::OnPoll(double CurrentTime, float Delt
 	UpdateVariables(Current, Fresh);
 	UpdateScriptText(&Current);
 	UpdateDescriptionBox();
-	UpdateNamespaceBox();
+	UpdateConfigBoxes();
 	return EActiveTimerReturnType::Continue;
 }
 
@@ -4807,6 +4873,10 @@ bool SBangoScriptEditor::Save()
 	{
 		SetScriptNamespace(NamespaceBox->GetText().ToString());
 	}
+	if (ThresholdBox.IsValid() && ThresholdBox->HasAnyUserFocusOrFocusedDescendants())
+	{
+		SetScriptThreshold(ThresholdBox->GetText().ToString());
+	}
 	if (bTextEdited && !ApplyScriptText())
 	{
 		Notify(FText::Format(LOCTEXT("CantSaveText", "Can't save: the script text doesn't read. Fix it, or Revert it. {0}"), FText::FromString(TextError)), false);
@@ -4815,7 +4885,7 @@ bool SBangoScriptEditor::Save()
 	FBangoGraphDocument Document;
 	FString Error;
 	FString Text;
-	if (!BuildCurrentDocument(Document, nullptr, Error) || !Bango::WriteGraphText(Document, Text, Error))
+	if (!BuildCurrentDocument(Document, nullptr, Error) || !Bango::WriteGraphText(Document, Text, Error, GetWriteOptions()))
 	{
 		Notify(FText::Format(LOCTEXT("CantSave", "Can't save: {0}"), FText::FromString(Error)), false);
 		return false;
@@ -4936,7 +5006,7 @@ void SBangoScriptEditor::WriteRecoveryCopy() const
 	{
 		Text = TextBox->GetText().ToString(); // what was typed, even if it doesn't read
 	}
-	else if (OpenScript.IsEmpty() || !BuildCurrentDocument(Document, nullptr, Error) || !Bango::WriteGraphText(Document, Text, Error))
+	else if (OpenScript.IsEmpty() || !BuildCurrentDocument(Document, nullptr, Error) || !Bango::WriteGraphText(Document, Text, Error, GetWriteOptions()))
 	{
 		return;
 	}

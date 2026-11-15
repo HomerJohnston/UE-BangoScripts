@@ -11,7 +11,7 @@ struct BANGOSCRIPTS_API FBangoEntryParam
 {
 	FString Type;
 	FString Name;
-	/** Only the main graph's parameters (#define inputs) can have defaults. */
+	/** Only the main graph's parameters (#set inputs) can have defaults. */
 	bool bHasDefault = false;
 	FString Default;
 
@@ -95,7 +95,7 @@ namespace Bango
 
 	/**
 	 * Reads the parameters of an entry node's text: `void Name(int _a, string _b)` in a function graph, or the
-	 * main graph's `#define inputs` list without its parentheses (`entity _who, int _times = 1`). Each part is
+	 * main graph's `#set inputs` list without its parentheses (`entity _who, int _times = 1`). Each part is
 	 * kept as written. False if the text doesn't read as a parameter list.
 	 */
 	BANGOSCRIPTS_API bool ReadEntryParams(const FString& EntryText, bool bInFunctionGraph, TArray<FBangoEntryParam>& OutParams);

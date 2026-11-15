@@ -28,7 +28,7 @@ bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 		TEXT("// About this script\n")
 		TEXT("\n")
 		TEXT("// Start here\n")
-		TEXT("#define inputs (int _n = 1)\n")
+		TEXT("#set inputs (int _n = 1)\n")
 		TEXT("if (_n > 0)    //@1(10, 0)\n")
 		TEXT("{\n")
 		TEXT("\tSleep(1.5);    //@2(20, 5)\n")
@@ -256,11 +256,9 @@ bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 	{
 		FBangoGraphDocument TextDoc;
 		const TCHAR* TextSource =
-			TEXT("#define LOCTEXT_NAMESPACE \"Bango.Tests\"\n")
+			TEXT("#set LOCTEXT_NAMESPACE \"Bango.Tests\"\n")
 			TEXT("\n")
-			TEXT("Say(LOCTEXT(\"Greeting\", \"Hi there\"));    //@1(0, 0)\n")
-			TEXT("\n")
-			TEXT("#undef LOCTEXT_NAMESPACE\n");
+			TEXT("Say(LOCTEXT(\"Greeting\", \"Hi there\"));    //@1(0, 0)\n");
 		if (TestTrue(TEXT("build text graph"), Bango::BuildGraph(TextSource, TEXT("text.bango"), TextDoc, Error)))
 		{
 			// No built-in command shows a text as a statement, so the test has one: Say(text).

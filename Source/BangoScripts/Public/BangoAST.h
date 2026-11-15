@@ -527,7 +527,7 @@ struct FBangoScriptParamDecl
 	FBangoExprPtr Default;
 };
 
-/** `#define inputs (int _a, string _b = "x")` Always the first statement of a script, if present. */
+/** `#set inputs (int _a, string _b = "x")` Always the first statement of a script, if present. */
 struct FBangoParamsStmt : FBangoStmt
 {
 	static constexpr EBangoStmtKind StaticKind = EBangoStmtKind::Params;
@@ -577,15 +577,21 @@ struct FBangoScript
 	TArray<const FBangoLiteralExpr*> TextLiterals;
 
 	/**
-	 * `#define LOCTEXT_NAMESPACE "Bango.Intro"`: the namespace for the script's LOCTEXT and NOTELOCTEXT texts,
-	 * written like C++ so Unreal's localization gatherer reads it. Comes before or after the inputs line (it's
-	 * written before it), and before everything else; the script must then end with `#undef LOCTEXT_NAMESPACE` (LocNamespaceEndLoc). Neither is a
-	 * statement: they have no graph nodes.
+	 * `#set LOCTEXT_NAMESPACE "Bango.Intro"`: the namespace for the script's LOCTEXT and NOTELOCTEXT texts. Like the
+	 * other settings lines, it comes before or after the inputs line (it's written before it), and before everything
+	 * else. Settings lines aren't statements: they have no graph nodes.
 	 */
 	bool bHasLocNamespace = false;
 	FString LocNamespace;
 	FBangoSourceLocation LocNamespaceLoc;
-	FBangoSourceLocation LocNamespaceEndLoc;
+
+	/**
+	 * `#set LARGE_SCRIPT_THRESHOLD 5`: from how many nodes on, the graph editor saves this script with its section
+	 * headings and node metadata (overrides the project setting). 0: always.
+	 */
+	bool bHasLargeScriptThreshold = false;
+	int32 LargeScriptThreshold = 0;
+	FBangoSourceLocation LargeScriptThresholdLoc;
 
 	/** The inputs line, or null if the script has none. Points into TopLevel. */
 	const FBangoParamsStmt* GetParams() const

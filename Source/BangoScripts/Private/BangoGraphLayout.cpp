@@ -815,7 +815,7 @@ namespace BangoGraphLayoutPrivate
 			}
 		}
 		else if (!Graph.Nodes[0].Text.IsEmpty()
-			&& Bango::ParseScript(FString(TEXT("#define inputs (")) + Graph.Nodes[0].Text + TEXT(")"), TEXT("node"), Script, Error))
+			&& Bango::ParseScript(FString(TEXT("#set inputs (")) + Graph.Nodes[0].Text + TEXT(")"), TEXT("node"), Script, Error))
 		{
 			if (const FBangoParamsStmt* Params = Script.GetParams())
 			{

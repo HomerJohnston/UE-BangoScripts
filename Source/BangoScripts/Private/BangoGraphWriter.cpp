@@ -43,7 +43,7 @@ namespace BangoGraphWriterPrivate
 	class FWriter
 	{
 	public:
-		explicit FWriter(FString& InError) : Error(InError) {}
+		FWriter(FString& InError, bool bInCompact) : Error(InError), bCompact(bInCompact) {}
 
 		bool Run(const FBangoGraphDocument& Doc, FString& OutText)
 		{
@@ -63,13 +63,20 @@ namespace BangoGraphWriterPrivate
 			AddComment(Doc.Description, 0, -1);
 
 			// The script's settings (SCRIPT CONFIG in the editor), under the description and above every heading.
-			if (Doc.bHasLocNamespace)
+			if (Doc.bHasLocNamespace || Doc.bHasLargeScriptThreshold)
 			{
 				if (Out.Num() > 0)
 				{
 					AddBlank();
 				}
-				AddCode(0, -1, FString(TEXT("#define LOCTEXT_NAMESPACE ")) + Bango::MakeStringLiteral(Doc.LocNamespace), nullptr);
+				if (Doc.bHasLocNamespace)
+				{
+					AddCode(0, -1, FString(TEXT("#set LOCTEXT_NAMESPACE ")) + Bango::MakeStringLiteral(Doc.LocNamespace), nullptr);
+				}
+				if (Doc.bHasLargeScriptThreshold)
+				{
+					AddCode(0, -1, FString::Printf(TEXT("#set LARGE_SCRIPT_THRESHOLD %d"), Doc.LargeScriptThreshold), nullptr);
+				}
 			}
 
 			// Main graph. Each part gets a section heading (// ==== ...) above it, if it has anything.
@@ -79,7 +86,7 @@ namespace BangoGraphWriterPrivate
 				AddHeading(Bango::GetScriptInputHeadingComment());
 				AddComment(MainEntry.Comment, 0, -1);
 				// An empty inputs line still anchors the entry node's comment.
-				AddCode(0, -1, FString(TEXT("#define inputs (")) + MainEntry.Text + TEXT(")"), nullptr);
+				AddCode(0, -1, FString(TEXT("#set inputs (")) + MainEntry.Text + TEXT(")"), nullptr);
 			}
 			// The declarations: globals, then the main graph's locals.
 			if (Doc.Globals.Num() > 0)
@@ -123,8 +130,11 @@ namespace BangoGraphWriterPrivate
 			{
 				const FBangoGraph& Function = Doc.Functions[FunctionIndex];
 				AddBlank();
-				AddCode(0, -1, FString(TEXT("//")) + (bFirstFunction ? Bango::GetFunctionsHeadingComment() : Bango::GetFunctionSeparatorComment()), nullptr);
-				AddBlank();
+				if (!bCompact)
+				{
+					AddCode(0, -1, FString(TEXT("//")) + (bFirstFunction ? Bango::GetFunctionsHeadingComment() : Bango::GetFunctionSeparatorComment()), nullptr);
+					AddBlank();
+				}
 				bFirstFunction = false;
 				const FBangoGraphNode& Entry = Function.Nodes[0];
 				AddComment(Entry.Comment, 0, -1);
@@ -145,13 +155,29 @@ namespace BangoGraphWriterPrivate
 				AddCode(0, -1, TEXT("}"), nullptr);
 			}
 
-			if (Doc.bHasLocNamespace)
+			// Compact, a script without a description can start with a comment (no heading comes first): a blank line
+			// above it keeps it from being read back as the description.
+			if (bCompact)
 			{
-				if (Out.Num() > 0)
+				// Skipped reroutes can leave blank lines in a row (or a disconnected chain of nothing): one is enough.
+				TArray<FOutLine> Kept;
+				for (FOutLine& Line : Out)
 				{
-					AddBlank();
+					if (IsBlankLine(Line) && (Kept.Num() == 0 || IsBlankLine(Kept.Last())))
+					{
+						continue;
+					}
+					Kept.Add(MoveTemp(Line));
 				}
-				AddCode(0, -1, TEXT("#undef LOCTEXT_NAMESPACE"), nullptr);
+				while (Kept.Num() > 0 && IsBlankLine(Kept.Last()))
+				{
+					Kept.Pop();
+				}
+				Out = MoveTemp(Kept);
+			}
+			if (bCompact && Doc.Description.IsEmpty() && Out.Num() > 0 && Out[0].DetachedIndent < 0 && Out[0].Code.StartsWith(TEXT("//"), ESearchCase::CaseSensitive))
+			{
+				Out.Insert(FOutLine(), 0);
 			}
 
 			Format(OutText);
@@ -160,6 +186,10 @@ namespace BangoGraphWriterPrivate
 
 	private:
 		FString& Error;
+		/** No section headings and no node metadata (and so no reroutes): see FBangoGraphWriteOptions. */
+		bool bCompact = false;
+		/** Compact: the comments of reroutes skipped since the last node written (CarryComment). */
+		FString CarriedComment;
 		TArray<FOutLine> Out;
 
 		/** Per node of the graph being written. */
@@ -357,6 +387,14 @@ namespace BangoGraphWriterPrivate
 				}
 				const FBangoGraphNode& Node = Graph.Nodes[i];
 				const bool bReroute = Node.Kind == EBangoGraphNodeKind::Reroute;
+				if (bReroute && bCompact)
+				{
+					// A reroute is only its //@ comment, so it isn't written; its comment goes above what follows.
+					Written[i] = true;
+					CarryComment(Node.Comment);
+					Previous = i;
+					continue;
+				}
 				if (bReroute && Previous != INDEX_NONE && Graph.Nodes[Previous].Kind == EBangoGraphNodeKind::Reroute && Node.Comment.IsEmpty())
 				{
 					// Reroutes in a row share one line (a reroute with a comment starts a new one, under its comment).
@@ -380,7 +418,23 @@ namespace BangoGraphWriterPrivate
 				}
 				Previous = i;
 			}
+			if (!CarriedComment.IsEmpty())
+			{
+				// Reroutes at the end of a chain: their comments stay where the chain ends.
+				const FString Comment = MoveTemp(CarriedComment);
+				CarriedComment.Reset();
+				AddComment(Comment, Indent, Detached);
+			}
 			return true;
+		}
+
+		/** Compact: a skipped reroute's comment, for the next node written. */
+		void CarryComment(const FString& Comment)
+		{
+			if (!Comment.IsEmpty())
+			{
+				CarriedComment = CarriedComment.IsEmpty() ? Comment : CarriedComment + TEXT("\n") + Comment;
+			}
 		}
 
 		/**
@@ -456,7 +510,16 @@ namespace BangoGraphWriterPrivate
 		{
 			Written[Index] = true;
 			const FBangoGraphNode& Node = Graph.Nodes[Index];
-			AddComment(Node.Comment, Indent, Detached);
+			if (!CarriedComment.IsEmpty())
+			{
+				const FString Carried = MoveTemp(CarriedComment);
+				CarriedComment.Reset();
+				AddComment(Node.Comment.IsEmpty() ? Carried : Carried + TEXT("\n") + Node.Comment, Indent, Detached);
+			}
+			else
+			{
+				AddComment(Node.Comment, Indent, Detached);
+			}
 
 			const bool bDisabled = !bElseIf && IsWrittenDisabled(Node);
 			if (bDisabled && IsBlockKind(Node.Kind))
@@ -598,7 +661,13 @@ namespace BangoGraphWriterPrivate
 				}
 				AddCode(Indent, Detached, TEXT("}"), nullptr);
 
-				const FBangoGraphNode& FalseNode = Graph.Nodes[FalseBranch];
+				// Compact, reroutes aren't written, so a False branch that starts with some is read past them.
+				int32 FalseStart = FalseBranch;
+				while (bCompact && Graph.Nodes[FalseStart].Kind == EBangoGraphNodeKind::Reroute && Graph.Nodes[FalseStart].Next != INDEX_NONE && !Written[Graph.Nodes[FalseStart].Next])
+				{
+					FalseStart = Graph.Nodes[FalseStart].Next;
+				}
+				const FBangoGraphNode& FalseNode = Graph.Nodes[FalseStart];
 				if (FalseNode.Kind == EBangoGraphNodeKind::If && FalseNode.Next == INDEX_NONE && !IsWrittenDisabled(FalseNode))
 				{
 					// A False branch that is just another if, with nothing after it, is written as `else if`.
@@ -606,7 +675,12 @@ namespace BangoGraphWriterPrivate
 					{
 						return Fail(TEXT("The graph is nested too deeply (more than 64 blocks inside each other)."));
 					}
-					return WriteNode(Graph, FalseBranch, Indent, Detached, Depth + 1, true);
+					for (int32 i = FalseBranch; i != FalseStart; i = Graph.Nodes[i].Next)
+					{
+						Written[i] = true;
+						CarryComment(Graph.Nodes[i].Comment);
+					}
+					return WriteNode(Graph, FalseStart, Indent, Detached, Depth + 1, true);
 				}
 
 				AddCode(Indent, Detached, TEXT("else"), nullptr);
@@ -627,7 +701,7 @@ namespace BangoGraphWriterPrivate
 			Line.Indent = Indent;
 			Line.DetachedIndent = Detached;
 			Line.Code = Code;
-			if (Node)
+			if (Node && !bCompact)
 			{
 				Line.bHasMetadata = true;
 				Line.NodeID = Node->NodeID;
@@ -663,6 +737,10 @@ namespace BangoGraphWriterPrivate
 			if (Out.Num() > 0)
 			{
 				AddBlank();
+			}
+			if (bCompact)
+			{
+				return; // only the blank line between parts
 			}
 			AddCode(0, -1, FString(TEXT("//")) + Heading, nullptr);
 			AddBlank();
@@ -743,10 +821,43 @@ namespace BangoGraphWriterPrivate
 
 namespace Bango
 {
+	int32 CountGraphNodes(const FBangoGraphDocument& Document)
+	{
+		int32 Count = 0;
+		auto CountIn = [&Count](const FBangoGraph& Graph)
+		{
+			for (const FBangoGraphNode& Node : Graph.Nodes)
+			{
+				Count += Node.Kind != EBangoGraphNodeKind::Entry ? 1 : 0;
+			}
+		};
+		CountIn(Document.Main);
+		for (const FBangoGraph& Function : Document.Functions)
+		{
+			CountIn(Function);
+		}
+		return Count;
+	}
+
+	bool IsWrittenCompact(const FBangoGraphDocument& Document, const FBangoGraphWriteOptions& Options)
+	{
+		if (Options.bCompact)
+		{
+			return true;
+		}
+		const int32 Threshold = Document.bHasLargeScriptThreshold ? Document.LargeScriptThreshold : Options.LargeScriptThreshold;
+		return Threshold > 0 && CountGraphNodes(Document) < Threshold;
+	}
+
 	bool WriteGraphText(const FBangoGraphDocument& Document, FString& OutText, FString& OutError)
 	{
+		return WriteGraphText(Document, OutText, OutError, FBangoGraphWriteOptions());
+	}
+
+	bool WriteGraphText(const FBangoGraphDocument& Document, FString& OutText, FString& OutError, const FBangoGraphWriteOptions& Options)
+	{
 		OutError.Reset();
-		BangoGraphWriterPrivate::FWriter Writer(OutError);
+		BangoGraphWriterPrivate::FWriter Writer(OutError, IsWrittenCompact(Document, Options));
 		if (!Writer.Run(Document, OutText))
 		{
 			OutText.Reset();

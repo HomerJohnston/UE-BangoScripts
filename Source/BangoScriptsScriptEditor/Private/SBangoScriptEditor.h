@@ -117,7 +117,7 @@ private:
 	TArray<TSharedPtr<FGraphEntry>> FunctionItems;
 	TSharedPtr<SListView<TSharedPtr<FGraphEntry>>> FunctionList;
 
-	// INPUTS: the shown graph's parameters (the script's #define inputs, or the function's), from its entry node.
+	// INPUTS: the shown graph's parameters (the script's #set inputs, or the function's), from its entry node.
 	struct FInputEntry
 	{
 		int32 Index = INDEX_NONE;
@@ -208,6 +208,8 @@ private:
 	TSharedPtr<SMultiLineEditableTextBox> DescriptionBox;
 	/** SCRIPT CONFIG: the box for the script's localization namespace (kept on the main Script Start node). */
 	TSharedPtr<SEditableTextBox> NamespaceBox;
+	/** SCRIPT CONFIG: the box for the script's Large Script Threshold (empty: the project's). */
+	TSharedPtr<SEditableTextBox> ThresholdBox;
 
 	// The script text pane, left of the graph: the script as it would be saved, which can be edited and applied.
 	TSharedPtr<SBangoTextEditor> TextBox;
@@ -420,12 +422,22 @@ private:
 	void UpdateDescriptionBox();
 
 	// SCRIPT CONFIG
-	/** The script's localization namespace (#define LOCTEXT_NAMESPACE), from the main Script Start node; empty if it has none. */
+	/** The script's localization namespace (#set LOCTEXT_NAMESPACE), from the main Script Start node; empty if it has none. */
 	FString GetScriptNamespace() const;
 	/** Sets the namespace from what was typed (empty removes the line), as one undoable edit. */
 	void SetScriptNamespace(const FString& Typed);
 	/** Puts the namespace in its box again if it changed (after an undo, a reload, Apply), unless the box is being typed in. */
 	void UpdateNamespaceBox();
+
+	/** The script's own Large Script Threshold (#set LARGE_SCRIPT_THRESHOLD), as text; empty if it has none. */
+	FString GetScriptThresholdText() const;
+	/** Sets the threshold from what was typed: a whole number 0 or more, or empty to use the project's. Anything else is undone. */
+	void SetScriptThreshold(const FString& Typed);
+	/** Both SCRIPT CONFIG boxes (UpdateNamespaceBox, and the threshold's). */
+	void UpdateConfigBoxes();
+
+	/** How this editor writes the script it shows and saves: the project's Large Script Threshold. */
+	FBangoGraphWriteOptions GetWriteOptions() const;
 
 	// Script text pane
 	TSharedRef<SWidget> MakeTextPane();

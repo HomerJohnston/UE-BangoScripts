@@ -24,8 +24,8 @@ enum class EBangoTokenKind : uint8
 	KwInputs,
 	KwIsNil,
 
-	/** `#define` / `#undef` at the start of a line: the script's settings lines (see FBangoScript). */
-	HashDefine, HashUndef,
+	/** `#set` at the start of a line: the script's settings lines (see FBangoScript). */
+	HashSet,
 
 	// Punctuation
 	LParen, RParen, LBrace, RBrace, LBracket, RBracket, Semicolon, Comma, Colon,

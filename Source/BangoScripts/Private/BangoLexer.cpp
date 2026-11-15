@@ -320,13 +320,10 @@ namespace BangoLexerPrivate
 			return LexOperator(Loc);
 		}
 
-		/**
-		 * `#define` or `#undef`, written like C's so Unreal's localization gatherer reads them. Must start its
-		 * line and be followed by a space, as the gatherer expects.
-		 */
+		/** `#set`, the script's settings lines. Must start its line and be followed by a space. */
 		bool LexDirective(const FBangoSourceLocation& Loc)
 		{
-			static const TCHAR* Usage = TEXT("Lines starting with '#' are #define inputs (...), #define LOCTEXT_NAMESPACE \"Name\" and #undef LOCTEXT_NAMESPACE.");
+			static const TCHAR* Usage = TEXT("Lines starting with '#' are the script's settings: #set inputs (...), #set LOCTEXT_NAMESPACE \"Name\" and #set LARGE_SCRIPT_THRESHOLD 5.");
 			Advance(); // #
 			const int32 Start = Pos;
 			while (!AtEnd() && IsIdentChar(Peek()))
@@ -335,13 +332,17 @@ namespace BangoLexerPrivate
 			}
 			const FString Word = Source.Mid(Start, Pos - Start);
 			EBangoTokenKind Kind;
-			if (Word.Equals(TEXT("define"), ESearchCase::CaseSensitive))
+			if (Word.Equals(TEXT("set"), ESearchCase::CaseSensitive))
 			{
-				Kind = EBangoTokenKind::HashDefine;
+				Kind = EBangoTokenKind::HashSet;
+			}
+			else if (Word.Equals(TEXT("define"), ESearchCase::CaseSensitive))
+			{
+				return Fail(Loc, TEXT("'#define' is now written '#set': #set inputs (...), #set LOCTEXT_NAMESPACE \"Name\"."));
 			}
 			else if (Word.Equals(TEXT("undef"), ESearchCase::CaseSensitive))
 			{
-				Kind = EBangoTokenKind::HashUndef;
+				return Fail(Loc, TEXT("'#undef' isn't used any more: delete this line."));
 			}
 			else
 			{

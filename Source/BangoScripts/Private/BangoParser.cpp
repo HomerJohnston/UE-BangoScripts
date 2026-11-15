@@ -151,24 +151,16 @@ namespace BangoParserPrivate
 				}
 				bParamsAllowed = bFirstItem;
 				bFirstItem = false;
-				if (Check(EBangoTokenKind::HashDefine))
+				if (Check(EBangoTokenKind::HashSet))
 				{
-					if (!ParseDefine())
+					if (!ParseSet())
 					{
 						return false;
 					}
-					// The namespace line may come before the inputs line: the inputs line is still the first item.
-					if (Script.bHasLocNamespace && Script.TopLevel.Num() == 0 && Script.Functions.Num() == 0)
+					// Settings lines may come before the inputs line: the inputs line is still the first item.
+					if (Script.TopLevel.Num() == 0 && Script.Functions.Num() == 0)
 					{
 						bFirstItem = true;
-					}
-					continue;
-				}
-				if (Check(EBangoTokenKind::HashUndef))
-				{
-					if (!ParseUndef())
-					{
-						return false;
 					}
 					continue;
 				}
@@ -203,11 +195,6 @@ namespace BangoParserPrivate
 			if (!TakeReroutes(Script.TopLevel))
 			{
 				return false;
-			}
-
-			if (Script.bHasLocNamespace && Script.LocNamespaceEndLoc.Line == 0)
-			{
-				return Fail(Script.LocNamespaceLoc, TEXT("A script with '#define LOCTEXT_NAMESPACE' must end with the line '#undef LOCTEXT_NAMESPACE', as Unreal's localization tools expect."));
 			}
 
 			// Every metadata comment must be on a statement line, or on a line of its own where a statement could go (a reroute).
@@ -276,7 +263,7 @@ namespace BangoParserPrivate
 			return true;
 		}
 
-		/** The rest of a #define / #undef line must be empty: no ';', no metadata, nothing after it. */
+		/** The rest of a #set line must be empty: no ';', no metadata, nothing after it. */
 		bool FinishDirectiveLine(const FBangoToken& First, const TCHAR* What)
 		{
 			if (Check(EBangoTokenKind::Semicolon) && Cur().Loc.Line == First.Loc.Line)
@@ -299,9 +286,18 @@ namespace BangoParserPrivate
 			return Token.Kind == EBangoTokenKind::Identifier && Token.Text.Equals(TEXT("LOCTEXT_NAMESPACE"), ESearchCase::CaseSensitive);
 		}
 
-		/** `#define inputs (...)` or `#define LOCTEXT_NAMESPACE "Name"` at the top of the script. */
-		bool ParseDefine()
+		static bool IsSettingName(const FBangoToken& Token, const TCHAR* Setting)
 		{
+			return Token.Kind == EBangoTokenKind::Identifier && Token.Text.Equals(Setting, ESearchCase::CaseSensitive);
+		}
+
+		/**
+		 * A settings line at the top of the script: `#set inputs (...)`, `#set LOCTEXT_NAMESPACE "Name"` or
+		 * `#set LARGE_SCRIPT_THRESHOLD 5`. The settings may come in any order, before or after the inputs line, each once.
+		 */
+		bool ParseSet()
+		{
+			static const TCHAR* Usage = TEXT("Bango's settings are '#set inputs (...)', '#set LOCTEXT_NAMESPACE \"Name\"' and '#set LARGE_SCRIPT_THRESHOLD 5'");
 			const FBangoToken& First = Cur();
 			const bool bFirstItem = bParamsAllowed;
 			bParamsAllowed = false;
@@ -310,17 +306,17 @@ namespace BangoParserPrivate
 			const FBangoToken& Name = Cur();
 			if (Name.Loc.Line != First.Loc.Line)
 			{
-				return Fail(First.Loc, TEXT("Expected 'inputs' or 'LOCTEXT_NAMESPACE' after '#define'."));
+				return Fail(First.Loc, FString::Printf(TEXT("Expected a setting's name after '#set'. %s."), Usage));
 			}
 
 			if (Name.Kind == EBangoTokenKind::KwInputs)
 			{
 				if (!bFirstItem)
 				{
-					return Fail(First.Loc, TEXT("'#define inputs' must come at the top of the script, before any other statement or function (only '#define LOCTEXT_NAMESPACE' may come before it)."));
+					return Fail(First.Loc, TEXT("'#set inputs' must come at the top of the script, before any other statement or function (only the other #set lines may come before it)."));
 				}
 				FBangoStmtPtr Stmt = ParseParams();
-				if (!Stmt || !RequireOneLine(First.Loc.Line, Previous().Loc) || !FinishDirectiveLine(First, TEXT("#define inputs")))
+				if (!Stmt || !RequireOneLine(First.Loc.Line, Previous().Loc) || !FinishDirectiveLine(First, TEXT("#set inputs")))
 				{
 					return false;
 				}
@@ -339,73 +335,63 @@ namespace BangoParserPrivate
 				return true;
 			}
 
-			if (Name.Kind == EBangoTokenKind::Identifier && Name.Text.Equals(TEXT("params"), ESearchCase::CaseSensitive))
+			if (IsSettingName(Name, TEXT("params")))
 			{
-				return Fail(Name.Loc, TEXT("'#define params' is now written '#define inputs'."));
+				return Fail(Name.Loc, TEXT("'#set params' is now written '#set inputs'."));
 			}
-			if (!IsLocNamespaceName(Name))
+			const bool bNamespace = IsLocNamespaceName(Name);
+			const bool bThreshold = IsSettingName(Name, TEXT("LARGE_SCRIPT_THRESHOLD"));
+			if (!bNamespace && !bThreshold)
 			{
-				return Fail(Name.Loc, FString::Printf(TEXT("Bango only has '#define inputs (...)' and '#define LOCTEXT_NAMESPACE \"Name\"', but found %s."), *Bango::DescribeToken(Name)));
+				return Fail(Name.Loc, FString::Printf(TEXT("%s, but found %s."), Usage, *Bango::DescribeToken(Name)));
 			}
+			const TCHAR* What = bNamespace ? TEXT("#set LOCTEXT_NAMESPACE") : TEXT("#set LARGE_SCRIPT_THRESHOLD");
 			const bool bOnlyParamsBefore = Script.Functions.Num() == 0
 				&& (Script.TopLevel.Num() == 0 || (Script.TopLevel.Num() == 1 && Script.GetParams()));
-			if (Script.bHasLocNamespace)
+			const FBangoSourceLocation& Earlier = bNamespace ? Script.LocNamespaceLoc : Script.LargeScriptThresholdLoc;
+			if (bNamespace ? Script.bHasLocNamespace : Script.bHasLargeScriptThreshold)
 			{
-				return Fail(First.Loc, FString::Printf(TEXT("A script can only have one '#define LOCTEXT_NAMESPACE' (the first is on line %d)."), Script.LocNamespaceLoc.Line));
+				return Fail(First.Loc, FString::Printf(TEXT("A script can only have one '%s' (the first is on line %d)."), What, Earlier.Line));
 			}
 			if (!bOnlyParamsBefore)
 			{
-				return Fail(First.Loc, TEXT("'#define LOCTEXT_NAMESPACE' must come at the top of the script, before any other statement or function (only the '#define inputs' line may come before it)."));
+				return Fail(First.Loc, FString::Printf(TEXT("'%s' must come at the top of the script, before any statement or function (only the other #set lines may come before it)."), What));
 			}
 			Advance();
-			const FBangoToken& Namespace = Cur();
-			if (Namespace.Kind != EBangoTokenKind::StringLiteral || Namespace.Loc.Line != First.Loc.Line)
+			const FBangoToken& Value = Cur();
+			const FBangoSourceLocation& ValueLoc = Value.Loc.Line == First.Loc.Line ? Value.Loc : Name.Loc;
+			if (bNamespace)
 			{
-				return Fail(Namespace.Loc.Line == First.Loc.Line ? Namespace.Loc : Name.Loc, TEXT("Write the namespace as a string: #define LOCTEXT_NAMESPACE \"Bango.Intro\""));
+				if (Value.Kind != EBangoTokenKind::StringLiteral || Value.Loc.Line != First.Loc.Line)
+				{
+					return Fail(ValueLoc, TEXT("Write the namespace as a string: #set LOCTEXT_NAMESPACE \"Bango.Intro\""));
+				}
+				if (Value.Text.IsEmpty())
+				{
+					return Fail(Value.Loc, TEXT("The namespace can't be empty."));
+				}
 			}
-			if (Namespace.Text.IsEmpty())
+			else if (Value.Kind != EBangoTokenKind::IntLiteral || Value.Loc.Line != First.Loc.Line || Value.IntValue > MAX_int32)
 			{
-				return Fail(Namespace.Loc, TEXT("The namespace can't be empty."));
+				return Fail(ValueLoc, TEXT("Write the threshold as a whole number of nodes, 0 or more: #set LARGE_SCRIPT_THRESHOLD 5"));
 			}
 			Advance();
-			if (!FinishDirectiveLine(First, TEXT("#define LOCTEXT_NAMESPACE")))
+			if (!FinishDirectiveLine(First, What))
 			{
 				return false;
 			}
-			Script.bHasLocNamespace = true;
-			Script.LocNamespace = Namespace.Text;
-			Script.LocNamespaceLoc = First.Loc;
-			return true;
-		}
-
-		/** `#undef LOCTEXT_NAMESPACE`: the last line of a script that has `#define LOCTEXT_NAMESPACE`. */
-		bool ParseUndef()
-		{
-			const FBangoToken& First = Cur();
-			bParamsAllowed = false;
-			Advance();
-			if (!IsLocNamespaceName(Cur()) || Cur().Loc.Line != First.Loc.Line)
+			if (bNamespace)
 			{
-				return Fail(First.Loc, TEXT("The only '#undef' is '#undef LOCTEXT_NAMESPACE', at the end of a script that has '#define LOCTEXT_NAMESPACE'."));
+				Script.bHasLocNamespace = true;
+				Script.LocNamespace = Value.Text;
+				Script.LocNamespaceLoc = First.Loc;
 			}
-			if (!Script.bHasLocNamespace)
+			else
 			{
-				return Fail(First.Loc, TEXT("There's no '#define LOCTEXT_NAMESPACE' for this '#undef' to end. Remove it, or add '#define LOCTEXT_NAMESPACE \"Name\"' at the top of the script."));
+				Script.bHasLargeScriptThreshold = true;
+				Script.LargeScriptThreshold = (int32)Value.IntValue;
+				Script.LargeScriptThresholdLoc = First.Loc;
 			}
-			if (Script.LocNamespaceEndLoc.Line != 0)
-			{
-				return Fail(First.Loc, FString::Printf(TEXT("A script can only have one '#undef LOCTEXT_NAMESPACE' (the first is on line %d)."), Script.LocNamespaceEndLoc.Line));
-			}
-			Advance();
-			if (!FinishDirectiveLine(First, TEXT("#undef LOCTEXT_NAMESPACE")))
-			{
-				return false;
-			}
-			if (!Check(EBangoTokenKind::EndOfFile))
-			{
-				return Fail(Cur().Loc, TEXT("'#undef LOCTEXT_NAMESPACE' must be the last line of the script; nothing can come after it except comments."));
-			}
-			Script.LocNamespaceEndLoc = First.Loc;
 			return true;
 		}
 
@@ -603,9 +589,8 @@ namespace BangoParserPrivate
 					return FailPlain(Next.Loc, FString::Printf(TEXT("This '}' closes a block that was opened before the '/*' on line %d. A disabled part must end with '*/' in the same block it starts in."), OpenLoc.Line));
 				case EBangoTokenKind::KwFunction:
 					return FailPlain(Next.Loc, TEXT("A function can't be disabled with '/*' and '*/': only statements can. Disable the nodes inside it instead."));
-				case EBangoTokenKind::HashDefine:
-				case EBangoTokenKind::HashUndef:
-					return FailPlain(Next.Loc, TEXT("A '#define' or '#undef' line can't be disabled with '/*' and '*/': only statements can."));
+				case EBangoTokenKind::HashSet:
+					return FailPlain(Next.Loc, TEXT("A '#set' line can't be disabled with '/*' and '*/': only statements can."));
 				default:
 					break;
 				}
@@ -965,21 +950,18 @@ namespace BangoParserPrivate
 			case EBangoTokenKind::KwReturn:   Stmt = ParseReturn(); break;
 			case EBangoTokenKind::KwLabel:    Stmt = ParseLabelOrGoto(true); break;
 			case EBangoTokenKind::KwGoto:     Stmt = ParseLabelOrGoto(false); break;
-			case EBangoTokenKind::HashDefine:
-				Fail(First.Loc, TEXT("'#define' lines must come at the top of the script, outside any block or function."));
-				return nullptr;
-			case EBangoTokenKind::HashUndef:
-				Fail(First.Loc, TEXT("'#undef LOCTEXT_NAMESPACE' must be the last line of the script, outside any block or function."));
+			case EBangoTokenKind::HashSet:
+				Fail(First.Loc, TEXT("'#set' lines must come at the top of the script, outside any block or function."));
 				return nullptr;
 			case EBangoTokenKind::KwInputs:
 				Fail(First.Loc, bAllowParams
-					? TEXT("The parameters line is written '#define inputs (...)', with no ';'.")
-					: TEXT("'#define inputs' must come at the top of the script, before any other statement or function (only '#define LOCTEXT_NAMESPACE' may come before it)."));
+					? TEXT("The parameters line is written '#set inputs (...)', with no ';'.")
+					: TEXT("'#set inputs' must come at the top of the script, before any other statement or function (only the other #set lines may come before it)."));
 				return nullptr;
 			default:
 				if (First.Kind == EBangoTokenKind::Identifier && First.Text.Equals(TEXT("locNamespace"), ESearchCase::CaseSensitive) && Tokens.IsValidIndex(Pos + 1) && Tokens[Pos + 1].Kind == EBangoTokenKind::LParen)
 				{
-					Fail(First.Loc, TEXT("The namespace line is now written '#define LOCTEXT_NAMESPACE \"Name\"', with '#undef LOCTEXT_NAMESPACE' as the script's last line."));
+					Fail(First.Loc, TEXT("The namespace line is now written '#set LOCTEXT_NAMESPACE \"Name\"'."));
 					return nullptr;
 				}
 				if (IsTypeKeyword(First.Kind))
@@ -1208,7 +1190,7 @@ namespace BangoParserPrivate
 						}
 						if (const FBangoExpr* TextLit = FindTextLiteral(*Param.Default))
 						{
-							Fail(TextLit->Loc, FString::Printf(TEXT("A text default can't be translated: Unreal's localization tools skip #define lines. Give '%s' the default nil, and set it in the script: if (IsNil(%s)) { %s = LOCTEXT(...); }"),
+							Fail(TextLit->Loc, FString::Printf(TEXT("A text default can't be translated: its text isn't gathered for translators. Give '%s' the default nil, and set it in the script: if (IsNil(%s)) { %s = LOCTEXT(...); }"),
 								*Param.Name, *Param.Name, *Param.Name));
 							return nullptr;
 						}

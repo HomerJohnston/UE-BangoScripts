@@ -64,6 +64,7 @@ bool FBangoGraphDocument::operator==(const FBangoGraphDocument& Other) const
 {
 	if (!Description.Equals(Other.Description, ESearchCase::CaseSensitive)
 		|| bHasLocNamespace != Other.bHasLocNamespace || !LocNamespace.Equals(Other.LocNamespace, ESearchCase::CaseSensitive)
+		|| bHasLargeScriptThreshold != Other.bHasLargeScriptThreshold || LargeScriptThreshold != Other.LargeScriptThreshold
 		|| Main != Other.Main || Functions.Num() != Other.Functions.Num() || Globals.Num() != Other.Globals.Num())
 	{
 		return false;
@@ -402,6 +403,8 @@ namespace BangoGraphPrivate
 			MainEntry.NodeID = 0;
 			Doc.bHasLocNamespace = Script.bHasLocNamespace;
 			Doc.LocNamespace = Script.LocNamespace;
+			Doc.bHasLargeScriptThreshold = Script.bHasLargeScriptThreshold;
+			Doc.LargeScriptThreshold = Script.LargeScriptThreshold;
 
 			int32 FirstTopLevel = 0;
 			if (const FBangoParamsStmt* Params = Script.GetParams())
@@ -414,14 +417,17 @@ namespace BangoGraphPrivate
 				MainTargets.Add(Target);
 				FirstTopLevel = 1;
 			}
-			if (Script.bHasLocNamespace)
+			// Comments on (or just above) the #set lines belong to Script Start, like the inputs line's.
+			for (const FBangoSourceLocation* Setting : { Script.bHasLocNamespace ? &Script.LocNamespaceLoc : nullptr, Script.bHasLargeScriptThreshold ? &Script.LargeScriptThresholdLoc : nullptr })
 			{
-				// Comments on (or just above) the #define LOCTEXT_NAMESPACE line belong to Script Start, like the inputs line's.
-				FTarget Target;
-				Target.Line = Script.LocNamespaceLoc.Line;
-				Target.Graph = -1;
-				Target.Node = 0;
-				MainTargets.Add(Target);
+				if (Setting)
+				{
+					FTarget Target;
+					Target.Line = Setting->Line;
+					Target.Graph = -1;
+					Target.Node = 0;
+					MainTargets.Add(Target);
+				}
 			}
 			FirstTopLevel = ReadDecls(-1, Script.TopLevel, FirstTopLevel, MainTargets);
 			Doc.Main.Nodes[0].Next = BuildChain(-1, Script.TopLevel, FirstTopLevel, &MainTargets);
@@ -672,7 +678,7 @@ namespace BangoGraphPrivate
 				// Declarations are only at the top of a graph (ReadDecls); there's no node for one anywhere else.
 				if (!bFailed)
 				{
-					Fail(Decl->Loc.Line, FString::Printf(TEXT("'%s' is declared here, but declarations go at the top: globals after the #define lines, and locals at the top of their script or function. Move it there in the text (set its value here with '%s = ...;' if it needs one), then open the script again."), *Decl->Name, *Decl->Name));
+					Fail(Decl->Loc.Line, FString::Printf(TEXT("'%s' is declared here, but declarations go at the top: globals after the #set lines, and locals at the top of their script or function. Move it there in the text (set its value here with '%s = ...;' if it needs one), then open the script again."), *Decl->Name, *Decl->Name));
 					bFailed = true;
 				}
 			}

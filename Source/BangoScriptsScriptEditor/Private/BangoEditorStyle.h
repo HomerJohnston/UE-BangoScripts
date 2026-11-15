@@ -41,6 +41,9 @@ public:
 	/** A Bango script's icon (Resources/ClassIcons/Icon_Script.svg), 16x16, in its own colours. Never null. */
 	static const FSlateBrush* GetScriptIcon();
 
+	/** The inline script box's Edit button icon (Resources/ButtonIcons/Icon_EditScript.svg), 16x16, white to tint. Never null. */
+	static const FSlateBrush* GetEditScriptIcon();
+
 	/** The style set's name, and the script icon's brush name in it, for an FSlateIcon (like a menu entry's). */
 	static FName GetStyleSetName();
 	static FName GetScriptIconName();

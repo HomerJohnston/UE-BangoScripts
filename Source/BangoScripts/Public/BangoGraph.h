@@ -150,11 +150,15 @@ struct BANGOSCRIPTS_API FBangoGraphDocument
 	 */
 	FString Description;
 
-	/** The script's `#define LOCTEXT_NAMESPACE "..."` line (see FBangoScript::LocNamespace). Saved after the description, above the inputs line, with `#undef LOCTEXT_NAMESPACE` at the end. Edited in the editor's SCRIPT CONFIG panel. */
+	/** The script's `#set LOCTEXT_NAMESPACE "..."` line (see FBangoScript::LocNamespace). Saved after the description, above the inputs line. Edited in the editor's SCRIPT CONFIG panel. */
 	bool bHasLocNamespace = false;
 	FString LocNamespace;
 
-	/** The file's global declarations, in order (written after the #define lines). */
+	/** The script's `#set LARGE_SCRIPT_THRESHOLD 5` line (see FBangoScript and FBangoGraphWriteOptions). Saved after the namespace line. */
+	bool bHasLargeScriptThreshold = false;
+	int32 LargeScriptThreshold = 0;
+
+	/** The file's global declarations, in order (written after the #set lines). */
 	TArray<FBangoGraphDecl> Globals;
 
 	FBangoGraph Main;
@@ -166,6 +170,19 @@ struct BANGOSCRIPTS_API FBangoGraphDocument
 };
 
 struct FBangoCompileError;
+
+/** How Bango::WriteGraphText writes a document. */
+struct FBangoGraphWriteOptions
+{
+	/**
+	 * The project's Large Script Threshold (UBangoSettings), for a script without its own #set line: a script with
+	 * fewer nodes than this is written compact. 0: always in full.
+	 */
+	int32 LargeScriptThreshold = 0;
+
+	/** Always compact: no section headings, no node metadata (and so no reroutes). For inline scripts typed in their box. */
+	bool bCompact = false;
+};
 
 namespace Bango
 {
@@ -194,7 +211,7 @@ namespace Bango
 	BANGOSCRIPTS_API TArray<int32> GetFunctionWriteOrder(const FBangoGraphDocument& Document);
 
 	/**
-	 * The section headings the writer puts in a file (the text after the //): SCRIPT INPUTS above the #define lines,
+	 * The section headings the writer puts in a file (the text after the //): SCRIPT INPUTS above the #set inputs line,
 	 * GLOBAL VARS and LOCAL VARS above the declarations, SCRIPT BODY above the main graph's code, and FUNCTIONS
 	 * above the first function. Every heading starts with "====".
 	 */
@@ -228,7 +245,18 @@ namespace Bango
 	/**
 	 * Writes Document as Bango text. Fails (with a message naming the node) if a node has two wires into it,
 	 * if wires form a loop, if a link points at a missing node, or if a node's text contains a line break.
-	 * Node text is written as-is; it is not checked for syntax.
+	 * Node text is written as-is; it is not checked for syntax. Without options, it's always written in full.
 	 */
 	BANGOSCRIPTS_API bool WriteGraphText(const FBangoGraphDocument& Document, FString& OutText, FString& OutError);
+	BANGOSCRIPTS_API bool WriteGraphText(const FBangoGraphDocument& Document, FString& OutText, FString& OutError, const FBangoGraphWriteOptions& Options);
+
+	/** The script's nodes, in all its graphs, not counting the entry nodes (what Large Script Threshold counts). */
+	BANGOSCRIPTS_API int32 CountGraphNodes(const FBangoGraphDocument& Document);
+
+	/**
+	 * Whether WriteGraphText writes Document compact: no section headings and no node metadata (so no reroutes).
+	 * That's when Options say so, or when it has fewer nodes than its Large Script Threshold (its own #set line's,
+	 * or else Options.LargeScriptThreshold); a threshold of 0 never makes it compact.
+	 */
+	BANGOSCRIPTS_API bool IsWrittenCompact(const FBangoGraphDocument& Document, const FBangoGraphWriteOptions& Options);
 }

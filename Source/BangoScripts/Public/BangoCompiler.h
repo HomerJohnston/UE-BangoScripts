@@ -23,8 +23,8 @@ namespace Bango
 	/**
 	 * Compiles a condition: a script whose main graph returns true or false (`return _count > 3;`), and must return one
 	 * of them. Or Source is a single expression, like `foundThings >= 10 && !IsNull(@door)`, on one line (with any
-	 * #define lines and comments around it), which is compiled as `return <expression>;` (errors still point into the
-	 * expression as written). Everything else is as for any script: #define inputs, globals, locals, functions.
+	 * #set lines and comments around it), which is compiled as `return <expression>;` (errors still point into the
+	 * expression as written). Everything else is as for any script: #set inputs, globals, locals, functions.
 	 * See UBangoScriptSubsystem::EvaluateBoolCondition.
 	 */
 	BANGOSCRIPTS_API bool CompileCondition(const FString& Source, const FString& FileName, const IBangoCommandLookup& Commands, FBangoProgram& OutProgram, FBangoCompileError& OutError);

@@ -59,7 +59,7 @@ static FString BangoCheckGraphRoundTrip(const TCHAR* Name, const FString& Source
 		}
 		Original.Functions = MoveTemp(Reordered);
 	}
-	// `#define inputs ()` means the same as no inputs line, and an empty else block the same as none;
+	// `#set inputs ()` means the same as no inputs line, and an empty else block the same as none;
 	// the graph doesn't keep those apart.
 	auto Normalize = [](const FString& Dump)
 	{
@@ -94,6 +94,60 @@ static FString BangoCheckGraphRoundTrip(const TCHAR* Name, const FString& Source
 	if (!Bango::WriteGraphText(Doc2, Text2, WriteError) || !Text2.Equals(Text1, ESearchCase::CaseSensitive))
 	{
 		return FString::Printf(TEXT("[%s] writing a second time changed the text.\n--- first ---\n%s--- second ---\n%s"), Name, *Text1, *Text2);
+	}
+
+	// Written compact (no headings, no metadata), it still means the same, and reads back to the same compact text.
+	FBangoGraphWriteOptions Compact;
+	Compact.bCompact = true;
+	FString CompactText;
+	if (!Bango::WriteGraphText(Doc1, CompactText, WriteError, Compact))
+	{
+		return FString::Printf(TEXT("[%s] writing compact failed: %s"), Name, *WriteError);
+	}
+	if (CompactText.Contains(TEXT("//@")) || CompactText.Contains(TEXT("// ====")))
+	{
+		return FString::Printf(TEXT("[%s] the compact text has metadata or headings.\n--- text ---\n%s"), Name, *CompactText);
+	}
+	FBangoScript CompactScript;
+	if (!Bango::ParseScript(CompactText, TEXT("test.bango"), CompactScript, Error))
+	{
+		return FString::Printf(TEXT("[%s] the compact text doesn't parse: %s\n--- text ---\n%s"), Name, *Error.ToString(), *CompactText);
+	}
+	{
+		TArray<TUniquePtr<FBangoFunction>> Reordered;
+		for (const TUniquePtr<FBangoFunction>& Written : CompactScript.Functions)
+		{
+			for (const TUniquePtr<FBangoFunction>& Function : Reparsed.Functions)
+			{
+				if (Function && Function->Name.Equals(Written->Name, ESearchCase::CaseSensitive))
+				{
+					Reordered.Add(MoveTemp(const_cast<TUniquePtr<FBangoFunction>&>(Function)));
+					break;
+				}
+			}
+		}
+		Reparsed.Functions = MoveTemp(Reordered);
+	}
+	// Compact text has no reroutes (they're only metadata).
+	auto WithoutReroutes = [](FString Dump)
+	{
+		Dump.ReplaceInline(TEXT("(reroute) "), TEXT(""), ESearchCase::CaseSensitive);
+		Dump.ReplaceInline(TEXT(" (reroute)"), TEXT(""), ESearchCase::CaseSensitive);
+		Dump.ReplaceInline(TEXT("(reroute)"), TEXT(""), ESearchCase::CaseSensitive);
+		return Dump;
+	};
+	const FString DumpCompact = Normalize(Bango::DumpScript(CompactScript));
+	const FString DumpReparsed = Normalize(WithoutReroutes(Bango::DumpScript(Reparsed)));
+	if (!DumpCompact.Equals(DumpReparsed, ESearchCase::CaseSensitive))
+	{
+		return FString::Printf(TEXT("[%s] the compact text means something else.\n  before: %s\n  after:  %s\n--- text ---\n%s"), Name, *DumpReparsed, *DumpCompact, *CompactText);
+	}
+	FBangoGraphDocument CompactDoc;
+	FString CompactText2;
+	if (!Bango::BuildGraph(CompactText, TEXT("test.bango"), CompactDoc, Error) || !Bango::WriteGraphText(CompactDoc, CompactText2, WriteError, Compact)
+		|| !CompactText2.Equals(CompactText, ESearchCase::CaseSensitive))
+	{
+		return FString::Printf(TEXT("[%s] reading the compact text back and writing it again changed it: %s\n--- first ---\n%s--- second ---\n%s"), Name, *Error.ToString(), *CompactText, *CompactText2);
 	}
 	return FString();
 }
@@ -175,11 +229,11 @@ static const TCHAR* const GBangoGraphRoundTripSources[] =
 	TEXT("// nothing here yet\n"),
 
 	// An empty inputs line.
-	TEXT("#define inputs ()\nTalk(\"x\");\n"),
+	TEXT("#set inputs ()\nTalk(\"x\");\n"),
 
 	// Reroutes: between statements, first and last in blocks, alone in a block, in an else before an if,
 	// in a function, with a comment, and in a disconnected chain.
-	TEXT("#define inputs (int _n)\n")
+	TEXT("#set inputs (int _n)\n")
 	TEXT("                    //@1(4, 0)\n")
 	TEXT("Talk(\"a\");           //@2(8, 0)\n")
 	TEXT("// bend here\n")
@@ -251,6 +305,65 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		}
 	};
 
+	// ---- Large Script Threshold: below it, written compact (no headings, no metadata) ----
+	{
+		const TCHAR* Source =
+			TEXT("#set LOCTEXT_NAMESPACE \"N\"\n")
+			TEXT("\n")
+			TEXT("// ============ SCRIPT INPUTS ===================\n")
+			TEXT("\n")
+			TEXT("#set inputs (int _n)\n")
+			TEXT("\n")
+			TEXT("// ============ SCRIPT BODY =====================\n")
+			TEXT("\n")
+			TEXT("Sleep(4);                 //@1(0, 0)\n")
+			TEXT("                          //@3(5, 0)\n")
+			TEXT("Talk(\"You got a pistol!\");    //@2(10, 0)\n");
+		const TCHAR* Compact =
+			TEXT("#set LOCTEXT_NAMESPACE \"N\"\n")
+			TEXT("\n")
+			TEXT("#set inputs (int _n)\n")
+			TEXT("\n")
+			TEXT("Sleep(4);\n")
+			TEXT("Talk(\"You got a pistol!\");\n");
+		FBangoGraphDocument Doc;
+		FBangoCompileError Error;
+		FString Text;
+		FString WriteError;
+		const bool bBuilt = Bango::BuildGraph(Source, TEXT("small.bango"), Doc, Error);
+		Expect(bBuilt && Bango::CountGraphNodes(Doc) == 3, FString(TEXT("threshold: two statements and a reroute are three nodes: ")) + Error.ToString());
+		FBangoGraphWriteOptions Options;
+		Options.LargeScriptThreshold = 4;
+		Expect(bBuilt && Bango::IsWrittenCompact(Doc, Options) && Bango::WriteGraphText(Doc, Text, WriteError, Options) && Text == FString(Compact),
+			FString(TEXT("threshold: fewer nodes than the project's threshold, written compact:\n")) + Text);
+		Options.LargeScriptThreshold = 3;
+		Expect(bBuilt && !Bango::IsWrittenCompact(Doc, Options) && Bango::WriteGraphText(Doc, Text, WriteError, Options) && Text.Contains(TEXT("//@1(0, 0)")) && Text.Contains(TEXT("// ============ SCRIPT BODY")),
+			FString(TEXT("threshold: as many nodes as the threshold, written in full:\n")) + Text);
+		Options.LargeScriptThreshold = 0;
+		Expect(bBuilt && !Bango::IsWrittenCompact(Doc, Options), TEXT("threshold: 0 is always in full"));
+		Options.bCompact = true;
+		Expect(bBuilt && Bango::IsWrittenCompact(Doc, Options), TEXT("threshold: bCompact is always compact"));
+
+		// The script's own threshold overrides the project's, and is written back.
+		FBangoGraphDocument Own;
+		const bool bOwnBuilt = Bango::BuildGraph(FString(TEXT("#set LARGE_SCRIPT_THRESHOLD 0\n")) + Source, TEXT("own.bango"), Own, Error);
+		FBangoGraphWriteOptions Project;
+		Project.LargeScriptThreshold = 10;
+		Expect(bOwnBuilt && Own.bHasLargeScriptThreshold && Own.LargeScriptThreshold == 0 && !Bango::IsWrittenCompact(Own, Project), FString(TEXT("threshold: the script's own 0 beats the project's 10: ")) + Error.ToString());
+		Expect(bOwnBuilt && Bango::WriteGraphText(Own, Text, WriteError, Project) && Text.StartsWith(TEXT("#set LOCTEXT_NAMESPACE \"N\"\n#set LARGE_SCRIPT_THRESHOLD 0\n"), ESearchCase::CaseSensitive),
+			FString(TEXT("threshold: the #set line is written after the namespace:\n")) + Text);
+		FBangoGraphDocument Changed = Own;
+		Changed.LargeScriptThreshold = 5;
+		Expect(Changed != Own, TEXT("threshold: part of what makes two documents different"));
+
+		// A compact script without a description that starts with a comment: a blank line first, so it isn't the description.
+		FBangoGraphDocument Commented;
+		const bool bCommentedBuilt = Bango::BuildGraph(TEXT("\n// first\nSleep(1);    //@1(0, 0)\n"), TEXT("c.bango"), Commented, Error);
+		Options.bCompact = true;
+		Expect(bCommentedBuilt && Bango::WriteGraphText(Commented, Text, WriteError, Options) && Text == FString(TEXT("\n// first\nSleep(1);\n")),
+			FString(TEXT("compact: a leading comment isn't made the description:\n")) + Text);
+	}
+
 	// ---- The text pane's Apply: locals declared further down are moved up (Bango::HoistLateLocals) ----
 	{
 		const TCHAR* Source =
@@ -302,11 +415,11 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			FString(TEXT("HoistLateLocals: int _t = spawn:\n")) + Same);
 		Expect(!Bango::HoistLateLocals(TEXT("int _t;\nint _t = spawn\n{\n}\n"), Same, Error) && Error.Message.Contains(TEXT("declared twice")),
 			TEXT("HoistLateLocals: int _t = spawn, declared twice"));
-		Expect(Bango::HoistLateLocals(TEXT("#define inputs (int _n = 3)\n\nfloat _a;\n\nTalk(\"x\");\nint foo;\n"), Same, Error)
-			&& Same == FString(TEXT("#define inputs (int _n = 3)\n\nfloat _a;\nint foo;\n\nTalk(\"x\");\n")),
+		Expect(Bango::HoistLateLocals(TEXT("#set inputs (int _n = 3)\n\nfloat _a;\n\nTalk(\"x\");\nint foo;\n"), Same, Error)
+			&& Same == FString(TEXT("#set inputs (int _n = 3)\n\nfloat _a;\nint foo;\n\nTalk(\"x\");\n")),
 			FString(TEXT("HoistLateLocals: after the inputs line and the locals: ")) + Same);
-		Expect(Bango::HoistLateLocals(TEXT("#define inputs (int _n = 3)\n\nTalk(\"x\");\nint foo;\n"), Same, Error)
-			&& Same == FString(TEXT("#define inputs (int _n = 3)\n\nint foo;\nTalk(\"x\");\n")),
+		Expect(Bango::HoistLateLocals(TEXT("#set inputs (int _n = 3)\n\nTalk(\"x\");\nint foo;\n"), Same, Error)
+			&& Same == FString(TEXT("#set inputs (int _n = 3)\n\nint foo;\nTalk(\"x\");\n")),
 			FString(TEXT("HoistLateLocals: after the inputs line, with no locals: ")) + Same);
 		Expect(Bango::HoistLateLocals(TEXT("// note\nTalk(\"x\");\nint _x = 2;\n"), Same, Error) && Same == FString(TEXT("// note\nint _x = 2;\nTalk(\"x\");\n")),
 			FString(TEXT("HoistLateLocals: before the first statement, under the description: ")) + Same);
@@ -387,24 +500,23 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		Expect(Bango::BuildGraph(ElseText, TEXT("disabled.bango"), ElseDoc, Error) && ElseDoc == Doc, FString(TEXT("Disabled nodes: a disabled else-if reads back the same: ")) + Error.ToString());
 	}
 
-	// ---- LOCTEXT_NAMESPACE and text: #define above the inputs (read after them too), #undef at the end, text literals kept as written ----
+	// ---- LOCTEXT_NAMESPACE and text: #set above the inputs (read after them too), text literals kept as written ----
 	{
 		const TCHAR* Source =
 			TEXT("\n") // so the comment below isn't the script's description (that's only on line 1)
 			TEXT("// About the script\n")
-			TEXT("#define inputs (text _line = nil)\n")
-			TEXT("#define LOCTEXT_NAMESPACE \"Bango.Intro\"\n")
+			TEXT("#set inputs (text _line = nil)\n")
+			TEXT("#set LOCTEXT_NAMESPACE \"Bango.Intro\"\n")
 			TEXT("// About the hint\n")
 			TEXT("Say(NSNOTELOCTEXT(\"Other\", \"K\", \"Hello {0}\", \"Said slowly\"), 1); //@1(10, 0)\n")
-			TEXT("function void F()\n{\n\tSay(LOCTEXT(\"F\", \"In F\")); //@2(0, 0)\n}\n")
-			TEXT("#undef LOCTEXT_NAMESPACE // the end\n");
+			TEXT("function void F()\n{\n\tSay(LOCTEXT(\"F\", \"In F\")); //@2(0, 0)\n}\n");
 		const TCHAR* Expected =
-			TEXT("#define LOCTEXT_NAMESPACE \"Bango.Intro\"\n")
+			TEXT("#set LOCTEXT_NAMESPACE \"Bango.Intro\"\n")
 			TEXT("\n")
 			TEXT("// ============ SCRIPT INPUTS ===================\n")
 			TEXT("\n")
 			TEXT("// About the script\n")
-			TEXT("#define inputs (text _line = nil)\n")
+			TEXT("#set inputs (text _line = nil)\n")
 			TEXT("\n")
 			TEXT("// ============ SCRIPT BODY =====================\n")
 			TEXT("\n")
@@ -413,20 +525,17 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			TEXT("\n")
 			TEXT("// ============ FUNCTIONS =======================\n")
 			TEXT("\n")
-			TEXT("// the end\n")
 			TEXT("function void F()\n")
 			TEXT("{\n")
 			TEXT("\tSay(LOCTEXT(\"F\", \"In F\"));                                      //@2(0, 0)\n")
-			TEXT("}\n")
-			TEXT("\n")
-			TEXT("#undef LOCTEXT_NAMESPACE\n");
+			TEXT("}\n");
 		FBangoGraphDocument Doc;
 		FBangoCompileError Error;
 		FString Text;
 		FString WriteError;
 		const bool bBuilt = Bango::BuildGraph(Source, TEXT("text.bango"), Doc, Error);
 		Expect(bBuilt && Doc.bHasLocNamespace && Doc.LocNamespace == FString(TEXT("Bango.Intro")), FString(TEXT("LOCTEXT_NAMESPACE: read into the document: ")) + Error.ToString());
-		Expect(bBuilt && Bango::WriteGraphText(Doc, Text, WriteError) && Text == FString(Expected), FString(TEXT("LOCTEXT_NAMESPACE: saved above the inputs, #undef at the end:\n")) + Text);
+		Expect(bBuilt && Bango::WriteGraphText(Doc, Text, WriteError) && Text == FString(Expected), FString(TEXT("LOCTEXT_NAMESPACE: saved above the inputs:\n")) + Text);
 
 		// The namespace line comes after the description, then the inputs.
 		{
@@ -434,17 +543,15 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				TEXT("// Description line\n")
 				TEXT("// More description lines\n")
 				TEXT("\n")
-				TEXT("#define LOCTEXT_NAMESPACE \"BangoTest\"\n")
+				TEXT("#set LOCTEXT_NAMESPACE \"BangoTest\"\n")
 				TEXT("\n")
 				TEXT("// ============ SCRIPT INPUTS ===================\n")
 				TEXT("\n")
-				TEXT("#define inputs (entity _who, int _count = 3)\n")
+				TEXT("#set inputs (entity _who, int _count = 3)\n")
 				TEXT("\n")
 				TEXT("// ============ GLOBAL VARS =====================\n")
 				TEXT("\n")
-				TEXT("global bool _newGlobal;\n")
-				TEXT("\n")
-				TEXT("#undef LOCTEXT_NAMESPACE\n");
+				TEXT("global bool _newGlobal;\n");
 			FBangoGraphDocument ConfigDoc;
 			FString ConfigText;
 			const bool bConfigBuilt = Bango::BuildGraph(Configured, TEXT("config.bango"), ConfigDoc, Error);
@@ -499,7 +606,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				TEXT("// ============ SCRIPT INPUTS ===================\n")
 				TEXT("\n")
 				TEXT("// Start's own comment\n")
-				TEXT("#define inputs (int _a)\n")
+				TEXT("#set inputs (int _a)\n")
 				TEXT("\n")
 				TEXT("// ============ SCRIPT BODY =====================\n")
 				TEXT("\n")
@@ -526,11 +633,11 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		}
 
 		FBangoGraphDocument NoParams;
-		Expect(Bango::BuildGraph(TEXT("#define LOCTEXT_NAMESPACE \"A\"\n#undef LOCTEXT_NAMESPACE\n"), TEXT("ns.bango"), NoParams, Error) && Bango::WriteGraphText(NoParams, Text, WriteError)
-			&& Text == FString(TEXT("#define LOCTEXT_NAMESPACE \"A\"\n\n#undef LOCTEXT_NAMESPACE\n")), FString(TEXT("LOCTEXT_NAMESPACE: without inputs or statements:\n")) + Text);
+		Expect(Bango::BuildGraph(TEXT("#set LOCTEXT_NAMESPACE \"A\"\n"), TEXT("ns.bango"), NoParams, Error) && Bango::WriteGraphText(NoParams, Text, WriteError)
+			&& Text == FString(TEXT("#set LOCTEXT_NAMESPACE \"A\"\n")), FString(TEXT("LOCTEXT_NAMESPACE: without inputs or statements:\n")) + Text);
 		FBangoGraphDocument Commented;
-		Expect(Bango::BuildGraph(TEXT("\n// Hi\n#define LOCTEXT_NAMESPACE \"A\"\n#undef LOCTEXT_NAMESPACE\n"), TEXT("ns.bango"), Commented, Error) && Bango::WriteGraphText(Commented, Text, WriteError)
-			&& Text == FString(TEXT("#define LOCTEXT_NAMESPACE \"A\"\n\n// ============ SCRIPT INPUTS ===================\n\n// Hi\n#define inputs ()\n\n#undef LOCTEXT_NAMESPACE\n")), FString(TEXT("LOCTEXT_NAMESPACE: a comment on it is Script Start's, written above an empty inputs line:\n")) + Text);
+		Expect(Bango::BuildGraph(TEXT("\n// Hi\n#set LOCTEXT_NAMESPACE \"A\"\n"), TEXT("ns.bango"), Commented, Error) && Bango::WriteGraphText(Commented, Text, WriteError)
+			&& Text == FString(TEXT("#set LOCTEXT_NAMESPACE \"A\"\n\n// ============ SCRIPT INPUTS ===================\n\n// Hi\n#set inputs ()\n")), FString(TEXT("LOCTEXT_NAMESPACE: a comment on it is Script Start's, written above an empty inputs line:\n")) + Text);
 		FBangoGraphDocument Changed = NoParams;
 		Changed.LocNamespace = TEXT("B");
 		Expect(Changed != NoParams, TEXT("LOCTEXT_NAMESPACE: part of what makes two documents different"));
@@ -769,11 +876,11 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		// top in a fixed layout.
 		{
 			const TCHAR* DeclSource =
-				TEXT("#define LOCTEXT_NAMESPACE \"Decls\"\n")
+				TEXT("#set LOCTEXT_NAMESPACE \"Decls\"\n")
 				TEXT("\n")
 				TEXT("// ============ SCRIPT INPUTS ===================\n")
 				TEXT("\n")
-				TEXT("#define inputs (int _a)\n")
+				TEXT("#set inputs (int _a)\n")
 				TEXT("\n")
 				TEXT("// ============ GLOBAL VARS =====================\n")
 				TEXT("\n")
@@ -806,9 +913,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				TEXT("function void G()\n")
 				TEXT("{\n")
 				TEXT("\tint _unused;\n")
-				TEXT("}\n")
-				TEXT("\n")
-				TEXT("#undef LOCTEXT_NAMESPACE\n");
+				TEXT("}\n");
 			FBangoGraphDocument DeclDoc;
 			FString DeclText;
 			const bool bDeclBuilt = Bango::BuildGraph(DeclSource, TEXT("decls.bango"), DeclDoc, Error);
@@ -865,8 +970,8 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		FBangoScript Script;
 		Expect(!Bango::ParseScript(TEXT("if (true)\n//@1(0, 0)\n{\n}\n"), TEXT("bad.bango"), Script, Error)
 			&& Error.Line == 2 && Error.Message.Contains(TEXT("reroute")), FString(TEXT("reroute: not allowed between 'if (...)' and '{': ")) + Error.ToString());
-		Expect(!Bango::ParseScript(TEXT("//@1(0, 0)\n#define inputs (int _a)\n"), TEXT("bad.bango"), Script, Error)
-			&& (Error.Message.Contains(TEXT("must come at the top")) || Error.Message.Contains(TEXT("reroute"))), FString(TEXT("reroute: not before #define inputs: ")) + Error.ToString());
+		Expect(!Bango::ParseScript(TEXT("//@1(0, 0)\n#set inputs (int _a)\n"), TEXT("bad.bango"), Script, Error)
+			&& (Error.Message.Contains(TEXT("must come at the top")) || Error.Message.Contains(TEXT("reroute"))), FString(TEXT("reroute: not before #set inputs: ")) + Error.ToString());
 	}
 
 	// ---- Building: structure, text, metadata, comments, automatic IDs and positions ----
@@ -874,7 +979,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		const TCHAR* Source =
 			TEXT("\n") // so the comment below is Script Start's, not the script's description (that's only on line 1)
 			TEXT("// Header comment\n")
-			TEXT("#define inputs (entity _who, int _n = 2)\n")
+			TEXT("#set inputs (entity _who, int _n = 2)\n")
 			TEXT("global int count;            //@5(10, 0)\n")
 			TEXT("if (_n > 1)                  //@6(20, 0)\n")
 			TEXT("{\n")
@@ -929,7 +1034,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				TEXT("// ============ SCRIPT INPUTS ===================\n")
 				TEXT("\n")
 				TEXT("// Header comment\n")
-				TEXT("#define inputs (entity _who, int _n = 2)\n")
+				TEXT("#set inputs (entity _who, int _n = 2)\n")
 				TEXT("\n")
 				TEXT("// ============ GLOBAL VARS =====================\n")
 				TEXT("\n")
@@ -987,7 +1092,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		bBuilt = Bango::BuildGraph(TEXT("Talk(\"a\");    //@1(0, 0)\n//~ Talk(\"b\");    //@1(0, 0)\n"), TEXT("test.bango"), Broken, Error);
 		Expect(!bBuilt && Error.Message.Contains(TEXT("used more than once")),
 			FString(TEXT("detached: duplicate IDs across //~ lines are an error: ")) + Error.ToString());
-		bBuilt = Bango::BuildGraph(TEXT("//~ #define inputs (int _a)\n"), TEXT("test.bango"), Broken, Error);
+		bBuilt = Bango::BuildGraph(TEXT("//~ #set inputs (int _a)\n"), TEXT("test.bango"), Broken, Error);
 		Expect(!bBuilt && Error.Message.Contains(TEXT("inputs")), FString(TEXT("detached: no inputs line in //~ lines: ")) + Error.ToString());
 	}
 
@@ -1152,7 +1257,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		// An entry with a comment but no inputs still writes an (empty) inputs line to hold the comment.
 		FBangoGraphDocument Commented = Doc;
 		Commented.Main.Nodes[0].Comment = TEXT("Hello");
-		Expect(Bango::WriteGraphText(Commented, Text, WriteError) && Text.StartsWith(TEXT("// ============ SCRIPT INPUTS ===================\n\n// Hello\n#define inputs ()\n"), ESearchCase::CaseSensitive),
+		Expect(Bango::WriteGraphText(Commented, Text, WriteError) && Text.StartsWith(TEXT("// ============ SCRIPT INPUTS ===================\n\n// Hello\n#set inputs ()\n"), ESearchCase::CaseSensitive),
 			FString(TEXT("entry comment without inputs: ")) + Text);
 	}
 }

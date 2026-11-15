@@ -99,7 +99,7 @@ public:
 
 	/**
 	 * Starts an inline script (an FBangoInlineScript property, spec section 15), as Spawn does a script asset: Args fill
-	 * its #define inputs line, in order, and it runs straight away until it first pauses. Its compiled program is kept
+	 * its #set inputs line, in order, and it runs straight away until it first pauses. Its compiled program is kept
 	 * (FBangoModule::GetInlineProgram), so the same text isn't compiled again. Owner, the object it belongs to (usually
 	 * `this`), only names it in errors and the debugger ("Door_1 (inline script)"). An empty script does nothing and
 	 * gives an invalid handle, without an error. Its text is saved with it, so SaveState saves it.
@@ -127,7 +127,7 @@ public:
 
 	/**
 	 * Runs a condition registered with Bango::RegisterCondition and gives its answer. It runs straight away, to the end,
-	 * in this world, with its globals and actors; Args fill its #define inputs line, if it has one.
+	 * in this world, with its globals and actors; Args fill its #set inputs line, if it has one.
 	 *
 	 * Returns true, with the answer in bOutResult, if it ran and returned true or false. Returns false, with the error in
 	 * OutError (and bOutResult false), if the handle isn't registered, its arguments don't fit, it stops with an error, it

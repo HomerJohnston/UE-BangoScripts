@@ -64,6 +64,17 @@ void SBangoTextEditor::Construct(const FArguments& InArgs)
 	const FString FullText = InArgs._Text.IsSet() ? InArgs._Text.Get().ToString() : FString();
 	const FString VisibleText = Metadata.Reset(FullText);
 
+	// An inline script's box shows no metadata, and can't be typed in while the script has some.
+	bInlineScriptEditor = InArgs._InlineScriptEditor;
+	if (bInlineScriptEditor)
+	{
+		bMetadataShown = false;
+	}
+	const TAttribute<bool> CallerReadOnly = InArgs._IsReadOnly;
+	const TAttribute<bool> ReadOnly = bInlineScriptEditor
+		? TAttribute<bool>::CreateLambda([this, CallerReadOnly]() { return CallerReadOnly.Get(false) || bGutterHasMetadata; })
+		: CallerReadOnly;
+
 	ChildSlot
 	[
 		SNew(SOverlay)
@@ -100,7 +111,8 @@ void SBangoTextEditor::Construct(const FArguments& InArgs)
 								.Marshaller(Marshaller)
 								.TextStyle(&SyntaxStyle->GetDefaultStyle()) // the text the marshaller doesn't colour, like an empty line, and the cursor's height
 								.AutoWrapText(false)
-								.IsReadOnly(InArgs._IsReadOnly)
+								.IsReadOnly(ReadOnly)
+								.ContextMenuExtender(InArgs._ContextMenuExtender)
 								.HScrollBar(HScrollBar)
 								.VScrollBar(VScrollBar)
 								.OnTextChanged(this, &SBangoTextEditor::HandleTextChanged)
@@ -126,7 +138,7 @@ void SBangoTextEditor::Construct(const FArguments& InArgs)
 						SAssignNew(DividerButton, SButton)
 						.ButtonStyle(FAppStyle::Get(), "InvisibleButton")
 						.ContentPadding(0.0f)
-						.Visibility_Lambda([this]() { return bGutterHasMetadata ? EVisibility::Visible : EVisibility::Collapsed; })
+						.Visibility_Lambda([this]() { return bGutterHasMetadata && !bInlineScriptEditor ? EVisibility::Visible : EVisibility::Collapsed; })
 						.ToolTipText_Lambda([this]()
 						{
 							return bMetadataShown
@@ -267,7 +279,7 @@ const FSlateBrush* SBangoTextEditor::GetFrameBrush() const
 
 void SBangoTextEditor::SetMetadataShown(bool bShown)
 {
-	bMetadataShown = bShown;
+	bMetadataShown = bShown && !bInlineScriptEditor;
 }
 
 FText SBangoTextEditor::GetText() const

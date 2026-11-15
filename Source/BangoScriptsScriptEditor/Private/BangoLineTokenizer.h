@@ -25,7 +25,7 @@ enum class EBangoSyntaxKind : uint8
 	Type,               // int float ... and a [] right after one
 	Constant,           // true false
 	Nil,                // nil
-	Preprocessor,       // #define #undef inputs LOCTEXT_NAMESPACE
+	Preprocessor,       // #set inputs LOCTEXT_NAMESPACE LARGE_SCRIPT_THRESHOLD
 	Local,              // a name the graph declares (set by FBangoScriptNames)
 	Global,             // any other name that isn't a call (the tokenizer gives every name this)
 	Entity,             // @john

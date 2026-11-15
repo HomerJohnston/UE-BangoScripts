@@ -78,7 +78,7 @@ namespace Bango
 		switch (Kind)
 		{
 		case EBangoGraphNodeKind::Entry:
-			Source = bInFunctionGraph ? FString(TEXT("function ")) + Text + TEXT("\n{\n};") : FString(TEXT("#define inputs (")) + Text + TEXT(")");
+			Source = bInFunctionGraph ? FString(TEXT("function ")) + Text + TEXT("\n{\n};") : FString(TEXT("#set inputs (")) + Text + TEXT(")");
 			break;
 		case EBangoGraphNodeKind::Assign:
 		case EBangoGraphNodeKind::IncDec:
@@ -1170,7 +1170,7 @@ namespace Bango
 			TSet<FString> Names;
 			int32 AnchorLine = 0; // the hoisted declarations go after the last declaration, or before the first statement
 			bool bAfterAnchor = true;
-			// The graph's leading declarations, after its #define inputs line (a statement too) and any reroutes among them.
+			// The graph's leading declarations, after its #set inputs line (a statement too) and any reroutes among them.
 			while (FirstLate < Body.Num() && (Body[FirstLate]->Kind == EBangoStmtKind::VarDecl || Body[FirstLate]->Kind == EBangoStmtKind::Reroute
 				|| Body[FirstLate]->Kind == EBangoStmtKind::Params))
 			{

@@ -110,13 +110,19 @@ public:
 	TSharedPtr<const FBangoNodeLayoutContext> LayoutContext;
 
 	/**
-	 * The main Script Start node only: the script's `#define LOCTEXT_NAMESPACE "..."` line, edited in the SCRIPT CONFIG panel
+	 * The main Script Start node only: the script's `#set LOCTEXT_NAMESPACE "..."` line, edited in the SCRIPT CONFIG panel
 	 * (SetLocNamespace). Kept here, not in Text, since it isn't part of the inputs line.
 	 */
 	UPROPERTY()
 	bool bHasLocNamespace = false;
 	UPROPERTY()
 	FString LocNamespace;
+
+	/** The main Script Start node only: the script's `#set LARGE_SCRIPT_THRESHOLD 5` line, edited in SCRIPT CONFIG (SetLargeScriptThreshold). */
+	UPROPERTY()
+	bool bHasLargeScriptThreshold = false;
+	UPROPERTY()
+	int32 LargeScriptThreshold = 0;
 
 	/** Entry nodes only: the locals declared at the top of this graph (FBangoGraph::Locals). Edited in the Locals list. */
 	UPROPERTY()
@@ -179,11 +185,17 @@ public:
 	bool SetFieldValue(int32 FieldIndex, const FString& Value, FString& OutError);
 
 	/**
-	 * The main Script Start node only: sets the script's namespace (the #define LOCTEXT_NAMESPACE line) as an undoable
+	 * The main Script Start node only: sets the script's namespace (the #set LOCTEXT_NAMESPACE line) as an undoable
 	 * edit, from what was typed in SCRIPT CONFIG (a name, without quotes). Spaces around it are dropped; empty removes the
 	 * line. False if nothing changed.
 	 */
 	bool SetLocNamespace(const FString& Typed);
+
+	/**
+	 * The main Script Start node only: sets or removes (bHas false) the script's #set LARGE_SCRIPT_THRESHOLD line, as an
+	 * undoable edit. False if nothing changed.
+	 */
+	bool SetLargeScriptThreshold(bool bHas, int32 Threshold);
 
 	/**
 	 * Shows a compile error on the node, pointing at a field if FieldIndex isn't INDEX_NONE (or at a switch's case, if

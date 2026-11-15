@@ -17,8 +17,11 @@ namespace BangoScriptEditor
 	 */
 	UEdGraph* CreateEdGraph(const FBangoGraph& Graph, const TSharedPtr<const FBangoNodeLayoutContext>& LayoutContext);
 
-	/** Puts the script's #define LOCTEXT_NAMESPACE on the main graph's Script Start node. */
+	/** Puts the script's #set LOCTEXT_NAMESPACE on the main graph's Script Start node. */
 	void SetLocNamespace(UEdGraph* MainGraph, bool bHasLocNamespace, const FString& LocNamespace);
+
+	/** Puts the script's #set LARGE_SCRIPT_THRESHOLD on the main graph's Script Start node. */
+	void SetLargeScriptThreshold(UEdGraph* MainGraph, bool bHasThreshold, int32 Threshold);
 
 	/** Puts the file's global declarations on the main graph's Script Start node (CreateEdGraph puts each graph's locals on its entry). */
 	void SetGlobals(UEdGraph* MainGraph, const TArray<FBangoGraphDecl>& Globals);

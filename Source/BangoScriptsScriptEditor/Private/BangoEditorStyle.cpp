@@ -74,6 +74,9 @@ void FBangoEditorStyle::Initialize()
 	// A Bango script (the scripts' folder tree and tabs), from Resources/ClassIcons.
 	StyleSet->Set(GetScriptIconName(), new FSlateVectorImageBrush(StyleSet->RootToContentDir(TEXT("ClassIcons/Icon_Script"), TEXT(".svg")), FVector2D(16.0f, 16.0f)));
 
+	// Buttons, from Resources/ButtonIcons.
+	StyleSet->Set("Bango.EditScript", new FSlateVectorImageBrush(StyleSet->RootToContentDir(TEXT("ButtonIcons/Icon_EditScript"), TEXT(".svg")), FVector2D(16.0f, 16.0f)));
+
 	FSlateStyleRegistry::RegisterSlateStyle(*StyleSet);
 }
 
@@ -173,6 +176,11 @@ const FSlateBrush* FBangoEditorStyle::GetPinBrush(bool bConnected)
 const FSlateBrush* FBangoEditorStyle::GetScriptIcon()
 {
 	return StyleSet.IsValid() ? StyleSet->GetBrush(GetScriptIconName()) : FAppStyle::GetBrush("GraphEditor.EventGraph_16x");
+}
+
+const FSlateBrush* FBangoEditorStyle::GetEditScriptIcon()
+{
+	return StyleSet.IsValid() ? StyleSet->GetBrush("Bango.EditScript") : FAppStyle::GetBrush("Icons.Edit");
 }
 
 FName FBangoEditorStyle::GetStyleSetName()

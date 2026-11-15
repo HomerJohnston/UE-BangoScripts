@@ -30,6 +30,15 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Limits", meta = (ClampMin = "8"))
 	int32 MaxCallDepth = 200;
 
+	/**
+	 * Large Script Threshold: the graph editor saves a script with fewer nodes than this compact, without section
+	 * headings (// ==== ...) or node metadata (//@), so it reads like plain code; its nodes are laid out afresh each
+	 * time it's opened. From this many nodes on, it's saved with both. 0: always with both. A script's own
+	 * `#set LARGE_SCRIPT_THRESHOLD` line (SCRIPT CONFIG in the editor) overrides this.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Editor", meta = (ClampMin = "0"))
+	int32 LargeScriptThreshold = 3;
+
 	/** How long a `WriteScreen` message stays on screen when the script doesn't say. */
 	UPROPERTY(Config, EditAnywhere, Category = "Commands", meta = (ClampMin = "0.5"))
 	float WriteScreenSeconds = 5.0f;

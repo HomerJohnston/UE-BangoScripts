@@ -36,6 +36,7 @@ class SBangoTextEditor : public SCompoundWidget
 public:
 	SLATE_BEGIN_ARGS(SBangoTextEditor)
 		: _FontSize(10.0f)
+		, _InlineScriptEditor(false)
 	{}
 		/** The script text, metadata included. Read once, when the widget is made; use SetText after that. */
 		SLATE_ATTRIBUTE(FText, Text)
@@ -45,6 +46,16 @@ public:
 
 		/** If true, the text can be read and selected but not changed. */
 		SLATE_ATTRIBUTE(bool, IsReadOnly)
+
+		/**
+		 * For an inline script's box (FBangoInlineScript, in the details panel): no node metadata gutter and no divider
+		 * to show it, and the text is read-only while it has any node metadata (HasNodeMetadata), as such a script is
+		 * edited in the full editor. Off: the script editor's text pane.
+		 */
+		SLATE_ARGUMENT(bool, InlineScriptEditor)
+
+		/** Adds entries to the text's right-click menu (after the usual Cut, Copy, Paste, ...). */
+		SLATE_EVENT(FMenuExtensionDelegate, ContextMenuExtender)
 
 		/** The space between the box's border and its text. Unset: the text box style's. */
 		SLATE_ATTRIBUTE(FMargin, Padding)
@@ -97,6 +108,9 @@ public:
 	/** Shows or hides the node metadata gutter (the divider beside it does the same). Shown to start with. */
 	void SetMetadataShown(bool bShown);
 	bool IsMetadataShown() const { return bMetadataShown; }
+
+	/** True if any line of the text has node metadata (//@). */
+	bool HasNodeMetadata() const { return bGutterHasMetadata; }
 
 	// SWidget
 	/** Opens, filters or closes the autocomplete list once the text and cursor have settled. */
@@ -205,6 +219,9 @@ private:
 
 	/** Whether the gutter is shown (the divider toggles it). */
 	bool bMetadataShown = true;
+
+	/** See the InlineScriptEditor argument. */
+	bool bInlineScriptEditor = false;
 
 	/** The divider between the text and the gutter. */
 	TSharedPtr<SButton> DividerButton;

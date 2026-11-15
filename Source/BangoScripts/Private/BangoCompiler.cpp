@@ -181,7 +181,7 @@ namespace BangoCompilerPrivate
 			}
 			else
 			{
-				return Fail(Lit.Loc, TEXT("This text needs the script's namespace: add the line #define LOCTEXT_NAMESPACE \"Bango.Intro\" at the top of the script (under its description) and #undef LOCTEXT_NAMESPACE as its last line. (NSLOCTEXT and NSNOTELOCTEXT give their own namespace instead.)"));
+				return Fail(Lit.Loc, TEXT("This text needs the script's namespace: add the line #set LOCTEXT_NAMESPACE \"Bango.Intro\" at the top of the script (under its description) and #undef LOCTEXT_NAMESPACE as its last line. (NSLOCTEXT and NSNOTELOCTEXT give their own namespace instead.)"));
 			}
 
 			const FString Id = Namespace + TEXT("\n") + Lit.TextKey;
@@ -661,8 +661,8 @@ namespace BangoCompilerPrivate
 			if (Decl.bGlobal)
 			{
 				return Fail(Decl.Loc, bInFunction
-					? FString::Printf(TEXT("Globals are declared at the top of the file, not in a function: move 'global %s %s;' up there, after the #define lines."), *Decl.Type.ToString(), *Decl.Name)
-					: FString::Printf(TEXT("Globals are declared at the top of the file, after the #define lines and before everything else: move 'global %s %s;' up there."), *Decl.Type.ToString(), *Decl.Name));
+					? FString::Printf(TEXT("Globals are declared at the top of the file, not in a function: move 'global %s %s;' up there, after the #set lines."), *Decl.Type.ToString(), *Decl.Name)
+					: FString::Printf(TEXT("Globals are declared at the top of the file, after the #set lines and before everything else: move 'global %s %s;' up there."), *Decl.Type.ToString(), *Decl.Name));
 			}
 			return Fail(Decl.Loc, FString::Printf(TEXT("Locals are declared at the top of their %s, before its first statement: move '%s %s;' up there, and set it here with '%s = ...;' if it needs a value at this point."),
 				bInFunction ? TEXT("function") : TEXT("script"), *Decl.Type.ToString(), *Decl.Name, *Decl.Name));
@@ -754,7 +754,7 @@ namespace BangoCompilerPrivate
 		}
 
 		/**
-		 * Globals are declared only at the top of the file (after the #define lines, before the main graph's locals and
+		 * Globals are declared only at the top of the file (after the #set lines, before the main graph's locals and
 		 * anything else, functions included), once each and without a value. Locals are declared only at the top of
 		 * their graph, with fixed starting values. Loop variables (for and forEach headers) aren't in a block, so they
 		 * aren't checked here.

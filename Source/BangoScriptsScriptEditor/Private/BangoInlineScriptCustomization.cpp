@@ -1,8 +1,14 @@
 #include "BangoInlineScriptCustomization.h"
 
 #include "BangoInlineScript.h"
+#include "BangoGraph.h"
+#include "BangoParser.h"
+#include "BangoTextMetadata.h"
+#include "BangoEditorStyle.h"
 #include "BangoInlineScriptTarget.h"
 #include "DetailWidgetRow.h"
+#include "Dialog/SCustomDialog.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "PropertyHandle.h"
 #include "SBangoTextEditor.h"
 #include "Styling/AppStyle.h"
@@ -10,7 +16,9 @@
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SWidgetSwitcher.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/SOverlay.h"
 #include "Widgets/SCompoundWidget.h"
+#include "Widgets/Images/SImage.h"
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "BangoInlineScript"
@@ -19,11 +27,50 @@ namespace BangoInlineScriptCustomizationPrivate
 {
 	/** About ten lines of the box's text (10 pt), and its frame. */
 	constexpr float MaxBoxHeight = 180.0f;
+	/** While the script's window is open: the box is darkened by this much, and the note over it is this colour. */
+	constexpr float LockedDim = 0.75f;
+	const FLinearColor LockedNoteColor(1.0f, 0.85f, 0.0f);
+
+	/**
+	 * The script without its graph layout: no node metadata (//@) and no section headings (// ====), so it can be
+	 * typed in its box. Written compact by the graph writer if it reads; otherwise each line has its metadata taken off,
+	 * and the headings and reroute lines (metadata only) are dropped.
+	 */
+	static FString StripNodeLayout(const FString& Script)
+	{
+		FBangoGraphDocument Document;
+		FBangoCompileError Error;
+		FString Compact;
+		FString WriteError;
+		FBangoGraphWriteOptions Options;
+		Options.bCompact = true;
+		if (Bango::BuildGraph(Script, TEXT("inline"), Document, Error) && Bango::WriteGraphText(Document, Compact, WriteError, Options))
+		{
+			return Compact.TrimEnd(); // without the last line's line break, as a script typed in the box would be
+		}
+		TArray<FString> Lines;
+		FBangoMetadataTracker::SplitLines(Script, Lines);
+		TArray<FString> Kept;
+		for (const FString& Line : Lines)
+		{
+			FBangoLineMetadata Meta;
+			const FString Visible = FBangoMetadataTracker::SplitLine(Line, Meta).TrimEnd();
+			const FString Trimmed = Visible.TrimStart();
+			const bool bHeading = Trimmed.StartsWith(TEXT("//")) && !Trimmed.StartsWith(TEXT("//~")) && Bango::IsSectionHeadingComment(Trimmed.Mid(2));
+			if (bHeading || (Meta.HasMetadata() && Trimmed.IsEmpty()))
+			{
+				continue;
+			}
+			Kept.Add(Visible);
+		}
+		return FBangoMetadataTracker::JoinLines(Kept);
+	}
 }
 
 /**
  * The details panel's box for one FBangoInlineScript property: its text, typed in and applied when the box loses
- * focus (as one undoable change), kept up to date with changes made elsewhere, and the Edit / Show Window button.
+ * focus (as one undoable change), kept up to date with changes made elsewhere, and the Edit button on its right (which
+ * shows the window instead once it's open).
  */
 class SBangoInlineScriptBox : public SCompoundWidget
 {
@@ -53,47 +100,83 @@ public:
 			+ SVerticalBox::Slot()
 			.AutoHeight()
 			[
-				SNew(SBox)
-				.MaxDesiredHeight(MaxBoxHeight)
-				[
-					SNew(SWidgetSwitcher)
-					.WidgetIndex_Lambda([this]() { return bMultipleValues ? 1 : 0; })
-					+ SWidgetSwitcher::Slot()
-					[
-						SAssignNew(TextBox, SBangoTextEditor)
-						.Text(FText::FromString(Shown))
-						.IsReadOnly_Lambda([this]() { return IsLocked(); })
-						.OnTextCommitted(this, &SBangoInlineScriptBox::OnTextCommitted)
-					]
-					+ SWidgetSwitcher::Slot()
-					.Padding(4.0f)
-					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("MultipleValues", "Multiple Values"))
-						.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-					]
-				]
-			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 3.0f, 0.0f, 0.0f)
-			[
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot()
 				.FillWidth(1.0f)
-				.VAlign(VAlign_Center)
 				[
-					SNew(STextBlock)
-					.Text(LOCTEXT("OpenInWindow", "Open in a script window."))
-					.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
-					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-					.Visibility_Lambda([this]() { return IsWindowOpen() ? EVisibility::Visible : EVisibility::Collapsed; })
+					SNew(SOverlay)
+					+ SOverlay::Slot()
+					[
+						SNew(SBox)
+						.MaxDesiredHeight(MaxBoxHeight)
+						[
+							SNew(SWidgetSwitcher)
+							.WidgetIndex_Lambda([this]() { return bMultipleValues ? 1 : 0; })
+							+ SWidgetSwitcher::Slot()
+							[
+								SAssignNew(TextBox, SBangoTextEditor)
+								.Text(FText::FromString(Shown))
+								.InlineScriptEditor(true) // no metadata shown, and read-only while the script has some
+								.IsReadOnly_Lambda([this]() { return IsLocked(); })
+								.OnTextCommitted(this, &SBangoInlineScriptBox::OnTextCommitted)
+								.ContextMenuExtender(this, &SBangoInlineScriptBox::ExtendContextMenu)
+							]
+							+ SWidgetSwitcher::Slot()
+							.Padding(4.0f)
+							[
+								SNew(STextBlock)
+								.Text(LOCTEXT("MultipleValues", "Multiple Values"))
+								.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+							]
+						]
+					]
+					// While the script's window is open: the box darkened, and a note over its middle (the box can't be typed in then).
+					+ SOverlay::Slot()
+					[
+						SNew(SImage)
+						.Image(FBangoEditorStyle::GetWhiteBrush())
+						.ColorAndOpacity(FLinearColor(0.0f, 0.0f, 0.0f, LockedDim))
+						.Visibility_Lambda([this]() { return IsWindowOpen() ? EVisibility::HitTestInvisible : EVisibility::Collapsed; })
+					]
+					// A script with graph layout (node metadata) is edited in the window, or made editable here: a note says so.
+					+ SOverlay::Slot()
+					.HAlign(HAlign_Right)
+					.VAlign(VAlign_Bottom)
+					.Padding(2.0f)
+					[
+						SNew(SBorder)
+						.BorderImage(FBangoEditorStyle::GetWhiteBrush())
+						.BorderBackgroundColor(FLinearColor(0.0f, 0.0f, 0.0f, 0.6f))
+						.Padding(FMargin(4.0f, 1.0f))
+						.Visibility_Lambda([this]() { return HasLayout() && !IsWindowOpen() && !bMultipleValues ? EVisibility::HitTestInvisible : EVisibility::Collapsed; })
+						[
+							SNew(STextBlock)
+							.Text(LOCTEXT("HasLayout", "Has graph layout: click Edit, or right-click > Make Editable Inline."))
+							.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+							.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+						]
+					]
+					+ SOverlay::Slot()
+					.HAlign(HAlign_Center)
+					.VAlign(VAlign_Center)
+					.Padding(4.0f)
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("OpenInWindow", "Editor open. Click Edit to focus it."))
+						.Font(FAppStyle::GetFontStyle("PropertyWindow.NormalFont"))
+						.ColorAndOpacity(LockedNoteColor)
+						.Visibility_Lambda([this]() { return IsWindowOpen() ? EVisibility::HitTestInvisible : EVisibility::Collapsed; })
+					]
 				]
+				// The Edit button, as tall as the box beside it.
 				+ SHorizontalBox::Slot()
 				.AutoWidth()
+				.Padding(2.0f, 0.0f, 0.0f, 0.0f)
 				[
 					SNew(SButton)
-					.Text_Lambda([this]() { return IsWindowOpen() ? LOCTEXT("ShowWindow", "Show Window") : LOCTEXT("Edit", "Edit"); })
+					.HAlign(HAlign_Center)
+					.VAlign(VAlign_Center)
+					.ContentPadding(FMargin(2.0f, 0.0f))
 					.ToolTipText_Lambda([this]()
 					{
 						if (!Target.IsValid())
@@ -106,14 +189,15 @@ public:
 					})
 					.IsEnabled_Lambda([this]() { return Target.IsValid() && !bMultipleValues && !StructHandle->IsEditConst(); })
 					.OnClicked(this, &SBangoInlineScriptBox::OnEditClicked)
+					[
+						SNew(SImage)
+						.Image(FBangoEditorStyle::GetEditScriptIcon())
+						.ColorAndOpacity(FSlateColor::UseForeground())
+					]
 				]
 			]
 		];
 
-		if (TextBox.IsValid())
-		{
-			TextBox->SetMetadataShown(false); // node positions aren't worth the room here
-		}
 	}
 
 	/** Keeps the box up to date with the property (undo, the window's Save, paste), except while it's being typed in. */
@@ -157,6 +241,60 @@ private:
 	bool IsWindowOpen() const
 	{
 		return Target.IsValid() && FBangoInlineScriptWindows::IsOpen(Target->GetKey());
+	}
+
+	/** The script has node metadata: it's laid out for the graph, so it's edited in the window (or made editable here). */
+	bool HasLayout() const
+	{
+		return TextBox.IsValid() && TextBox->HasNodeMetadata();
+	}
+
+	void ExtendContextMenu(FMenuBuilder& MenuBuilder)
+	{
+		MenuBuilder.BeginSection(TEXT("BangoInlineScript"), LOCTEXT("InlineScriptSection", "Inline Script"));
+		MenuBuilder.AddMenuEntry(
+			LOCTEXT("MakeEditableInline", "Make Editable Inline"),
+			LOCTEXT("MakeEditableInlineTooltip", "Removes the script's node metadata (and section headings), so it can be typed in here. Its graph loses its layout: the nodes are laid out afresh when it's next opened in the editor."),
+			FSlateIcon(),
+			FUIAction(
+				FExecuteAction::CreateSP(this, &SBangoInlineScriptBox::MakeEditableInline),
+				FCanExecuteAction::CreateLambda([this]() { return HasLayout() && !IsLocked(); })));
+		MenuBuilder.EndSection();
+	}
+
+	void MakeEditableInline()
+	{
+		using namespace BangoInlineScriptCustomizationPrivate;
+		if (!HasLayout() || IsLocked() || !SourceHandle.IsValid() || !SourceHandle->IsValidHandle())
+		{
+			return;
+		}
+		TSharedRef<SCustomDialog> Dialog = SNew(SCustomDialog)
+			.Title(LOCTEXT("MakeEditableInlineTitle", "Make Editable Inline"))
+			.Content()
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("MakeEditableInlineMessage", "This action will remove all node metadata. The graph representation of this script will lose all layout information. Proceed?"))
+				.AutoWrapText(true)
+			]
+			.Buttons({
+				SCustomDialog::FButton(LOCTEXT("Yes", "Yes")),
+				SCustomDialog::FButton(LOCTEXT("Cancel", "Cancel")),
+			});
+		if (Dialog->ShowModal() != 0)
+		{
+			return;
+		}
+		FString Current;
+		bool bMultiple = false;
+		ReadValue(Current, bMultiple);
+		if (bMultiple)
+		{
+			return;
+		}
+		Shown = StripNodeLayout(Current);
+		SourceHandle->SetValue(Shown); // one undoable change
+		TextBox->SetText(FText::FromString(Shown));
 	}
 
 	bool IsLocked() const

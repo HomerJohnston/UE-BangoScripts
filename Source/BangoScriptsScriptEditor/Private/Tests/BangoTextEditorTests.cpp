@@ -78,10 +78,10 @@ bool FBangoLineTokenizerTest::RunTest(const FString& Parameters)
 	Check(TEXT("_pos.X = 1;"), TEXT("Global[_pos] Punctuation[.] Error[X]"));
 	Check(TEXT("int[][] _grid = [[1, 2], [3]];"), TEXT("Type[int[][]] Global[_grid]"));
 	Check(TEXT("double _d = 1. + .5 + 12abc + 2.5e-3;"), TEXT("Error[double] Global[_d] Operator[=] Error[1.] Operator[+] Error[.5] Operator[+] Error[12abc] Operator[+] Number[2.5e-3]"));
-	Check(TEXT("#define inputs (entity _speaker, int _n = 1, entity _l = nil)"), TEXT("Preprocessor[#define] Preprocessor[inputs] Punctuation[(] Type[entity] Global[_speaker]"));
-	Check(TEXT("#define inputs (entity _speaker, int _n = 1, entity _l = nil)"), TEXT("Nil[nil] Punctuation[)]"));
-	Check(TEXT("#define LOCTEXT_NAMESPACE \"Quest.Intro\""), TEXT("Preprocessor[#define] Preprocessor[LOCTEXT_NAMESPACE] String[\"Quest.Intro\"]"));
-	Check(TEXT("#undef LOCTEXT_NAMESPACE"), TEXT("Preprocessor[#undef] Preprocessor[LOCTEXT_NAMESPACE]"));
+	Check(TEXT("#set inputs (entity _speaker, int _n = 1, entity _l = nil)"), TEXT("Preprocessor[#set] Preprocessor[inputs] Punctuation[(] Type[entity] Global[_speaker]"));
+	Check(TEXT("#set inputs (entity _speaker, int _n = 1, entity _l = nil)"), TEXT("Nil[nil] Punctuation[)]"));
+	Check(TEXT("#set LOCTEXT_NAMESPACE \"Quest.Intro\""), TEXT("Preprocessor[#set] Preprocessor[LOCTEXT_NAMESPACE] String[\"Quest.Intro\"]"));
+	Check(TEXT("#set LARGE_SCRIPT_THRESHOLD 5"), TEXT("Preprocessor[#set] Preprocessor[LARGE_SCRIPT_THRESHOLD] Number[5]"));
 	Check(TEXT("//~ if (true)               //@3(20, 20)"), TEXT("DisconnectedMarker[//~] Keyword~[if] Punctuation~[(] Constant~[true] Punctuation~[)] Metadata~[//@3(20, 20)]"));
 	Check(TEXT("//~"), TEXT("DisconnectedMarker[//~]"));
 	Check(TEXT("                //@7(4, 9) @8(8, 13)"), TEXT("Metadata[//@7(4, 9) @8(8, 13)]"));
@@ -255,8 +255,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoScriptNamesTest, "Bango.ScriptEditor.Text
 bool FBangoScriptNamesTest::RunTest(const FString& Parameters)
 {
 	const TCHAR* Source =
-		TEXT("#define inputs (entity speaker, int _rounds = 3)\n")
-		TEXT("#define LOCTEXT_NAMESPACE \"Q\"\n")
+		TEXT("#set inputs (entity speaker, int _rounds = 3)\n")
+		TEXT("#set LOCTEXT_NAMESPACE \"Q\"\n")
 		TEXT("// ============ GLOBAL VARS ====================\n")
 		TEXT("global int foundThings;\n")
 		TEXT("global string[] questLog;\n")
@@ -465,7 +465,7 @@ bool FBangoCompletionTest::RunTest(const FString& Parameters)
 	Word(TEXT("//~ Lo"), 6, 4);                  // a disconnected line
 
 	FBangoMetadataTracker Tracker;
-	Tracker.Reset(UV(TEXT("#define inputs (entity speaker, int rounds = 3)|global int foundThings;|global string count;|int count = 0;|fo|function int AddScore(int amount,|>entity who)|{|>am|};")));
+	Tracker.Reset(UV(TEXT("#set inputs (entity speaker, int rounds = 3)|global int foundThings;|global string count;|int count = 0;|fo|function int AddScore(int amount,|>entity who)|{|>am|};")));
 	TArray<TArray<FBangoSyntaxToken>> Tokens;
 	Tokens.SetNum(Tracker.GetLines().Num());
 	for (int32 I = 0; I < Tracker.GetLines().Num(); ++I)

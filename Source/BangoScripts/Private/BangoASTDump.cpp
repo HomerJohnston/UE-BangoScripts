@@ -395,6 +395,10 @@ namespace Bango
 		{
 			Parts.Add(TEXT("(locNamespace ") + QuoteString(Script.LocNamespace) + TEXT(")"));
 		}
+		if (Script.bHasLargeScriptThreshold)
+		{
+			Parts.Add(FString::Printf(TEXT("(largeScriptThreshold %d)"), Script.LargeScriptThreshold));
+		}
 		for (const TUniquePtr<FBangoFunction>& Function : Script.Functions)
 		{
 			FString Params;

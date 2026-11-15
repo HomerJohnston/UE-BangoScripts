@@ -28,6 +28,7 @@ public class BangoScriptsScriptEditor : ModuleRules
 				"DirectoryWatcher",
 				"SourceControl",
 				"PropertyEditor",
+				"ToolWidgets",
 				"BangoScripts",
 			}
 		);
