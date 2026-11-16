@@ -348,7 +348,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoBlueprintArgsTest, "Bango.Game.BlueprintA
 
 bool FBangoBlueprintArgsTest::RunTest(const FString& Parameters)
 {
-	// inputs (string _name, int _times = 3, double _delay = 0.5, entity _who = nil)
+	// inputs (string _name, int _times = 3, float _delay = 0.5, entity _who = nil)
 	TArray<FBangoScriptParamInfo> Params;
 	FString Error;
 	BangoGameTestsPrivate::MakeTestScript(TEXT("Greet"), TEXT("#set inputs (string _name, int _times = 3, float _delay = 0.5, entity _who = nil)\nSleep(_delay);"));

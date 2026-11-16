@@ -130,6 +130,7 @@ public:
 								SAssignNew(TextBox, SBangoTextEditor)
 								.Text(FText::FromString(Shown))
 								.InlineScriptEditor(true) // no metadata shown, and read-only while the script has some
+								.CompileAsYouType(true)
 								.IsReadOnly_Lambda([this]() { return IsLocked(); })
 								.OnTextCommitted(this, &SBangoInlineScriptBox::OnTextCommitted)
 								.ContextMenuExtender(this, &SBangoInlineScriptBox::ExtendContextMenu)

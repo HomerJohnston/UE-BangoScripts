@@ -7,6 +7,7 @@
 #include "BangoEditorStyle.h"
 #include "BangoGraphCommands.h"
 #include "BangoScriptSync.h"
+#include "BangoScriptReferences.h"
 #include "BangoEdGraphSchema.h"
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphUtilities.h"
@@ -48,6 +49,9 @@ public:
 		FBangoEditorStyle::Initialize();
 		FBangoGraphCommands::Register();
 
+		// Rings in the level viewports around the actors the script being edited refers to.
+		BangoScriptReferences::Register();
+
 		// Bango Script assets and their linked .bango files (spec section 15).
 		ScriptSync = MakeUnique<FBangoScriptSync>();
 		ScriptSync->Startup();
@@ -77,6 +81,7 @@ public:
 
 	virtual void ShutdownModule() override
 	{
+		BangoScriptReferences::Unregister();
 		if (FSlateApplication::IsInitialized())
 		{
 			FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(TabName);

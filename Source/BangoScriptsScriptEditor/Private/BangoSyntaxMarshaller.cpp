@@ -85,7 +85,38 @@ namespace BangoSyntaxMarshallerPrivate
 		TSharedRef<FBangoTextProbe> Probe;
 	};
 
+	/** A red line under a compile error's characters (FBangoSyntaxMarshaller::SetError). */
+	class FBangoErrorHighlighter : public ISlateLineHighlighter
+	{
+	public:
+		virtual int32 OnPaint(const FPaintArgs& Args, const FTextLayout::FLineView& Line, const FVector2D Offset, const float Width,
+			const FTextBlockStyle& DefaultStyle, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect,
+			FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
+		{
+			if (Width <= 0.0f)
+			{
+				return LayerId;
+			}
+			// Along the bottom of the line, as the bracket boxes are drawn (their sizes are pre-scaled).
+			const float InverseScale = Inverse(AllottedGeometry.Scale);
+			const float LineHeight = FMath::Max(Line.Size.Y, Line.TextHeight);
+			const float Thickness = 2.0f * AllottedGeometry.Scale;
+			const FVector2D Location(Line.Offset.X + Offset.X, Line.Offset.Y + Offset.Y + LineHeight - Thickness);
+			FSlateDrawElement::MakeBox(
+				OutDrawElements,
+				++LayerId,
+				AllottedGeometry.ToPaintGeometry(
+					TransformVector(InverseScale, FVector2D(Width, Thickness)),
+					FSlateLayoutTransform(TransformPoint(InverseScale, Location))),
+				FAppStyle::GetBrush("WhiteBrush"),
+				bParentEnabled ? ESlateDrawEffect::None : ESlateDrawEffect::DisabledEffect,
+				FLinearColor(1.0f, 0.2f, 0.15f) * InWidgetStyle.GetColorAndOpacityTint());
+			return LayerId;
+		}
+	};
+
 	static constexpr int32 ProbeZOrder = -7;
+	static constexpr int32 ErrorZOrder = -6;
 
 	/** Above the selection (-10) and search results (-9), below the text. */
 	static constexpr int32 BracketHighlightZOrder = -8;
@@ -213,6 +244,7 @@ FBangoSyntaxMarshaller::FBangoSyntaxMarshaller(TSharedRef<const FBangoSyntaxStyl
 	MatchHighlighter = MakeShared<FBangoBracketHighlighter>(FLinearColor(1.0f, 1.0f, 1.0f, 0.16f));
 	UnmatchedHighlighter = MakeShared<FBangoBracketHighlighter>(FLinearColor(0.9f, 0.1f, 0.1f, 0.45f));
 	ProbeHighlighter = MakeShared<FBangoProbeHighlighter>(Probe);
+	ErrorHighlighter = MakeShared<FBangoErrorHighlighter>();
 }
 
 void FBangoSyntaxMarshaller::SetProbe(int32 Line, int32 BeginColumn, int32 EndColumn)
@@ -251,6 +283,59 @@ void FBangoSyntaxMarshaller::UpdateProbeHighlight()
 		LastLayout->AddLineHighlight(Highlight);
 		ProbeHighlights.Add(Highlight);
 	}
+}
+
+void FBangoSyntaxMarshaller::SetError(int32 Line, int32 Column)
+{
+	ErrorLine = Line;
+	ErrorColumn = Column;
+	UpdateErrorHighlight();
+}
+
+void FBangoSyntaxMarshaller::ClearError()
+{
+	ErrorLine = INDEX_NONE;
+	UpdateErrorHighlight();
+}
+
+void FBangoSyntaxMarshaller::UpdateErrorHighlight()
+{
+	if (LastLayout == nullptr)
+	{
+		return;
+	}
+	for (const FTextLineHighlight& Highlight : ErrorHighlights)
+	{
+		LastLayout->RemoveLineHighlight(Highlight);
+	}
+	ErrorHighlights.Reset();
+	if (ErrorLine < 0 || ErrorLine >= LastLayout->GetLineModels().Num() || !CachedLines.IsValidIndex(ErrorLine))
+	{
+		return;
+	}
+	// The token the error is at; past the end of the line (a missing ';'), its last character; on an empty line, nothing.
+	const int32 LineLen = CachedLines[ErrorLine].Len();
+	if (LineLen == 0)
+	{
+		return;
+	}
+	int32 Begin = FMath::Clamp(ErrorColumn, 0, LineLen - 1);
+	int32 End = Begin + 1;
+	if (CachedTokens.IsValidIndex(ErrorLine))
+	{
+		for (const FBangoSyntaxToken& Token : CachedTokens[ErrorLine])
+		{
+			if (Begin >= Token.Start && Begin < Token.Start + Token.Len)
+			{
+				Begin = Token.Start;
+				End = Token.Start + Token.Len;
+				break;
+			}
+		}
+	}
+	FTextLineHighlight Highlight(ErrorLine, FTextRange(Begin, End), BangoSyntaxMarshallerPrivate::ErrorZOrder, ErrorHighlighter.ToSharedRef());
+	LastLayout->AddLineHighlight(Highlight);
+	ErrorHighlights.Add(Highlight);
 }
 
 void FBangoSyntaxMarshaller::SetCursor(const FBangoTextPosition& InCursor)
@@ -419,6 +504,8 @@ void FBangoSyntaxMarshaller::SetText(const FString& SourceString, FTextLayout& T
 	UpdateBracketHighlights();
 	ProbeHighlights.Reset();
 	UpdateProbeHighlight();
+	ErrorHighlights.Reset();
+	UpdateErrorHighlight();
 }
 
 void FBangoSyntaxMarshaller::GetText(FString& TargetString, const FTextLayout& SourceTextLayout)

@@ -10,14 +10,26 @@
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
+#include "Widgets/Input/SMenuAnchor.h"
+#include "Widgets/SCanvas.h"
 #include "Widgets/SOverlay.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBar.h"
+#include "Widgets/Layout/SSpacer.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SNullWidget.h"
 #include "Widgets/Text/STextBlock.h"
 #include "BangoSyntaxMarshaller.h"
+#include "BangoScriptReferences.h"
+#include "BangoEditorSettings.h"
+#include "Bango.h"
+#include "BangoCompiler.h"
+#include "BangoParser.h"
+#include "BangoProgram.h"
+#include "Widgets/Layout/SBox.h"
+#include "Widgets/Images/SImage.h"
+#include "Widgets/Text/STextBlock.h"
 #include "BangoEditingAids.h"
 #include "BangoSyntaxStyle.h"
 #include "SBangoScrollFollower.h"
@@ -66,6 +78,8 @@ void SBangoTextEditor::Construct(const FArguments& InArgs)
 
 	// An inline script's box shows no metadata, and can't be typed in while the script has some.
 	bInlineScriptEditor = InArgs._InlineScriptEditor;
+	bCompileAsYouType = InArgs._CompileAsYouType;
+	bCompileDirty = bCompileAsYouType; // the text it starts with is compiled on the first tick
 	if (bInlineScriptEditor)
 	{
 		bMetadataShown = false;
@@ -246,14 +260,63 @@ void SBangoTextEditor::Construct(const FArguments& InArgs)
 			]
 		]
 
-		// Autocomplete: the list of names, beside the word being typed. Drawn here, over the text, rather than in a pop-up
-		// window, so the text keeps keyboard focus (FBangoCompletion).
+		// Compile as you type: the first error's message, hanging under this widget's bottom edge. An anchor along the
+		// bottom that asks for no space. The message is a small window of its own, never activated (the text keeps
+		// focus), so it can hang below the editor window's own edge, as the script editor's text pane reaches down to it;
+		// it only goes above this widget's bottom edge where the screen ends.
 		+ SOverlay::Slot()
-		.HAlign(HAlign_Left)
-		.VAlign(VAlign_Top)
-		.Padding(TAttribute<FMargin>::CreateSP(this, &SBangoTextEditor::GetCompletionPadding))
+		.HAlign(HAlign_Fill)
+		.VAlign(VAlign_Bottom)
 		[
-			MakeCompletionPopup()
+			SAssignNew(ErrorAnchor, SMenuAnchor)
+			.Placement(MenuPlacement_BelowAnchor)
+			.Method(EPopupMethod::CreateNewWindow)
+			.UseApplicationMenuStack(false)
+			.FitInWindow(true)
+			.Visibility(EVisibility::SelfHitTestInvisible)
+			.MenuContent(MakeErrorPopup())
+			[
+				SNew(SSpacer)
+				.Size(FVector2D::ZeroVector)
+				.Visibility(EVisibility::HitTestInvisible)
+			]
+		]
+
+		// Autocomplete: the list of names, floating under the word being typed (above it, if there's no room below in the
+		// window). A menu anchor over the word, in a canvas, which asks for no space, so the list never changes this
+		// widget's size. The anchor draws the list in this window's popup layer, over everything and unclipped (it can
+		// hang out of a short inline script box), outside the application's menu stack, so the text keeps keyboard
+		// focus (FBangoCompletion).
+		+ SOverlay::Slot()
+		[
+			// Clicks go through the canvas and the anchor to the text; only the list itself takes them.
+			SNew(SCanvas)
+			.Visibility(EVisibility::SelfHitTestInvisible)
+
+			+ SCanvas::Slot()
+			.Position(TAttribute<FVector2D>::CreateSP(this, &SBangoTextEditor::GetCompletionWordPosition))
+			.Size(TAttribute<FVector2D>::CreateSP(this, &SBangoTextEditor::GetCompletionWordSize))
+			[
+				SAssignNew(CompletionAnchor, SMenuAnchor)
+				.Placement(MenuPlacement_BelowAnchor)
+				.Method(EPopupMethod::UseCurrentWindow)
+				.UseApplicationMenuStack(false)
+				.FitInWindow(true)
+				.Visibility(EVisibility::SelfHitTestInvisible)
+				.MenuContent(MakeCompletionPopup())
+				.OnMenuOpenChanged_Lambda([this](bool bOpen)
+				{
+					// Closed from outside (another menu opening closes this window's popups): close the list too.
+					if (!bOpen && bCompletionOpen && !bChangingCompletionAnchor)
+					{
+						CloseCompletion();
+					}
+				})
+				[
+					SNew(SSpacer)
+					.Visibility(EVisibility::HitTestInvisible)
+				]
+			]
 		]
 	];
 
@@ -301,6 +364,11 @@ void SBangoTextEditor::SetText(const FText& InText)
 {
 	const FString VisibleText = Metadata.Reset(InText.ToString());
 	bHasReportedNodes = false;
+	bReferencesDirty = true;
+	ClearShownError(); // new text: an error shown for the old one no longer applies
+	// Text set from outside (opened, or rewritten from the graph): compiled straight away, not after a pause.
+	bCompileDirty = true;
+	LastEditSeconds = 0.0;
 	UpdateGutter();
 	if (TextBox.IsValid())
 	{
@@ -562,11 +630,13 @@ void SBangoTextEditor::UpdateGutterHighlight(int32 Line)
 
 FReply SBangoTextEditor::HandleKeyDown(const FGeometry& Geometry, const FKeyEvent& KeyEvent)
 {
-	// While the autocomplete list is open: Up and Down move through it, Tab puts in the entry, Escape closes it.
-	// Anything else is typed as usual (and filters the list).
+	// While the autocomplete list is open: Up and Down move through it, Tab or Enter puts in the entry (each if its
+	// editor preference is on), Escape closes it. Anything else is typed as usual (and filters the list); Tab or Enter
+	// with its preference off closes the list and is typed as usual.
 	if (bCompletionOpen && !KeyEvent.IsControlDown() && !KeyEvent.IsAltDown() && !KeyEvent.IsCommandDown())
 	{
 		const FKey Key = KeyEvent.GetKey();
+		const UBangoEditorSettings* Settings = GetDefault<UBangoEditorSettings>();
 		if (Key == EKeys::Up || Key == EKeys::Down)
 		{
 			MoveCompletionSelection(Key == EKeys::Up ? -1 : 1);
@@ -579,18 +649,37 @@ FReply SBangoTextEditor::HandleKeyDown(const FGeometry& Geometry, const FKeyEven
 		}
 		if (Key == EKeys::Tab && !KeyEvent.IsShiftDown())
 		{
-			AcceptCompletion();
-			bSwallowTab = true; // the tab character that follows this key
-			return FReply::Handled();
+			if (!Settings->bAcceptCompletionWithTab)
+			{
+				CloseCompletion(); // and a tab, as usual
+			}
+			else
+			{
+				AcceptCompletion();
+				bSwallowTab = true; // the tab character that follows this key
+				return FReply::Handled();
+			}
 		}
 		if (Key == EKeys::Escape)
 		{
 			CloseCompletion();
 			return FReply::Handled();
 		}
-		if (Key == EKeys::Enter)
+		if (Key == EKeys::Enter && !KeyEvent.IsShiftDown())
 		{
-			CloseCompletion(); // and a new line, as usual
+			if (!Settings->bAcceptCompletionWithEnter)
+			{
+				CloseCompletion(); // and a new line, as usual
+			}
+			else
+			{
+				AcceptCompletion(); // no new line
+				return FReply::Handled();
+			}
+		}
+		else if (Key == EKeys::Enter)
+		{
+			CloseCompletion(); // Shift+Enter: a new line, as usual
 		}
 	}
 
@@ -633,6 +722,11 @@ void SBangoTextEditor::HandleTextChanged(const FText& NewVisibleText)
 	Metadata.OnVisibleTextChanged(NewVisibleText.ToString(), CursorLine);
 	UpdateGutter();
 	bCompletionDirty = true;
+	bReferencesDirty = true;
+	// Typing hides the last error until the script is compiled again, once typing stops.
+	bCompileDirty = true;
+	LastEditSeconds = FPlatformTime::Seconds();
+	ClearShownError();
 	OnTextChangedHandler.ExecuteIfBound(FText::FromString(Metadata.GetFullText()));
 }
 
@@ -677,6 +771,59 @@ void SBangoTextEditor::Tick(const FGeometry& AllottedGeometry, const double InCu
 		bCompletionDirty = false;
 		UpdateCompletion(bTypedNameChar);
 		bTypedNameChar = false;
+	}
+
+	// The script being typed in is the one whose @names are ringed in the level viewports (BangoScriptReferences). It
+	// stays that one until another text editor gets focus, and its rings show while it's on screen (ticking).
+	if (TextBox.IsValid())
+	{
+		const bool bActive = BangoScriptReferences::IsActiveScript(this);
+		if ((TextBox->HasKeyboardFocus() && !bActive) || (bActive && bReferencesDirty))
+		{
+			BangoScriptReferences::SetActiveScript(SharedThis(this), Metadata.GetLines());
+		}
+		bReferencesDirty = false;
+		const FTextLocation Cursor = TextBox->GetCursorLocation();
+		BangoScriptReferences::TouchActiveScript(this, Cursor.GetLineIndex(), Cursor.GetOffset());
+	}
+
+	// Compile as you type: once typing has stopped for the preference's delay.
+	if (bCompileAsYouType && bCompileDirty)
+	{
+		const UBangoEditorSettings* Settings = GetDefault<UBangoEditorSettings>();
+		if (!Settings->bCompileAsYouType)
+		{
+			bCompileDirty = false;
+			if (!bErrorFromOutside)
+			{
+				ClearShownError();
+			}
+		}
+		else if (FPlatformTime::Seconds() - LastEditSeconds >= Settings->CompileAsYouTypeDelay)
+		{
+			CompileForErrors();
+		}
+	}
+	// The error's message hangs under this widget while it has keyboard focus (several inline boxes with errors would
+	// otherwise cover the details panel), and not while the autocomplete list is open; the underline stays either way.
+	if (ErrorAnchor.IsValid())
+	{
+		const bool bShowError = bHasCompileError && !bCompletionOpen && TextBox.IsValid() && TextBox->HasKeyboardFocus();
+		if (ErrorAnchor->IsOpen() != bShowError)
+		{
+			ErrorAnchor->SetIsOpen(bShowError, /*bFocusMenu*/ false);
+		}
+	}
+
+	// The floating list is shown once the word has been painted (its position comes from that paint), and hidden with it.
+	if (CompletionAnchor.IsValid())
+	{
+		const bool bShow = bCompletionOpen && Marshaller->GetProbe().bValid;
+		if (CompletionAnchor->IsOpen() != bShow)
+		{
+			TGuardValue<bool> Changing(bChangingCompletionAnchor, true);
+			CompletionAnchor->SetIsOpen(bShow, /*bFocusMenu*/ false);
+		}
 	}
 }
 
@@ -802,6 +949,11 @@ void SBangoTextEditor::CloseCompletion()
 	{
 		CompletionList->RequestListRefresh();
 	}
+	if (CompletionAnchor.IsValid() && CompletionAnchor->IsOpen())
+	{
+		TGuardValue<bool> Changing(bChangingCompletionAnchor, true);
+		CompletionAnchor->SetIsOpen(false);
+	}
 }
 
 TSharedPtr<FBangoCompletionItem> SBangoTextEditor::GetSelectedCompletion() const
@@ -855,30 +1007,135 @@ void SBangoTextEditor::AcceptCompletion()
 	TextBox->InsertTextAtCursor(Insert);
 }
 
-FMargin SBangoTextEditor::GetCompletionPadding() const
+void SBangoTextEditor::CompileForErrors()
 {
-	// Under the word being typed (above it, if there's no room below), kept inside this widget.
-	const FBangoTextProbe& Probe = Marshaller->GetProbe();
-	if (!bCompletionOpen || !Probe.bValid || !CompletionPopup.IsValid())
+	bCompileDirty = false;
+	FBangoProgram Program;
+	FBangoCompileError Error;
+	if (Bango::CompileSource(Metadata.GetFullText(), TEXT("script"), FBangoModule::Get().GetCommands(), Program, Error))
 	{
-		return FMargin(0.0f);
+		if (!bErrorFromOutside)
+		{
+			ClearShownError(); // an error from ShowError isn't a compile error, so it stays
+		}
+		return;
+	}
+	bErrorFromOutside = false;
+	SetShownError(Error);
+}
+
+void SBangoTextEditor::ShowError(const FBangoCompileError& Error, bool bFocus)
+{
+	SetShownError(Error);
+	bErrorFromOutside = true;
+	if (bFocus && TextBox.IsValid())
+	{
+		FSlateApplication::Get().SetKeyboardFocus(TextBox, EFocusCause::SetDirectly);
+	}
+}
+
+void SBangoTextEditor::ClearShownError()
+{
+	bErrorFromOutside = false;
+	if (bHasCompileError)
+	{
+		bHasCompileError = false;
+		Marshaller->ClearError();
+	}
+}
+
+void SBangoTextEditor::SetShownError(const FBangoCompileError& Error)
+{
+	// The compiler's lines and columns are 1-based, and the same in the box (metadata only comes off the ends of lines).
+	bHasCompileError = true;
+	CompileErrorLocation = FTextLocation(FMath::Max(Error.Line - 1, 0), FMath::Max(Error.Column - 1, 0));
+	CompileErrorText = Error.Line > 0
+		? FText::Format(NSLOCTEXT("BangoTextEditor", "CompileErrorAt", "Line {0}, column {1}: {2}"), FText::AsNumber(Error.Line), FText::AsNumber(Error.Column), FText::FromString(Error.Message))
+		: FText::FromString(Error.Message);
+	if (Error.Line > 0)
+	{
+		Marshaller->SetError(CompileErrorLocation.GetLineIndex(), CompileErrorLocation.GetOffset());
+	}
+	else
+	{
+		Marshaller->ClearError();
+	}
+}
+
+TSharedRef<SWidget> SBangoTextEditor::MakeErrorPopup()
+{
+	return SNew(SBox)
+		// As wide as this widget, or 500 if it's narrower (the script editor's text pane can be), so a message is
+		// usually one line; a longer one wraps.
+		.MaxDesiredWidth_Lambda([this]() { return FMath::Max(500.0f, (float)GetCachedGeometry().GetLocalSize().X); })
+		[
+			SNew(SBorder)
+			.BorderImage(FAppStyle::GetBrush("Menu.Background"))
+			.Padding(FMargin(6.0f, 4.0f))
+			.ToolTipText(NSLOCTEXT("BangoTextEditor", "CompileErrorTooltip", "Why the script doesn't compile (or, after Apply in the script editor, doesn't read as a graph). Click to go to it."))
+			.Cursor(EMouseCursor::Hand)
+			// On mouse down, before focus could move: go to the error, keeping focus in the text.
+			.OnMouseButtonDown_Lambda([this](const FGeometry&, const FPointerEvent& MouseEvent)
+			{
+				if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton || !TextBox.IsValid())
+				{
+					return FReply::Unhandled();
+				}
+				GoTo(CompileErrorLocation);
+				return FReply::Handled().SetUserFocus(TextBox.ToSharedRef(), EFocusCause::Mouse);
+			})
+			[
+				SNew(SHorizontalBox)
+
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Top)
+				.Padding(FMargin(0.0f, 1.0f, 6.0f, 0.0f))
+				[
+					SNew(SImage)
+					.Image(FAppStyle::GetBrush("Icons.ErrorWithColor"))
+					.DesiredSizeOverride(FVector2D(14.0f, 14.0f))
+				]
+
+				+ SHorizontalBox::Slot()
+				.FillWidth(1.0f)
+				[
+					SNew(STextBlock)
+					.Text_Lambda([this]() { return CompileErrorText; })
+					.ColorAndOpacity(FLinearColor(1.0f, 0.45f, 0.4f))
+					.AutoWrapText(true)
+				]
+			]
+		];
+}
+
+bool SBangoTextEditor::GetCompletionWordRect(FVector2D& OutTopLeft, FVector2D& OutBottomRight) const
+{
+	const FBangoTextProbe& Probe = Marshaller->GetProbe();
+	if (!bCompletionOpen || !Probe.bValid)
+	{
+		return false;
 	}
 	// The probe was recorded while painting, so its "absolute" position is in paint space (relative to the window):
 	// convert it with this widget's paint-space geometry. (The tick-space geometry is relative to the desktop, which put
-	// the list off by the window's own position on screen.)
+	// the list off by the window's own position on screen.) The canvas fills this widget, so this is its space too.
 	const FGeometry& Geometry = GetPaintSpaceGeometry();
-	const FVector2D WordTopLeft = Geometry.AbsoluteToLocal(Probe.AbsolutePosition);
-	const FVector2D WordBottomRight = Geometry.AbsoluteToLocal(Probe.AbsolutePosition + Probe.AbsoluteSize);
-	const FVector2D PopupSize = CompletionPopup->GetDesiredSize();
-	const FVector2D Size = Geometry.GetLocalSize();
+	OutTopLeft = Geometry.AbsoluteToLocal(Probe.AbsolutePosition);
+	OutBottomRight = Geometry.AbsoluteToLocal(Probe.AbsolutePosition + Probe.AbsoluteSize);
+	return true;
+}
 
-	const float X = FMath::Clamp<float>(WordTopLeft.X, 0.0f, FMath::Max<float>(0.0f, Size.X - PopupSize.X));
-	float Y = WordBottomRight.Y;
-	if (Y + PopupSize.Y > Size.Y && WordTopLeft.Y - PopupSize.Y >= 0.0f)
-	{
-		Y = WordTopLeft.Y - PopupSize.Y;
-	}
-	return FMargin(X, Y, 0.0f, 0.0f);
+FVector2D SBangoTextEditor::GetCompletionWordPosition() const
+{
+	FVector2D TopLeft, BottomRight;
+	return GetCompletionWordRect(TopLeft, BottomRight) ? TopLeft : FVector2D::ZeroVector;
+}
+
+FVector2D SBangoTextEditor::GetCompletionWordSize() const
+{
+	// The anchor covers the word, so the list goes under it, or above it when there's no room below.
+	FVector2D TopLeft, BottomRight;
+	return GetCompletionWordRect(TopLeft, BottomRight) ? FVector2D::Max(BottomRight - TopLeft, FVector2D(1.0f, 1.0f)) : FVector2D(1.0f, 1.0f);
 }
 
 TSharedRef<SWidget> SBangoTextEditor::MakeCompletionPopup()

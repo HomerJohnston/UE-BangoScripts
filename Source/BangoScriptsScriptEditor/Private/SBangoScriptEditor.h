@@ -29,6 +29,7 @@ class STextBlock;
 class SVerticalBox;
 class ITableRow;
 class STableViewBase;
+struct FBangoCompileError;
 class UEdGraph;
 struct FBangoNodeLayoutContext;
 struct FBangoNodeMenuEntry;
@@ -240,10 +241,8 @@ private:
 	bool bTextEdited = false;
 	/** Why the text in the box couldn't be shown as a graph (from Apply, or opening a file that doesn't read). Empty if it can. */
 	FString TextError;
-	/** Flashes the error under the text once each time it's set (SetTextError), so a new (or the same) error is noticed. */
-	FCurveSequence TextErrorFlash;
-	/** Sets TextError, and flashes it if there is one. */
-	void SetTextError(const FString& Error);
+	/** Sets TextError, and shows the error in the text (underlined, with its message under it: SBangoTextEditor::ShowError). */
+	void SetTextError(const FBangoCompileError& Error, bool bFocusText);
 	TSharedPtr<SBox> GraphHost;
 	TSharedPtr<SGraphEditor> GraphEditor;
 	TSharedPtr<FUICommandList> GraphCommands;

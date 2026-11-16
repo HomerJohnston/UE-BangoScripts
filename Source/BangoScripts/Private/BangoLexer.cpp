@@ -337,14 +337,6 @@ namespace BangoLexerPrivate
 			{
 				Kind = EBangoTokenKind::HashSet;
 			}
-			else if (Word.Equals(TEXT("define"), ESearchCase::CaseSensitive))
-			{
-				return Fail(Loc, TEXT("'#define' is now written '#set': #set inputs (...), #set LOCTEXT_NAMESPACE \"Name\"."));
-			}
-			else if (Word.Equals(TEXT("undef"), ESearchCase::CaseSensitive))
-			{
-				return Fail(Loc, TEXT("'#undef' isn't used any more: delete this line."));
-			}
 			else
 			{
 				return Fail(Loc, FString::Printf(TEXT("Unknown '#%s'. %s"), *Word, Usage));
@@ -370,10 +362,6 @@ namespace BangoLexerPrivate
 				Advance();
 			}
 			const FString Text = Source.Mid(Start, Pos - Start);
-			if (Text.Equals(TEXT("double"), ESearchCase::CaseSensitive))
-			{
-				return Fail(Loc, TEXT("The 'double' type is now called 'float' (it's still a 64-bit number). Write 'float' instead."));
-			}
 
 			EBangoTokenKind Kind = EBangoTokenKind::Identifier;
 			for (const FKeyword& Keyword : Keywords)

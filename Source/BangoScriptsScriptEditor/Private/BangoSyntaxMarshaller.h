@@ -54,6 +54,13 @@ public:
 	 */
 	void SetProbe(int32 Line, int32 BeginColumn, int32 EndColumn);
 	void ClearProbe();
+
+	/**
+	 * Underlines a compile error in red: the token at Line and Column (0-based), or the line's last character if the
+	 * column is past its end. It stays until ClearError, through relayouts.
+	 */
+	void SetError(int32 Line, int32 Column);
+	void ClearError();
 	const FBangoTextProbe& GetProbe() const { return *Probe; }
 
 	/** The text's locals, parameters, globals and graphs, as of the last layout. */
@@ -75,6 +82,9 @@ private:
 
 	/** Puts the probe's highlight on the layout, replacing the one there. */
 	void UpdateProbeHighlight();
+
+	/** Puts the error's underline on the layout, replacing the one there. */
+	void UpdateErrorHighlight();
 
 	TSharedRef<const FBangoSyntaxStyle> Style;
 
@@ -100,6 +110,11 @@ private:
 	int32 ProbeLine = INDEX_NONE;
 	FTextRange ProbeRange;
 	TArray<FTextLineHighlight> ProbeHighlights;
+
+	TSharedPtr<ISlateLineHighlighter> ErrorHighlighter;
+	int32 ErrorLine = INDEX_NONE;
+	int32 ErrorColumn = 0;
+	TArray<FTextLineHighlight> ErrorHighlights;
 
 	int32 TabSize = 4;
 	bool bMetadataIsError = false;

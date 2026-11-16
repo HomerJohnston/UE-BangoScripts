@@ -13,6 +13,7 @@ public class BangoScriptsScriptEditor : ModuleRules
 				"Core",
 				"CoreUObject",
 				"Engine",
+				"DeveloperSettings",
 				"InputCore",
 				"ApplicationCore",
 				"Slate",

@@ -27,6 +27,7 @@ class STableViewBase;
 template <typename ItemType> class SListView;
 class STextBlock;
 struct FTextLocation;
+struct FBangoCompileError;
 
 /** The nodes on the cursor's line(s): the graph's function name (empty for the main graph), and their NodeIDs (0 for the graph's entry). */
 DECLARE_DELEGATE_TwoParams(FOnBangoCursorNodesChanged, const FString& /*FunctionName*/, const TArray<int64>& /*NodeIDs*/);
@@ -53,6 +54,12 @@ public:
 		 * edited in the full editor. Off: the script editor's text pane.
 		 */
 		SLATE_ARGUMENT(bool, InlineScriptEditor)
+
+		/**
+		 * Compiles the script a moment after typing stops (Editor Preferences > Plugins > Bango), and shows its first
+		 * error: underlined in the text, and its message in a box hanging under this widget while it has focus.
+		 */
+		SLATE_ARGUMENT(bool, CompileAsYouType)
 
 		/** Adds entries to the text's right-click menu (after the usual Cut, Copy, Paste, ...). */
 		SLATE_EVENT(FMenuExtensionDelegate, ContextMenuExtender)
@@ -88,6 +95,13 @@ public:
 
 	/** Sets the whole text, metadata included. The metadata goes to the gutter. */
 	void SetText(const FText& InText);
+
+	/**
+	 * Shows an error found outside this widget (the script editor's Apply: the text didn't read as a graph) as compile
+	 * as you type shows its own: underlined, with its message under this widget. It stays until the text changes, or
+	 * compiling as you type finds an error of its own. bFocus: puts the keyboard focus in the text (so the message shows).
+	 */
+	void ShowError(const FBangoCompileError& Error, bool bFocus);
 
 	/** Puts the cursor at a line and column (both from 0) of the whole text, scrolling it into view. */
 	void GoTo(const FTextLocation& Location);
@@ -156,7 +170,10 @@ private:
 	void AcceptCompletion();
 	TSharedPtr<FBangoCompletionItem> GetSelectedCompletion() const;
 	/** Where the list goes: under the word being typed (FBangoSyntaxMarshaller::SetProbe), or above it near the bottom. */
-	FMargin GetCompletionPadding() const;
+	/** Where the word being completed is, in this widget's space (false if the list isn't open or it isn't painted yet). */
+	bool GetCompletionWordRect(FVector2D& OutTopLeft, FVector2D& OutBottomRight) const;
+	FVector2D GetCompletionWordPosition() const;
+	FVector2D GetCompletionWordSize() const;
 	TSharedRef<SWidget> MakeCompletionPopup();
 	TSharedRef<ITableRow> MakeCompletionRow(TSharedPtr<FBangoCompletionItem> Item, const TSharedRef<STableViewBase>& OwnerTable);
 	void HandleTextChanged(const FText& NewVisibleText);
@@ -209,6 +226,32 @@ private:
 	TArray<TSharedPtr<FBangoCompletionItem>> CompletionShown;
 	TSharedPtr<SListView<TSharedPtr<FBangoCompletionItem>>> CompletionList;
 	TSharedPtr<SWidget> CompletionPopup;
+	/** Floats the list over the word being typed (see Construct). */
+	TSharedPtr<class SMenuAnchor> CompletionAnchor;
+	/** Set while this widget opens or closes CompletionAnchor itself, so its OnMenuOpenChanged only reacts to others. */
+	bool bChangingCompletionAnchor = false;
+	/** The text changed since it was last given to BangoScriptReferences (if this is the script it draws). */
+	bool bReferencesDirty = true;
+
+	/** Compile as you type (CompileAsYouType). */
+	void CompileForErrors();
+	/** Sets the error shown (CompileErrorText, the underline) from Error. */
+	void SetShownError(const FBangoCompileError& Error);
+	/** Hides the error shown, if any. */
+	void ClearShownError();
+	/** The error shown came from ShowError: compiling without errors leaves it, as it isn't a compile error. */
+	bool bErrorFromOutside = false;
+	TSharedRef<SWidget> MakeErrorPopup();
+	bool bCompileAsYouType = false;
+	/** The text changed since it was last compiled; it's compiled once typing has stopped for the preference's delay. */
+	bool bCompileDirty = false;
+	double LastEditSeconds = 0.0;
+	/** The first compile error, if the last compile had one (hidden again as soon as the text changes). */
+	bool bHasCompileError = false;
+	FTextLocation CompileErrorLocation;
+	FText CompileErrorText;
+	/** Hangs the error's message under this widget (see Construct). */
+	TSharedPtr<class SMenuAnchor> ErrorAnchor;
 	bool bCompletionOpen = false;
 	int32 CompletionLine = INDEX_NONE;
 	int32 CompletionStart = INDEX_NONE;

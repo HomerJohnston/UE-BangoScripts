@@ -1,8 +1,18 @@
-# Bango Language Spec (draft v0.52)
+# Bango Language Spec (draft v0.57)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.57:** the script text pane's **ERROR:** box under the text is gone: why Apply failed is shown in the text, underlined, with its message hanging under the text, like a compile-as-you-type error (section 12, Script editor). While the autocomplete list is open, the error message is hidden.
+
+**Changes in v0.56:** in script text boxes, **Enter** puts in the autocomplete entry too, as Tab does (it already did on graph nodes). Two editor preferences, **Accept With Tab** and **Accept With Enter**, turn each key off (section 11).
+
+**Changes in v0.55:** compatibility handling for old spellings and data is gone: `#define`, `#undef`, `#set params`, `locNamespace(...)` and `double` are no longer errors with their own messages (they're ordinary errors, and `double` is an ordinary name), a Bango ID name no longer reads a plain string saved before it was a Bango ID Name, and the Spawn Bango Script node no longer turns a typed script path into an asset. Save data format versions start again from 1.
+
+**Changes in v0.54:** script text boxes compile as you type, half a second after you stop, and show the first error under the box; two new editor preferences for it (section 11, Editor preferences).
+
+**Changes in v0.53:** while a script is being edited, the level editor's viewports ring the actors it refers to, and list the `@name`s no actor in the level has (section 4).
 
 **Changes in v0.52:** a new keyword, **`self`**: the actor a script **belongs to** (its owner), by its Bango ID (section 4). Every way of spawning a script takes an **Owner**: `UBangoScriptSubsystem::Spawn(..., Owner)` in C++, and an **Owner** pin (Self by default) on the Blueprint spawn nodes (section 10). Scripts started with `Exec`, and spawn blocks, belong to the same owner as the script that started them.
 
@@ -234,7 +244,7 @@ else
 |---|---|
 | `bool` | `true` / `false` |
 | `int` | **32-bit signed**: -2147483648 to 2147483647. The same as a Blueprint Integer. |
-| `float` | A 64-bit (double-precision) number, the same as a Blueprint Float. There's no 32-bit float type. Writing `double` is a compile error that says to write `float`. |
+| `float` | A 64-bit (double-precision) number, the same as a Blueprint Float. There's no 32-bit float type. |
 | `string` | `"..."` with escapes `\" \\ \n \t` |
 | `entity` | Names an actor that has a Bango ID component. Written `@john`. Stored as the name and looked up each time it's used. |
 | `text` | Localized text the player reads, the same as an Unreal `FText`. Written `LOCTEXT("Key", "Hello")` (see Localized text below). |
@@ -352,7 +362,7 @@ WriteScreen(ToString(NSLOCTEXT("Shared.UI", "Continue", "Continue")));
 - **Names are case-sensitive**: `john` and `John` are different names. This covers variables, globals, functions, labels, commands, keywords, type names and Bango ID names (`@john` and `@John` are different actors).
 - Calling a command or function with the wrong capitalisation is a compile error that suggests the right name: *"Unknown command or function 'writeScreen'. Did you mean 'WriteScreen'? Names are case-sensitive."*
 - A name is letters, digits and `_`, and doesn't start with a digit.
-- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn switch case default break continue return label goto function global inputs player self true false nil bool int float double string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
+- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn switch case default break continue return label goto function global inputs player self true false nil bool int float string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
 
 ### Locals
 - Any name will do; a leading `_` is allowed but not needed (`count` and `_count` are both fine). The same goes for function parameters, script parameters and loop variables. Locals only exist inside the running script instance.
@@ -410,6 +420,7 @@ global string[] questLog;        // arrays can be global
 - A name is letters, digits and `_`, and doesn't start with a digit. Keywords and a leading `_` are allowed (`@if`, `@_hidden`).
 - An empty or invalid name, or a name already used by another actor in the level, shows an error on screen. The name is then not registered.
 - **In the level editor**, each Bango ID's name is drawn over its actor (`@john`), just above its bounds, as screen-facing text. It fades out with distance from the camera (from the **ID Label Fade Distance** setting, 7,500 units, to the **ID Label Hide Distance**, 10,000, beyond which it isn't drawn; not in ortho views). A name scripts couldn't use is drawn in red with why: *no name*, *invalid name*, or *used by another actor*, so problems show up before play. Hidden actors have no label. The viewport's **Show > Bango IDs** flag turns them off and on (on by default). They aren't drawn while playing (PIE) or in asset editors' viewports.
+- **While a script is being edited**, the level editor's viewports draw a **cyan ring** around each actor whose Bango ID the script refers to (its `@name`s; not `player` or `self`). The script is the one in the text editor last typed in: a script editor tab, or an inline script's box in the details panel. Its rings show while that editor is on screen, and are updated as it's typed in, without compiling. The `@name` under the text cursor gets a **thicker** ring. Names no actor in the level has are listed in red in the viewport's bottom-left corner (*Not in this level*). The rings fade with distance like the labels. **Show > Bango Script References** turns them off and on (on by default); like the labels, they're not drawn while playing.
 - When the actor is removed, its name is unregistered. Entity values naming it keep the name, and using them afterwards stops the script because the actor can't be found.
 - Loading a save or resetting state doesn't change which names are registered.
 - **`player`** is the **first local player's pawn**: the pawn that the game's first local player controller possesses. It's an entity like `@john` (`player SetPos(200, 500, 900);`, `entity _p = player;`, `if (_e == player)`), and needs no Bango ID component.
@@ -1102,7 +1113,7 @@ A save stores:
 
 On load, each saved script is loaded and compiled from its path (or from its saved text), and its saved state is checked against it. If a script was changed so that the saved state no longer fits (or the file is missing), that script isn't restored and an error is shown. Other scripts still load. Beyond that check, loading state into a changed script is **undefined behaviour** (not supported).
 
-The save data has a format version. Data from an older version (such as saves made before ints became 32-bit in v0.9, or before scripts spawned from text were saved with their text in v0.35, or before script ids became 32-bit in v0.38, or before each script's parent was saved in v0.43) fails to load with an error rather than being misread.
+The save data has a format version. Data in another version's format fails to load with an error rather than being misread.
 
 ### Limits (project settings)
 | Setting | Default |
@@ -1114,6 +1125,16 @@ The save data has a format version. Data from an older version (such as saves ma
 | How long a WriteScreen message stays on screen when the script doesn't say (Write Screen Seconds) | 5 seconds |
 | ID Label Fade Distance / ID Label Hide Distance: where Bango ID labels in the level editor's viewport start to fade, and where they're gone (section 4) | 7,500 / 10,000 units |
 | Large Script Threshold: from how many nodes on the graph editor saves a script with section headings and node metadata (section 12, Compact scripts); 0: always | 3 |
+
+### Editor preferences
+Your own, not the project's: **Editor Preferences > Plugins > Bango**, saved in `EditorPerProjectUserSettings.ini`.
+
+| Preference | Default |
+|---|---|
+| Compile As You Type: script text boxes (the script editor's text pane, and inline scripts' boxes) compile the script once you stop typing, and show its first error, underlined in red in the text, with its message (*Line 3, column 5: ...*) in a box hanging under the text box while it has focus (and the autocomplete list isn't open). Clicking the message goes to the error. Typing hides it until the next compile. | on |
+| Compile As You Type Delay: how long after you stop typing it compiles | 0.5 seconds |
+| Accept With Tab: Tab puts in the autocomplete list's entry, in script text boxes and graph node fields. Off: Tab closes the list and does what it does without it (a tab; the next field) | on |
+| Accept With Enter: Enter does the same. Off: Enter closes the list and does what it does without it (a new line; applying the field). In a text box, Shift+Enter always closes the list and starts a new line | on |
 
 ---
 
@@ -1221,7 +1242,7 @@ The graph editor is the **Bango Scripts** tab (Tools menu). It doesn't need the 
     - It shows the script as it would be saved, and follows the graph as it's edited. It's the Bango text editor (**Bango Text Editor Spec**): Bango syntax highlighting, tabs typed and shown as tabs. Line numbers are shown down its left side, and scroll with the text.
     - **Locals can be declared anywhere while typing.** Applying moves a local declared further down a graph (in its code, or inside a block) up to the graph's other locals. A starting value that's a fixed value moves with it (`int _n = 3;`); any other is left where the declaration was, as a Set node (`float _d = Distance(_a, _b);` leaves `_d = Distance(_a, _b);`, a new node). A spawn that declares its id variable works the same way: `int _t = spawn { ... }` moves `int _t;` up and leaves `_t = spawn { ... }`. A name declared twice in one graph is an error. Moving changes when a fixed starting value is given: once, when the graph starts, rather than each time that line is reached (in a loop, say). This is only for the text pane: a `.bango` file with a local declared below its code still doesn't compile.
     - **While there's typed text that isn't applied, the left pane and the graph are locked**: the pane is greyed out and the graph is covered by a note, with **Apply** and **Revert** buttons. The text is what counts until it's applied or reverted.
-    - It can be typed in. Typed text isn't used until it's applied: **Apply** (or Ctrl+Enter) makes the graphs again from it, keeping the shown graph and its view, like Reload. Applying can't be undone with Undo. If the text doesn't read, the error is shown under the text, at the bottom of the pane (so the text doesn't move), below a line and headed **ERROR:** in bold red; it flashes red once each time it's set, the cursor goes to where it is, and the graphs are left as they are. **Revert** throws the typing away. While there's typed text that isn't applied, the graph doesn't change the pane's text, a note says so, and the script counts as having unsaved changes; **Save** and **Compile** apply it first (and don't go ahead if it doesn't read).
+    - It can be typed in. Typed text isn't used until it's applied: **Apply** (or Ctrl+Enter) makes the graphs again from it, keeping the shown graph and its view, like Reload. Applying can't be undone with Undo. If the text doesn't read, the error is shown in the text the way compile-as-you-type shows one (section 11, Editor preferences): underlined in red, with its message in a box hanging under the text. The cursor goes to it, the text gets the keyboard focus so the message shows, and the graphs are left as they are. The error stays until the text is typed in. **Revert** throws the typing away. While there's typed text that isn't applied, the graph doesn't change the pane's text, a note says so, and the script counts as having unsaved changes; **Save** and **Compile** apply it first (and don't go ahead if it doesn't read).
     - A script whose text doesn't read opens with the pane shown, holding the file's text and its error, so it can be fixed there and applied.
   - **Debug** (toolbar, after Save): while playing in the editor, which running copy of this script to follow, like Blueprint's debug object. The dropdown lists every copy running in the Play in Editor worlds, as `#3: Sleep at node 12 in Step()` (its number, the command it's waiting on, the node, and the function if it's in one), and copies that **stopped with an error** in this play session, as `#4: failed at node 7: '_x' is nil.`. Picking one follows it and shows the node it's at; **No debugging** follows none; **Show Where It Is** shows the node again; **Forget Failed Copies** takes the failed ones off the list. When nothing is followed, the only running copy is followed by itself, or, if none is running, the copy that failed last (so a script that fails as soon as it's spawned is shown too); No debugging stops this until playing stops. A copy that's followed stays followed when it fails. The followed copy is shown in the graph, updated ten times a second:
     - the node it's running or paused on has a **pulsing yellow outline**, like Blueprint's;
@@ -1245,7 +1266,7 @@ The graph editor is the **Bango Scripts** tab (Tools menu). It doesn't need the 
 ### Fields
 Each node shows its text as **fields** in columns, like the details panel: each row starts with its type's icon (bool (a ?), int, float, number (float's icon, tinted between int's and float's colours), string (an S), text (a T), entity, array, or any; hovering it shows the type), then the name, then the value, which fills the rest. Values stay on one line, in a box 90 to 240 pixels wide (wider only if the node is): a longer value ends in "…". Hovering a value shows its parameter's description if it has one (Sleep's Time says *Seconds*), or else the whole value. Rows that name a variable (a Var, For Each's Variable, an array command's Target) show a variable icon, an italic `(x)`, tinted with the variable's type when it's known. Rows without a type leave the icon space empty so the names line up, and a node where no row has a type has no icon column. Empty fields show *not set* (optional) or *missing* (required).
 
-**Autocomplete.** While a field is being edited, typing a name opens a list under it of what fits there, as in the script text pane: the variables the node can see (its graph's parameters and locals, the file's globals), this script's functions, the registered commands and the built-ins, sorted by name, with each one's kind (P, L, G, F, C or B), type or signature, and a command's description. It filters as more is typed and closes when nothing matches or the name is typed in full. Up and Down (and Page Up / Page Down) pick, **Enter** or **Tab** puts the name in (a command or function also gets its `(`), clicking an entry does the same, and **Escape** closes the list (a second Escape cancels the edit). **Ctrl+Space** opens it for the word at the cursor. Nothing is offered in a string or text field's plain text (one that starts with `=` is an expression, and gets the list), after `@` or `.`, or inside a string.
+**Autocomplete.** While a field is being edited, typing a name opens a list under it of what fits there, as in the script text pane: the variables the node can see (its graph's parameters and locals, the file's globals), this script's functions, the registered commands and the built-ins, sorted by name, with each one's kind (P, L, G, F, C or B), type or signature, and a command's description. It filters as more is typed and closes when nothing matches or the name is typed in full. Up and Down (and Page Up / Page Down) pick, **Enter** or **Tab** puts the name in (a command or function also gets its `(`; each key can be turned off in the editor preferences, section 11, and then closes the list and does what it does without one), clicking an entry does the same, and **Escape** closes the list (a second Escape cancels the edit). **Ctrl+Space** opens it for the word at the cursor. Nothing is offered in a string or text field's plain text (one that starts with `=` is an expression, and gets the list), after `@` or `.`, or inside a string.
 
 **Moving between fields.** While a field is being edited (and the autocomplete list isn't open; when it is, Enter and Tab pick from it), **Enter** applies what's typed and opens the node's next field, with its text selected; after the last field, editing ends. **Tab** does the same but wraps around to the first field, and **Shift+Enter** / **Shift+Tab** go to the previous field instead. Fields that can't be edited are skipped, and the next field is found after the edit, so an edit that changes the node's fields (like a call's command) moves on through its new ones.
 
@@ -1398,13 +1419,13 @@ Scripts become assets: a **Bango Script** asset (`UBangoScriptAsset`, a `.uasset
 - A script's name is its **asset path**, without the asset name repeated: `/Game/Quests/Intro`. Errors show it with `.bango` (`/Game/Quests/Intro.bango(12:5)`).
 - **From a script** (`Exec`): a path is **relative to the calling script's folder**: in `/Game/Quests/Start`, `Exec("Intro")` starts `/Game/Quests/Intro` and `Exec("../Shared/Greet")` starts `/Game/Shared/Greet`. A path starting with `/` is a full asset path (`Exec("/Game/Shared/Greet")`). `..` can't go above the content root (`/Game`, or a plugin's).
 - **From Blueprint and C++** (the Dynamic Path spawn node, `UBangoScriptSubsystem::Spawn` with a string): a path starting with `/` is a full asset path; one without is relative to `/Game` (`"Quests/Intro"` is `/Game/Quests/Intro`).
-- **The Spawn Bango Script node** *(built)* picks its script with an asset picker (a Bango Script asset reference), instead of a typed path (section 10). C++ can also spawn an asset directly (`Spawn(UBangoScriptAsset*, Args)`).
+- **The Spawn Bango Script node** *(built)* picks its script with an asset picker (a Bango Script asset reference) (section 10). C++ can also spawn an asset directly (`Spawn(UBangoScriptAsset*, Args)`).
 - Backslashes and a trailing `.bango` are still accepted in paths.
 
 ### Runtime
 - Spawning loads the asset if it isn't loaded (a synchronous load), then compiles its text on first use, as now. The compiled script is cached per asset and reused until the asset's text changes.
 - **Hot reload** (section 11) works from the asset: when a script's asset changes in the editor (saved in the graph editor, or its linked file changed and was refreshed), running copies switch to the new version as now.
-- **Save Bango State** stores each running script's asset path (saves from before this change can't be loaded).
+- **Save Bango State** stores each running script's asset path.
 - The **Script Directory** project setting, and the packaging setting for `Content/Bango`, are gone *(built)*. The graph editor only opens script assets.
 
 ### Translation

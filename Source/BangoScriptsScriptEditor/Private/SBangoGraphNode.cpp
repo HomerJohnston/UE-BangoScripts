@@ -2,6 +2,7 @@
 
 #include "BangoEdGraphNode.h"
 #include "BangoEditorStyle.h"
+#include "BangoEditorSettings.h"
 #include "BangoGraphEdit.h"
 #include "BangoGraph.h"
 #include "BangoGraphLayout.h"
@@ -1746,8 +1747,16 @@ FReply SBangoGraphNode::OnEditBoxKeyDown(const FGeometry& Geometry, const FKeyEv
 	}
 	if (Key == EKeys::Enter || Key == EKeys::Tab)
 	{
-		AcceptCompletion(FieldIndex); // and the field stays open for more typing; Enter again applies it
-		return FReply::Handled();
+		// Each key puts in the entry if its editor preference is on; otherwise it closes the list and does what it does
+		// without one (applies the field and moves on).
+		const UBangoEditorSettings* BangoSettings = GetDefault<UBangoEditorSettings>();
+		if (Key == EKeys::Enter ? BangoSettings->bAcceptCompletionWithEnter : BangoSettings->bAcceptCompletionWithTab)
+		{
+			AcceptCompletion(FieldIndex); // and the field stays open for more typing; Enter again applies it
+			return FReply::Handled();
+		}
+		CloseCompletion();
+		return CommitAndMoveOn(FieldIndex, KeyEvent.IsShiftDown() ? -1 : 1, Key == EKeys::Tab);
 	}
 	if (Key == EKeys::Escape)
 	{

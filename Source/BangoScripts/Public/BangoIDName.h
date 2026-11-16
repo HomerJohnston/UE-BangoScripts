@@ -9,8 +9,6 @@ struct FPropertyTag;
  * A Bango ID name, as scripts write it after an '@' (`@john`): an FString, in a struct of its own only so the details
  * panel can show it with an '@' in front (FBangoIDNameCustomization). It converts to and from FString implicitly, so it
  * can be passed wherever a name string goes. Case-sensitive, like the names themselves.
- *
- * An FString property saved before it became an FBangoIDName (with the same property name) is read into it.
  */
 USTRUCT(BlueprintType, meta = (DisplayName = "Bango ID Name"))
 struct BANGOSCRIPTS_API FBangoIDName
@@ -38,16 +36,4 @@ struct BANGOSCRIPTS_API FBangoIDName
 	friend bool operator==(const FString& A, const FBangoIDName& B) { return B == A; }
 	friend bool operator!=(const FString& A, const FBangoIDName& B) { return !(B == A); }
 	friend uint32 GetTypeHash(const FBangoIDName& IDName) { return GetTypeHash(IDName.Name); }
-
-	/** Reads a plain FString saved under this property's name, from before it was an FBangoIDName. */
-	bool SerializeFromMismatchedTag(const FPropertyTag& Tag, FStructuredArchive::FSlot Slot);
-};
-
-template<>
-struct TStructOpsTypeTraits<FBangoIDName> : public TStructOpsTypeTraitsBase2<FBangoIDName>
-{
-	enum
-	{
-		WithStructuredSerializeFromMismatchedTag = true,
-	};
 };

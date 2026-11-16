@@ -2519,7 +2519,7 @@ void SBangoScriptEditor::LoadScript(const FString& Script)
 		ShowMessage(FText::Format(LOCTEXT("CantOpen", "This script can't be shown as a graph until its text is fixed. Fix it in the script text pane (the Source Editor tab on the left) and Apply, or elsewhere and Reload:\n\n{0}"), FText::FromString(Error.ToString())));
 		SetScriptText(Source);
 		SetTextPaneOpen(true, false); // at once: there's nothing else to show
-		SetTextError(Error.ToString());
+		SetTextError(Error, false);
 		if (Error.Line > 0)
 		{
 			TextBox->GoTo(FTextLocation(Error.Line - 1, FMath::Max(Error.Column - 1, 0))); // the pane shows the file as it is
@@ -3512,6 +3512,7 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeTextPane()
 	TextBox = SNew(SBangoTextEditor)
 		.Padding(FMargin(4.0f, BangoScriptEditorPrivate::ScriptTextTopPadding))
 		.VScrollBar(TextVScrollBar) // its scroll position is read back for the line numbers
+		.CompileAsYouType(true)
 		.Text(FText::FromString(TextShown))
 		.IsReadOnly_Lambda([this]() { return OpenScript.IsEmpty(); })
 		.OnCursorNodesChanged(this, &SBangoScriptEditor::OnTextCursorNodes) // Sync Graph
@@ -3648,69 +3649,18 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeTextPane()
 					TextVScrollBar.ToSharedRef()
 				]
 			]
-			// Why the text doesn't read, under the text (so the text doesn't move down when it shows), below a line. It
-			// flashes once each time it's set. That the text has been edited is shown beside the heading.
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 4.0f, 0.0f, 0.0f)
-			[
-				SNew(SVerticalBox)
-				.Visibility_Lambda([this]() { return !TextError.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed; })
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				.Padding(0.0f, 0.0f, 0.0f, 4.0f)
-				[
-					SNew(SSeparator)
-					.Orientation(Orient_Horizontal)
-					.Thickness(1.0f)
-				]
-				+ SVerticalBox::Slot()
-				.AutoHeight()
-				[
-					SNew(SBorder)
-					.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
-					.BorderBackgroundColor_Lambda([this]()
-					{
-						// The panel's recessed colour, lit up red when the error's just been set, fading back.
-						const FLinearColor Base = FStyleColors::Recessed.GetColor(FWidgetStyle());
-						const FLinearColor Lit(0.55f, 0.08f, 0.06f);
-						const float Flash = TextErrorFlash.IsPlaying() ? 1.0f - TextErrorFlash.GetLerp() : 0.0f;
-						return FSlateColor(FMath::Lerp(Base, Lit, Flash));
-					})
-					.Padding(FMargin(6.0f, 4.0f))
-					[
-						SNew(SVerticalBox)
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(0.0f, 0.0f, 0.0f, 2.0f)
-						[
-							SNew(STextBlock)
-							.Text(LOCTEXT("TextErrorHeading", "ERROR:"))
-							.Font(FAppStyle::GetFontStyle("BoldFont"))
-							.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.25f, 0.2f)))
-						]
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						[
-							SNew(STextBlock)
-							.AutoWrapText(true)
-							.Text_Lambda([this]() { return FText::FromString(TextError); })
-							.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.4f, 0.35f)))
-						]
-					]
-				]
-			]
+			// Why the text doesn't read (after Apply, or opening it) is shown in the text itself, as compile errors are:
+			// underlined, with its message under the text (SetTextError). That the text has been edited is shown
+			// beside the heading.
 		];
 }
 
-void SBangoScriptEditor::SetTextError(const FString& Error)
+void SBangoScriptEditor::SetTextError(const FBangoCompileError& Error, bool bFocusText)
 {
-	TextError = Error;
-	if (!TextError.IsEmpty())
+	TextError = Error.ToString();
+	if (TextBox.IsValid())
 	{
-		// One flash, fading out; playing it on this widget keeps it drawing until the flash is over.
-		TextErrorFlash = FCurveSequence(0.0f, 0.6f, ECurveEaseFunction::QuadOut);
-		TextErrorFlash.Play(AsShared());
+		TextBox->ShowError(Error, bFocusText);
 	}
 }
 
@@ -3805,7 +3755,7 @@ bool SBangoScriptEditor::ApplyScriptText()
 	if (!Bango::HoistLateLocals(Typed, Text, Error))
 	{
 		Error.FileName = GetScriptFileLabel();
-		SetTextError(Error.ToString());
+		SetTextError(Error, true);
 		if (Error.Line > 0)
 		{
 			TextBox->GoTo(FTextLocation(Error.Line - 1, FMath::Max(Error.Column - 1, 0)));
@@ -3815,7 +3765,7 @@ bool SBangoScriptEditor::ApplyScriptText()
 	FBangoGraphDocument Document;
 	if (!Bango::BuildGraph(Text, GetScriptFileLabel(), Document, Error))
 	{
-		SetTextError(Error.ToString());
+		SetTextError(Error, true);
 		if (Error.Line > 0)
 		{
 			TextBox->GoTo(FTextLocation(Error.Line - 1, FMath::Max(Error.Column - 1, 0)));

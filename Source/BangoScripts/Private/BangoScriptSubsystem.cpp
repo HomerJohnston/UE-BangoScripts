@@ -18,7 +18,7 @@
 namespace BangoScriptSubsystemPrivate
 {
 	constexpr int32 SaveMagic = 0x4F474E42; // "BNGO"
-	constexpr int32 SaveVersion = 5; // 2: ints are 32-bit; 3: scripts spawned from text are saved with their text; 4: script ids are 32-bit; 5: which script started each one
+	constexpr int32 SaveVersion = 1; // raise it when the save format changes: data in another format is refused, not misread
 
 	class FWorldEntityResolver : public IBangoEntityResolver
 	{

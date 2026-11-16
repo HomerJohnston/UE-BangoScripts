@@ -77,7 +77,7 @@ bool FBangoLineTokenizerTest::RunTest(const FString& Parameters)
 	Check(TEXT("float _h = _who GetPos().z;"), TEXT("Type[float] Global[_h] Operator[=] Global[_who] Call[GetPos] Punctuation[(] Punctuation[)] Punctuation[.] VectorPart[z]"));
 	Check(TEXT("_pos.X = 1;"), TEXT("Global[_pos] Punctuation[.] Error[X]"));
 	Check(TEXT("int[][] _grid = [[1, 2], [3]];"), TEXT("Type[int[][]] Global[_grid]"));
-	Check(TEXT("double _d = 1. + .5 + 12abc + 2.5e-3;"), TEXT("Error[double] Global[_d] Operator[=] Error[1.] Operator[+] Error[.5] Operator[+] Error[12abc] Operator[+] Number[2.5e-3]"));
+	Check(TEXT("float _d = 1. + .5 + 12abc + 2.5e-3;"), TEXT("Type[float] Global[_d] Operator[=] Error[1.] Operator[+] Error[.5] Operator[+] Error[12abc] Operator[+] Number[2.5e-3]"));
 	Check(TEXT("#set inputs (entity _speaker, int _n = 1, entity _l = nil)"), TEXT("Preprocessor[#set] Preprocessor[inputs] Punctuation[(] Type[entity] Global[_speaker]"));
 	Check(TEXT("#set inputs (entity _speaker, int _n = 1, entity _l = nil)"), TEXT("Nil[nil] Punctuation[)]"));
 	Check(TEXT("#set LOCTEXT_NAMESPACE \"Quest.Intro\""), TEXT("Preprocessor[#set] Preprocessor[LOCTEXT_NAMESPACE] String[\"Quest.Intro\"]"));

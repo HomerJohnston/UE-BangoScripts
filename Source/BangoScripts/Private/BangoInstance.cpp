@@ -4,7 +4,7 @@
 
 namespace BangoInstancePrivate
 {
-	constexpr int32 SaveVersion = 3; // 2: ints are 32-bit; 3: the owner (self)
+	constexpr int32 SaveVersion = 1; // raise it when the save format changes: data in another format is refused, not misread
 
 	static FString TypeText(const FBangoType& Type)
 	{

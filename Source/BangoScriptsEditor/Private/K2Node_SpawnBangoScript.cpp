@@ -4,9 +4,6 @@
 #include "BangoBlueprintLibrary.h"
 #include "BangoPinUtils.h"
 #include "BangoScriptAsset.h"
-#include "BangoScriptPath.h"
-#include "Misc/PackageName.h"
-#include "UObject/SoftObjectPath.h"
 #include "BlueprintActionDatabaseRegistrar.h"
 #include "BlueprintNodeSpawner.h"
 #include "EdGraphSchema_K2.h"
@@ -33,31 +30,6 @@ bool UK2Node_SpawnBangoScript::LoadParams(TArray<FBangoScriptParamInfo>& OutPara
 	return FBangoModule::Get().GetScriptParams(*Script, OutParams, OutError);
 }
 
-void UK2Node_SpawnBangoScript::MigrateScriptPath()
-{
-	if (Script || ScriptPath.TrimStartAndEnd().IsEmpty())
-	{
-		return;
-	}
-	// Tried as a path under /Game, then under the old script folder (Content/Bango), where imported scripts went.
-	for (const TCHAR* Folder : { TEXT("/Game"), TEXT("/Game/Bango") })
-	{
-		FString PackageName;
-		FString Error;
-		if (!Bango::ResolveScriptPath(ScriptPath, Folder, PackageName, Error))
-		{
-			continue;
-		}
-		const FSoftObjectPath ObjectPath(PackageName + TEXT(".") + FPackageName::GetLongPackageAssetName(PackageName));
-		if (UBangoScriptAsset* Found = Cast<UBangoScriptAsset>(ObjectPath.TryLoad()))
-		{
-			Script = Found;
-			ScriptPath.Reset();
-			return;
-		}
-	}
-}
-
 bool UK2Node_SpawnBangoScript::IsParamPin(const UEdGraphPin* Pin) const
 {
 	return Pin && Pin->Direction == EGPD_Input
@@ -73,7 +45,6 @@ void UK2Node_SpawnBangoScript::AllocateDefaultPins()
 	CreatePin(EGPD_Input, UEdGraphSchema_K2::PC_Exec, UEdGraphSchema_K2::PN_Execute);
 	CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Exec, UEdGraphSchema_K2::PN_Then);
 
-	MigrateScriptPath();
 	UEdGraphPin* ScriptPin = CreatePin(EGPD_Input, UEdGraphSchema_K2::PC_Object, UBangoScriptAsset::StaticClass(), ScriptPinName);
 	ScriptPin->DefaultObject = Script;
 	ScriptPin->PinToolTip = TEXT("The Bango Script to spawn. Must be picked here, not connected: its parameters become this node's pins.");
@@ -96,10 +67,6 @@ void UK2Node_SpawnBangoScript::CreateParamPins()
 
 	if (!Script)
 	{
-		if (!ScriptPath.TrimStartAndEnd().IsEmpty())
-		{
-			LoadError = FString::Printf(TEXT("There's no Bango Script at '%s' any more: pick the script on the node."), *ScriptPath);
-		}
 		UpdateErrorDisplay();
 		return;
 	}
@@ -217,7 +184,6 @@ void UK2Node_SpawnBangoScript::PinDefaultValueChanged(UEdGraphPin* Pin)
 	if (Pin && Pin->PinName == ScriptPinName && Pin->DefaultObject != Script)
 	{
 		Script = Cast<UBangoScriptAsset>(Pin->DefaultObject);
-		ScriptPath.Reset();
 		RefreshParamPins();
 	}
 }

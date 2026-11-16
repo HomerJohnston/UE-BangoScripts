@@ -38,7 +38,6 @@ namespace BangoLineTokenizerPrivate
 	static const TCHAR* const PlayerWord[]     = { TEXT("player"), TEXT("self") }; // the first local player's pawn, and the script's owner: entities, coloured like @john
 	static const TCHAR* const PreprocWords[]   = { TEXT("inputs"), TEXT("LOCTEXT_NAMESPACE"), TEXT("LARGE_SCRIPT_THRESHOLD") };
 	static const TCHAR* const Builtins[]       = { TEXT("IsNil"), TEXT("Count"), TEXT("Push"), TEXT("InsertAt"), TEXT("Pop"), TEXT("RemoveAt") };
-	static const TCHAR* const InvalidWords[]   = { TEXT("double") };
 	static const TCHAR* const VectorParts[]    = { TEXT("x"), TEXT("y"), TEXT("z") };
 
 	// Localized-text macros and the role of each string argument, by position.
@@ -292,7 +291,6 @@ namespace BangoLineTokenizerPrivate
 			else if (IsOneOf(Line, Start, WordLen, PlayerWord))     { Kind = EBangoSyntaxKind::Entity; }
 			else if (IsOneOf(Line, Start, WordLen, PreprocWords))   { Kind = EBangoSyntaxKind::Preprocessor; }
 			else if (IsOneOf(Line, Start, WordLen, Builtins))       { Kind = EBangoSyntaxKind::Builtin; }
-			else if (IsOneOf(Line, Start, WordLen, InvalidWords))   { Kind = EBangoSyntaxKind::Error; }
 			else if (IsFollowedByOpenParen())                       { Kind = EBangoSyntaxKind::Call; }
 			// A name is the graph's local, parameter or loop variable if it has one, and otherwise a global. One line
 			// can't tell, so it's a global here; FBangoScriptNames, which reads the whole file, tells them apart.

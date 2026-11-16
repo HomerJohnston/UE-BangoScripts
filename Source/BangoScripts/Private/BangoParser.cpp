@@ -335,10 +335,6 @@ namespace BangoParserPrivate
 				return true;
 			}
 
-			if (IsSettingName(Name, TEXT("params")))
-			{
-				return Fail(Name.Loc, TEXT("'#set params' is now written '#set inputs'."));
-			}
 			const bool bNamespace = IsLocNamespaceName(Name);
 			const bool bThreshold = IsSettingName(Name, TEXT("LARGE_SCRIPT_THRESHOLD"));
 			if (!bNamespace && !bThreshold)
@@ -959,11 +955,6 @@ namespace BangoParserPrivate
 					: TEXT("'#set inputs' must come at the top of the script, before any other statement or function (only the other #set lines may come before it)."));
 				return nullptr;
 			default:
-				if (First.Kind == EBangoTokenKind::Identifier && First.Text.Equals(TEXT("locNamespace"), ESearchCase::CaseSensitive) && Tokens.IsValidIndex(Pos + 1) && Tokens[Pos + 1].Kind == EBangoTokenKind::LParen)
-				{
-					Fail(First.Loc, TEXT("The namespace line is now written '#set LOCTEXT_NAMESPACE \"Name\"'."));
-					return nullptr;
-				}
 				if (IsTypeKeyword(First.Kind))
 				{
 					Stmt = ParseVarDecl(false);

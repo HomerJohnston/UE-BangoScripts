@@ -181,7 +181,7 @@ namespace BangoCompilerPrivate
 			}
 			else
 			{
-				return Fail(Lit.Loc, TEXT("This text needs the script's namespace: add the line #set LOCTEXT_NAMESPACE \"Bango.Intro\" at the top of the script (under its description) and #undef LOCTEXT_NAMESPACE as its last line. (NSLOCTEXT and NSNOTELOCTEXT give their own namespace instead.)"));
+				return Fail(Lit.Loc, TEXT("This text needs the script's namespace: add the line #set LOCTEXT_NAMESPACE \"Bango.Intro\" at the top of the script (under its description). (NSLOCTEXT and NSNOTELOCTEXT give their own namespace instead.)"));
 			}
 
 			const FString Id = Namespace + TEXT("\n") + Lit.TextKey;

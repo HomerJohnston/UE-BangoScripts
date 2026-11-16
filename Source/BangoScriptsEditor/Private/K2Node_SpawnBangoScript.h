@@ -67,13 +67,6 @@ private:
 	UPROPERTY()
 	TObjectPtr<UBangoScriptAsset> Script;
 
-	/** Legacy: a script path typed on nodes made before scripts were assets. Turned into Script when the node is next rebuilt. */
-	UPROPERTY()
-	FString ScriptPath;
-
-	/** A legacy ScriptPath becomes Script, if there's a script asset at that path (relative to /Game, or to the old /Game/Bango). */
-	void MigrateScriptPath();
-
 	/** The default text each parameter pin was given at the last refresh. */
 	UPROPERTY()
 	TMap<FName, FString> ParamDefaults;

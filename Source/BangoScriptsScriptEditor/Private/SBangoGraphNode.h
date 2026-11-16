@@ -26,7 +26,7 @@ struct FBangoTextLiteral;
  * property's advanced options.
  *
  * Typing a name in a field opens an autocomplete list under it, like the script text pane's: the variables the node
- * can see, this script's functions, the commands and the built-ins. Up/Down pick, Enter or Tab accept, Escape closes it,
+ * can see, this script's functions, the commands and the built-ins. Up/Down pick, Enter or Tab accept (each if its editor preference is on), Escape closes it,
  * Ctrl+Space opens it.
  *
  * A For node has a (Simple) / (Complex) toggle right after its title: lit, as (Complex), while the whole header is shown as one row.
