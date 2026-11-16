@@ -272,17 +272,29 @@ void FBangoSyntaxMarshaller::UpdateProbeHighlight()
 	{
 		return;
 	}
-	for (const FTextLineHighlight& Highlight : ProbeHighlights)
-	{
-		LastLayout->RemoveLineHighlight(Highlight);
-	}
-	ProbeHighlights.Reset();
+	RemoveHighlights(ProbeHighlights);
 	if (ProbeLine >= 0 && ProbeLine < LastLayout->GetLineModels().Num() && !ProbeRange.IsEmpty())
 	{
 		FTextLineHighlight Highlight(ProbeLine, ProbeRange, BangoSyntaxMarshallerPrivate::ProbeZOrder, ProbeHighlighter.ToSharedRef());
 		LastLayout->AddLineHighlight(Highlight);
 		ProbeHighlights.Add(Highlight);
 	}
+}
+
+void FBangoSyntaxMarshaller::RemoveHighlights(TArray<FTextLineHighlight>& Highlights)
+{
+	// Only from lines that are still there: an edit that removes lines (deleting a selection of several) shrinks the
+	// layout before it's rebuilt, and a highlight on a removed line went with it. (Any others are dropped when the
+	// layout is rebuilt after the edit.)
+	const int32 NumLines = LastLayout ? LastLayout->GetLineModels().Num() : 0;
+	for (const FTextLineHighlight& Highlight : Highlights)
+	{
+		if (Highlight.LineIndex >= 0 && Highlight.LineIndex < NumLines)
+		{
+			LastLayout->RemoveLineHighlight(Highlight);
+		}
+	}
+	Highlights.Reset();
 }
 
 void FBangoSyntaxMarshaller::SetError(int32 Line, int32 Column)
@@ -304,11 +316,7 @@ void FBangoSyntaxMarshaller::UpdateErrorHighlight()
 	{
 		return;
 	}
-	for (const FTextLineHighlight& Highlight : ErrorHighlights)
-	{
-		LastLayout->RemoveLineHighlight(Highlight);
-	}
-	ErrorHighlights.Reset();
+	RemoveHighlights(ErrorHighlights);
 	if (ErrorLine < 0 || ErrorLine >= LastLayout->GetLineModels().Num() || !CachedLines.IsValidIndex(ErrorLine))
 	{
 		return;
@@ -350,11 +358,7 @@ void FBangoSyntaxMarshaller::UpdateBracketHighlights()
 	{
 		return;
 	}
-	for (const FTextLineHighlight& Highlight : BracketHighlights)
-	{
-		LastLayout->RemoveLineHighlight(Highlight);
-	}
-	BracketHighlights.Reset();
+	RemoveHighlights(BracketHighlights);
 
 	const FBangoBracketMatch Match = FBangoEditingAids::FindMatchingBracket(CachedLines, CachedTokens, BracketCursor);
 	if (!Match.bFound)

@@ -1,6 +1,7 @@
 #include "BangoInlineScriptCustomization.h"
 
 #include "BangoInlineScript.h"
+#include "BangoScriptReferences.h"
 #include "BangoGraph.h"
 #include "BangoParser.h"
 #include "BangoTextMetadata.h"
@@ -126,6 +127,7 @@ public:
 		InStructHandle->GetOuterObjects(Outers);
 		if (Outers.Num() == 1 && Outers[0])
 		{
+			SelfOwner = Outers[0];
 			Target = MakeShared<FBangoInlineScriptTarget>(Outers[0], InStructHandle->GeneratePathToProperty(), InStructHandle, InStructHandle->GetPropertyDisplayName());
 		}
 
@@ -155,6 +157,8 @@ public:
 								.Text(FText::FromString(Shown))
 								.InlineScriptEditor(true) // no metadata shown, and read-only while the script has some
 								.CompileAsYouType(true)
+								// self: the actor whose details show this script (lines to what it refers to, in the viewports)
+								.SelfActor_Lambda([this]() { return BangoScriptReferences::GetSelfActor(SelfOwner.Get()); })
 								.IsReadOnly_Lambda([this]() { return IsLocked(); })
 								.OnTextCommitted(this, &SBangoInlineScriptBox::OnTextCommitted)
 								.ContextMenuExtender(this, &SBangoInlineScriptBox::ExtendContextMenu)
@@ -276,6 +280,8 @@ private:
 	TSharedPtr<IPropertyHandle> StructHandle;
 	TSharedPtr<IPropertyHandle> SourceHandle;
 	TSharedPtr<FBangoInlineScriptTarget> Target;
+	/** The object the script is a property of, when there's just one (for self). */
+	TWeakObjectPtr<UObject> SelfOwner;
 	TSharedPtr<SBangoTextEditor> TextBox;
 	TSharedPtr<SButton> EditButton;
 	/** When the Has graph layout note last started flashing (FSlateApplication time), or a negative number. */

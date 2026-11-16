@@ -86,6 +86,9 @@ private:
 	/** Puts the error's underline on the layout, replacing the one there. */
 	void UpdateErrorHighlight();
 
+	/** Takes Highlights off the layout (those on lines it still has) and empties the list. */
+	void RemoveHighlights(TArray<FTextLineHighlight>& Highlights);
+
 	TSharedRef<const FBangoSyntaxStyle> Style;
 
 	/** The text as last laid out: its lines and their tokens, for finding brackets. */

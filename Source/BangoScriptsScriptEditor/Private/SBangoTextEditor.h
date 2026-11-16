@@ -17,6 +17,8 @@
 #include "BangoTextMetadata.h"
 #include "BangoCompletion.h"
 
+class AActor;
+
 class FBangoSyntaxMarshaller;
 class FBangoSyntaxStyle;
 class SScrollBar;
@@ -60,6 +62,12 @@ public:
 		 * error: underlined in the text, and its message in a box hanging under this widget while it has focus.
 		 */
 		SLATE_ARGUMENT(bool, CompileAsYouType)
+
+		/**
+		 * The actor `self` would be in this script (an inline script's actor), or null. While this is the script being
+		 * edited, lines are drawn from it to the actors the script refers to, in the level viewports (BangoScriptReferences).
+		 */
+		SLATE_ATTRIBUTE(AActor*, SelfActor)
 
 		/** Adds entries to the text's right-click menu (after the usual Cut, Copy, Paste, ...). */
 		SLATE_EVENT(FMenuExtensionDelegate, ContextMenuExtender)
@@ -243,6 +251,7 @@ private:
 	bool bErrorFromOutside = false;
 	TSharedRef<SWidget> MakeErrorPopup();
 	bool bCompileAsYouType = false;
+	TAttribute<AActor*> SelfActor;
 	/** The text changed since it was last compiled; it's compiled once typing has stopped for the preference's delay. */
 	bool bCompileDirty = false;
 	double LastEditSeconds = 0.0;

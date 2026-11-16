@@ -79,6 +79,7 @@ void SBangoTextEditor::Construct(const FArguments& InArgs)
 	// An inline script's box shows no metadata, and can't be typed in while the script has some.
 	bInlineScriptEditor = InArgs._InlineScriptEditor;
 	bCompileAsYouType = InArgs._CompileAsYouType;
+	SelfActor = InArgs._SelfActor;
 	bCompileDirty = bCompileAsYouType; // the text it starts with is compiled on the first tick
 	if (bInlineScriptEditor)
 	{
@@ -784,7 +785,7 @@ void SBangoTextEditor::Tick(const FGeometry& AllottedGeometry, const double InCu
 		}
 		bReferencesDirty = false;
 		const FTextLocation Cursor = TextBox->GetCursorLocation();
-		BangoScriptReferences::TouchActiveScript(this, Cursor.GetLineIndex(), Cursor.GetOffset());
+		BangoScriptReferences::TouchActiveScript(this, Cursor.GetLineIndex(), Cursor.GetOffset(), SelfActor.Get(nullptr));
 	}
 
 	// Compile as you type: once typing has stopped for the preference's delay.

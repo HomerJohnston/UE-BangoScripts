@@ -2,6 +2,7 @@
 
 #include "BangoScriptAsset.h"
 #include "BangoInlineScriptTarget.h"
+#include "BangoScriptReferences.h"
 #include "BangoScriptSync.h"
 
 #include "Bango.h"
@@ -3486,6 +3487,8 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeTextPane()
 		.Padding(FMargin(4.0f, BangoScriptEditorPrivate::ScriptTextTopPadding))
 		.VScrollBar(TextVScrollBar) // its scroll position is read back for the line numbers
 		.CompileAsYouType(true)
+		// self, for an inline script opened from its Edit button: the actor it's on (lines to what it refers to, in the viewports)
+		.SelfActor_Lambda([this]() { return InlineTarget.IsValid() ? BangoScriptReferences::GetSelfActor(InlineTarget->GetOwner()) : nullptr; })
 		.Text(FText::FromString(TextShown))
 		.IsReadOnly_Lambda([this]() { return OpenScript.IsEmpty(); })
 		.OnCursorNodesChanged(this, &SBangoScriptEditor::OnTextCursorNodes) // Sync Graph

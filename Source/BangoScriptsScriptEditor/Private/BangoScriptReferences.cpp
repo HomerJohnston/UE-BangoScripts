@@ -5,6 +5,7 @@
 #include "BangoSettings.h"
 #include "CanvasItem.h"
 #include "CanvasTypes.h"
+#include "Components/ActorComponent.h"
 #include "Debug/DebugDrawService.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
@@ -44,19 +45,23 @@ namespace BangoScriptReferencesPrivate
 	static TArray<FString> Names;
 	/** The name under the active editor's cursor, if it's on one. */
 	static FString CursorName;
-	/** When the active editor last ticked: its rings are drawn only while it's on screen. */
+	/** When the active editor last ticked: its markers are drawn only while it's on screen. */
 	static double LastTouchSeconds = -1.0;
-	/** How long after its last tick the active editor's rings are still drawn (Slate may skip a few ticks). */
+	/** How long after its last tick the active editor's markers are still drawn (Slate may skip a few ticks). */
 	constexpr double TouchTimeout = 1.0;
+	/** The actor `self` would be in the active script, if it's an inline script on an actor (TouchActiveScript). */
+	static TWeakObjectPtr<const AActor> SelfActor;
 
-	const FLinearColor RingColor(0.0f, 0.85f, 1.0f);
+	const FLinearColor MarkerColor(0.0f, 0.85f, 1.0f);
 	const FLinearColor MissingColor(1.0f, 0.3f, 0.25f);
-	constexpr float RingThickness = 2.0f;
-	constexpr float CursorRingThickness = 4.0f;
-	constexpr float MinRingRadius = 14.0f;
-	/** A ring around an actor with no bounds (an empty actor, a point): this radius in the world. */
-	constexpr float BoundlessRadius = 50.0f;
-	constexpr int32 RingSegments = 40;
+	/** A marker's radius, as a share of the view's height (FSceneView::UnscaledViewRect). */
+	constexpr float MarkerRadiusPerViewHeight = 0.005f;
+	/** The marker of the reference under the text cursor is this much bigger. */
+	constexpr float CursorMarkerScale = 1.6f;
+	/** The dark edge around a marker, so it shows on any background: this much bigger than the marker, in pixels. */
+	constexpr float MarkerEdge = 1.5f;
+	constexpr int32 MarkerSides = 16;
+	constexpr float SelfLineThickness = 1.5f;
 	/** At most this many missing names are listed; the rest are counted. */
 	constexpr int32 MaxMissingListed = 8;
 
@@ -82,52 +87,52 @@ namespace BangoScriptReferencesPrivate
 		return 1.0f - (Distance - FadeStart) / (Hide - FadeStart);
 	}
 
-	static void DrawRing(UCanvas& Canvas, const FVector2D& Center, float Radius, float Thickness, const FLinearColor& Color)
-	{
-		FVector2D Previous = Center + FVector2D(Radius, 0.0f);
-		for (int32 i = 1; i <= RingSegments; ++i)
-		{
-			const float Angle = 2.0f * PI * i / RingSegments;
-			const FVector2D Next = Center + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Radius;
-			FCanvasLineItem Line(Previous, Next);
-			Line.LineThickness = Thickness;
-			Line.SetColor(Color);
-			Line.BlendMode = SE_BLEND_Translucent;
-			Canvas.DrawItem(Line);
-			Previous = Next;
-		}
-	}
-
-	/** A ring around Actor's bounds as they look on screen, with a dark edge so it shows on any background. */
-	static void DrawActorRing(UCanvas& Canvas, const FSceneView& View, const AActor& Actor, bool bUnderCursor)
+	/**
+	 * Where Actor is on screen (the middle of its bounds; its location if it has none), and how faded (GetFade).
+	 * False if it's behind the camera or faded out.
+	 */
+	static bool ProjectActor(UCanvas& Canvas, const FSceneView& View, const AActor& Actor, FVector2D& OutScreen, float& OutFade)
 	{
 		FVector Origin;
 		FVector Extent;
 		Actor.GetActorBounds(false, Origin, Extent, true);
-		const float WorldRadius = Extent.IsNearlyZero() ? BoundlessRadius : (float)Extent.Size();
 		if (Extent.IsNearlyZero())
 		{
 			Origin = Actor.GetActorLocation();
 		}
 		if (View.IsPerspectiveProjection() && FVector::DotProduct(Origin - View.ViewMatrices.GetViewOrigin(), View.GetViewDirection()) <= 0.0f)
 		{
-			return; // behind the camera
+			return false;
 		}
-		const float Fade = GetFade(View, Origin);
-		if (Fade <= 0.0f)
-		{
-			return;
-		}
-		const FVector Center = Canvas.Project(Origin);
-		const FVector Edge = Canvas.Project(Origin + View.GetViewRight() * WorldRadius);
-		const float MaxRadius = 0.45f * FMath::Min(Canvas.ClipX, Canvas.ClipY);
-		const float Radius = FMath::Clamp((float)FVector2D::Distance(FVector2D(Center), FVector2D(Edge)), MinRingRadius, FMath::Max(MinRingRadius, MaxRadius));
+		OutFade = GetFade(View, Origin);
+		OutScreen = FVector2D(Canvas.Project(Origin));
+		return OutFade > 0.0f;
+	}
 
-		const float Thickness = bUnderCursor ? CursorRingThickness : RingThickness;
-		DrawRing(Canvas, FVector2D(Center), Radius, Thickness + 2.0f, FLinearColor(0.0f, 0.0f, 0.0f, 0.5f * Fade));
-		FLinearColor Color = RingColor;
+	/** A filled circle, translucent (so it fades; FCanvas::DrawNGon draws opaque). */
+	static void DrawDisc(UCanvas& Canvas, const FVector2D& Center, float Radius, const FLinearColor& Color)
+	{
+		FCanvasNGonItem Disc(Center, FVector2D(Radius, Radius), MarkerSides, Color);
+		Disc.BlendMode = SE_BLEND_Translucent;
+		Canvas.DrawItem(Disc);
+	}
+
+	/** A small filled circle over an actor the script refers to, with a dark edge so it shows on any background. */
+	static void DrawMarker(UCanvas& Canvas, const FVector2D& Center, float Radius, float Fade)
+	{
+		DrawDisc(Canvas, Center, Radius + MarkerEdge, FLinearColor(0.0f, 0.0f, 0.0f, 0.6f * Fade));
+		FLinearColor Color = MarkerColor;
 		Color.A *= Fade;
-		DrawRing(Canvas, FVector2D(Center), Radius, Thickness, Color);
+		DrawDisc(Canvas, Center, Radius, Color);
+	}
+
+	/** A line from self to a marker. Canvas lines are only drawn opaque, so it doesn't fade; it's left out when faded out. */
+	static void DrawSelfLine(UCanvas& Canvas, const FVector2D& From, const FVector2D& To)
+	{
+		FCanvasLineItem Line(From, To);
+		Line.LineThickness = SelfLineThickness;
+		Line.SetColor(MarkerColor);
+		Canvas.DrawItem(Line);
 	}
 
 	/** The names no actor in the level has, listed in the bottom-left corner. */
@@ -198,6 +203,15 @@ namespace BangoScriptReferencesPrivate
 			}
 		}
 
+		// self (an inline script's actor, in this level): lines go from it to each marker, under the markers.
+		FVector2D SelfScreen;
+		float SelfFade = 0.0f;
+		const AActor* Self = SelfActor.Get();
+		const bool bSelf = Self && Self->GetWorld() == World && !Self->IsHiddenEd() && ProjectActor(*Canvas, *View, *Self, SelfScreen, SelfFade);
+
+		const float Radius = MarkerRadiusPerViewHeight * View->UnscaledViewRect.Size().Y;
+		struct FMarker { FVector2D Screen; float Fade; bool bUnderCursor; };
+		TArray<FMarker> Markers;
 		TArray<FString> Missing;
 		for (const FString& Name : Names)
 		{
@@ -209,11 +223,28 @@ namespace BangoScriptReferencesPrivate
 			}
 			for (const AActor* Actor : *Found)
 			{
-				if (!Actor->IsHiddenEd()) // hidden in the editor: it's there, so not missing, but not drawn either
+				FMarker Marker;
+				Marker.bUnderCursor = Name == CursorName;
+				// Hidden in the editor: it's there, so not missing, but not drawn either.
+				if (!Actor->IsHiddenEd() && ProjectActor(*Canvas, *View, *Actor, Marker.Screen, Marker.Fade))
 				{
-					DrawActorRing(*Canvas, *View, *Actor, Name == CursorName);
+					Markers.Add(Marker);
 				}
 			}
+		}
+		if (bSelf)
+		{
+			for (const FMarker& Marker : Markers)
+			{
+				if (!Marker.Screen.Equals(SelfScreen, 1.0f)) // self referring to itself: no line
+				{
+					DrawSelfLine(*Canvas, SelfScreen, Marker.Screen);
+				}
+			}
+		}
+		for (const FMarker& Marker : Markers)
+		{
+			DrawMarker(*Canvas, Marker.Screen, Marker.bUnderCursor ? Radius * CursorMarkerScale : Radius, Marker.Fade);
 		}
 		DrawMissing(*Canvas, Missing);
 	}
@@ -282,13 +313,14 @@ namespace BangoScriptReferences
 		return Editor && Active.Get() == Editor;
 	}
 
-	void TouchActiveScript(const SWidget* Editor, int32 CursorLine, int32 CursorColumn)
+	void TouchActiveScript(const SWidget* Editor, int32 CursorLine, int32 CursorColumn, const AActor* Self)
 	{
 		if (!IsActiveScript(Editor))
 		{
 			return;
 		}
 		LastTouchSeconds = FPlatformTime::Seconds();
+		SelfActor = Self;
 		CursorName.Reset();
 		for (const FReference& Reference : References)
 		{
@@ -299,6 +331,16 @@ namespace BangoScriptReferences
 				break;
 			}
 		}
+	}
+
+	AActor* GetSelfActor(UObject* Owner)
+	{
+		if (AActor* Actor = Cast<AActor>(Owner))
+		{
+			return Actor;
+		}
+		const UActorComponent* Component = Cast<UActorComponent>(Owner);
+		return Component ? Component->GetOwner() : nullptr;
 	}
 }
 
