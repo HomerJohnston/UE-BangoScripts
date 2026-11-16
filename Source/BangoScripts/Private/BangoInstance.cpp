@@ -4,7 +4,7 @@
 
 namespace BangoInstancePrivate
 {
-	constexpr int32 SaveVersion = 2; // 2: ints are 32-bit
+	constexpr int32 SaveVersion = 3; // 2: ints are 32-bit; 3: the owner (self)
 
 	static FString TypeText(const FBangoType& Type)
 	{
@@ -216,6 +216,7 @@ bool FBangoInstance::StartSpawned(const FBangoInstance& Parent, int32 BlockIP, i
 		return false;
 	}
 	Error.FileName = Program->FileName;
+	Owner = Parent.Owner; // a spawn block's copy belongs to the same actor
 	const FBangoFrame& From = Parent.Frames.Last();
 	if (!Program->Functions.IsValidIndex(From.Function) || !Program->Functions[From.Function].Code.IsValidIndex(BlockIP))
 	{
@@ -268,7 +269,12 @@ bool FBangoInstance::CheckArguments(TConstArrayView<FBangoValue> Args, TArray<FB
 		const FBangoScriptParamInfo& Param = Params[i];
 		if (i >= Args.Num())
 		{
-			OutValues.Add(Param.Default);
+			FBangoValue Default;
+			if (!ResolveSelf(Param.Default, Default))
+			{
+				return ArgFail(FString::Printf(TEXT("The default for '%s' is self, but %s"), *Param.Name, *GetSelfProblem()));
+			}
+			OutValues.Add(MoveTemp(Default));
 			continue;
 		}
 		const FBangoValue& Arg = Args[i];
@@ -295,6 +301,47 @@ void FBangoInstance::Terminate()
 		PendingCommandName = -1;
 		PendingCall = FBangoCommandCall();
 	}
+}
+
+FString FBangoInstance::GetSelfProblem() const
+{
+	return Owner.Problem.IsEmpty()
+		? FString(TEXT("this script has no owner (it was started without one), so there's no actor for self to be. Pass the actor it belongs to as the Owner when you spawn it."))
+		: Owner.Problem;
+}
+
+bool FBangoInstance::ResolveSelf(const FBangoValue& Value, FBangoValue& OutValue) const
+{
+	if (Value.IsNil() || Value.GetType().Base != EBangoBaseType::Entity)
+	{
+		OutValue = Value;
+		return true;
+	}
+	if (Value.GetType().IsArray())
+	{
+		TArray<FBangoValue> Elements;
+		Elements.Reserve(Value.GetArray().Num());
+		for (const FBangoValue& Element : Value.GetArray())
+		{
+			if (!ResolveSelf(Element, Elements.AddDefaulted_GetRef()))
+			{
+				return false;
+			}
+		}
+		OutValue = FBangoValue::MakeArray(Value.GetType().GetElementType(), Elements);
+		return true;
+	}
+	if (!Bango::IsSelfEntityName(Value.GetEntityName()))
+	{
+		OutValue = Value;
+		return true;
+	}
+	if (Owner.BangoName.IsEmpty())
+	{
+		return false;
+	}
+	OutValue = FBangoValue::MakeEntity(Owner.BangoName);
+	return true;
 }
 
 bool FBangoInstance::RuntimeFail(const FString& Message)
@@ -567,8 +614,8 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 		const FBangoFunctionCode& Function = Program->Functions[Frames.Last().Function];
 		if (Place.Kind == EBangoPlaceKind::Local && Indexes.Num() == 0 && Place.Index < Function.NumParams)
 		{
-			const FString Owner = Function.Name.IsEmpty() ? FString(TEXT("this script")) : FString::Printf(TEXT("function '%s'"), *Function.Name);
-			return RuntimeFail(FString::Printf(TEXT("'%s' is nil. It's a parameter of %s; check what the caller passed."), *Path, *Owner));
+			const FString ParamOf = Function.Name.IsEmpty() ? FString(TEXT("this script")) : FString::Printf(TEXT("function '%s'"), *Function.Name);
+			return RuntimeFail(FString::Printf(TEXT("'%s' is nil. It's a parameter of %s; check what the caller passed."), *Path, *ParamOf));
 		}
 		if (Place.Kind == EBangoPlaceKind::Global && Indexes.Num() == 0)
 		{
@@ -1204,8 +1251,21 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 			{
 				return RuntimeFail(TEXT("Internal error: bad constant."));
 			}
-			Stack.Add(Program->Constants[I.A]);
+		{
+			const FBangoValue& Constant = Program->Constants[I.A];
+			if (Constant.GetType().Base != EBangoBaseType::Entity)
+			{
+				Stack.Add(Constant);
+				break;
+			}
+			FBangoValue Resolved;
+			if (!ResolveSelf(Constant, Resolved))
+			{
+				return RuntimeFail(FString::Printf(TEXT("'self' can't be used here: %s"), *GetSelfProblem()));
+			}
+			Stack.Add(MoveTemp(Resolved));
 			break;
+		}
 
 		case EBangoOp::PushNil:
 			if (!Program->Types.IsValidIndex(I.A))
@@ -1919,7 +1979,11 @@ bool FBangoInstance::MakeReloadedFrames(TArray<FBangoFrame>& OutFrames, FString&
 					}
 				}
 			}
-			NewFrame.Slots[i] = NewFn.SlotStartValues.IsValidIndex(i) ? NewFn.SlotStartValues[i] : FBangoValue::MakeNil(NewFn.SlotTypes[i]);
+			// A start value of self is the owner's Bango ID, as when the local's declaration runs (nil if there's no owner).
+			if (!NewFn.SlotStartValues.IsValidIndex(i) || !ResolveSelf(NewFn.SlotStartValues[i], NewFrame.Slots[i]))
+			{
+				NewFrame.Slots[i] = FBangoValue::MakeNil(NewFn.SlotTypes[i]);
+			}
 		}
 		OutFrames.Add(MoveTemp(NewFrame));
 	}
@@ -1941,6 +2005,8 @@ void FBangoInstance::Serialize(FArchive& Ar)
 	}
 
 	Ar << Id;
+	Ar << Owner.BangoName;
+	Ar << Owner.Problem;
 	uint8 StatusByte = (uint8)Status;
 	Ar << StatusByte;
 	SerializeError(Ar, Error);

@@ -634,7 +634,12 @@ FString FBangoValue::ToDebugString() const
 	case EBangoBaseType::Int:    return FString::Printf(TEXT("%d"), IntValue);
 	case EBangoBaseType::Double: return FString::SanitizeFloat(DoubleValue);
 	case EBangoBaseType::String: return FString::Printf(TEXT("\"%s\""), *StringValue.ReplaceCharWithEscapedChar());
-	case EBangoBaseType::Entity: return Bango::IsPlayerEntityName(StringValue) ? FString(TEXT("player")) : FString::Printf(TEXT("@%s"), *StringValue);
+	case EBangoBaseType::Entity:
+		if (const TCHAR* Keyword = Bango::GetEntityKeyword(StringValue))
+		{
+			return Keyword;
+		}
+		return FString::Printf(TEXT("@%s"), *StringValue);
 	case EBangoBaseType::Text:   return FString::Printf(TEXT("text(\"%s\")"), *TextValue.ToString().ReplaceCharWithEscapedChar());
 	case EBangoBaseType::Vector2:
 	case EBangoBaseType::Vector3:
@@ -671,7 +676,11 @@ FString FBangoValue::ToDisplayString() const
 	case EBangoBaseType::String:
 		return StringValue;
 	case EBangoBaseType::Entity:
-		return Bango::IsPlayerEntityName(StringValue) ? FString(TEXT("player")) : StringValue;
+		if (const TCHAR* Keyword = Bango::GetEntityKeyword(StringValue))
+		{
+			return Keyword;
+		}
+		return StringValue;
 	case EBangoBaseType::Text:
 		return TextValue.ToString();
 	default:
@@ -802,6 +811,22 @@ namespace Bango
 		return Name.Equals(GetPlayerEntityName(), ESearchCase::CaseSensitive);
 	}
 
+	const FString& GetSelfEntityName()
+	{
+		static const FString Name(TEXT("#self"));
+		return Name;
+	}
+
+	bool IsSelfEntityName(const FString& Name)
+	{
+		return Name.Equals(GetSelfEntityName(), ESearchCase::CaseSensitive);
+	}
+
+	const TCHAR* GetEntityKeyword(const FString& Name)
+	{
+		return IsPlayerEntityName(Name) ? TEXT("player") : IsSelfEntityName(Name) ? TEXT("self") : nullptr;
+	}
+
 	bool IsReservedWord(const FString& Name)
 	{
 		static const TCHAR* Words[] =
@@ -810,7 +835,7 @@ namespace Bango
 			TEXT("break"), TEXT("continue"), TEXT("return"), TEXT("label"), TEXT("goto"),
 			TEXT("function"), TEXT("global"), TEXT("true"), TEXT("false"), TEXT("nil"),
 			TEXT("bool"), TEXT("int"), TEXT("float"), TEXT("double"), TEXT("string"), TEXT("entity"), TEXT("void"),
-			TEXT("text"), TEXT("vector2"), TEXT("vector3"), TEXT("inputs"), TEXT("IsNil"), TEXT("player"),
+			TEXT("text"), TEXT("vector2"), TEXT("vector3"), TEXT("inputs"), TEXT("IsNil"), TEXT("player"), TEXT("self"),
 			TEXT("LOCTEXT"), TEXT("NSLOCTEXT"), TEXT("NOTELOCTEXT"), TEXT("NSNOTELOCTEXT"), TEXT("INVTEXT"),
 		};
 		for (const TCHAR* Word : Words)

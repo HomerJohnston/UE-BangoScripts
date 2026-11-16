@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.51)
+# Bango Language Spec (draft v0.52)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.52:** a new keyword, **`self`**: the actor a script **belongs to** (its owner), by its Bango ID (section 4). Every way of spawning a script takes an **Owner**: `UBangoScriptSubsystem::Spawn(..., Owner)` in C++, and an **Owner** pin (Self by default) on the Blueprint spawn nodes (section 10). Scripts started with `Exec`, and spawn blocks, belong to the same owner as the script that started them.
 
 **Changes in v0.51:** the level editor's viewport shows each Bango ID's name over its actor, fading with distance; problem names are red (section 4). Two new settings for the fade (section 11).
 
@@ -278,7 +280,7 @@ _height = GetPos(_who).z;
 - Doubles: `2.5`, `1.0`, `1e3`, `2.5e-3`. There must be a digit on both sides of the `.` (`0.5`, not `.5`; `1.0`, not `1.`).
 - A number followed directly by a letter (`12abc`) is a compile error.
 - Strings must end on the line they start. Any other escape than `\" \\ \n \t` is a compile error.
-- Entities: `@` followed directly by a Bango ID name, like `@john` or `@door17` (section 4), or the keyword **`player`** (the player's pawn, below). No space is allowed after the `@`. An entity literal is a fixed value with the type `entity`, so it can be a parameter default and the compiler knows its type.
+- Entities: `@` followed directly by a Bango ID name, like `@john` or `@door17` (section 4), or the keywords **`player`** (the player's pawn) and **`self`** (the script's owner), both in section 4. No space is allowed after the `@`. An entity literal is a fixed value with the type `entity`, so it can be a parameter default and the compiler knows its type.
 - Entity literals are never checked when the script compiles, since which actors exist depends on the level. Using one whose actor isn't in the level stops the script (see Conversions below).
 - Texts: `LOCTEXT("Key", "Source")`, `NSLOCTEXT("Namespace", "Key", "Source")`, `NOTELOCTEXT("Key", "Source", "Notes")`, `NSNOTELOCTEXT("Namespace", "Key", "Source", "Notes")`, and `INVTEXT("Source")` for a text that isn't translated. Every part must be a string literal.
 
@@ -350,7 +352,7 @@ WriteScreen(ToString(NSLOCTEXT("Shared.UI", "Continue", "Continue")));
 - **Names are case-sensitive**: `john` and `John` are different names. This covers variables, globals, functions, labels, commands, keywords, type names and Bango ID names (`@john` and `@John` are different actors).
 - Calling a command or function with the wrong capitalisation is a compile error that suggests the right name: *"Unknown command or function 'writeScreen'. Did you mean 'WriteScreen'? Names are case-sensitive."*
 - A name is letters, digits and `_`, and doesn't start with a digit.
-- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn switch case default break continue return label goto function global inputs player true false nil bool int float double string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
+- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn switch case default break continue return label goto function global inputs player self true false nil bool int float double string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
 
 ### Locals
 - Any name will do; a leading `_` is allowed but not needed (`count` and `_count` are both fine). The same goes for function parameters, script parameters and loop variables. Locals only exist inside the running script instance.
@@ -403,7 +405,7 @@ global string[] questLog;        // arrays can be global
 - Blueprints can also set and read globals (section 11). Setting a global from Blueprint that doesn't exist yet declares it with that value's type.
 
 ### Bango ID names
-- Adding a Bango ID component to an actor and giving it a name (e.g. `john`) lets scripts use that actor as `@john`. The name is registered when play begins.
+- Adding a Bango ID component to an actor and giving it a name (e.g. `john`) lets scripts use that actor as `@john`. The name is registered when play begins. The component's name property is an **`FBangoIDName`**: an `FString` in a struct of its own, so the details panel shows it after an `@`. In C++ it converts to and from `FString` by itself; in Blueprint it converts to and from a string where one is wired to the other.
 - Bango ID names are **their own set of names**, separate from variables and globals. They don't create globals, so `@john` and a global called `john` can both exist without clashing.
 - A name is letters, digits and `_`, and doesn't start with a digit. Keywords and a leading `_` are allowed (`@if`, `@_hidden`).
 - An empty or invalid name, or a name already used by another actor in the level, shows an error on screen. The name is then not registered.
@@ -417,6 +419,15 @@ global string[] questLog;        // arrays can be global
   - It's a different value from the pawn's own Bango ID, if it has one: `player == @hero` is false even when `@hero` is the player's pawn.
   - In C++, `UBangoActorRegistry::FindActor` finds it like a Bango ID name (its reserved name is `Bango::GetPlayerEntityName()`), and `GetPlayerPawn` gives the pawn. `Bango::ActorToEntity` gives `player` for the player's pawn when it has no registered Bango ID, so it can be passed to a script without one.
   - `@player` is still an ordinary Bango ID name, unrelated to the keyword.
+- **`self`** is the actor the script **belongs to**: its **owner**, given when it's spawned (section 10). It's that actor's **Bango ID**, so with an owner whose Bango ID is `door_1`, `self` is `@door_1`: `self SetPos(...)`, `entity _me = self;`, `if (_e == self)`, `case self:`.
+  - The owner is always an **actor**, and it needs a **Bango ID** component with a name. A component that spawns a script passes its owning actor.
+  - It's swapped for the owner's Bango ID **as it's used**, so a value stored from it, or passed to another script, is the owner's Bango ID (`@door_1`), not "whoever self is there".
+  - A script started with `Exec`, and a `spawn` block's copy, belong to the **same owner** as the script that started them.
+  - Using it in a script that can't (no owner, an owner that isn't an actor, or one with no Bango ID or name) stops the script with an error saying which, like *"'self' can't be used here: this script's owner, 'Door_3', has no Bango ID component..."*. A script that doesn't use `self` runs as usual without an owner.
+  - It can be an input's default (`#set inputs (entity _who = self)`); without an owner, the script then doesn't start unless that argument is passed.
+  - A condition (`EvaluateBoolCondition`) has no owner, so it can't use `self`.
+  - The owner is saved with the running script.
+  - `@self` is an ordinary Bango ID name, unrelated to the keyword.
 - Writing a Bango ID without its `@` (`john Speak("Hi");`) reads a global called `john`. If there is no such global but there is an actor with that Bango ID, the error says so: *"Global 'john' doesn't exist. There is an actor with the Bango ID 'john': write @john to use it."*
 
 ### Undeclared globals (resolved at runtime)
@@ -898,6 +909,7 @@ These checks happen when the script is spawned. If any fails, the script doesn't
 
 ### From C++
 - `UBangoScriptSubsystem::Spawn(ScriptPath, Args)`, where `Args` is a `TArray<FBangoValue>` in parameter order. It returns an `FBangoScriptHandle` for `Terminate` and `IsRunning`. Its `Id` is an `int32`, given out in order from 1 by each world's subsystem (and saved with it), so two running scripts never have the same one; a script started with `Exec` gets the same id back as an `int`. `Spawn(ScriptPath, Args, Error)` is the same, except that an error starting the script is put in `Error` instead of being shown.
+- Every `Spawn` (and `SpawnFromSource`) takes an optional **`Owner`**, the actor the script belongs to, which `self` means (section 4): `Spawn(ScriptPath, Args, Owner)`, `Spawn(ScriptPath, Args, Owner, Error)`, and the same for a script asset. It's a `const UObject*`, but `self` works only when it's an actor with a named Bango ID; otherwise the script still spawns, and `self` stops it with an error saying why. `UBangoScriptSubsystem::GetScriptOwner(Owner)` gives the `FBangoScriptOwner` (the Bango ID name, or the problem) that `FBangoInstance::SetOwner` takes, for C++ that runs instances itself.
 - `UBangoScriptSubsystem::SpawnFromSource(Source, Name, Args)` starts a script from its **text** instead of a file, for scripts made at runtime or kept somewhere else (a data asset, a string table, a server). It's compiled on every call, then started exactly like `Spawn`: the same arguments, checks and errors, and the same handle. `Name` stands in for the file name in its errors (`Dialogue.Intro(3:5) [node 2]: ...`) and in the editor's debugger; it defaults to `Script`.
   ```cpp
   const FString Source = TEXT("#set inputs (entity _who)\n_who Speak(\"Hello.\");");
@@ -906,7 +918,7 @@ These checks happen when the script is spawned. If any fails, the script doesn't
   UBangoScriptSubsystem::Get(this)->SpawnFromSource(Source, TEXT("Greeting"), Args);
   ```
   A script spawned from text keeps its text: saving the state saves it, and loading compiles it again (section 11). It isn't hot reloaded, since there's no file to watch, and no script editor tab follows it.
-- `UBangoScriptSubsystem::Spawn(InlineScript, Args, Owner)` starts an **inline script** (an `FBangoInlineScript` property, section 15), like `SpawnFromSource`, except that its compiled program is kept (`FBangoModule::GetInlineProgram`), so the same text is compiled once. `Owner` (usually `this`) names it in errors: `Door_1 (inline script)(1:7): ...`. An empty inline script does nothing and gives an invalid handle, without an error. `Spawn(InlineScript, Args, Owner, Error)` puts an error starting it in `Error` instead of showing it.
+- `UBangoScriptSubsystem::Spawn(InlineScript, Args, Owner)` starts an **inline script** (an `FBangoInlineScript` property, section 15), like `SpawnFromSource`, except that its compiled program is kept (`FBangoModule::GetInlineProgram`), so the same text is compiled once. `Owner` (usually `this`) names it in errors: `Door_1 (inline script)(1:7): ...`, and is what `self` means in it. An empty inline script does nothing and gives an invalid handle, without an error. `Spawn(InlineScript, Args, Owner, Error)` puts an error starting it in `Error` instead of showing it.
   ```cpp
   TArray<FBangoValue> Args;
   Args.Add(FBangoValue::MakeString(EnemyType));
@@ -972,6 +984,7 @@ Bango::UnregisterCondition(Condition); // and Condition is made invalid
 The **Spawn Bango Script** node reads the script's `inputs` line and creates one input pin per parameter:
 
 - The script is **picked on the node** with an asset picker (a Bango Script asset, section 15) and is fixed, not computed at runtime: the Blueprint references the asset, so it's loaded and packaged with the Blueprint, and renaming or moving the script keeps the node pointing at it. The script can't be connected. To choose a script at runtime, use **Spawn Bango Script (Dynamic Path)** (section 11), which passes no arguments. (A node made when scripts were typed paths picks up its script asset when it's next refreshed, if there's one at that path under `/Game` or `/Game/Bango`.)
+- An **Owner** pin: the actor the script belongs to, which `self` means in it (section 4). Self while it's unconnected; in a component's Blueprint, connect its owning actor.
 - Pins are named after the parameters, in order. Pin types:
 
   | Bango type | Blueprint pin |
@@ -1024,9 +1037,9 @@ The **Spawn Bango Script** node reads the script's `inputs` line and creates one
 | Node | Effect |
 |---|---|
 | **Spawn Bango Script** (fixed path, one pin per parameter) → Handle | Starts a script with arguments (section 10). Returns an invalid handle (and shows an error) if it can't start. |
-| **Spawn Bango Inline Script** (Script, Args, Owner) → Handle | Starts an inline script (a Bango Inline Script variable or property, section 15). **Args** fill its `#set inputs` line in order; leave it unconnected for a script with no parameters. They're checked when it starts: if they don't fit, it doesn't start, and an error says why. Owner (Self by default) names it in errors. An empty script does nothing. |
+| **Spawn Bango Inline Script** (Script, Args, Owner) → Handle | Starts an inline script (a Bango Inline Script variable or property, section 15). **Args** fill its `#set inputs` line in order; leave it unconnected for a script with no parameters. They're checked when it starts: if they don't fit, it doesn't start, and an error says why. Owner (Self by default) is the actor it belongs to, which `self` means; it also names it in errors. An empty script does nothing. |
 | **Make Bango Args** → Args, then **Add Bango Arg (Int)**, **(Bool)**, **(Float)**, **(String)**, **(Text)**, **(Actor (Entity))**, **(Vector2)**, **(Vector3)** and their **Array** versions, and **Skip Bango Arg** | Build Spawn Bango Inline Script's arguments, one per parameter, in order: chain them (Make Bango Args → Add Bango Arg (String) → Add Bango Arg (Vector3) → Args). Skip Bango Arg leaves out a parameter that has a default. An actor becomes its Bango ID (an actor without one is an error when the script starts). |
-| **Spawn Bango Script (Dynamic Path)** (path) → Handle | Starts a script from a path chosen at runtime, with no arguments, so the script can't have required parameters. Returns an invalid handle (and shows an error) if it can't start. |
+| **Spawn Bango Script (Dynamic Path)** (path, Owner) → Handle | Starts a script from a path chosen at runtime, with no arguments, so the script can't have required parameters. Owner (Self by default) is what `self` means in it. Returns an invalid handle (and shows an error) if it can't start. |
 | **Terminate Bango Script** (Handle, And Children) | Stops a script. A script stopped while one of its commands is running stays stopped. With And Children, also stops the scripts it started (with `Exec` or `spawn`), and theirs, as `Abort`'s `Children` does. |
 | **Is Bango Script Running** (Handle) → bool | True while running or paused; false once it has finished, failed or been terminated. |
 | **Is Valid Bango Script Handle** (Handle) → bool | True if the handle came from a successful spawn. |

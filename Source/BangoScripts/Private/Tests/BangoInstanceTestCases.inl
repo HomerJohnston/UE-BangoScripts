@@ -242,7 +242,12 @@ struct FBangoRuntimeTestResult
 };
 
 /** Compiles and runs Source to the end (or failure), resuming every 0.5 seconds of fake time. */
-static void BangoRunScript(const TCHAR* Source, FBangoRuntimeTestResult& Out, int32 MaxInstructions = 100000, const TArray<FBangoValue>& Args = TArray<FBangoValue>())
+/**
+ * Owner: who `self` is. The Bango ID "john" by default; null for no owner; "!message" for an owner self can't use,
+ * with that message.
+ */
+static void BangoRunScript(const TCHAR* Source, FBangoRuntimeTestResult& Out, int32 MaxInstructions = 100000, const TArray<FBangoValue>& Args = TArray<FBangoValue>(),
+	const TCHAR* Owner = TEXT("john"))
 {
 	FBangoCommandTable Commands;
 	BangoMakeRuntimeTestCommands(Commands, Out.Log);
@@ -260,6 +265,12 @@ static void BangoRunScript(const TCHAR* Source, FBangoRuntimeTestResult& Out, in
 	}
 
 	FBangoInstance Instance;
+	if (Owner)
+	{
+		FBangoScriptOwner ScriptOwner;
+		(Owner[0] == TEXT('!') ? ScriptOwner.Problem : ScriptOwner.BangoName) = Owner[0] == TEXT('!') ? Owner + 1 : Owner;
+		Instance.SetOwner(ScriptOwner);
+	}
 	FBangoRuntimeError StartError;
 	if (!Instance.Start(Program, Commands, Globals, 1, StartError, Args))
 	{
@@ -347,6 +358,8 @@ struct FBangoRuntimeTestCase
 	/** For error cases: "(line:column)" (or other text) the runtime error must contain, and the message text. Null if the script must finish. */
 	const TCHAR* ErrorLocation;
 	const TCHAR* ErrorContains;
+	/** Who `self` is (BangoRunScript's Owner). */
+	const TCHAR* Owner = TEXT("john");
 };
 
 static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
@@ -453,6 +466,17 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 	{ TEXT("IsNull on nil and missing actors"), TEXT("entity _e;\nentity[] _a = [@john];\nTalk(\"{0} {1} {2}\", IsNull(@john), IsNull(@ghost), IsNull(_e));\nTalk(\"{0} {1} {2}\", IsNull(_a[0]), IsNull(_a[5]), IsNull(nobody));\n_e = @player;\nTalk(\"{0}\", IsNull(_e));"), TEXT("false true true|false true true|false"), nullptr, nullptr },
 	{ TEXT("IsNull on something that isn't an entity"), TEXT("bool _b;\n_b = IsNull(lots);"), TEXT(""), TEXT("(2:6)"), TEXT("Expected an entity here, but the value is a string") },
 	{ TEXT("the player keyword"), TEXT("entity _p = player;\nplayer Speak(\"hi\");\nTalk(\"{0} {1} {2}\", _p, _p == player, player == @player);"), TEXT("#player: hi|player true false"), nullptr, nullptr },
+	// ---- self: the owner's Bango ID (john here, unless the case says otherwise) ----
+	{ TEXT("self is the owner"), TEXT("entity _e = self;\nself Speak(\"hi\");\nTalk(\"{0} {1} {2} {3}\", _e, _e == @john, self == player, self);"), TEXT("john: hi|john true false john"), nullptr, nullptr },
+	{ TEXT("self in arrays, switch cases and functions"),
+		TEXT("entity[] _a = [self, @player];\nTalk(\"{0}\", _a);\nswitch (@john)\n{\n\tcase self:\n\t{\n\t\tTalk(\"me\");\n\t}\n}\nWho();\nfunction void Who()\n{\n\tself Speak(\"in a function\");\n};"),
+		TEXT("[john, player]|me|john: in a function"), nullptr, nullptr },
+	{ TEXT("self in a spawn block is the same owner"), TEXT("spawn\n{\n\tSleep(1);\n\tself Speak(\"copy\");\n}\nself Speak(\"parent\");"), TEXT("john: parent|john: copy"), nullptr, nullptr },
+	{ TEXT("self as an input's default"), TEXT("#set inputs (entity _who = self, entity[] _all = [self])\n_who Speak(\"x\");\nTalk(\"{0}\", _all);"), TEXT("john: x|[john]"), nullptr, nullptr },
+	{ TEXT("self with no owner"), TEXT("Talk(\"a\");\nself Speak(\"x\");"), TEXT("a"), TEXT("(2:1)"), TEXT("'self' can't be used here: this script has no owner (it was started without one)"), nullptr },
+	{ TEXT("self with an owner that has no Bango ID"), TEXT("entity _e = self;"), TEXT(""), TEXT("(1:"), TEXT("'self' can't be used here: Door has no Bango ID."), TEXT("!Door has no Bango ID.") },
+	{ TEXT("self as a default with no owner"), TEXT("#set inputs (entity _who = self)\nTalk(\"x\");"), TEXT(""), TEXT("(1:1)"), TEXT("The default for '_who' is self, but this script has no owner"), nullptr },
+	{ TEXT("a script with no owner that doesn't use self runs"), TEXT("Talk(\"fine\");"), TEXT("fine"), nullptr, nullptr, nullptr },
 	{ TEXT("unregistered entity"), TEXT("@ghost Speak(\"boo\");"), TEXT(""), TEXT("(1:1)"), TEXT("no actor is registered with the Bango ID name 'ghost'") },
 	{ TEXT("Bango ID written without @"), TEXT("john Speak(\"hi\");"), TEXT(""), TEXT("(1:1)"), TEXT("Global 'john' doesn't exist. There is an actor with the Bango ID 'john': write @john to use it.") },
 	{ TEXT("missing global that isn't a Bango ID"), TEXT("ghost Speak(\"hi\");"), TEXT(""), TEXT("(1:1)"), TEXT("Global 'ghost' doesn't exist. No script or Blueprint has declared it.") },
@@ -486,7 +510,7 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 static FString BangoCheckRuntimeCase(const FBangoRuntimeTestCase& Case)
 {
 	FBangoRuntimeTestResult Result;
-	BangoRunScript(Case.Source, Result, 20000);
+	BangoRunScript(Case.Source, Result, 20000, TArray<FBangoValue>(), Case.Owner);
 	if (!Result.bCompiled)
 	{
 		return FString::Printf(TEXT("[%s] didn't compile: %s"), Case.Name, *Result.CompileError);
@@ -631,6 +655,40 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 		Context.Globals = &LoadedGlobals;
 		Expect(Loaded.Resume(Context) == EBangoInstanceStatus::Finished, TEXT("save/load: the remaining 0.5s finishes the Sleep"));
 		Expect(Log.Num() == 2 && Log[1].Equals(TEXT("john: done"), ESearchCase::CaseSensitive), TEXT("save/load: continues where it left off"));
+	}
+
+	// ---- Save and load keep the owner (self) ----
+	{
+		Log.Reset();
+		TSharedPtr<FBangoProgram> SelfProgram = MakeShared<FBangoProgram>();
+		Expect(Bango::CompileSource(TEXT("Sleep(1);\nself Speak(\"back\");"), TEXT("self.bango"), Commands, *SelfProgram, CompileError), TEXT("self save: compiles"));
+		FBangoGlobalStore Globals;
+		Context.Globals = &Globals;
+		FBangoInstance Instance;
+		FBangoScriptOwner Owner;
+		Owner.BangoName = TEXT("john");
+		Instance.SetOwner(Owner);
+		FBangoRuntimeError Error;
+		Instance.Start(SelfProgram, Commands, Globals, 5, Error);
+		Instance.Resume(Context);
+
+		TArray<uint8> Bytes;
+		{
+			FMemoryWriter Writer(Bytes);
+			Instance.Serialize(Writer);
+		}
+		FBangoInstance Loaded;
+		{
+			FMemoryReader Reader(Bytes);
+			Loaded.Serialize(Reader);
+			Expect(!Reader.IsError(), TEXT("self save: reads back"));
+		}
+		Expect(Loaded.GetOwner().BangoName == TEXT("john"), TEXT("self save: the owner is loaded"));
+		FString BindError;
+		Expect(Loaded.Bind(SelfProgram, Commands, BindError), TEXT("self save: binds"));
+		Loaded.Resume(Context);
+		Loaded.Resume(Context);
+		Expect(Loaded.GetStatus() == EBangoInstanceStatus::Finished && Log.Num() == 1 && Log[0] == TEXT("john: back"), TEXT("self save: self is still the owner after loading"));
 	}
 
 	// ---- Save and load mid-function, mid-expression ----

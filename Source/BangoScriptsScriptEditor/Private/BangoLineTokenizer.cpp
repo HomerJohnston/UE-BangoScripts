@@ -35,7 +35,7 @@ namespace BangoLineTokenizerPrivate
 	static const TCHAR* const TypeNames[]      = { TEXT("bool"), TEXT("int"), TEXT("float"), TEXT("string"), TEXT("entity"), TEXT("text"), TEXT("vector2"), TEXT("vector3"), TEXT("void") };
 	static const TCHAR* const Constants[]      = { TEXT("true"), TEXT("false") };
 	static const TCHAR* const NilWord[]        = { TEXT("nil") };
-	static const TCHAR* const PlayerWord[]     = { TEXT("player") }; // the first local player's pawn: an entity, coloured like @john
+	static const TCHAR* const PlayerWord[]     = { TEXT("player"), TEXT("self") }; // the first local player's pawn, and the script's owner: entities, coloured like @john
 	static const TCHAR* const PreprocWords[]   = { TEXT("inputs"), TEXT("LOCTEXT_NAMESPACE"), TEXT("LARGE_SCRIPT_THRESHOLD") };
 	static const TCHAR* const Builtins[]       = { TEXT("IsNil"), TEXT("Count"), TEXT("Push"), TEXT("InsertAt"), TEXT("Pop"), TEXT("RemoveAt") };
 	static const TCHAR* const InvalidWords[]   = { TEXT("double") };

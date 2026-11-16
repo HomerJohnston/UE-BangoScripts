@@ -385,11 +385,12 @@ namespace BangoLexerPrivate
 				}
 			}
 
-			// `player` is an entity literal for the first local player's pawn (Bango::GetPlayerEntityName).
-			if (Kind == EBangoTokenKind::Identifier && Text.Equals(TEXT("player"), ESearchCase::CaseSensitive))
+			// `player` is an entity literal for the first local player's pawn (Bango::GetPlayerEntityName), and `self` one for
+			// the script's owner (Bango::GetSelfEntityName).
+			if (Kind == EBangoTokenKind::Identifier && (Text.Equals(TEXT("player"), ESearchCase::CaseSensitive) || Text.Equals(TEXT("self"), ESearchCase::CaseSensitive)))
 			{
 				FBangoToken& Token = AddToken(EBangoTokenKind::EntityLiteral, Loc);
-				Token.Text = Bango::GetPlayerEntityName();
+				Token.Text = Text[0] == TEXT('p') ? Bango::GetPlayerEntityName() : Bango::GetSelfEntityName();
 				return true;
 			}
 
@@ -672,7 +673,12 @@ namespace Bango
 		case EBangoTokenKind::EndOfFile: return TEXT("end of file");
 		case EBangoTokenKind::Identifier: return FString::Printf(TEXT("'%s'"), *Token.Text);
 		case EBangoTokenKind::StringLiteral: return TEXT("a string");
-		case EBangoTokenKind::EntityLiteral: return Bango::IsPlayerEntityName(Token.Text) ? FString(TEXT("'player'")) : FString::Printf(TEXT("'@%s'"), *Token.Text);
+		case EBangoTokenKind::EntityLiteral:
+			if (const TCHAR* Keyword = Bango::GetEntityKeyword(Token.Text))
+			{
+				return FString::Printf(TEXT("'%s'"), Keyword);
+			}
+			return FString::Printf(TEXT("'@%s'"), *Token.Text);
 		default: return FString::Printf(TEXT("'%s'"), *Token.Text);
 		}
 	}

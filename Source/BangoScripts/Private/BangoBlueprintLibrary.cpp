@@ -252,7 +252,7 @@ FBangoBlueprintArgs UBangoBlueprintLibrary::AddBangoArgVector3Array(const FBango
 	return AddArray(Args, Value, FBangoType::Vector3(), [](const FVector& Item) { return FBangoValue::MakeVector3(Item.X, Item.Y, Item.Z); });
 }
 
-FBangoScriptHandle UBangoBlueprintLibrary::SpawnBangoScriptWithArgs(UObject* WorldContextObject, const FString& ScriptPath, const FBangoBlueprintArgs& Args)
+FBangoScriptHandle UBangoBlueprintLibrary::SpawnBangoScriptWithArgs(UObject* WorldContextObject, const FString& ScriptPath, const FBangoBlueprintArgs& Args, UObject* Owner)
 {
 	UBangoScriptSubsystem* Subsystem = GetScripts(WorldContextObject, TEXT("Spawn Bango Script"));
 	if (!Subsystem)
@@ -274,10 +274,10 @@ FBangoScriptHandle UBangoBlueprintLibrary::SpawnBangoScriptWithArgs(UObject* Wor
 		Bango::ReportError(FString::Printf(TEXT("Spawn Bango Script '%s': %s"), *ScriptPath, *Error));
 		return FBangoScriptHandle();
 	}
-	return Subsystem->Spawn(ScriptPath, Values);
+	return Subsystem->Spawn(ScriptPath, Values, Owner);
 }
 
-FBangoScriptHandle UBangoBlueprintLibrary::SpawnBangoScriptAssetWithArgs(UObject* WorldContextObject, const UBangoScriptAsset* Script, const FBangoBlueprintArgs& Args)
+FBangoScriptHandle UBangoBlueprintLibrary::SpawnBangoScriptAssetWithArgs(UObject* WorldContextObject, const UBangoScriptAsset* Script, const FBangoBlueprintArgs& Args, UObject* Owner)
 {
 	UBangoScriptSubsystem* Subsystem = GetScripts(WorldContextObject, TEXT("Spawn Bango Script"));
 	if (!Subsystem)
@@ -304,7 +304,7 @@ FBangoScriptHandle UBangoBlueprintLibrary::SpawnBangoScriptAssetWithArgs(UObject
 		Bango::ReportError(FString::Printf(TEXT("Spawn Bango Script '%s': %s"), *Script->GetScriptName(), *Error));
 		return FBangoScriptHandle();
 	}
-	return Subsystem->Spawn(Script, Values);
+	return Subsystem->Spawn(Script, Values, Owner);
 }
 
 FBangoScriptHandle UBangoBlueprintLibrary::SpawnBangoInlineScript(UObject* WorldContextObject, const FBangoInlineScript& Script, const FBangoBlueprintArgs& Args, UObject* Owner)
@@ -331,10 +331,10 @@ FBangoScriptHandle UBangoBlueprintLibrary::SpawnBangoInlineScript(UObject* World
 	return Subsystem->Spawn(Script, Values, Owner);
 }
 
-FBangoScriptHandle UBangoBlueprintLibrary::SpawnBangoScript(UObject* WorldContextObject, const FString& ScriptPath)
+FBangoScriptHandle UBangoBlueprintLibrary::SpawnBangoScript(UObject* WorldContextObject, const FString& ScriptPath, UObject* Owner)
 {
 	UBangoScriptSubsystem* Subsystem = GetScripts(WorldContextObject, TEXT("Spawn Bango Script"));
-	return Subsystem ? Subsystem->Spawn(ScriptPath) : FBangoScriptHandle();
+	return Subsystem ? Subsystem->Spawn(ScriptPath, TArray<FBangoValue>(), Owner) : FBangoScriptHandle();
 }
 
 void UBangoBlueprintLibrary::TerminateBangoScript(UObject* WorldContextObject, FBangoScriptHandle Handle, bool bAndChildren)

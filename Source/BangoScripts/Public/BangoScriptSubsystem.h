@@ -76,33 +76,46 @@ public:
 	 * for entity arguments. The script runs straight away until it first pauses. Returns an invalid handle and
 	 * shows an error if the script can't be found, doesn't compile, the arguments don't fit its parameters, or
 	 * one of its globals conflicts with an existing global.
+	 *
+	 * Owner, if given, is the actor the script belongs to: what `self` means in it (see GetScriptOwner). It must be an
+	 * actor with a Bango ID; anything else spawns as usual, and `self` stops the script with an error saying why.
 	 */
-	FBangoScriptHandle Spawn(const FString& ScriptPath, const TArray<FBangoValue>& Args = TArray<FBangoValue>());
+	FBangoScriptHandle Spawn(const FString& ScriptPath, const TArray<FBangoValue>& Args = TArray<FBangoValue>(), const UObject* Owner = nullptr);
 
 	/**
 	 * Spawn, for callers that report errors themselves (the Exec command): an error starting the script is put in
 	 * OutError instead of being shown. An error the script hits once it's running is reported as usual.
 	 */
 	FBangoScriptHandle Spawn(const FString& ScriptPath, const TArray<FBangoValue>& Args, FString& OutError);
+	FBangoScriptHandle Spawn(const FString& ScriptPath, const TArray<FBangoValue>& Args, const UObject* Owner, FString& OutError);
 
 	/** Spawn, for a script asset already in hand (like a Spawn Bango Script node's). Null shows an error. */
-	FBangoScriptHandle Spawn(const UBangoScriptAsset* Script, const TArray<FBangoValue>& Args = TArray<FBangoValue>());
+	FBangoScriptHandle Spawn(const UBangoScriptAsset* Script, const TArray<FBangoValue>& Args = TArray<FBangoValue>(), const UObject* Owner = nullptr);
 
 	/** Spawn of a script asset, for callers that report errors themselves (OutError, as above). */
 	FBangoScriptHandle Spawn(const UBangoScriptAsset* Script, const TArray<FBangoValue>& Args, FString& OutError);
+	FBangoScriptHandle Spawn(const UBangoScriptAsset* Script, const TArray<FBangoValue>& Args, const UObject* Owner, FString& OutError);
 
 	/**
 	 * Spawn of a script path (reporting errors in OutError) as a child of the running script ParentId: the Exec
-	 * command's. Terminate with bAndChildren stops a script's children, and theirs.
+	 * command's. Terminate with bAndChildren stops a script's children, and theirs. The child belongs to the
+	 * parent's owner, so `self` is the same actor in both.
 	 */
 	FBangoScriptHandle SpawnChild(int64 ParentId, const FString& ScriptPath, const TArray<FBangoValue>& Args, FString& OutError);
+
+	/**
+	 * Who `self` is in a script spawned with Owner: its Bango ID name, or (when it can't be used) why not: Owner is
+	 * null, isn't an actor (a component should pass its owning actor), or has no Bango ID component or name.
+	 */
+	static FBangoScriptOwner GetScriptOwner(const UObject* Owner);
 
 	/**
 	 * Starts an inline script (an FBangoInlineScript property, spec section 15), as Spawn does a script asset: Args fill
 	 * its #set inputs line, in order, and it runs straight away until it first pauses. Its compiled program is kept
 	 * (FBangoModule::GetInlineProgram), so the same text isn't compiled again. Owner, the object it belongs to (usually
-	 * `this`), only names it in errors and the debugger ("Door_1 (inline script)"). An empty script does nothing and
-	 * gives an invalid handle, without an error. Its text is saved with it, so SaveState saves it.
+	 * `this`), names it in errors and the debugger ("Door_1 (inline script)"), and is what `self` means, as for Spawn.
+	 * An empty script does nothing and gives an invalid handle, without an error. Its text is saved with it, so
+	 * SaveState saves it.
 	 */
 	FBangoScriptHandle Spawn(const FBangoInlineScript& Script, const TArray<FBangoValue>& Args = TArray<FBangoValue>(), const UObject* Owner = nullptr);
 	/** Spawn of an inline script, for callers that report errors themselves (OutError, as above). */
@@ -123,7 +136,8 @@ public:
 	 * an error shown) if it doesn't compile or can't start. It's compiled on every call. Its text is kept with it, so
 	 * SaveState saves it and LoadState can restore it; it isn't hot reloaded, since it has no file.
 	 */
-	FBangoScriptHandle SpawnFromSource(const FString& Source, const FString& Name = TEXT("Script"), const TArray<FBangoValue>& Args = TArray<FBangoValue>());
+	FBangoScriptHandle SpawnFromSource(const FString& Source, const FString& Name = TEXT("Script"), const TArray<FBangoValue>& Args = TArray<FBangoValue>(),
+		const UObject* Owner = nullptr);
 
 	/**
 	 * Runs a condition registered with Bango::RegisterCondition and gives its answer. It runs straight away, to the end,
@@ -223,6 +237,8 @@ private:
 	 * them, so Terminate with bAndChildren still finds a script's children's children after its children have ended.
 	 */
 	TMap<int32, int32> EndedParents;
+	/** Spawn of a script path, belonging to Owner (FBangoInstance::SetOwner). */
+	FBangoScriptHandle SpawnPath(const FString& ScriptPath, const TArray<FBangoValue>& Args, const FBangoScriptOwner& Owner, FString* OutError);
 	/** The parent StartScript gives the script it starts (SpawnChild), or 0. */
 	int32 PendingParentId = 0;
 	/** The script that started this one, whether it's running or has ended (0 if none or unknown). */

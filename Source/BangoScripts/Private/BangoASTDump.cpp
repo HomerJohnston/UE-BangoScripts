@@ -303,7 +303,12 @@ namespace Bango
 			case EBangoLiteralKind::Double: return FormatDouble(E.DoubleValue);
 			case EBangoLiteralKind::String: return QuoteString(E.StringValue);
 			case EBangoLiteralKind::Nil:    return TEXT("nil");
-			case EBangoLiteralKind::Entity: return Bango::IsPlayerEntityName(E.StringValue) ? FString(TEXT("player")) : TEXT("@") + E.StringValue;
+			case EBangoLiteralKind::Entity:
+				if (const TCHAR* Keyword = Bango::GetEntityKeyword(E.StringValue))
+				{
+					return Keyword;
+				}
+				return TEXT("@") + E.StringValue;
 			case EBangoLiteralKind::Text:
 			{
 				// (text "Key" "Source"), with the namespace first and the notes last when they're given; (invtext "Source")

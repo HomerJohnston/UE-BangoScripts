@@ -46,6 +46,18 @@ struct BANGOSCRIPTS_API FBangoRuntimeError
 	FString ToString() const;
 };
 
+/**
+ * Who a running script belongs to: the actor `self` means (FBangoInstance::SetOwner). Scripts it spawns, and its
+ * spawn blocks, belong to the same actor.
+ */
+struct FBangoScriptOwner
+{
+	/** The owning actor's Bango ID name, which `self` gives. Empty when `self` can't be used, and Problem says why. */
+	FString BangoName;
+	/** Why `self` can't be used (no owner, an owner with no Bango ID, ...), or empty for the usual "no owner" message. */
+	FString Problem;
+};
+
 /** What Resume needs from the outside world. */
 class FBangoInstance;
 
@@ -133,6 +145,14 @@ public:
 	bool StartSpawned(const FBangoInstance& Parent, int32 BlockIP, int64 InId, FBangoRuntimeError& OutError);
 
 	/**
+	 * The actor the script belongs to, which `self` means. Set it before Start (an input's default can be `self`); Start
+	 * keeps it, StartSpawned copies the parent's, and it's saved with the instance. Without one, `self` stops the script
+	 * with an error when it's used.
+	 */
+	void SetOwner(const FBangoScriptOwner& InOwner) { Owner = InOwner; }
+	const FBangoScriptOwner& GetOwner() const { return Owner; }
+
+	/**
 	 * Runs until the script pauses on a latent command, finishes or fails. Returns the new status.
 	 * Does nothing unless the status is Ready or Waiting.
 	 */
@@ -216,6 +236,13 @@ private:
 	bool CheckArguments(TConstArrayView<FBangoValue> Args, TArray<FBangoValue>& OutValues);
 	bool Execute(const FBangoExecContext& Context);
 	bool RuntimeFail(const FString& Message);
+	/** Why `self` can't be used here (the owner's Problem, or that there's no owner). */
+	FString GetSelfProblem() const;
+	/**
+	 * Value with each `self` in it (Bango::GetSelfEntityName, alone or in an array) swapped for the owner's Bango ID.
+	 * False if there's a `self` and no owner to swap it for.
+	 */
+	bool ResolveSelf(const FBangoValue& Value, FBangoValue& OutValue) const;
 
 	// Stack helpers
 	FBangoValue PopValue();
@@ -243,6 +270,8 @@ private:
 
 	int64 Id = 0;
 	EBangoInstanceStatus Status = EBangoInstanceStatus::None;
+	/** Who `self` is (SetOwner). Saved. */
+	FBangoScriptOwner Owner;
 	FBangoRuntimeError Error;
 
 	TArray<FBangoFrame> Frames;

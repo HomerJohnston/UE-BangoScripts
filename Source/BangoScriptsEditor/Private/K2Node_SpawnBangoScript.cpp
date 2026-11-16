@@ -21,6 +21,7 @@
 
 const FName UK2Node_SpawnBangoScript::ScriptPinName(TEXT("Script"));
 const FName UK2Node_SpawnBangoScript::HandlePinName(TEXT("Handle"));
+const FName UK2Node_SpawnBangoScript::OwnerPinName(TEXT("__BangoOwner"));
 
 bool UK2Node_SpawnBangoScript::LoadParams(TArray<FBangoScriptParamInfo>& OutParams, FString& OutError) const
 {
@@ -61,7 +62,8 @@ bool UK2Node_SpawnBangoScript::IsParamPin(const UEdGraphPin* Pin) const
 {
 	return Pin && Pin->Direction == EGPD_Input
 		&& Pin->PinName != UEdGraphSchema_K2::PN_Execute
-		&& Pin->PinName != ScriptPinName;
+		&& Pin->PinName != ScriptPinName
+		&& Pin->PinName != OwnerPinName;
 }
 
 void UK2Node_SpawnBangoScript::AllocateDefaultPins()
@@ -75,6 +77,11 @@ void UK2Node_SpawnBangoScript::AllocateDefaultPins()
 	UEdGraphPin* ScriptPin = CreatePin(EGPD_Input, UEdGraphSchema_K2::PC_Object, UBangoScriptAsset::StaticClass(), ScriptPinName);
 	ScriptPin->DefaultObject = Script;
 	ScriptPin->PinToolTip = TEXT("The Bango Script to spawn. Must be picked here, not connected: its parameters become this node's pins.");
+
+	UEdGraphPin* OwnerPin = CreatePin(EGPD_Input, UEdGraphSchema_K2::PC_Object, UObject::StaticClass(), OwnerPinName);
+	OwnerPin->PinFriendlyName = LOCTEXT("OwnerPin", "Owner");
+	OwnerPin->PinToolTip = TEXT("The actor the script belongs to: what self means in it. It needs a Bango ID for self to work. Self while unconnected (in a component, connect its owning actor).");
+	OwnerPin->bDefaultValueIsIgnored = true; // no object picker: unconnected means Self
 
 	UEdGraphPin* HandlePin = CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Struct, FBangoScriptHandle::StaticStruct(), HandlePinName);
 	HandlePin->PinToolTip = TEXT("The spawned script, for Terminate Bango Script and Is Bango Script Running. Invalid if the script couldn't start.");
@@ -354,6 +361,18 @@ void UK2Node_SpawnBangoScript::ExpandNode(FKismetCompilerContext& CompilerContex
 	UK2Node_Self* SelfNode = CompilerContext.SpawnIntermediateNode<UK2Node_Self>(this, SourceGraph);
 	SelfNode->AllocateDefaultPins();
 	Schema->TryCreateConnection(SelfNode->FindPinChecked(UEdGraphSchema_K2::PN_Self), SpawnNode->FindPinChecked(TEXT("WorldContextObject")));
+
+	// Owner: what's connected, or Self.
+	UEdGraphPin* OwnerPin = FindPinChecked(OwnerPinName);
+	UEdGraphPin* SpawnOwnerPin = SpawnNode->FindPinChecked(TEXT("Owner"));
+	if (OwnerPin->LinkedTo.Num() > 0)
+	{
+		CompilerContext.MovePinLinksToIntermediate(*OwnerPin, *SpawnOwnerPin);
+	}
+	else
+	{
+		Schema->TryCreateConnection(SelfNode->FindPinChecked(UEdGraphSchema_K2::PN_Self), SpawnOwnerPin);
+	}
 
 	CompilerContext.MovePinLinksToIntermediate(*GetExecPin(), *SpawnNode->GetExecPin());
 	CompilerContext.MovePinLinksToIntermediate(*FindPinChecked(UEdGraphSchema_K2::PN_Then), *SpawnNode->GetThenPin());

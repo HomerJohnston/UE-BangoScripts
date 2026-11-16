@@ -6,6 +6,8 @@
 #include "BangoActorRegistry.h"
 #include "BangoCompiler.h"
 #include "BangoGlobalsSubsystem.h"
+#include "BangoIDActorComponent.h"
+#include "GameFramework/Actor.h"
 #include "BangoLog.h"
 #include "BangoSettings.h"
 #include "Engine/Engine.h"
@@ -166,15 +168,53 @@ FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FBangoInlineScript& Script
 	Running->Path = Name;
 	Running->bFromSource = true; // saved with its text; not hot reloaded (it has no file)
 	Running->Source = Script.Source;
+	Running->Instance.SetOwner(GetScriptOwner(Owner));
 	return StartScript(Program, Running, Args, &OutError);
 }
 
 FBangoScriptHandle UBangoScriptSubsystem::SpawnChild(int64 ParentId, const FString& ScriptPath, const TArray<FBangoValue>& Args, FString& OutError)
 {
+	// The child belongs to the same actor as its parent.
+	const TSharedPtr<FRunningScript>* Parent = Scripts.Find(ParentId);
+	const FBangoScriptOwner Owner = Parent && Parent->IsValid() ? (*Parent)->Instance.GetOwner() : FBangoScriptOwner();
 	PendingParentId = (int32)ParentId;
-	const FBangoScriptHandle Handle = Spawn(ScriptPath, Args, OutError);
+	OutError.Reset();
+	const FBangoScriptHandle Handle = SpawnPath(ScriptPath, Args, Owner, &OutError);
 	PendingParentId = 0; // if it never got as far as StartScript
 	return Handle;
+}
+
+FBangoScriptOwner UBangoScriptSubsystem::GetScriptOwner(const UObject* Owner)
+{
+	FBangoScriptOwner Result;
+	if (!Owner)
+	{
+		return Result; // the instance's own "no owner" message
+	}
+	const AActor* Actor = Cast<AActor>(Owner);
+	if (!Actor)
+	{
+		const UActorComponent* Component = Cast<UActorComponent>(Owner);
+		Result.Problem = Component && Component->GetOwner()
+			? FString::Printf(TEXT("this script's owner, '%s', is a component, and self is always an actor. Pass its actor, '%s', as the Owner instead."),
+				*Owner->GetName(), *Component->GetOwner()->GetName())
+			: FString::Printf(TEXT("this script's owner, '%s', isn't an actor, and self is always an actor. Pass the actor it belongs to as the Owner instead."), *Owner->GetName());
+		return Result;
+	}
+	const UBangoIDActorComponent* ID = Actor->FindComponentByClass<UBangoIDActorComponent>();
+	if (!ID)
+	{
+		Result.Problem = FString::Printf(TEXT("this script's owner, '%s', has no Bango ID component. self is the owner's Bango ID, so add one and give it a name."), *Actor->GetName());
+	}
+	else if (ID->BangoName.IsEmpty())
+	{
+		Result.Problem = FString::Printf(TEXT("this script's owner, '%s', has a Bango ID component with no name. self is the owner's Bango ID, so give it one."), *Actor->GetName());
+	}
+	else
+	{
+		Result.BangoName = ID->BangoName.ToString();
+	}
+	return Result;
 }
 
 int32 UBangoScriptSubsystem::GetParentId(int32 Id) const
@@ -392,20 +432,50 @@ void UBangoScriptSubsystem::ReloadChangedScripts()
 
 FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FString& ScriptPath, const TArray<FBangoValue>& Args, FString& OutError)
 {
+	return Spawn(ScriptPath, Args, nullptr, OutError);
+}
+
+FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FString& ScriptPath, const TArray<FBangoValue>& Args, const UObject* Owner, FString& OutError)
+{
 	OutError.Reset();
+	return SpawnPath(ScriptPath, Args, GetScriptOwner(Owner), &OutError);
+}
+
+FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FString& ScriptPath, const TArray<FBangoValue>& Args, const UObject* Owner)
+{
+	return SpawnPath(ScriptPath, Args, GetScriptOwner(Owner), nullptr);
+}
+
+FBangoScriptHandle UBangoScriptSubsystem::SpawnPath(const FString& ScriptPath, const TArray<FBangoValue>& Args, const FBangoScriptOwner& Owner, FString* OutError)
+{
 	FBangoModule& Module = FBangoModule::Get();
 	TSharedPtr<const FBangoProgram> Program;
 	FString DisplayPath;
-	if (!Module.GetScriptCache().GetProgram(ScriptPath, Module.GetCommands(), Program, DisplayPath, OutError))
+	FString Error;
+	if (!Module.GetScriptCache().GetProgram(ScriptPath, Module.GetCommands(), Program, DisplayPath, Error))
 	{
+		if (OutError)
+		{
+			*OutError = Error;
+		}
+		else
+		{
+			Bango::ReportError(Error);
+		}
 		return FBangoScriptHandle();
 	}
 	TSharedPtr<FRunningScript> Script = MakeShared<FRunningScript>();
 	Script->Path = DisplayPath;
-	return StartScript(Program, Script, Args, &OutError);
+	Script->Instance.SetOwner(Owner);
+	return StartScript(Program, Script, Args, OutError);
 }
 
 FBangoScriptHandle UBangoScriptSubsystem::Spawn(const UBangoScriptAsset* ScriptAsset, const TArray<FBangoValue>& Args, FString& OutError)
+{
+	return Spawn(ScriptAsset, Args, nullptr, OutError);
+}
+
+FBangoScriptHandle UBangoScriptSubsystem::Spawn(const UBangoScriptAsset* ScriptAsset, const TArray<FBangoValue>& Args, const UObject* Owner, FString& OutError)
 {
 	OutError.Reset();
 	if (!ScriptAsset)
@@ -422,13 +492,14 @@ FBangoScriptHandle UBangoScriptSubsystem::Spawn(const UBangoScriptAsset* ScriptA
 	}
 	TSharedPtr<FRunningScript> Script = MakeShared<FRunningScript>();
 	Script->Path = DisplayPath;
+	Script->Instance.SetOwner(GetScriptOwner(Owner));
 	return StartScript(Program, Script, Args, &OutError);
 }
 
-FBangoScriptHandle UBangoScriptSubsystem::Spawn(const UBangoScriptAsset* ScriptAsset, const TArray<FBangoValue>& Args)
+FBangoScriptHandle UBangoScriptSubsystem::Spawn(const UBangoScriptAsset* ScriptAsset, const TArray<FBangoValue>& Args, const UObject* Owner)
 {
 	FString Error;
-	const FBangoScriptHandle Handle = Spawn(ScriptAsset, Args, Error);
+	const FBangoScriptHandle Handle = Spawn(ScriptAsset, Args, Owner, Error);
 	if (!Handle.IsValid() && !Error.IsEmpty())
 	{
 		Bango::ReportError(Error);
@@ -460,22 +531,6 @@ int32 UBangoScriptSubsystem::AllocateId()
 	return NextId++;
 }
 
-FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FString& ScriptPath, const TArray<FBangoValue>& Args)
-{
-	FBangoModule& Module = FBangoModule::Get();
-	TSharedPtr<const FBangoProgram> Program;
-	FString DisplayPath;
-	FString Error;
-	if (!Module.GetScriptCache().GetProgram(ScriptPath, Module.GetCommands(), Program, DisplayPath, Error))
-	{
-		Bango::ReportError(Error);
-		return FBangoScriptHandle();
-	}
-	TSharedPtr<FRunningScript> Script = MakeShared<FRunningScript>();
-	Script->Path = DisplayPath;
-	return StartScript(Program, Script, Args);
-}
-
 bool UBangoScriptSubsystem::CompileFromSource(const FString& Source, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError)
 {
 	TSharedPtr<FBangoProgram> Compiled = MakeShared<FBangoProgram>();
@@ -489,7 +544,7 @@ bool UBangoScriptSubsystem::CompileFromSource(const FString& Source, const FStri
 	return true;
 }
 
-FBangoScriptHandle UBangoScriptSubsystem::SpawnFromSource(const FString& Source, const FString& Name, const TArray<FBangoValue>& Args)
+FBangoScriptHandle UBangoScriptSubsystem::SpawnFromSource(const FString& Source, const FString& Name, const TArray<FBangoValue>& Args, const UObject* Owner)
 {
 	const FString ScriptName = Name.IsEmpty() ? FString(TEXT("Script")) : Name;
 	TSharedPtr<const FBangoProgram> Program;
@@ -503,6 +558,7 @@ FBangoScriptHandle UBangoScriptSubsystem::SpawnFromSource(const FString& Source,
 	Script->Path = ScriptName;
 	Script->bFromSource = true;
 	Script->Source = Source;
+	Script->Instance.SetOwner(GetScriptOwner(Owner));
 	return StartScript(Program, Script, Args);
 }
 

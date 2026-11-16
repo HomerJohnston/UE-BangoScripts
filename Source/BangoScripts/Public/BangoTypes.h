@@ -240,6 +240,16 @@ namespace Bango
 	BANGOSCRIPTS_API const FString& GetPlayerEntityName();
 	BANGOSCRIPTS_API bool IsPlayerEntityName(const FString& Name);
 
+	/**
+	 * The `self` keyword: an entity literal with this reserved name. It never reaches a running script's values: as it's
+	 * used, the instance swaps it for its owner's Bango ID (FBangoInstance::SetOwner), so a `self` kept in a variable or
+	 * passed to another script still means this script's owner.
+	 */
+	BANGOSCRIPTS_API const FString& GetSelfEntityName();
+	BANGOSCRIPTS_API bool IsSelfEntityName(const FString& Name);
+	/** "player" or "self" for those keywords' reserved entity names, otherwise null. How they're written and shown. */
+	BANGOSCRIPTS_API const TCHAR* GetEntityKeyword(const FString& Name);
+
 	/** True if the name starts with '_'. Command names can't; variable names (locals and globals alike) may. */
 	BANGOSCRIPTS_API bool IsLocalName(const FString& Name);
 

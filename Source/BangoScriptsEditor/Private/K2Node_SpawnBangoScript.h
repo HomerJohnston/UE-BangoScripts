@@ -19,6 +19,7 @@ class UBangoScriptAsset;
  *  - Optional parameters count as "not passed" (so the script uses its own default) while their pin is
  *    unconnected and still shows the script's default.
  *  - Entities are Actor pins; an unconnected or null actor passes nil.
+ * The Owner pin is the actor the script belongs to, which `self` means in it: Self while it's unconnected.
  * When the script's inputs line changes, right-click the node and choose Refresh Node. Wires on pins
  * whose name and type didn't change are kept.
  *
@@ -49,6 +50,8 @@ public:
 private:
 	static const FName ScriptPinName;
 	static const FName HandlePinName;
+	/** The actor the script belongs to (`self` in it). Not "Owner", so it can't clash with a script parameter of that name. */
+	static const FName OwnerPinName;
 
 	bool LoadParams(TArray<FBangoScriptParamInfo>& OutParams, FString& OutError) const;
 	bool IsParamPin(const UEdGraphPin* Pin) const;

@@ -70,9 +70,10 @@ public:
 	 * Spawn Bango Script node instead: it shows a pin for each of the script's parameters.
 	 * ScriptPath is a Bango Script asset's path: full ("/Game/Quests/Intro") or relative to /Game ("Quests/Intro").
 	 * The script runs straight away until it first pauses. Errors are shown on screen and return an invalid handle.
+	 * Owner is the actor the script belongs to, which `self` means in it (Self, unless something else is connected).
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Bango", meta = (WorldContext = "WorldContextObject", DisplayName = "Spawn Bango Script (Dynamic Path)"))
-	static FBangoScriptHandle SpawnBangoScript(UObject* WorldContextObject, const FString& ScriptPath);
+	UFUNCTION(BlueprintCallable, Category = "Bango", meta = (WorldContext = "WorldContextObject", DefaultToSelf = "Owner", DisplayName = "Spawn Bango Script (Dynamic Path)"))
+	static FBangoScriptHandle SpawnBangoScript(UObject* WorldContextObject, const FString& ScriptPath, UObject* Owner);
 
 	// ---- Bango ID names: converted to and from strings by themselves where one is wired to the other ----
 
@@ -156,22 +157,23 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Add Bango Arg (Vector3 Array)"))
 	static FBangoBlueprintArgs AddBangoArgVector3Array(const FBangoBlueprintArgs& Args, const TArray<FVector>& Value);
 
-	/** Spawns ScriptPath with collected arguments. */
-	UFUNCTION(BlueprintCallable, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
-	static FBangoScriptHandle SpawnBangoScriptWithArgs(UObject* WorldContextObject, const FString& ScriptPath, const FBangoBlueprintArgs& Args);
+	/** Spawns ScriptPath with collected arguments, belonging to Owner. */
+	UFUNCTION(BlueprintCallable, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true", DefaultToSelf = "Owner"))
+	static FBangoScriptHandle SpawnBangoScriptWithArgs(UObject* WorldContextObject, const FString& ScriptPath, const FBangoBlueprintArgs& Args, UObject* Owner);
 
-	/** Spawns a script asset with collected arguments (the Spawn Bango Script node). */
 	/**
 	 * Starts an inline script (a Bango Inline Script variable or property, spec section 15). Args fill its #set inputs
 	 * line, in order: make them with Make Bango Args and the Add Bango Arg nodes (leave it unconnected for a script with
 	 * no parameters). They're checked when it starts: if they don't fit, it doesn't start, and the error says why. An
-	 * empty script does nothing. Owner names it in errors and the debugger (Self, unless something else is connected).
+	 * empty script does nothing. Owner is the actor it belongs to, which `self` means in it; it also names it in errors
+	 * and the debugger (Self, unless something else is connected).
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Bango", meta = (WorldContext = "WorldContextObject", AutoCreateRefTerm = "Args", DefaultToSelf = "Owner", DisplayName = "Spawn Bango Inline Script"))
 	static FBangoScriptHandle SpawnBangoInlineScript(UObject* WorldContextObject, const FBangoInlineScript& Script, const FBangoBlueprintArgs& Args, UObject* Owner);
 
-	UFUNCTION(BlueprintCallable, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true"))
-	static FBangoScriptHandle SpawnBangoScriptAssetWithArgs(UObject* WorldContextObject, const UBangoScriptAsset* Script, const FBangoBlueprintArgs& Args);
+	/** Spawns a script asset with collected arguments, belonging to Owner (the Spawn Bango Script node). */
+	UFUNCTION(BlueprintCallable, Category = "Bango|Internal", meta = (BlueprintInternalUseOnly = "true", DefaultToSelf = "Owner"))
+	static FBangoScriptHandle SpawnBangoScriptAssetWithArgs(UObject* WorldContextObject, const UBangoScriptAsset* Script, const FBangoBlueprintArgs& Args, UObject* Owner);
 
 	/**
 	 * Stops a running script. With And Children, also stops the scripts it started (with Exec or spawn) that are still
