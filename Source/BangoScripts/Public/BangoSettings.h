@@ -31,10 +31,10 @@ public:
 	int32 MaxCallDepth = 200;
 
 	/**
-	 * Large Script Threshold: the graph editor saves a script with fewer nodes than this compact, without section
-	 * headings (// ==== ...) or node metadata (//@), so it reads like plain code; its nodes are laid out afresh each
-	 * time it's opened. From this many nodes on, it's saved with both. 0: always with both. A script's own
-	 * `#set LARGE_SCRIPT_THRESHOLD` line (SCRIPT CONFIG in the editor) overrides this.
+	 * Large Script Threshold: when nodes are moved in the graph editor in a script with at least this many nodes, the
+	 * script gets a `#set USES_GRAPH_EDITOR` line, and from then on it's saved with section headings (// ==== ...) and
+	 * node metadata (//@), so its layout is kept. Until then it's saved compact, so it reads like plain code, and its
+	 * nodes are laid out afresh each time it's opened. 0: moving any node adds the line.
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "Editor", meta = (ClampMin = "0"))
 	int32 LargeScriptThreshold = 3;

@@ -293,11 +293,12 @@ namespace BangoParserPrivate
 
 		/**
 		 * A settings line at the top of the script: `#set inputs (...)`, `#set LOCTEXT_NAMESPACE "Name"` or
-		 * `#set LARGE_SCRIPT_THRESHOLD 5`. The settings may come in any order, before or after the inputs line, each once.
+		 * `#set USES_GRAPH_EDITOR` (a flag, with nothing after it). The settings may come in any order, before or after
+		 * the inputs line, each once.
 		 */
 		bool ParseSet()
 		{
-			static const TCHAR* Usage = TEXT("Bango's settings are '#set inputs (...)', '#set LOCTEXT_NAMESPACE \"Name\"' and '#set LARGE_SCRIPT_THRESHOLD 5'");
+			static const TCHAR* Usage = TEXT("Bango's settings are '#set inputs (...)', '#set LOCTEXT_NAMESPACE \"Name\"' and '#set USES_GRAPH_EDITOR'");
 			const FBangoToken& First = Cur();
 			const bool bFirstItem = bParamsAllowed;
 			bParamsAllowed = false;
@@ -336,16 +337,16 @@ namespace BangoParserPrivate
 			}
 
 			const bool bNamespace = IsLocNamespaceName(Name);
-			const bool bThreshold = IsSettingName(Name, TEXT("LARGE_SCRIPT_THRESHOLD"));
-			if (!bNamespace && !bThreshold)
+			const bool bUsesGraphEditor = IsSettingName(Name, TEXT("USES_GRAPH_EDITOR"));
+			if (!bNamespace && !bUsesGraphEditor)
 			{
 				return Fail(Name.Loc, FString::Printf(TEXT("%s, but found %s."), Usage, *Bango::DescribeToken(Name)));
 			}
-			const TCHAR* What = bNamespace ? TEXT("#set LOCTEXT_NAMESPACE") : TEXT("#set LARGE_SCRIPT_THRESHOLD");
+			const TCHAR* What = bNamespace ? TEXT("#set LOCTEXT_NAMESPACE") : TEXT("#set USES_GRAPH_EDITOR");
 			const bool bOnlyParamsBefore = Script.Functions.Num() == 0
 				&& (Script.TopLevel.Num() == 0 || (Script.TopLevel.Num() == 1 && Script.GetParams()));
-			const FBangoSourceLocation& Earlier = bNamespace ? Script.LocNamespaceLoc : Script.LargeScriptThresholdLoc;
-			if (bNamespace ? Script.bHasLocNamespace : Script.bHasLargeScriptThreshold)
+			const FBangoSourceLocation& Earlier = bNamespace ? Script.LocNamespaceLoc : Script.UsesGraphEditorLoc;
+			if (bNamespace ? Script.bHasLocNamespace : Script.bUsesGraphEditor)
 			{
 				return Fail(First.Loc, FString::Printf(TEXT("A script can only have one '%s' (the first is on line %d)."), What, Earlier.Line));
 			}
@@ -354,40 +355,35 @@ namespace BangoParserPrivate
 				return Fail(First.Loc, FString::Printf(TEXT("'%s' must come at the top of the script, before any statement or function (only the other #set lines may come before it)."), What));
 			}
 			Advance();
+			if (bUsesGraphEditor)
+			{
+				// A flag: there or not, with nothing after it.
+				if (!FinishDirectiveLine(First, What))
+				{
+					return false;
+				}
+				Script.bUsesGraphEditor = true;
+				Script.UsesGraphEditorLoc = First.Loc;
+				return true;
+			}
 			const FBangoToken& Value = Cur();
 			const FBangoSourceLocation& ValueLoc = Value.Loc.Line == First.Loc.Line ? Value.Loc : Name.Loc;
-			if (bNamespace)
+			if (Value.Kind != EBangoTokenKind::StringLiteral || Value.Loc.Line != First.Loc.Line)
 			{
-				if (Value.Kind != EBangoTokenKind::StringLiteral || Value.Loc.Line != First.Loc.Line)
-				{
-					return Fail(ValueLoc, TEXT("Write the namespace as a string: #set LOCTEXT_NAMESPACE \"Bango.Intro\""));
-				}
-				if (Value.Text.IsEmpty())
-				{
-					return Fail(Value.Loc, TEXT("The namespace can't be empty."));
-				}
+				return Fail(ValueLoc, TEXT("Write the namespace as a string: #set LOCTEXT_NAMESPACE \"Bango.Intro\""));
 			}
-			else if (Value.Kind != EBangoTokenKind::IntLiteral || Value.Loc.Line != First.Loc.Line || Value.IntValue > MAX_int32)
+			if (Value.Text.IsEmpty())
 			{
-				return Fail(ValueLoc, TEXT("Write the threshold as a whole number of nodes, 0 or more: #set LARGE_SCRIPT_THRESHOLD 5"));
+				return Fail(Value.Loc, TEXT("The namespace can't be empty."));
 			}
 			Advance();
 			if (!FinishDirectiveLine(First, What))
 			{
 				return false;
 			}
-			if (bNamespace)
-			{
-				Script.bHasLocNamespace = true;
-				Script.LocNamespace = Value.Text;
-				Script.LocNamespaceLoc = First.Loc;
-			}
-			else
-			{
-				Script.bHasLargeScriptThreshold = true;
-				Script.LargeScriptThreshold = (int32)Value.IntValue;
-				Script.LargeScriptThresholdLoc = First.Loc;
-			}
+			Script.bHasLocNamespace = true;
+			Script.LocNamespace = Value.Text;
+			Script.LocNamespaceLoc = First.Loc;
 			return true;
 		}
 

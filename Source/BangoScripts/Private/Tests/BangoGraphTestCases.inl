@@ -128,9 +128,10 @@ static FString BangoCheckGraphRoundTrip(const TCHAR* Name, const FString& Source
 		}
 		Reparsed.Functions = MoveTemp(Reordered);
 	}
-	// Compact text has no reroutes (they're only metadata).
+	// Compact text has no reroutes (they're only metadata), and no #set USES_GRAPH_EDITOR (it asks for the metadata).
 	auto WithoutReroutes = [](FString Dump)
 	{
+		Dump.ReplaceInline(TEXT("(usesGraphEditor) "), TEXT(""), ESearchCase::CaseSensitive);
 		Dump.ReplaceInline(TEXT("(reroute) "), TEXT(""), ESearchCase::CaseSensitive);
 		Dump.ReplaceInline(TEXT(" (reroute)"), TEXT(""), ESearchCase::CaseSensitive);
 		Dump.ReplaceInline(TEXT("(reroute)"), TEXT(""), ESearchCase::CaseSensitive);
@@ -332,29 +333,29 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		FString WriteError;
 		const bool bBuilt = Bango::BuildGraph(Source, TEXT("small.bango"), Doc, Error);
 		Expect(bBuilt && Bango::CountGraphNodes(Doc) == 3, FString(TEXT("threshold: two statements and a reroute are three nodes: ")) + Error.ToString());
+		// Following the script's flag (the editor's saves): without #set USES_GRAPH_EDITOR, compact.
 		FBangoGraphWriteOptions Options;
-		Options.LargeScriptThreshold = 4;
-		Expect(bBuilt && Bango::IsWrittenCompact(Doc, Options) && Bango::WriteGraphText(Doc, Text, WriteError, Options) && Text == FString(Compact),
-			FString(TEXT("threshold: fewer nodes than the project's threshold, written compact:\n")) + Text);
-		Options.LargeScriptThreshold = 3;
-		Expect(bBuilt && !Bango::IsWrittenCompact(Doc, Options) && Bango::WriteGraphText(Doc, Text, WriteError, Options) && Text.Contains(TEXT("//@1(0, 0)")) && Text.Contains(TEXT("// ============ SCRIPT BODY")),
-			FString(TEXT("threshold: as many nodes as the threshold, written in full:\n")) + Text);
-		Options.LargeScriptThreshold = 0;
-		Expect(bBuilt && !Bango::IsWrittenCompact(Doc, Options), TEXT("threshold: 0 is always in full"));
-		Options.bCompact = true;
-		Expect(bBuilt && Bango::IsWrittenCompact(Doc, Options), TEXT("threshold: bCompact is always compact"));
+		Options.bFollowUsesGraphEditor = true;
+		Expect(bBuilt && !Doc.bUsesGraphEditor && Bango::IsWrittenCompact(Doc, Options) && Bango::WriteGraphText(Doc, Text, WriteError, Options) && Text == FString(Compact),
+			FString(TEXT("uses graph editor: without the flag, written compact:\n")) + Text);
+		Expect(bBuilt && !Bango::IsWrittenCompact(Doc, FBangoGraphWriteOptions()), TEXT("uses graph editor: not following the flag, always in full"));
 
-		// The script's own threshold overrides the project's, and is written back.
+		// With the flag: in full, and the flag is written back, after the namespace.
 		FBangoGraphDocument Own;
-		const bool bOwnBuilt = Bango::BuildGraph(FString(TEXT("#set LARGE_SCRIPT_THRESHOLD 0\n")) + Source, TEXT("own.bango"), Own, Error);
-		FBangoGraphWriteOptions Project;
-		Project.LargeScriptThreshold = 10;
-		Expect(bOwnBuilt && Own.bHasLargeScriptThreshold && Own.LargeScriptThreshold == 0 && !Bango::IsWrittenCompact(Own, Project), FString(TEXT("threshold: the script's own 0 beats the project's 10: ")) + Error.ToString());
-		Expect(bOwnBuilt && Bango::WriteGraphText(Own, Text, WriteError, Project) && Text.StartsWith(TEXT("#set LOCTEXT_NAMESPACE \"N\"\n#set LARGE_SCRIPT_THRESHOLD 0\n"), ESearchCase::CaseSensitive),
-			FString(TEXT("threshold: the #set line is written after the namespace:\n")) + Text);
+		const bool bOwnBuilt = Bango::BuildGraph(FString(TEXT("#set USES_GRAPH_EDITOR\n")) + Source, TEXT("own.bango"), Own, Error);
+		Expect(bOwnBuilt && Own.bUsesGraphEditor && !Bango::IsWrittenCompact(Own, Options), FString(TEXT("uses graph editor: with the flag, in full: ")) + Error.ToString());
+		Expect(bOwnBuilt && Bango::WriteGraphText(Own, Text, WriteError, Options) && Text.StartsWith(TEXT("#set LOCTEXT_NAMESPACE \"N\"\n#set USES_GRAPH_EDITOR\n"), ESearchCase::CaseSensitive)
+			&& Text.Contains(TEXT("//@1(0, 0)")) && Text.Contains(TEXT("// ============ SCRIPT BODY")),
+			FString(TEXT("uses graph editor: the #set line is written after the namespace, and the node metadata:\n")) + Text);
 		FBangoGraphDocument Changed = Own;
-		Changed.LargeScriptThreshold = 5;
-		Expect(Changed != Own, TEXT("threshold: part of what makes two documents different"));
+		Changed.bUsesGraphEditor = false;
+		Expect(Changed != Own, TEXT("uses graph editor: part of what makes two documents different"));
+
+		// Always compact (an inline script made editable in its box): the flag goes too.
+		FBangoGraphWriteOptions AlwaysCompact;
+		AlwaysCompact.bCompact = true;
+		Expect(bOwnBuilt && Bango::IsWrittenCompact(Own, AlwaysCompact) && Bango::WriteGraphText(Own, Text, WriteError, AlwaysCompact) && !Text.Contains(TEXT("USES_GRAPH_EDITOR")) && !Text.Contains(TEXT("//@")),
+			FString(TEXT("uses graph editor: bCompact drops the flag and the metadata:\n")) + Text);
 
 		// A compact script without a description that starts with a comment: a blank line first, so it isn't the description.
 		FBangoGraphDocument Commented;

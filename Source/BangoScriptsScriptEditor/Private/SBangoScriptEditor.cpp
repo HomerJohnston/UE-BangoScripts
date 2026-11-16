@@ -235,31 +235,6 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 									{
 										SetScriptNamespace(NewText.ToString());
 									})
-								]
-								+ SVerticalBox::Slot()
-								.AutoHeight()
-								.Padding(8.0f, 4.0f, 6.0f, 2.0f)
-								[
-									SNew(STextBlock)
-									.Text(LOCTEXT("ThresholdHeading", "LARGE SCRIPT THRESHOLD"))
-									.Font(FCoreStyle::GetDefaultFontStyle("Bold", 8))
-									.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-								]
-								+ SVerticalBox::Slot()
-								.AutoHeight()
-								.Padding(8.0f, 0.0f, 6.0f, 4.0f)
-								[
-									SAssignNew(ThresholdBox, SEditableTextBox)
-									.HintText_Lambda([]()
-									{
-										return FText::Format(LOCTEXT("ThresholdHint", "project setting ({0})"), FText::AsNumber(GetDefault<UBangoSettings>()->LargeScriptThreshold));
-									})
-									.ToolTipText(LOCTEXT("ThresholdTooltip", "From how many nodes on this script is saved with section headings (// ==== ...) and node metadata (//@). With fewer, it's saved as plain code, and its nodes are laid out afresh each time it's opened. 0: always. Leave it empty to use the project setting (Project Settings > Bango > Large Script Threshold). It's saved as #set LARGE_SCRIPT_THRESHOLD at the top of the script."))
-									.IsReadOnly_Lambda([this]() { return EdGraphs.Num() == 0; })
-									.OnTextCommitted_Lambda([this](const FText& NewText, ETextCommit::Type CommitType)
-									{
-										SetScriptThreshold(NewText.ToString());
-									})
 								])
 						]
 
@@ -2542,7 +2517,7 @@ void SBangoScriptEditor::ShowDocument(const FBangoGraphDocument& Document)
 	LayoutContext = MakeShared<FBangoNodeLayoutContext>(Bango::MakeNodeLayoutContext(Document, &FBangoModule::Get().GetCommands()));
 	EdGraphs.Add(TStrongObjectPtr<UEdGraph>(BangoScriptEditor::CreateEdGraph(Document.Main, LayoutContext)));
 	BangoScriptEditor::SetLocNamespace(EdGraphs[0].Get(), Document.bHasLocNamespace, Document.LocNamespace);
-	BangoScriptEditor::SetLargeScriptThreshold(EdGraphs[0].Get(), Document.bHasLargeScriptThreshold, Document.LargeScriptThreshold);
+	BangoScriptEditor::SetUsesGraphEditor(EdGraphs[0].Get(), Document.bUsesGraphEditor);
 	BangoScriptEditor::SetGlobals(EdGraphs[0].Get(), Document.Globals);
 	BangoScriptEditor::SetDescription(EdGraphs[0].Get(), Document.Description);
 	TSharedPtr<FGraphEntry> Main = MakeShared<FGraphEntry>();
@@ -3020,44 +2995,42 @@ void SBangoScriptEditor::UpdateNamespaceBox()
 	}
 }
 
-FString SBangoScriptEditor::GetScriptThresholdText() const
-{
-	const UBangoEdGraphNode* Entry = EdGraphs.Num() > 0 ? BangoScriptEditor::FindEntryNode(EdGraphs[0].Get()) : nullptr;
-	return Entry && Entry->bHasLargeScriptThreshold ? FString::FromInt(Entry->LargeScriptThreshold) : FString();
-}
-
-void SBangoScriptEditor::SetScriptThreshold(const FString& Typed)
-{
-	const FString Trimmed = Typed.TrimStartAndEnd();
-	UBangoEdGraphNode* Entry = EdGraphs.Num() > 0 ? BangoScriptEditor::FindEntryNode(EdGraphs[0].Get()) : nullptr;
-	if (Entry && (Trimmed.IsEmpty() || (Trimmed.IsNumeric() && !Trimmed.Contains(TEXT(".")) && !Trimmed.StartsWith(TEXT("-")) && Trimmed.Len() <= 9)))
-	{
-		Entry->SetLargeScriptThreshold(!Trimmed.IsEmpty(), Trimmed.IsEmpty() ? 0 : FCString::Atoi(*Trimmed));
-	}
-	if (ThresholdBox.IsValid())
-	{
-		ThresholdBox->SetText(FText::FromString(GetScriptThresholdText())); // what's kept, or back to it if what was typed isn't a number
-	}
-}
-
 void SBangoScriptEditor::UpdateConfigBoxes()
 {
 	UpdateNamespaceBox();
-	if (ThresholdBox.IsValid() && !ThresholdBox->HasAnyUserFocusOrFocusedDescendants())
-	{
-		const FString Threshold = GetScriptThresholdText();
-		if (!ThresholdBox->GetText().ToString().Equals(Threshold, ESearchCase::CaseSensitive))
-		{
-			ThresholdBox->SetText(FText::FromString(Threshold));
-		}
-	}
 }
 
 FBangoGraphWriteOptions SBangoScriptEditor::GetWriteOptions() const
 {
 	FBangoGraphWriteOptions Options;
-	Options.LargeScriptThreshold = GetDefault<UBangoSettings>()->LargeScriptThreshold;
+	Options.bFollowUsesGraphEditor = true; // node metadata only once the script has #set USES_GRAPH_EDITOR
 	return Options;
+}
+
+void SBangoScriptEditor::CheckMovedNodes()
+{
+	bool bMoved = false;
+	int32 NodeCount = 0; // as Bango::CountGraphNodes counts: every graph's nodes, not their entry nodes
+	for (const TStrongObjectPtr<UEdGraph>& Graph : EdGraphs)
+	{
+		for (UEdGraphNode* EdNode : Graph.IsValid() ? Graph->Nodes : TArray<TObjectPtr<UEdGraphNode>>())
+		{
+			if (UBangoEdGraphNode* Node = Cast<UBangoEdGraphNode>(EdNode))
+			{
+				bMoved |= Node->bMovedByUser;
+				Node->bMovedByUser = false;
+				NodeCount += Node->IsEntry() ? 0 : 1;
+			}
+		}
+	}
+	UBangoEdGraphNode* Entry = EdGraphs.Num() > 0 ? BangoScriptEditor::FindEntryNode(EdGraphs[0].Get()) : nullptr;
+	if (!bMoved || !Entry || Entry->bUsesGraphEditor || NodeCount < GetDefault<UBangoSettings>()->LargeScriptThreshold)
+	{
+		return;
+	}
+	// Not an undo step of its own: undoing the move keeps it (the script is now laid out in the graph editor).
+	Entry->Modify();
+	Entry->bUsesGraphEditor = true;
 }
 
 // ---- Script text pane ----
@@ -4438,6 +4411,7 @@ EActiveTimerReturnType SBangoScriptEditor::OnPoll(double CurrentTime, float Delt
 		bDirty = false;
 		return EActiveTimerReturnType::Continue;
 	}
+	CheckMovedNodes();
 
 	FBangoGraphDocument Current;
 	FString Error;
@@ -4822,10 +4796,6 @@ bool SBangoScriptEditor::Save()
 	if (NamespaceBox.IsValid() && NamespaceBox->HasAnyUserFocusOrFocusedDescendants())
 	{
 		SetScriptNamespace(NamespaceBox->GetText().ToString());
-	}
-	if (ThresholdBox.IsValid() && ThresholdBox->HasAnyUserFocusOrFocusedDescendants())
-	{
-		SetScriptThreshold(ThresholdBox->GetText().ToString());
 	}
 	if (bTextEdited && !ApplyScriptText())
 	{

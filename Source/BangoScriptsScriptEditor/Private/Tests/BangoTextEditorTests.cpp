@@ -81,7 +81,7 @@ bool FBangoLineTokenizerTest::RunTest(const FString& Parameters)
 	Check(TEXT("#set inputs (entity _speaker, int _n = 1, entity _l = nil)"), TEXT("Preprocessor[#set] Preprocessor[inputs] Punctuation[(] Type[entity] Global[_speaker]"));
 	Check(TEXT("#set inputs (entity _speaker, int _n = 1, entity _l = nil)"), TEXT("Nil[nil] Punctuation[)]"));
 	Check(TEXT("#set LOCTEXT_NAMESPACE \"Quest.Intro\""), TEXT("Preprocessor[#set] Preprocessor[LOCTEXT_NAMESPACE] String[\"Quest.Intro\"]"));
-	Check(TEXT("#set LARGE_SCRIPT_THRESHOLD 5"), TEXT("Preprocessor[#set] Preprocessor[LARGE_SCRIPT_THRESHOLD] Number[5]"));
+	Check(TEXT("#set USES_GRAPH_EDITOR"), TEXT("Preprocessor[#set] Preprocessor[USES_GRAPH_EDITOR]"));
 	Check(TEXT("//~ if (true)               //@3(20, 20)"), TEXT("DisconnectedMarker[//~] Keyword~[if] Punctuation~[(] Constant~[true] Punctuation~[)] Metadata~[//@3(20, 20)]"));
 	Check(TEXT("//~"), TEXT("DisconnectedMarker[//~]"));
 	Check(TEXT("                //@7(4, 9) @8(8, 13)"), TEXT("Metadata[//@7(4, 9) @8(8, 13)]"));

@@ -44,10 +44,34 @@ namespace BangoInlineScriptCustomizationPrivate
 	constexpr int32 LayoutNoteFlashes = 2;
 	const FLinearColor LayoutNoteBackground(0.0f, 0.0f, 0.0f, 0.6f);
 
+	/** A `#set USES_GRAPH_EDITOR` line (Trimmed: without its indent), which asks for the graph layout to be saved. */
+	static bool IsUsesGraphEditorLine(const FString& Trimmed)
+	{
+		if (!Trimmed.StartsWith(TEXT("#set"), ESearchCase::CaseSensitive))
+		{
+			return false;
+		}
+		FString Rest = Trimmed.Mid(4).TrimStart();
+		int32 CommentAt = INDEX_NONE;
+		if (Rest.FindChar(TEXT('/'), CommentAt))
+		{
+			Rest.LeftInline(CommentAt);
+		}
+		return Rest.TrimEnd().Equals(TEXT("USES_GRAPH_EDITOR"), ESearchCase::CaseSensitive);
+	}
+
+	static bool HasUsesGraphEditorLine(const FString& Script)
+	{
+		TArray<FString> Lines;
+		FBangoMetadataTracker::SplitLines(Script, Lines);
+		return Lines.ContainsByPredicate([](const FString& Line) { return IsUsesGraphEditorLine(Line.TrimStartAndEnd()); });
+	}
+
 	/**
-	 * The script without its graph layout: no node metadata (//@) and no section headings (// ====), so it can be
-	 * typed in its box. Written compact by the graph writer if it reads; otherwise each line has its metadata taken off,
-	 * and the headings and reroute lines (metadata only) are dropped.
+	 * The script without its graph layout: no node metadata (//@), no section headings (// ====) and no
+	 * #set USES_GRAPH_EDITOR line, so it can be typed in its box. Written compact by the graph writer if it reads
+	 * (which leaves the line out); otherwise each line has its metadata taken off, and the headings, the
+	 * #set USES_GRAPH_EDITOR line and reroute lines (metadata only) are dropped.
 	 */
 	static FString StripNodeLayout(const FString& Script)
 	{
@@ -70,7 +94,7 @@ namespace BangoInlineScriptCustomizationPrivate
 			const FString Visible = FBangoMetadataTracker::SplitLine(Line, Meta).TrimEnd();
 			const FString Trimmed = Visible.TrimStart();
 			const bool bHeading = Trimmed.StartsWith(TEXT("//")) && !Trimmed.StartsWith(TEXT("//~")) && Bango::IsSectionHeadingComment(Trimmed.Mid(2));
-			if (bHeading || (Meta.HasMetadata() && Trimmed.IsEmpty()))
+			if (bHeading || IsUsesGraphEditorLine(Trimmed) || (Meta.HasMetadata() && Trimmed.IsEmpty()))
 			{
 				continue;
 			}
@@ -313,23 +337,29 @@ private:
 		return TextBox.IsValid() && TextBox->HasNodeMetadata();
 	}
 
+	/** Something Make Editable Inline takes out: node metadata, or a #set USES_GRAPH_EDITOR line. */
+	bool HasLayoutToRemove() const
+	{
+		return HasLayout() || (TextBox.IsValid() && BangoInlineScriptCustomizationPrivate::HasUsesGraphEditorLine(TextBox->GetText().ToString()));
+	}
+
 	void ExtendContextMenu(FMenuBuilder& MenuBuilder)
 	{
 		MenuBuilder.BeginSection(TEXT("BangoInlineScript"), LOCTEXT("InlineScriptSection", "Inline Script"));
 		MenuBuilder.AddMenuEntry(
 			LOCTEXT("MakeEditableInline", "Make Editable Inline"),
-			LOCTEXT("MakeEditableInlineTooltip", "Removes the script's node metadata (and section headings), so it can be typed in here. Its graph loses its layout: the nodes are laid out afresh when it's next opened in the editor."),
+			LOCTEXT("MakeEditableInlineTooltip", "Removes the script's node metadata, section headings and #set USES_GRAPH_EDITOR line, so it can be typed in here. Its graph loses its layout: the nodes are laid out afresh when it's next opened in the editor."),
 			FSlateIcon(),
 			FUIAction(
 				FExecuteAction::CreateSP(this, &SBangoInlineScriptBox::MakeEditableInline),
-				FCanExecuteAction::CreateLambda([this]() { return HasLayout() && !IsLocked(); })));
+				FCanExecuteAction::CreateLambda([this]() { return HasLayoutToRemove() && !IsLocked(); })));
 		MenuBuilder.EndSection();
 	}
 
 	void MakeEditableInline()
 	{
 		using namespace BangoInlineScriptCustomizationPrivate;
-		if (!HasLayout() || IsLocked() || !SourceHandle.IsValid() || !SourceHandle->IsValidHandle())
+		if (!HasLayoutToRemove() || IsLocked() || !SourceHandle.IsValid() || !SourceHandle->IsValidHandle())
 		{
 			return;
 		}

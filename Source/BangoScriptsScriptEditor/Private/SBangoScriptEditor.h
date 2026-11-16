@@ -209,8 +209,6 @@ private:
 	TSharedPtr<SMultiLineEditableTextBox> DescriptionBox;
 	/** SCRIPT CONFIG: the box for the script's localization namespace (kept on the main Script Start node). */
 	TSharedPtr<SEditableTextBox> NamespaceBox;
-	/** SCRIPT CONFIG: the box for the script's Large Script Threshold (empty: the project's). */
-	TSharedPtr<SEditableTextBox> ThresholdBox;
 
 	// The script text pane, left of the graph: the script as it would be saved, which can be edited and applied.
 	TSharedPtr<SBangoTextEditor> TextBox;
@@ -428,15 +426,17 @@ private:
 	/** Puts the namespace in its box again if it changed (after an undo, a reload, Apply), unless the box is being typed in. */
 	void UpdateNamespaceBox();
 
-	/** The script's own Large Script Threshold (#set LARGE_SCRIPT_THRESHOLD), as text; empty if it has none. */
-	FString GetScriptThresholdText() const;
-	/** Sets the threshold from what was typed: a whole number 0 or more, or empty to use the project's. Anything else is undone. */
-	void SetScriptThreshold(const FString& Typed);
-	/** Both SCRIPT CONFIG boxes (UpdateNamespaceBox, and the threshold's). */
+	/** The SCRIPT CONFIG boxes (UpdateNamespaceBox). */
 	void UpdateConfigBoxes();
 
-	/** How this editor writes the script it shows and saves: the project's Large Script Threshold. */
+	/** How this editor writes the script it shows and saves: as its #set USES_GRAPH_EDITOR line says. */
 	FBangoGraphWriteOptions GetWriteOptions() const;
+
+	/**
+	 * Turns on the script's #set USES_GRAPH_EDITOR once a node has been moved (dragged) while the script has at least
+	 * the project's Large Script Threshold of nodes, so its layout is saved from then on. Run each poll.
+	 */
+	void CheckMovedNodes();
 
 	// Script text pane
 	TSharedRef<SWidget> MakeTextPane();

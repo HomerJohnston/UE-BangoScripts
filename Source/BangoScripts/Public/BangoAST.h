@@ -586,12 +586,12 @@ struct FBangoScript
 	FBangoSourceLocation LocNamespaceLoc;
 
 	/**
-	 * `#set LARGE_SCRIPT_THRESHOLD 5`: from how many nodes on, the graph editor saves this script with its section
-	 * headings and node metadata (overrides the project setting). 0: always.
+	 * `#set USES_GRAPH_EDITOR`: the graph editor saves this script with its section headings and node metadata (node
+	 * positions). Without it, the script is saved compact. The editor adds it once its nodes are moved in a script with
+	 * at least the project's Large Script Threshold of nodes.
 	 */
-	bool bHasLargeScriptThreshold = false;
-	int32 LargeScriptThreshold = 0;
-	FBangoSourceLocation LargeScriptThresholdLoc;
+	bool bUsesGraphEditor = false;
+	FBangoSourceLocation UsesGraphEditorLoc;
 
 	/** The inputs line, or null if the script has none. Points into TopLevel. */
 	const FBangoParamsStmt* GetParams() const

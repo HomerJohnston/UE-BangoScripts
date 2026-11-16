@@ -64,7 +64,7 @@ bool FBangoGraphDocument::operator==(const FBangoGraphDocument& Other) const
 {
 	if (!Description.Equals(Other.Description, ESearchCase::CaseSensitive)
 		|| bHasLocNamespace != Other.bHasLocNamespace || !LocNamespace.Equals(Other.LocNamespace, ESearchCase::CaseSensitive)
-		|| bHasLargeScriptThreshold != Other.bHasLargeScriptThreshold || LargeScriptThreshold != Other.LargeScriptThreshold
+		|| bUsesGraphEditor != Other.bUsesGraphEditor
 		|| Main != Other.Main || Functions.Num() != Other.Functions.Num() || Globals.Num() != Other.Globals.Num())
 	{
 		return false;
@@ -403,8 +403,7 @@ namespace BangoGraphPrivate
 			MainEntry.NodeID = 0;
 			Doc.bHasLocNamespace = Script.bHasLocNamespace;
 			Doc.LocNamespace = Script.LocNamespace;
-			Doc.bHasLargeScriptThreshold = Script.bHasLargeScriptThreshold;
-			Doc.LargeScriptThreshold = Script.LargeScriptThreshold;
+			Doc.bUsesGraphEditor = Script.bUsesGraphEditor;
 
 			int32 FirstTopLevel = 0;
 			if (const FBangoParamsStmt* Params = Script.GetParams())
@@ -418,7 +417,7 @@ namespace BangoGraphPrivate
 				FirstTopLevel = 1;
 			}
 			// Comments on (or just above) the #set lines belong to Script Start, like the inputs line's.
-			for (const FBangoSourceLocation* Setting : { Script.bHasLocNamespace ? &Script.LocNamespaceLoc : nullptr, Script.bHasLargeScriptThreshold ? &Script.LargeScriptThresholdLoc : nullptr })
+			for (const FBangoSourceLocation* Setting : { Script.bHasLocNamespace ? &Script.LocNamespaceLoc : nullptr, Script.bUsesGraphEditor ? &Script.UsesGraphEditorLoc : nullptr })
 			{
 				if (Setting)
 				{

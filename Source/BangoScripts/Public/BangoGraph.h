@@ -154,9 +154,11 @@ struct BANGOSCRIPTS_API FBangoGraphDocument
 	bool bHasLocNamespace = false;
 	FString LocNamespace;
 
-	/** The script's `#set LARGE_SCRIPT_THRESHOLD 5` line (see FBangoScript and FBangoGraphWriteOptions). Saved after the namespace line. */
-	bool bHasLargeScriptThreshold = false;
-	int32 LargeScriptThreshold = 0;
+	/**
+	 * The script's `#set USES_GRAPH_EDITOR` line (see FBangoScript): it's saved with its node metadata, when written
+	 * following it (FBangoGraphWriteOptions::bFollowUsesGraphEditor). Saved after the namespace line.
+	 */
+	bool bUsesGraphEditor = false;
 
 	/** The file's global declarations, in order (written after the #set lines). */
 	TArray<FBangoGraphDecl> Globals;
@@ -175,12 +177,15 @@ struct FBangoCompileError;
 struct FBangoGraphWriteOptions
 {
 	/**
-	 * The project's Large Script Threshold (UBangoSettings), for a script without its own #set line: a script with
-	 * fewer nodes than this is written compact. 0: always in full.
+	 * Written as the script says: in full (section headings and node metadata) if it has `#set USES_GRAPH_EDITOR`,
+	 * compact if not. The script editor's saves. Off: in full, whatever it says (unless bCompact).
 	 */
-	int32 LargeScriptThreshold = 0;
+	bool bFollowUsesGraphEditor = false;
 
-	/** Always compact: no section headings, no node metadata (and so no reroutes). For inline scripts typed in their box. */
+	/**
+	 * Always compact: no section headings, no node metadata (and so no reroutes), and no #set USES_GRAPH_EDITOR line.
+	 * For inline scripts made editable in their box.
+	 */
 	bool bCompact = false;
 };
 
@@ -250,13 +255,13 @@ namespace Bango
 	BANGOSCRIPTS_API bool WriteGraphText(const FBangoGraphDocument& Document, FString& OutText, FString& OutError);
 	BANGOSCRIPTS_API bool WriteGraphText(const FBangoGraphDocument& Document, FString& OutText, FString& OutError, const FBangoGraphWriteOptions& Options);
 
-	/** The script's nodes, in all its graphs, not counting the entry nodes (what Large Script Threshold counts). */
+	/** The script's nodes, in all its graphs, not counting the entry nodes (what the project's Large Script Threshold counts). */
 	BANGOSCRIPTS_API int32 CountGraphNodes(const FBangoGraphDocument& Document);
 
 	/**
 	 * Whether WriteGraphText writes Document compact: no section headings and no node metadata (so no reroutes).
-	 * That's when Options say so, or when it has fewer nodes than its Large Script Threshold (its own #set line's,
-	 * or else Options.LargeScriptThreshold); a threshold of 0 never makes it compact.
+	 * That's when Options.bCompact says so, or when following the script's flag (bFollowUsesGraphEditor) and it
+	 * has no #set USES_GRAPH_EDITOR line.
 	 */
 	BANGOSCRIPTS_API bool IsWrittenCompact(const FBangoGraphDocument& Document, const FBangoGraphWriteOptions& Options);
 }

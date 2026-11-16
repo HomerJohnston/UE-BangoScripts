@@ -96,15 +96,14 @@ namespace BangoScriptEditor
 		}
 	}
 
-	void SetLargeScriptThreshold(UEdGraph* MainGraph, bool bHasThreshold, int32 Threshold)
+	void SetUsesGraphEditor(UEdGraph* MainGraph, bool bUsesGraphEditor)
 	{
 		for (UEdGraphNode* EdNode : MainGraph ? MainGraph->Nodes : TArray<TObjectPtr<UEdGraphNode>>())
 		{
 			UBangoEdGraphNode* Node = Cast<UBangoEdGraphNode>(EdNode);
 			if (Node && Node->IsScriptEntry())
 			{
-				Node->bHasLargeScriptThreshold = bHasThreshold;
-				Node->LargeScriptThreshold = bHasThreshold ? Threshold : 0;
+				Node->bUsesGraphEditor = bUsesGraphEditor;
 			}
 		}
 	}
@@ -260,8 +259,7 @@ namespace BangoScriptEditor
 				OutDocument.Description = Nodes[0]->Description;
 				OutDocument.bHasLocNamespace = Nodes[0]->bHasLocNamespace;
 				OutDocument.LocNamespace = Nodes[0]->bHasLocNamespace ? Nodes[0]->LocNamespace : FString();
-				OutDocument.bHasLargeScriptThreshold = Nodes[0]->bHasLargeScriptThreshold;
-				OutDocument.LargeScriptThreshold = Nodes[0]->bHasLargeScriptThreshold ? Nodes[0]->LargeScriptThreshold : 0;
+				OutDocument.bUsesGraphEditor = Nodes[0]->bUsesGraphEditor;
 				for (const FBangoEdDecl& Global : Nodes[0]->Globals)
 				{
 					OutDocument.Globals.Add(Global.ToGraphDecl());

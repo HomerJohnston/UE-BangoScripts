@@ -118,11 +118,16 @@ public:
 	UPROPERTY()
 	FString LocNamespace;
 
-	/** The main Script Start node only: the script's `#set LARGE_SCRIPT_THRESHOLD 5` line, edited in SCRIPT CONFIG (SetLargeScriptThreshold). */
+	/**
+	 * The main Script Start node only: the script's `#set USES_GRAPH_EDITOR` line, so it's saved with its node metadata.
+	 * Turned on once nodes are moved in a script with at least the project's Large Script Threshold of nodes.
+	 */
 	UPROPERTY()
-	bool bHasLargeScriptThreshold = false;
-	UPROPERTY()
-	int32 LargeScriptThreshold = 0;
+	bool bUsesGraphEditor = false;
+
+	/** Dragged in the graph editor since the script editor last looked (SBangoGraphNode::MoveTo). Not saved. */
+	UPROPERTY(Transient)
+	bool bMovedByUser = false;
 
 	/** Entry nodes only: the locals declared at the top of this graph (FBangoGraph::Locals). Edited in the Locals list. */
 	UPROPERTY()
@@ -191,11 +196,6 @@ public:
 	 */
 	bool SetLocNamespace(const FString& Typed);
 
-	/**
-	 * The main Script Start node only: sets or removes (bHas false) the script's #set LARGE_SCRIPT_THRESHOLD line, as an
-	 * undoable edit. False if nothing changed.
-	 */
-	bool SetLargeScriptThreshold(bool bHas, int32 Threshold);
 
 	/**
 	 * Shows a compile error on the node, pointing at a field if FieldIndex isn't INDEX_NONE (or at a switch's case, if

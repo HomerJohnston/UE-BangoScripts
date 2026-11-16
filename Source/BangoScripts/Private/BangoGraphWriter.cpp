@@ -63,7 +63,9 @@ namespace BangoGraphWriterPrivate
 			AddComment(Doc.Description, 0, -1);
 
 			// The script's settings (SCRIPT CONFIG in the editor), under the description and above every heading.
-			if (Doc.bHasLocNamespace || Doc.bHasLargeScriptThreshold)
+			// A compact script isn't saved with the graph editor's layout, so it doesn't keep the flag that asks for it.
+			const bool bWriteUsesGraphEditor = Doc.bUsesGraphEditor && !bCompact;
+			if (Doc.bHasLocNamespace || bWriteUsesGraphEditor)
 			{
 				if (Out.Num() > 0)
 				{
@@ -73,9 +75,9 @@ namespace BangoGraphWriterPrivate
 				{
 					AddCode(0, -1, FString(TEXT("#set LOCTEXT_NAMESPACE ")) + Bango::MakeStringLiteral(Doc.LocNamespace), nullptr);
 				}
-				if (Doc.bHasLargeScriptThreshold)
+				if (bWriteUsesGraphEditor)
 				{
-					AddCode(0, -1, FString::Printf(TEXT("#set LARGE_SCRIPT_THRESHOLD %d"), Doc.LargeScriptThreshold), nullptr);
+					AddCode(0, -1, TEXT("#set USES_GRAPH_EDITOR"), nullptr);
 				}
 			}
 
@@ -841,12 +843,7 @@ namespace Bango
 
 	bool IsWrittenCompact(const FBangoGraphDocument& Document, const FBangoGraphWriteOptions& Options)
 	{
-		if (Options.bCompact)
-		{
-			return true;
-		}
-		const int32 Threshold = Document.bHasLargeScriptThreshold ? Document.LargeScriptThreshold : Options.LargeScriptThreshold;
-		return Threshold > 0 && CountGraphNodes(Document) < Threshold;
+		return Options.bCompact || (Options.bFollowUsesGraphEditor && !Document.bUsesGraphEditor);
 	}
 
 	bool WriteGraphText(const FBangoGraphDocument& Document, FString& OutText, FString& OutError)

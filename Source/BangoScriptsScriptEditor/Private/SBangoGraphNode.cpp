@@ -1058,6 +1058,10 @@ void SBangoGraphNode::MoveTo(const FVector2f& NewPosition, FNodeSet& NodeFilter,
 		return; // always node 0 at (0,0); the rest of the graph moves around it
 	}
 	SGraphNode::MoveTo(NewPosition, NodeFilter, bMarkDirty);
+	if (BangoNode)
+	{
+		BangoNode->bMovedByUser = true; // for the script editor: a moved node can turn on #set USES_GRAPH_EDITOR
+	}
 }
 
 TSharedRef<SWidget> SBangoGraphNode::CreateTitleWidget(TSharedPtr<SNodeTitle> NodeTitle)

@@ -324,7 +324,7 @@ namespace BangoLexerPrivate
 		/** `#set`, the script's settings lines. Must start its line and be followed by a space. */
 		bool LexDirective(const FBangoSourceLocation& Loc)
 		{
-			static const TCHAR* Usage = TEXT("Lines starting with '#' are the script's settings: #set inputs (...), #set LOCTEXT_NAMESPACE \"Name\" and #set LARGE_SCRIPT_THRESHOLD 5.");
+			static const TCHAR* Usage = TEXT("Lines starting with '#' are the script's settings: #set inputs (...), #set LOCTEXT_NAMESPACE \"Name\" and #set USES_GRAPH_EDITOR.");
 			Advance(); // #
 			const int32 Start = Pos;
 			while (!AtEnd() && IsIdentChar(Peek()))

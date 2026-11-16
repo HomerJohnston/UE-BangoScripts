@@ -264,20 +264,6 @@ bool UBangoEdGraphNode::SetLocNamespace(const FString& Typed)
 	return true;
 }
 
-bool UBangoEdGraphNode::SetLargeScriptThreshold(bool bHas, int32 Threshold)
-{
-	Threshold = bHas ? FMath::Max(0, Threshold) : 0;
-	if (bHas == bHasLargeScriptThreshold && Threshold == LargeScriptThreshold)
-	{
-		return false;
-	}
-	const FScopedTransaction Transaction(LOCTEXT("EditLargeScriptThreshold", "Edit Large Script Threshold"));
-	Modify();
-	bHasLargeScriptThreshold = bHas;
-	LargeScriptThreshold = Threshold;
-	return true;
-}
-
 bool UBangoEdGraphNode::SetFieldValue(int32 FieldIndex, const FString& Value, FString& OutError)
 {
 	FBangoGraphNode Edited;
