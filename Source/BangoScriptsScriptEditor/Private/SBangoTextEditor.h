@@ -270,9 +270,25 @@ private:
 	bool bTypedNameChar = false;
 	/** Tab put in an entry: the tab character that follows it isn't typed. */
 	bool bSwallowTab = false;
+	/** The popup's width: at least this, wider when the name column needs it (CompletionNameWidth), up to the max. */
 	static constexpr float CompletionWidth = 460.0f;
+	static constexpr float CompletionMaxWidth = 720.0f;
+	/** Room the signature column keeps, at least, when the popup widens for long names (longer signatures end in "..."). */
+	static constexpr float CompletionMinDetailWidth = 280.0f;
+	/** The name column never takes more than this, so a very long name doesn't push the signatures out (it's cut short). */
+	static constexpr float CompletionMaxNameWidth = 320.0f;
+	/** The kind letter's column, with its gap, and the gap between the name and signature columns. */
+	static constexpr float CompletionLetterWidth = 18.0f;
+	static constexpr float CompletionColumnGap = 12.0f;
 	static constexpr float CompletionRowHeight = 18.0f;
 	static constexpr int32 CompletionVisibleRows = 8;
+	/**
+	 * The name column's width: the longest name the list can show since it opened (all of CompletionItems, not just
+	 * those that match what's typed), so the signatures stay in one place as the list is filtered (GatherCompletionItems).
+	 */
+	float CompletionNameWidth = 0.0f;
+	/** Measures CompletionNameWidth from CompletionItems. */
+	void MeasureCompletionNames();
 
 	/** Whether the gutter is shown (the divider toggles it). */
 	bool bMetadataShown = true;

@@ -36,6 +36,8 @@
 #include "Bango.h"
 #include "BangoCommand.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Fonts/FontMeasure.h"
+#include "Rendering/SlateRenderer.h"
 #include "Widgets/Views/SListView.h"
 #include "Widgets/Views/STableRow.h"
 
@@ -933,6 +935,21 @@ void SBangoTextEditor::GatherCompletionItems(int32 Line)
 	{
 		CompletionItemPtrs.Add(MakeShared<FBangoCompletionItem>(Item));
 	}
+	MeasureCompletionNames();
+}
+
+void SBangoTextEditor::MeasureCompletionNames()
+{
+	// Every name the list could show, once as it opens: a few hundred at most, and the font measurer caches its glyphs,
+	// so this is quick enough not to need caching between openings.
+	const TSharedRef<FSlateFontMeasure> FontMeasure = FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
+	const FSlateFontInfo& Font = SyntaxStyle->GetDefaultStyle().Font;
+	float Widest = 0.0f;
+	for (const FBangoCompletionItem& Item : CompletionItems)
+	{
+		Widest = FMath::Max(Widest, (float)FontMeasure->Measure(Item.Name, Font).X);
+	}
+	CompletionNameWidth = FMath::Min(FMath::CeilToFloat(Widest), CompletionMaxNameWidth);
 }
 
 void SBangoTextEditor::CloseCompletion()
@@ -1147,7 +1164,12 @@ TSharedRef<SWidget> SBangoTextEditor::MakeCompletionPopup()
 		.Padding(FMargin(2.0f))
 		[
 			SNew(SBox)
-			.WidthOverride(CompletionWidth)
+			// Wide enough for the name column and a signature column beside it.
+			.WidthOverride_Lambda([this]()
+			{
+				const float Needed = CompletionLetterWidth + CompletionNameWidth + CompletionColumnGap + CompletionMinDetailWidth + 8.0f;
+				return FMath::Clamp(Needed, CompletionWidth, CompletionMaxWidth);
+			})
 			[
 				SNew(SVerticalBox)
 
@@ -1197,7 +1219,8 @@ TSharedRef<SWidget> SBangoTextEditor::MakeCompletionPopup()
 
 TSharedRef<ITableRow> SBangoTextEditor::MakeCompletionRow(TSharedPtr<FBangoCompletionItem> Item, const TSharedRef<STableViewBase>& OwnerTable)
 {
-	// The kind as one letter and the name in the text's colours for it, then the type or signature.
+	// Two columns: the kind as one letter and the name, in the text's colours for it; then the type or signature, all
+	// starting at the same place (CompletionNameWidth: the longest name in the list).
 	EBangoSyntaxKind Kind = EBangoSyntaxKind::Command;
 	const TCHAR* Letter = TEXT("C");
 	switch (Item->Kind)
@@ -1232,7 +1255,7 @@ TSharedRef<ITableRow> SBangoTextEditor::MakeCompletionRow(TSharedPtr<FBangoCompl
 			+ SHorizontalBox::Slot()
 			.AutoWidth()
 			.VAlign(VAlign_Center)
-			.Padding(0.0f, 0.0f, 6.0f, 0.0f)
+			.Padding(0.0f, 0.0f, CompletionLetterWidth - 12.0f, 0.0f)
 			[
 				SNew(SBox)
 				.WidthOverride(12.0f)
@@ -1248,19 +1271,25 @@ TSharedRef<ITableRow> SBangoTextEditor::MakeCompletionRow(TSharedPtr<FBangoCompl
 			.AutoWidth()
 			.VAlign(VAlign_Center)
 			[
-				SNew(STextBlock)
-				.Text(FText::FromString(Item->Name))
-				.Font(SyntaxStyle->GetDefaultStyle().Font)
-				.ColorAndOpacity(KindStyle.ColorAndOpacity)
+				SNew(SBox)
+				.WidthOverride_Lambda([this]() { return CompletionNameWidth; })
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(Item->Name))
+					.Font(SyntaxStyle->GetDefaultStyle().Font)
+					.ColorAndOpacity(KindStyle.ColorAndOpacity)
+					.OverflowPolicy(ETextOverflowPolicy::Ellipsis) // only past CompletionMaxNameWidth
+				]
 			]
 
 			+ SHorizontalBox::Slot()
 			.FillWidth(1.0f)
 			.VAlign(VAlign_Center)
-			.Padding(10.0f, 0.0f, 0.0f, 0.0f)
+			.Padding(CompletionColumnGap, 0.0f, 0.0f, 0.0f)
 			[
 				SNew(STextBlock)
 				.Text(FText::FromString(Item->Detail))
+				.ToolTipText(FText::FromString(Item->Detail)) // all of it, if it's cut short
 				.Font(FAppStyle::GetFontStyle("SmallFont"))
 				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 				.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
