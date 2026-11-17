@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.59)
+# Bango Language Spec (draft v0.60)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.60:** two new commands, `GetDir(entity)` and `entity SetDir(float)`, for an actor's compass bearing (section 7).
 
 **Changes in v0.59:** the script-reference markers in the level viewports are small filled circles instead of large rings, and an inline script's markers have lines from `self` (section 4).
 
@@ -710,6 +712,8 @@ Every placeholder needs a value. When the text is written as a literal (`WriteLo
 | `ToEntity(string Name)` → `entity` | The entity with this Bango ID name, for names that come from data (`ToEntity("john")` is the same as `@john`). A name that isn't letters, digits and `_` (or starts with a digit) is an error. |
 | `entity SetPos(vector3 Pos)` | Moves the actor (as a teleport). A **character** (`ACharacter`) stands on `Pos`: its feet, the bottom of its capsule, go there, so its middle goes a half height above. If the ground rises into the capsule's rounded bottom there (a slope, a step), it's lifted until it rests on it, by up to its half height: a sphere the capsule's width is swept down onto `Pos` against static collision (`WorldStatic`). With nothing under `Pos`, or something in the way above it, it's placed as on flat ground. |
 | `GetPos(entity Entity)` → `vector3` | The actor's location. For a character, where its feet are (the bottom of its capsule), as `SetPos` takes it, so `_who SetPos(GetPos(_who));` doesn't move it. |
+| `GetDir(entity Entity)` → `float` | The actor's **compass bearing** in degrees, from 0 up to 360: its forward vector flattened onto the ground, as seen from above. 0 is the world's +X, 90 is +Y (clockwise from above), the same as an upright actor's yaw. An actor facing straight up or down has none, and stops the script with an error. |
+| `entity SetDir(float Bearing)` | Turns the actor about the **world's up axis** to face `Bearing`, a compass bearing in degrees (as `GetDir` gives; any number, so 450 is 90), the short way round from its bearing now. Its tilt (pitch and roll) is kept. A pawn that turns with its controller (`Use Controller Rotation Yaw`, as the player's usually does) has its controller turned too, so it isn't turned back. Errors like `GetDir` for an actor facing straight up or down. |
 | `entity SetHidden(bool Hidden)` | Hides or shows the actor in game. |
 | `entity DistanceTo(entity Other)` → `float` | Distance between two actors. |
 | `IsNull(entity Entity)` → `bool` | True if the entity is `nil`, or no actor in the level has its Bango ID: it was never there (or never registered, like a duplicate name), or it's been destroyed. It never stops the script for those: a `nil` variable, a global nobody made or an element past the end counts as `nil` here, and a missing actor isn't an error. Use it before a command that would stop the script: `if (!IsNull(_who)) { _who SetHidden(true); }`. |

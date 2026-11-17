@@ -10,6 +10,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/Controller.h"
 #include "Components/CapsuleComponent.h"
 
 namespace BangoBuiltinPrivate
@@ -77,6 +78,29 @@ namespace BangoBuiltinPrivate
 				: FString::Printf(TEXT("No actor is registered with the Bango ID name '%s'."), *Entity.GetEntityName());
 		}
 		return Actor;
+	}
+
+	/**
+	 * An actor's compass bearing (GetDir, SetDir): its forward vector flattened onto the ground (Z dropped), as degrees
+	 * from 0 up to 360, clockwise seen from above: 0 is +X, 90 is +Y, as an upright actor's yaw. Fails (the call's error)
+	 * if it faces straight up or down, which has no bearing.
+	 */
+	static bool GetCompassBearing(FBangoCommandCall& Call, const AActor& Actor, double& OutBearing)
+	{
+		const FVector Forward = Actor.GetActorForwardVector();
+		const FVector2D Flat(Forward.X, Forward.Y);
+		if (Flat.IsNearlyZero(UE_KINDA_SMALL_NUMBER))
+		{
+			Call.Fail(FString::Printf(TEXT("'%s' faces straight up or down, so it has no compass direction."), *Actor.GetName()));
+			return false;
+		}
+		const double Degrees = FMath::RadiansToDegrees(FMath::Atan2(Flat.Y, Flat.X));
+		OutBearing = Degrees < 0.0 ? Degrees + 360.0 : Degrees;
+		if (OutBearing >= 360.0)
+		{
+			OutBearing = 0.0;
+		}
+		return true;
 	}
 
 	/**
@@ -1077,6 +1101,67 @@ namespace Bango
 					Location -= FVector::UpVector * HalfHeight;
 				}
 				Call.Result = FBangoValue::MakeVector3(Location.X, Location.Y, Location.Z);
+				return EBangoCommandResult::Done;
+			};
+			Add(Commands, Command);
+		}
+
+		// GetDir(entity) -> float: the actor's compass bearing. Like GetPos, the entity is its only argument.
+		{
+			FBangoCommand Command;
+			Command.Signature = FBangoCommandSignature::Make(TEXT("GetDir")).Param(TEXT("Entity"), Entity).Returns(Double).InCategory(TEXT("Actors"))
+				.Describe(TEXT("The actor's compass bearing, in degrees from 0 up to 360: which way it faces, seen from above. 0 is the world's +X, 90 is +Y (turning clockwise from above), as an upright actor's yaw."));
+			Command.Start = [](FBangoCommandCall& Call)
+			{
+				if (!RequireArgs(Call, 1))
+				{
+					return EBangoCommandResult::Failed;
+				}
+				const AActor* Actor = ResolveActor(Call, Call.Args[0]);
+				double Bearing = 0.0;
+				if (!Actor || !GetCompassBearing(Call, *Actor, Bearing))
+				{
+					return EBangoCommandResult::Failed;
+				}
+				Call.Result = FBangoValue::MakeDouble(Bearing);
+				return EBangoCommandResult::Done;
+			};
+			Add(Commands, Command);
+		}
+
+		// entity SetDir(bearing): turns the actor about the world's up axis to face that compass bearing.
+		{
+			FBangoCommand Command;
+			Command.Signature = FBangoCommandSignature::Make(TEXT("SetDir")).Target(Entity).Param(TEXT("Bearing"), Double).InCategory(TEXT("Actors"))
+				.Describe(TEXT("Turns the actor about the world's up axis so it faces Bearing, a compass bearing in degrees (as GetDir gives), the short way round. Its tilt (pitch and roll) is kept."));
+			Command.Start = [](FBangoCommandCall& Call)
+			{
+				AActor* Actor = ResolveActor(Call, Call.Target);
+				double Current = 0.0;
+				if (!Actor || !RequireArgs(Call, 1) || !GetCompassBearing(Call, *Actor, Current))
+				{
+					return EBangoCommandResult::Failed;
+				}
+				// The short way round: -180 to 180 degrees. Bearings turn clockwise from above, as yaw does about +Z.
+				const double Delta = FMath::FindDeltaAngleDegrees(Current, Call.Args[0].GetNumberAsDouble());
+				if (FMath::IsNearlyZero(Delta))
+				{
+					return EBangoCommandResult::Done;
+				}
+				const FQuat Turn(FVector::UpVector, FMath::DegreesToRadians(Delta));
+				Actor->SetActorRotation(Turn * Actor->GetActorQuat(), ETeleportType::TeleportPhysics);
+				// A pawn that turns with its controller (as the player's usually does) would be turned back by it next
+				// frame: turn the controller the same way.
+				if (const APawn* Pawn = Cast<APawn>(Actor))
+				{
+					AController* Controller = Pawn->GetController();
+					if (Controller && Pawn->bUseControllerRotationYaw)
+					{
+						FRotator Control = Controller->GetControlRotation();
+						Control.Yaw += Delta;
+						Controller->SetControlRotation(Control);
+					}
+				}
 				return EBangoCommandResult::Done;
 			};
 			Add(Commands, Command);
