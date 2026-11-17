@@ -29,6 +29,20 @@ public:
 	void ResetAll() { Store.ResetAll(); }
 	void SerializeGlobals(FArchive& Ar) { Store.Serialize(Ar); }
 
+	/**
+	 * The next level to begin play won't run its start script (UBangoLevelStartScript). For loading a saved game: call it
+	 * before opening the saved game's level, then LoadState once it's open. It lasts for that one level.
+	 */
+	void SkipNextLevelStartScript() { bSkipNextLevelStartScript = true; }
+	/** True (once) if SkipNextLevelStartScript was called; used by UBangoScriptSubsystem when a world begins play. */
+	bool ConsumeSkipLevelStartScript()
+	{
+		const bool bSkip = bSkipNextLevelStartScript;
+		bSkipNextLevelStartScript = false;
+		return bSkip;
+	}
+
 private:
 	FBangoGlobalStore Store;
+	bool bSkipNextLevelStartScript = false;
 };

@@ -12,6 +12,16 @@ UBangoIDActorComponent::UBangoIDActorComponent()
 void UBangoIDActorComponent::BeginPlay()
 {
 	Super::BeginPlay();
+	RegisterName();
+}
+
+void UBangoIDActorComponent::RegisterName()
+{
+	if (bTriedRegistering)
+	{
+		return;
+	}
+	bTriedRegistering = true;
 
 	const FString OwnerName = GetOwner() ? GetOwner()->GetName() : TEXT("<none>");
 
@@ -48,6 +58,7 @@ void UBangoIDActorComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		}
 		bRegistered = false;
 	}
+	bTriedRegistering = false;
 
 	Super::EndPlay(EndPlayReason);
 }

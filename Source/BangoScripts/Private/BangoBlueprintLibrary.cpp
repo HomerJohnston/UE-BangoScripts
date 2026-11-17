@@ -464,3 +464,15 @@ void UBangoBlueprintLibrary::ResetBangoState(UObject* WorldContextObject)
 		Subsystem->ResetState();
 	}
 }
+
+void UBangoBlueprintLibrary::SkipNextBangoLevelStartScript(UObject* WorldContextObject)
+{
+	if (UBangoGlobalsSubsystem* Globals = UBangoGlobalsSubsystem::Get(WorldContextObject))
+	{
+		Globals->SkipNextLevelStartScript();
+	}
+	else
+	{
+		Bango::ReportError(TEXT("Skip Next Bango Level Start Script: it needs a game instance (play in editor or a packaged game)."));
+	}
+}

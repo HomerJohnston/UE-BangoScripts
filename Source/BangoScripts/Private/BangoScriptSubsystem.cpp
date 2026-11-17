@@ -7,6 +7,8 @@
 #include "BangoCompiler.h"
 #include "BangoGlobalsSubsystem.h"
 #include "BangoIDActorComponent.h"
+#include "BangoLevelStartScript.h"
+#include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "BangoLog.h"
 #include "BangoSettings.h"
@@ -67,6 +69,71 @@ void UBangoScriptSubsystem::Deinitialize()
 	TerminateAll();
 	EntityResolver.Reset();
 	Super::Deinitialize();
+}
+
+void UBangoScriptSubsystem::OnWorldBeginPlay(UWorld& InWorld)
+{
+	Super::OnWorldBeginPlay(InWorld);
+	RunLevelStartScript(InWorld);
+}
+
+void UBangoScriptSubsystem::RunLevelStartScript(UWorld& InWorld)
+{
+	const UBangoLevelStartScript* StartData = UBangoLevelStartScript::Find(&InWorld);
+	UBangoGlobalsSubsystem* Globals = UBangoGlobalsSubsystem::Get(this);
+	// Asked for once, whether or not this level has a start script, so it doesn't carry on to the next level.
+	const bool bSkip = Globals && Globals->ConsumeSkipLevelStartScript();
+	if (!StartData)
+	{
+		return;
+	}
+	const FString LevelName = InWorld.GetMapName();
+	if (bSkip)
+	{
+		UE_LOG(LogBango, Log, TEXT("Not running %s's start script: SkipNextLevelStartScript was called (loading a saved game)."), *LevelName);
+		return;
+	}
+	if (!StartData->Script)
+	{
+		Bango::ReportError(FString::Printf(TEXT("%s's World Settings have a Bango Level Start Script with no script chosen. Choose one in the Bango toolbar menu, or remove it there."), *LevelName));
+		return;
+	}
+
+	// Actors register their Bango IDs in BeginPlay, which hasn't happened yet: register them now, so the script can use them.
+	for (TActorIterator<AActor> It(&InWorld); It; ++It)
+	{
+		TInlineComponentArray<UBangoIDActorComponent*> IDs(*It);
+		for (UBangoIDActorComponent* ID : IDs)
+		{
+			ID->RegisterName();
+		}
+	}
+
+	FBangoModule& Module = FBangoModule::Get();
+	TSharedPtr<const FBangoProgram> Program;
+	FString DisplayPath;
+	FString Error;
+	if (!Module.GetScriptCache().GetProgram(*StartData->Script, Module.GetCommands(), Program, DisplayPath, Error))
+	{
+		Bango::ReportError(Error);
+		return;
+	}
+	TSharedPtr<FRunningScript> Script = MakeShared<FRunningScript>();
+	Script->Path = DisplayPath;
+	FBangoScriptOwner Owner;
+	Owner.Problem = TEXT("this is the level's start script, which has no owner, so there's no actor for self to be. Name the actor with its Bango ID instead, like @frontDoor.");
+	Script->Instance.SetOwner(Owner);
+	const FBangoScriptHandle Handle = StartScript(Program, Script, TArray<FBangoValue>(), nullptr);
+
+	// It runs before anything else, so it must have finished: one that's waiting would let the level start under it.
+	if (Script->Instance.IsRunning() && Script->Instance.GetStatus() == EBangoInstanceStatus::Waiting)
+	{
+		const FString Command = Script->Instance.GetWaitingCommandName();
+		const FBangoDebugLoc Where = Script->Instance.GetCurrentLocation();
+		Terminate(Handle);
+		Bango::ReportError(FString::Printf(TEXT("%s(%d:%d): The level's start script runs before the level starts, so it must finish straight away, but it called '%s', which waits. Put what waits in a spawn block: spawn { ... }"),
+			*DisplayPath, Where.Line, Where.Column, *Command));
+	}
 }
 
 bool UBangoScriptSubsystem::MakeContext(float DeltaSeconds, FBangoExecContext& OutContext)

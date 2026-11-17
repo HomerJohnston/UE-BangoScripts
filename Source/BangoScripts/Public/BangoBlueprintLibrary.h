@@ -259,4 +259,11 @@ public:
 	/** Stops all scripts and clears all globals, e.g. for a new game. Actors' Bango ID names stay registered. */
 	UFUNCTION(BlueprintCallable, Category = "Bango|Save", meta = (WorldContext = "WorldContextObject"))
 	static void ResetBangoState(UObject* WorldContextObject);
+
+	/**
+	 * The next level to open won't run its Bango level start script. For loading a saved game: call it just before
+	 * opening the saved game's level, then Load Bango State once the level has opened. It lasts for that one level.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Bango|Save", meta = (WorldContext = "WorldContextObject"))
+	static void SkipNextBangoLevelStartScript(UObject* WorldContextObject);
 };

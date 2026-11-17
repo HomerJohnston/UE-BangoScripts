@@ -1,6 +1,7 @@
 #include "BangoConnectionDrawingPolicy.h"
 #include "BangoInlineScript.h"
 #include "BangoInlineScriptCustomization.h"
+#include "BangoLevelStartScriptMenu.h"
 #include "BangoIDName.h"
 #include "BangoIDNameCustomization.h"
 #include "PropertyEditorModule.h"
@@ -56,6 +57,10 @@ public:
 		ScriptSync = MakeUnique<FBangoScriptSync>();
 		ScriptSync->Startup();
 
+		// The level toolbar's Bango dropdown: the level's start script (spec section 15).
+		LevelStartScriptMenu = MakeUnique<FBangoLevelStartScriptMenu>();
+		LevelStartScriptMenu->Startup();
+
 		// Inline scripts (FBangoInlineScript properties): a box to type in, and Edit for a window of their own.
 		FPropertyEditorModule& PropertyEditor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
 		PropertyEditor.RegisterCustomPropertyTypeLayout(FBangoInlineScript::StaticStruct()->GetFName(),
@@ -106,6 +111,11 @@ public:
 			PropertyEditor->UnregisterCustomPropertyTypeLayout(FBangoInlineScript::StaticStruct()->GetFName());
 			PropertyEditor->UnregisterCustomPropertyTypeLayout(FBangoIDName::StaticStruct()->GetFName());
 		}
+		if (LevelStartScriptMenu.IsValid())
+		{
+			LevelStartScriptMenu->Shutdown();
+			LevelStartScriptMenu.Reset();
+		}
 		if (ScriptSync.IsValid())
 		{
 			ScriptSync->Shutdown();
@@ -117,6 +127,7 @@ public:
 
 private:
 	TUniquePtr<FBangoScriptSync> ScriptSync;
+	TUniquePtr<FBangoLevelStartScriptMenu> LevelStartScriptMenu;
 	TSharedPtr<FBangoGraphPinFactory> PinFactory;
 	TSharedPtr<FBangoConnectionDrawingPolicyFactory> ConnectionFactory;
 	TSharedPtr<FBangoGraphNodeFactory> NodeFactory;

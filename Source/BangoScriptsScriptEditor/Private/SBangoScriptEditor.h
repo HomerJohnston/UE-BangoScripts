@@ -94,6 +94,8 @@ public:
 
 	//~ Begin SWidget
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
+	/** For the reference pane's AUTO: COMMANDS when the text box gets the focus, NODES when the graph does. */
+	virtual void OnFocusChanging(const FWeakWidgetPath& PreviousFocusPath, const FWidgetPath& NewWidgetPath, const FFocusEvent& InFocusEvent) override;
 	//~ End SWidget
 
 	//~ Begin FEditorUndoClient: however the undo was started (Ctrl+Z, Edit menu, Undo History), the nodes' widgets are rebuilt.
@@ -193,8 +195,17 @@ private:
 	/** The reference pane's tabs: every command a script can call, and every node that can be placed in the graph. */
 	FReferenceList CommandReference;
 	FReferenceList NodeReference;
-	/** Which tab the reference pane shows: 0 COMMANDS, 1 NODES (remembered between sessions). */
+	/** Which tab the reference pane shows: 0 COMMANDS, 1 NODES. */
 	int32 ReferenceTab = 0;
+	/**
+	 * What its switch is set to (remembered between sessions): 0 COMMANDS, 1 NODES, or 2 AUTO, which shows COMMANDS while
+	 * the script text has the focus and NODES while the graph has. The Graph switch sets it to COMMANDS or NODES (or,
+	 * in AUTO, shows them).
+	 */
+	int32 ReferenceMode = 0;
+	static constexpr int32 ReferenceAuto = 2;
+	/** Shows Tab (0 COMMANDS, 1 NODES) in the reference pane, reading its list again if it changes. */
+	void ShowReferenceTab(int32 Tab);
 	/** The reference pane on the right (COMMANDS and NODES), shown or hidden with its Command Palette tab, like the text pane on the left. */
 	bool bCommandsPaneOpen = false;
 	float CommandsPaneOpenness = 0.0f;
@@ -225,6 +236,11 @@ private:
 	TSharedPtr<SBangoLineMarkers> LineMarkers;
 	/** How many line numbers LineNumbers shows. */
 	int32 LineNumberCount = 0;
+	/**
+	 * The toolbar's Graph switch (remembered between sessions): off hides the graph, and the text and reference panes
+	 * fill its place, open whatever bTextPaneOpen and bCommandsPaneOpen say, with their pullout tabs hidden.
+	 */
+	bool bGraphShown = true;
 	/** Shown or hidden with the Source Editor tab on the graph's left edge (SetTextPaneOpen). Hidden to start with. */
 	bool bTextPaneOpen = false;
 	/** How far the pane is slid out, 0 (hidden) to 1 (open): it moves toward bTextPaneOpen when the tab is clicked. */
@@ -449,6 +465,11 @@ private:
 	TSharedRef<SWidget> MakeTextTab();
 	/** Opens or closes the text pane, sliding it (bAnimate) or at once. */
 	void SetTextPaneOpen(bool bOpen, bool bAnimate);
+	/** The text pane is shown: opened with its tab, or forced open while the graph is hidden. */
+	bool IsTextPaneShown() const { return bTextPaneOpen || !bGraphShown; }
+	/** The toolbar's Graph switch, at its far right: slid right, the graph is shown; slid left, it's hidden. */
+	TSharedRef<SWidget> MakeGraphSwitch();
+	void SetGraphShown(bool bShown);
 	/** The Command Palette tab on the graph's right edge, and the reference pane (COMMANDS and NODES tabs) it pulls out. */
 	TSharedRef<SWidget> MakeCommandsTab();
 	TSharedRef<SWidget> MakeCommandsPane();
@@ -471,6 +492,11 @@ private:
 	bool ApplyScriptText();
 	/** Throws away what was typed in the box: it shows the graphs again. */
 	void RevertScriptText();
+	/**
+	 * Save: writes Text to wherever the open script is kept (its .bango file and asset, its asset, or its inline
+	 * property), asking first over a change made there outside the editor. Returns false (having said why) if it wasn't.
+	 */
+	bool WriteOpenScript(const FString& Text);
 
 	/** Compares the graphs with the file as last opened or saved, and updates bDirty. */
 	void RefreshDirty();
@@ -490,7 +516,13 @@ private:
 	void RebuildAllNodes();
 
 	/** Reload: asks about unsaved changes, then reads the script again from its file. */
+	/**
+	 * The toolbar's Reload (a script read from a .bango file: reads it again) or Revert (an embedded script asset or an
+	 * inline script: throws away the unsaved changes). Asks first, OK / Cancel, if there are unsaved changes.
+	 */
 	FReply OnReloadClicked();
+	/** The open script's text is a .bango file (a linked asset), so the toolbar has Reload rather than Revert. */
+	bool IsReadFromFile() const;
 	/** The toolbar: Reload, Compile (with its status icon) and Save, then the Debug dropdown, styled like an asset editor's. */
 	TSharedRef<SWidget> MakeToolbar();
 	FReply OnCompileClicked();

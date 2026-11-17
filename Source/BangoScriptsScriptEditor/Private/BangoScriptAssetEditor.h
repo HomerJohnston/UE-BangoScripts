@@ -3,13 +3,13 @@
 #include "CoreMinimal.h"
 #include "Toolkits/AssetEditorToolkit.h"
 
-class IDetailsView;
 class SBangoScriptEditor;
 class UBangoScriptAsset;
 
 /**
- * The editor a Bango Script asset opens in (double-clicking it in the Content Browser): a Script tab with the graph
- * editor (SBangoScriptEditor), in front, and a Details tab behind it in the same tab stack.
+ * The editor a Bango Script asset opens in (double-clicking it in the Content Browser): the graph editor
+ * (SBangoScriptEditor), filling the window. It's in one tab, whose tab well is hidden, so no tabs are shown. (The
+ * asset's one property, whether it's linked, is shown in the graph editor's toolbar.)
  */
 class FBangoScriptAssetEditor : public FAssetEditorToolkit
 {
@@ -35,9 +35,7 @@ protected:
 
 private:
 	TSharedRef<SDockTab> SpawnScriptTab(const FSpawnTabArgs& Args);
-	TSharedRef<SDockTab> SpawnDetailsTab(const FSpawnTabArgs& Args);
 
 	TWeakObjectPtr<UBangoScriptAsset> Asset;
 	TSharedPtr<SBangoScriptEditor> ScriptEditor;
-	TSharedPtr<IDetailsView> DetailsView;
 };

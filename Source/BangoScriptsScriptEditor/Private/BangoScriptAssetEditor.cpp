@@ -2,10 +2,6 @@
 
 #include "BangoEditorStyle.h"
 #include "BangoScriptAsset.h"
-#include "IDetailsView.h"
-#include "Modules/ModuleManager.h"
-#include "PropertyEditorModule.h"
-#include "Styling/AppStyle.h"
 #include "SBangoScriptEditor.h"
 #include "Widgets/Docking/SDockTab.h"
 
@@ -15,7 +11,6 @@ namespace BangoScriptAssetEditorPrivate
 {
 	const FName AppIdentifier(TEXT("BangoScriptAssetEditorApp"));
 	const FName ScriptTabId(TEXT("BangoScriptAssetEditor_Script"));
-	const FName DetailsTabId(TEXT("BangoScriptAssetEditor_Details"));
 }
 
 void FBangoScriptAssetEditor::Init(EToolkitMode::Type Mode, const TSharedPtr<IToolkitHost>& InToolkitHost, UBangoScriptAsset* InAsset)
@@ -26,14 +21,8 @@ void FBangoScriptAssetEditor::Init(EToolkitMode::Type Mode, const TSharedPtr<ITo
 	ScriptEditor = SNew(SBangoScriptEditor);
 	ScriptEditor->OpenScriptAsset(InAsset);
 
-	FPropertyEditorModule& PropertyEditor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
-	FDetailsViewArgs DetailsArgs;
-	DetailsArgs.NameAreaSettings = FDetailsViewArgs::HideNameArea;
-	DetailsView = PropertyEditor.CreateDetailView(DetailsArgs);
-	DetailsView->SetObject(InAsset);
-
-	// The Script tab in front, and Details behind it in the same stack (a tab away).
-	const TSharedRef<FTabManager::FLayout> Layout = FTabManager::NewLayout(TEXT("Standalone_BangoScriptAssetEditor_v1"))
+	// Just the graph editor: one tab, with its tab well hidden, so it fills the window without a tab above it.
+	const TSharedRef<FTabManager::FLayout> Layout = FTabManager::NewLayout(TEXT("Standalone_BangoScriptAssetEditor_v2"))
 		->AddArea
 		(
 			FTabManager::NewPrimaryArea()
@@ -42,8 +31,7 @@ void FBangoScriptAssetEditor::Init(EToolkitMode::Type Mode, const TSharedPtr<ITo
 			(
 				FTabManager::NewStack()
 				->AddTab(ScriptTabId, ETabState::OpenedTab)
-				->AddTab(DetailsTabId, ETabState::OpenedTab)
-				->SetForegroundTab(ScriptTabId)
+				->SetHideTabWell(true)
 			)
 		);
 
@@ -81,10 +69,6 @@ void FBangoScriptAssetEditor::RegisterTabSpawners(const TSharedRef<FTabManager>&
 		.SetDisplayName(LOCTEXT("ScriptTab", "Script"))
 		.SetGroup(WorkspaceMenuCategory.ToSharedRef())
 		.SetIcon(FSlateIcon(FBangoEditorStyle::GetStyleSetName(), FBangoEditorStyle::GetScriptIconName()));
-	InTabManager->RegisterTabSpawner(DetailsTabId, FOnSpawnTab::CreateSP(this, &FBangoScriptAssetEditor::SpawnDetailsTab))
-		.SetDisplayName(LOCTEXT("DetailsTab", "Details"))
-		.SetGroup(WorkspaceMenuCategory.ToSharedRef())
-		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "LevelEditor.Tabs.Details"));
 }
 
 void FBangoScriptAssetEditor::UnregisterTabSpawners(const TSharedRef<FTabManager>& InTabManager)
@@ -92,7 +76,6 @@ void FBangoScriptAssetEditor::UnregisterTabSpawners(const TSharedRef<FTabManager
 	using namespace BangoScriptAssetEditorPrivate;
 	FAssetEditorToolkit::UnregisterTabSpawners(InTabManager);
 	InTabManager->UnregisterTabSpawner(ScriptTabId);
-	InTabManager->UnregisterTabSpawner(DetailsTabId);
 }
 
 TSharedRef<SDockTab> FBangoScriptAssetEditor::SpawnScriptTab(const FSpawnTabArgs& Args)
@@ -101,15 +84,6 @@ TSharedRef<SDockTab> FBangoScriptAssetEditor::SpawnScriptTab(const FSpawnTabArgs
 		.Label(LOCTEXT("ScriptTab", "Script"))
 		[
 			ScriptEditor.ToSharedRef()
-		];
-}
-
-TSharedRef<SDockTab> FBangoScriptAssetEditor::SpawnDetailsTab(const FSpawnTabArgs& Args)
-{
-	return SNew(SDockTab)
-		.Label(LOCTEXT("DetailsTab", "Details"))
-		[
-			DetailsView.ToSharedRef()
 		];
 }
 

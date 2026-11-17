@@ -260,7 +260,7 @@ bool FBangoScriptNamesTest::RunTest(const FString& Parameters)
 		TEXT("// ============ GLOBAL VARS ====================\n")
 		TEXT("global int foundThings;\n")
 		TEXT("global string[] questLog;\n")
-		TEXT("int count = 0;\n")
+		TEXT("scriptVar int count = 0;\n")
 		TEXT("string _name;\n")
 		TEXT("if (IsNil(foundThings) && otherGlobal)    //@1(0, 0)\n")
 		TEXT("{\n")
@@ -331,6 +331,60 @@ bool FBangoScriptNamesTest::RunTest(const FString& Parameters)
 	Check(27, TEXT("count"), K::Local);
 	Check(29, TEXT("count"), K::Local);                   // the main graph again, after the function's };
 	Check(29, TEXT("amount"), K::UndeclaredGlobal);
+	Check(19, TEXT("entry"), K::UndeclaredGlobal);        // loop variables only exist in their loop
+	Check(29, TEXT("i"), K::UndeclaredGlobal);
+
+	// Block scope: a local is visible from its line to the } that closes its block; the inner one of two wins; a
+	// spawn's declared id is visible after the spawn's block.
+	const TCHAR* Scoped =
+		TEXT("global int gold;\n")                 // 1
+		TEXT("Talk(\"x\");\n")                     // 2
+		TEXT("int _a = 1;\n")                      // 3
+		TEXT("if (true)\n")                        // 4
+		TEXT("{\n")                                // 5
+		TEXT("\tfloat gold = 2.5;\n")              // 6
+		TEXT("\tstring _a = \"x\";\n")             // 7
+		TEXT("\tTalk(_a);\n")                      // 8
+		TEXT("}\n")                                // 9
+		TEXT("else\n")                             // 10
+		TEXT("{\n")                                // 11
+		TEXT("\tbool _b = true;\n")                // 12
+		TEXT("}\n")                                // 13
+		TEXT("int _t = spawn\n")                   // 14
+		TEXT("{\n")                                // 15
+		TEXT("\tSleep(1);\n")                      // 16
+		TEXT("}\n")                                // 17
+		TEXT("Talk(\"{0}\", _t);\n")               // 18
+		TEXT("function void F()\n")                // 19
+		TEXT("{\n")                                // 20
+		TEXT("\tTalk(\"f\");\n")                   // 21
+		TEXT("\tint _late = 3;\n")                 // 22
+		TEXT("\tTalk(\"{0}\", _late);\n")          // 23
+		TEXT("}\n");                               // 24
+	FBangoMetadataTracker::SplitLines(Scoped, Lines);
+	Tokens.Reset();
+	Tokens.SetNum(Lines.Num());
+	for (int32 I = 0; I < Lines.Num(); ++I)
+	{
+		FBangoLineTokenizer::TokenizeLine(FStringView(Lines[I]), Tokens[I]);
+	}
+	Names.Build(Lines, Tokens);
+	Check(2, TEXT("_a"), K::UndeclaredGlobal);            // before its declaration
+	Check(3, TEXT("_a"), K::Local);
+	Check(6, TEXT("gold"), K::Local);                     // a local hides a global
+	Check(12, TEXT("gold"), K::Global);                   // but not in the sibling block
+	Check(12, TEXT("_b"), K::Local);
+	Check(14, TEXT("_b"), K::UndeclaredGlobal);
+	Check(16, TEXT("_t"), K::UndeclaredGlobal);           // not in the spawn's own block
+	Check(18, TEXT("_t"), K::Local);
+	Check(21, TEXT("_late"), K::UndeclaredGlobal);
+	Check(23, TEXT("_late"), K::Local);
+	TArray<FBangoVisibleName> Visible;
+	Names.GetVisibleNames(7, Visible);                    // line 8
+	const FBangoVisibleName* InnerA = Visible.FindByPredicate([](const FBangoVisibleName& Name) { return Name.Name.Equals(TEXT("_a"), ESearchCase::CaseSensitive); });
+	TestTrue(TEXT("The inner _a is the visible one"), InnerA != nullptr && InnerA->Type.Equals(TEXT("string"), ESearchCase::CaseSensitive));
+	Names.GetVisibleNames(17, Visible);                   // line 18
+	TestFalse(TEXT("A block's local isn't offered after the block"), Visible.ContainsByPredicate([](const FBangoVisibleName& Name) { return Name.Name.Equals(TEXT("_b"), ESearchCase::CaseSensitive); }));
 
 	return true;
 }

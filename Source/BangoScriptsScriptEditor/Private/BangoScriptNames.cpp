@@ -72,10 +72,31 @@ void FBangoScriptNames::Build(const TArray<FString>& Lines, const TArray<TArray<
 	LineGraph.Reset();
 	Globals.Reset();
 	GlobalTypes.Reset();
+	Locals.Reset();
 
 	int32 Graph = 0;            // the graph being read
 	int32 Depth = 0;            // { } depth
 	bool bInFunctionHeader = false;
+
+	// The open blocks: the locals declared in each (they end at its `}`), and the spawn ids that start at its `}`.
+	struct FBlock
+	{
+		TArray<int32> Locals;
+		TArray<int32> StartAtClose;
+	};
+	TArray<FBlock> Blocks;
+	bool bInLoopHeader = false;     // after `for` or `forEach`, until its block opens
+	TArray<int32> PendingLoopVars;  // declared in a loop's header: they belong to its block
+	TArray<int32> PendingSpawnIds;  // `int _t = spawn`: they start when the spawn's block closes
+	auto AddLocal = [this](const FString& Name, const FString& Type, int32 InGraph, int32 StartLine)
+	{
+		FLocalName& Local = Locals.AddDefaulted_GetRef();
+		Local.Name = Name;
+		Local.Type = Type;
+		Local.Graph = InGraph;
+		Local.StartLine = StartLine;
+		return Locals.Num() - 1;
+	};
 
 	for (int32 LineIndex = 0; LineIndex < Lines.Num(); ++LineIndex)
 	{
@@ -138,12 +159,34 @@ void FBangoScriptNames::Build(const TArray<FString>& Lines, const TArray<TArray<
 			{
 				bInFunctionHeader = false;
 				++Depth;
+				FBlock& Block = Blocks.AddDefaulted_GetRef();
+				Block.Locals = MoveTemp(PendingLoopVars);
+				Block.StartAtClose = MoveTemp(PendingSpawnIds);
+				PendingLoopVars.Reset();
+				PendingSpawnIds.Reset();
+				bInLoopHeader = false;
 				continue;
 			}
 
 			if (TokenIs(Line, Token, EBangoSyntaxKind::Structure, TEXT("}")))
 			{
 				Depth = FMath::Max(Depth - 1, 0);
+				if (Blocks.Num() > 0)
+				{
+					FBlock Closed = Blocks.Pop();
+					for (const int32 Local : Closed.Locals)
+					{
+						Locals[Local].EndLine = LineIndex;
+					}
+					for (const int32 Local : Closed.StartAtClose)
+					{
+						Locals[Local].StartLine = LineIndex;
+						if (Blocks.Num() > 0)
+						{
+							Blocks.Last().Locals.Add(Local); // it's the enclosing block's
+						}
+					}
+				}
 				if (Depth == 0 && Graph != 0)
 				{
 					Graph = 0; // the function's body has ended; this line was its last
@@ -151,7 +194,13 @@ void FBangoScriptNames::Build(const TArray<FString>& Lines, const TArray<TArray<
 				continue;
 			}
 
-			// <type> name: a declaration (a global, a parameter, a local, or a for loop's variable).
+			if (TokenIs(Line, Token, EBangoSyntaxKind::Keyword, TEXT("for")))
+			{
+				bInLoopHeader = true;
+				continue;
+			}
+
+			// <type> name: a declaration (a global, a parameter, a local, a script variable, or a for loop's variable).
 			if (Token.Kind == EBangoSyntaxKind::Type && Next != nullptr && Next->Kind == EBangoSyntaxKind::Global)
 			{
 				const FString Name = TokenText(Line, *Next);
@@ -170,7 +219,25 @@ void FBangoScriptNames::Build(const TArray<FString>& Lines, const TArray<TArray<
 				}
 				else
 				{
-					AddUnique(Graphs[Graph].Locals, Graphs[Graph].LocalTypes, Name, Type);
+					const int32 Local = AddLocal(Name, Type, Graph, LineIndex);
+					bool bSpawn = false;
+					for (int32 J = I + 2; J < Code.Num(); ++J)
+					{
+						bSpawn |= TokenIs(Line, Code[J], EBangoSyntaxKind::Keyword, TEXT("spawn"));
+					}
+					if (bInLoopHeader)
+					{
+						PendingLoopVars.Add(Local);
+					}
+					else if (bSpawn)
+					{
+						Locals[Local].StartLine = MAX_int32; // not visible until the spawn's block closes
+						PendingSpawnIds.Add(Local);
+					}
+					else if (Blocks.Num() > 0)
+					{
+						Blocks.Last().Locals.Add(Local);
+					}
 				}
 				++I;
 				continue;
@@ -182,7 +249,8 @@ void FBangoScriptNames::Build(const TArray<FString>& Lines, const TArray<TArray<
 				&& TokenIs(Line, Code[I + 1], EBangoSyntaxKind::Punctuation, TEXT("("))
 				&& Code[I + 2].Kind == EBangoSyntaxKind::Global)
 			{
-				AddUnique(Graphs[Graph].Locals, Graphs[Graph].LocalTypes, TokenText(Line, Code[I + 2]), FString());
+				PendingLoopVars.Add(AddLocal(TokenText(Line, Code[I + 2]), FString(), Graph, LineIndex));
+				bInLoopHeader = true;
 				I += 2;
 				continue;
 			}
@@ -201,12 +269,25 @@ EBangoSyntaxKind FBangoScriptNames::Classify(int32 LineIndex, const FString& Nam
 		{
 			return EBangoSyntaxKind::Parameter;
 		}
-		if (Contains(Graphs[Graph].Locals, Name))
+		if (FindVisibleLocal(LineIndex, Name))
 		{
 			return EBangoSyntaxKind::Local;
 		}
 	}
 	return Contains(Globals, Name) ? EBangoSyntaxKind::Global : EBangoSyntaxKind::UndeclaredGlobal;
+}
+
+const FBangoScriptNames::FLocalName* FBangoScriptNames::FindVisibleLocal(int32 LineIndex, const FString& Name) const
+{
+	const int32 Graph = GetLineGraph(LineIndex);
+	for (int32 I = Locals.Num() - 1; I >= 0; --I)
+	{
+		if (Locals[I].IsVisible(Graph, LineIndex) && Locals[I].Name.Equals(Name, ESearchCase::CaseSensitive))
+		{
+			return &Locals[I];
+		}
+	}
+	return nullptr;
 }
 
 void FBangoScriptNames::RefineTokens(int32 LineIndex, const FString& Line, TArray<FBangoSyntaxToken>& InOutTokens) const
@@ -276,9 +357,13 @@ void FBangoScriptNames::GetVisibleNames(int32 LineIndex, TArray<FBangoVisibleNam
 		{
 			Add(Names.Params[I], Names.ParamTypes.IsValidIndex(I) ? Names.ParamTypes[I] : FString(), EBangoSyntaxKind::Parameter);
 		}
-		for (int32 I = 0; I < Names.Locals.Num(); ++I)
+	}
+	// The visible locals, in the order they're declared; of two with one name, the inner one (FindVisibleLocal).
+	for (int32 I = 0; I < Locals.Num(); ++I)
+	{
+		if (Locals[I].IsVisible(Graph, LineIndex) && FindVisibleLocal(LineIndex, Locals[I].Name) == &Locals[I])
 		{
-			Add(Names.Locals[I], Names.LocalTypes.IsValidIndex(I) ? Names.LocalTypes[I] : FString(), EBangoSyntaxKind::Local);
+			Add(Locals[I].Name, Locals[I].Type, EBangoSyntaxKind::Local);
 		}
 	}
 

@@ -211,6 +211,8 @@ public:
 	// UTickableWorldSubsystem
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
+	/** Runs the level's start script (UBangoLevelStartScript): this comes before any actor's BeginPlay. */
+	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 	virtual void Tick(float DeltaTime) override;
 	virtual TStatId GetStatId() const override;
 
@@ -260,6 +262,8 @@ private:
 	bool StartSpawnBlock(const FBangoInstance& Parent, int32 BlockIP, int64& OutId, FString& OutError);
 	/** The next id for a script (or a condition's run): in order, skipping any still in use if they ever wrap around. */
 	int32 AllocateId();
+	/** OnWorldBeginPlay: runs the level's start script, if it has one, failing it if it waits. */
+	void RunLevelStartScript(UWorld& InWorld);
 	/** Compiles a script's text (SpawnFromSource, and loading one that was saved). */
 	static bool CompileFromSource(const FString& Source, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError);
 	/** Resumes one script. Returns false once it has ended (for any reason). */

@@ -7,9 +7,12 @@
 //  - globals: `global <type> name;`, in one block at the top of the file;
 //  - the main graph's parameters: `#set inputs (<type> name, ...)`;
 //  - a function's parameters: its header, `function <type> Name(<type> name, ...)`, which may span several lines;
-//  - locals: `<type> name ...;` at the top of their graph;
-//  - loop variables: `for (<type> name = ...` and `forEach (name in ...)`.
+//  - locals and script variables: `<type> name ...;` and `scriptVar <type> name ...;`, visible from their line to the
+//    `}` that closes their block (C-style block scope; a graph's top level runs to the end of the graph);
+//  - loop variables: `for (<type> name = ...` and `forEach (name in ...)`, visible in their loop's header and block;
+//  - a spawn's declared id: `int _t = spawn`, visible from the `}` that closes the spawn's block.
 // A function's graph is the lines from its `function` line to the `};` that closes its body.
+// Brace matching is by line tokens only, so text being typed with unbalanced braces just gives looser scopes.
 //
 // Depends only on FString, TArray and the line tokenizer, so it can be unit-tested without Slate.
 
@@ -37,8 +40,9 @@ public:
 	void Build(const TArray<FString>& Lines, const TArray<TArray<FBangoSyntaxToken>>& LineTokens);
 
 	/**
-	 * What a name on a line is: Parameter, Local (also loop variables), Global (declared in this file), or
-	 * UndeclaredGlobal (used here, declared elsewhere, or a misspelling).
+	 * What a name on a line is: Parameter, Local (a local, script variable or loop variable visible on that line),
+	 * Global (declared in this file), or UndeclaredGlobal (used here, declared elsewhere, a misspelling, or a local
+	 * used outside its block).
 	 */
 	EBangoSyntaxKind Classify(int32 LineIndex, const FString& Name) const;
 
@@ -55,8 +59,9 @@ public:
 	int32 FindEntryLine(const FString& FunctionName) const;
 
 	/**
-	 * The names a line can use: its graph's parameters and locals (loop variables included), the file's globals that
-	 * aren't hidden by them, and the file's functions. In that order.
+	 * The names a line can use: its graph's parameters and the locals visible on it (script variables and loop
+	 * variables included; of two visible with one name, the inner one), the file's globals that aren't hidden by them,
+	 * and the file's functions. In that order.
 	 */
 	void GetVisibleNames(int32 LineIndex, TArray<FBangoVisibleName>& OutNames) const;
 
@@ -68,8 +73,6 @@ private:
 	{
 		TArray<FString> Params;
 		TArray<FString> ParamTypes;
-		TArray<FString> Locals;
-		TArray<FString> LocalTypes;
 		FString FunctionName;
 		FString ReturnType;
 		int32 EntryLine = INDEX_NONE;
@@ -81,6 +84,24 @@ private:
 
 	/** Graph 0 is the main graph; then one per function, in file order. */
 	TArray<FGraphNames> Graphs;
+
+	/** A local, script variable or loop variable, and the lines it's visible on. */
+	struct FLocalName
+	{
+		FString Name;
+		FString Type;
+		int32 Graph = 0;
+		int32 StartLine = 0;
+		/** The line of the `}` that closes its block, or MAX_int32 (a graph's top level, or a block not closed yet). */
+		int32 EndLine = MAX_int32;
+
+		bool IsVisible(int32 InGraph, int32 LineIndex) const { return Graph == InGraph && StartLine <= LineIndex && LineIndex <= EndLine; }
+	};
+
+	/** The visible local of that name on the line (the innermost: the latest declared), or nullptr. */
+	const FLocalName* FindVisibleLocal(int32 LineIndex, const FString& Name) const;
+
+	TArray<FLocalName> Locals;
 
 	/** The graph each line belongs to. */
 	TArray<int32> LineGraph;

@@ -67,6 +67,8 @@
 #include "BangoCommand.h"
 #include "Styling/CoreStyle.h"
 #include "Styling/SlateTypes.h"
+#include "Styling/ToolBarStyle.h"
+#include "Layout/WidgetPath.h"
 #include "Widgets/SNullWidget.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/STableRow.h"
@@ -128,16 +130,35 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 	}));
 
 	EmptyMessage = InArgs._EmptyMessage;
+	GConfig->GetBool(TEXT("BangoScriptEditor"), TEXT("GraphShown"), bGraphShown, GEditorPerProjectIni);
 
 	ChildSlot
 	[
 		SNew(SVerticalBox)
 
-		// Top: the toolbar, like an asset editor's (Blueprint's): Reload, Compile (with its status) and Save, then Debug.
+		// Top: the toolbar, like an asset editor's (Blueprint's): Reload, Compile (with its status) and Save, then Debug;
+		// and the Graph switch at its far right, on the toolbar's own background.
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		[
-			MakeToolbar()
+			SNew(SBorder)
+			.BorderImage(&FAppStyle::Get().GetWidgetStyle<FToolBarStyle>("AssetEditorToolbar").BackgroundBrush)
+			.Padding(0.0f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.FillWidth(1.0f)
+				[
+					MakeToolbar()
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(8.0f, 0.0f, 10.0f, 0.0f)
+				[
+					MakeGraphSwitch()
+				]
+			]
 		]
 
 		+ SVerticalBox::Slot()
@@ -406,31 +427,36 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 				// The script text pane. While it's hidden, the graph has the whole width. Opening and closing slide it
 				// (its width grows from nothing, TextPaneOpenness). It keeps its width when the window is resized (the
 				// graph takes the change); the splitter sets its open width.
+				// While the graph is hidden (the Graph switch), it takes the graph's place: it fills what the reference
+				// pane, which keeps its width, leaves.
 				+ SSplitter::Slot()
-				.SizeRule(SSplitter::SizeToContent)
+				.SizeRule_Lambda([this]() { return bGraphShown ? SSplitter::SizeToContent : SSplitter::FractionOfParent; })
+				.Value(1.0f)
 				.Resizable(true) // a sized-to-content slot is only dragged if it says so (and has OnSlotResized)
-				.OnSlotResized_Lambda([this](float NewWidth)
+				.OnSlotResized_Lambda([this](float NewSize)
 				{
-					if (TextPaneOpenness >= 1.0f)
+					if (bGraphShown && TextPaneOpenness >= 1.0f)
 					{
-						TextPaneWidth = FMath::Max(NewWidth, MinSidePaneWidth);
+						TextPaneWidth = FMath::Max(NewSize, MinSidePaneWidth);
 					}
 				})
 				[
 					SNew(SBox)
-					.WidthOverride_Lambda([this]() { return TextPaneWidth * FMath::InterpEaseInOut(0.0f, 1.0f, TextPaneOpenness, 2.0f); })
+					.WidthOverride_Lambda([this]() { return bGraphShown ? FOptionalSize(TextPaneWidth * FMath::InterpEaseInOut(0.0f, 1.0f, TextPaneOpenness, 2.0f)) : FOptionalSize(); })
 					.Clipping(EWidgetClipping::ClipToBounds)
-					.Visibility_Lambda([this]() { return TextPaneOpenness > 0.0f ? EVisibility::Visible : EVisibility::Collapsed; })
+					.Visibility_Lambda([this]() { return TextPaneOpenness > 0.0f || !bGraphShown ? EVisibility::Visible : EVisibility::Collapsed; })
 					[
 						MakeTextPane()
 					]
 				]
 
-				// The graph: the only part whose width follows the window's.
+				// The graph: the only part whose width follows the window's. Collapsed by the Graph switch, with the
+				// pullout tabs on its edges.
 				+ SSplitter::Slot()
 				.Value(1.0f)
 				[
 					SNew(SOverlay)
+					.Visibility_Lambda([this]() { return bGraphShown ? EVisibility::Visible : EVisibility::Collapsed; })
 					+ SOverlay::Slot()
 					[
 						SNew(SVerticalBox)
@@ -579,21 +605,22 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 				]
 
 				// The reference pane (COMMANDS and NODES), on the right: hidden to start with, and slid out by its tab like the text pane.
+				// Its width stays put when the window is resized, with the graph shown or not (forced open while it isn't).
 				+ SSplitter::Slot()
 				.SizeRule(SSplitter::SizeToContent)
 				.Resizable(true) // a sized-to-content slot is only dragged if it says so (and has OnSlotResized)
 				.OnSlotResized_Lambda([this](float NewWidth)
 				{
-					if (CommandsPaneOpenness >= 1.0f)
+					if (CommandsPaneOpenness >= 1.0f || !bGraphShown)
 					{
 						CommandsPaneWidth = FMath::Max(NewWidth, MinSidePaneWidth);
 					}
 				})
 				[
 					SNew(SBox)
-					.WidthOverride_Lambda([this]() { return CommandsPaneWidth * FMath::InterpEaseInOut(0.0f, 1.0f, CommandsPaneOpenness, 2.0f); })
+					.WidthOverride_Lambda([this]() { return CommandsPaneWidth * (bGraphShown ? FMath::InterpEaseInOut(0.0f, 1.0f, CommandsPaneOpenness, 2.0f) : 1.0f); })
 					.Clipping(EWidgetClipping::ClipToBounds)
-					.Visibility_Lambda([this]() { return CommandsPaneOpenness > 0.0f ? EVisibility::Visible : EVisibility::Collapsed; })
+					.Visibility_Lambda([this]() { return CommandsPaneOpenness > 0.0f || !bGraphShown ? EVisibility::Visible : EVisibility::Collapsed; })
 					[
 						MakeCommandsPane()
 					]
@@ -601,6 +628,11 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 			]
 		]
 	];
+
+	// The reference pane's lists, filled now: it can be shown from the start, forced open while the graph is hidden,
+	// without being slid out (which fills them otherwise).
+	RefreshCommandList();
+	RefreshNodeList();
 
 	ShowMessage(EmptyMessage); // until a script asset is opened (OpenScriptAsset)
 	RegisterActiveTimer(0.25f, FWidgetActiveTimerDelegate::CreateSP(this, &SBangoScriptEditor::OnPoll));
@@ -872,7 +904,7 @@ void SBangoScriptEditor::DeleteFunction(TSharedPtr<FGraphEntry> Item)
 		return;
 	}
 	const EAppReturnType::Type Answer = FMessageDialog::Open(EAppMsgType::YesNo, FText::Format(
-		LOCTEXT("DeleteFunctionConfirm", "Delete the function {0}, and everything in its graph?\n\nCalls to it stay where they are, and won't compile until they're removed. This can't be undone with Undo (until you save, Reload brings it back)."),
+		LOCTEXT("DeleteFunctionConfirm", "Delete the function {0}, and everything in its graph?\n\nCalls to it stay where they are, and won't compile until they're removed. This can't be undone with Undo (until you save, Reload or Revert brings it back)."),
 		FText::FromString(Item->Label)));
 	if (Answer != EAppReturnType::Yes)
 	{
@@ -3224,6 +3256,134 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeTextTab()
 		];
 }
 
+TSharedRef<SWidget> SBangoScriptEditor::MakeGraphSwitch()
+{
+	// A slide switch: a rounded track with "Graph" on it and a round knob at the end it's slid to (right: on).
+	static const FSlateRoundedBoxBrush TrackBrush(FLinearColor::White, 10.0f);
+	static const FSlateRoundedBoxBrush KnobBrush(FLinearColor::White, 7.0f);
+	auto Knob = [](TFunction<EVisibility()> InVisibility)
+	{
+		return SNew(SBox)
+			.WidthOverride(14.0f)
+			.HeightOverride(14.0f)
+			.Visibility_Lambda(MoveTemp(InVisibility))
+			[
+				SNew(SBorder)
+				.BorderImage(&KnobBrush)
+				.BorderBackgroundColor(FStyleColors::White)
+				.Padding(0.0f)
+			];
+	};
+	return SNew(SButton)
+		.ButtonStyle(FAppStyle::Get(), "NoBorder")
+		.ContentPadding(0.0f)
+		.Cursor(EMouseCursor::Hand)
+		.ToolTipText_Lambda([this]()
+		{
+			return bGraphShown
+				? LOCTEXT("GraphSwitchOnTooltip", "The graph is shown. Slide this left to hide it: the script text and the command palette fill the window instead.")
+				: LOCTEXT("GraphSwitchOffTooltip", "The graph is hidden, and the script text and the command palette fill the window. Slide this right to show the graph again.");
+		})
+		.OnClicked_Lambda([this]()
+		{
+			SetGraphShown(!bGraphShown);
+			return FReply::Handled();
+		})
+		[
+			SNew(SBox)
+			.HeightOverride(20.0f)
+			.MinDesiredWidth(76.0f)
+			[
+				SNew(SBorder)
+				.BorderImage(&TrackBrush)
+				.BorderBackgroundColor_Lambda([this]() { return bGraphShown ? FStyleColors::Primary : FStyleColors::Dropdown; })
+				.Padding(FMargin(3.0f, 3.0f))
+				.VAlign(VAlign_Center)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					[
+						Knob([this]() { return bGraphShown ? EVisibility::Collapsed : EVisibility::Visible; })
+					]
+					+ SHorizontalBox::Slot()
+					.FillWidth(1.0f)
+					.HAlign(HAlign_Center)
+					.VAlign(VAlign_Center)
+					.Padding(6.0f, 0.0f)
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("GraphSwitch", "Graph"))
+						.Font(FAppStyle::GetFontStyle("SmallFontBold"))
+						.ColorAndOpacity_Lambda([this]() { return bGraphShown ? FStyleColors::White : FStyleColors::Foreground; })
+					]
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.VAlign(VAlign_Center)
+					[
+						Knob([this]() { return bGraphShown ? EVisibility::Visible : EVisibility::Collapsed; })
+					]
+				]
+			]
+		];
+}
+
+void SBangoScriptEditor::SetGraphShown(bool bShown)
+{
+	bGraphShown = bShown;
+	GConfig->SetBool(TEXT("BangoScriptEditor"), TEXT("GraphShown"), bGraphShown, GEditorPerProjectIni);
+	if (!bShown)
+	{
+		UpdateScriptText(nullptr); // the text pane is shown now: up to date with the graphs
+		// So is the reference pane, forced open: read its lists again, as sliding it out does.
+		RefreshCommandList();
+		RefreshNodeList();
+	}
+	// The reference pane follows: NODES with the graph, COMMANDS without it. Its switch moves too, unless it's on AUTO.
+	if (ReferenceMode != ReferenceAuto)
+	{
+		ReferenceMode = bShown ? 1 : 0;
+		GConfig->SetInt(TEXT("BangoScriptEditor"), TEXT("ReferenceTab"), ReferenceMode, GEditorPerProjectIni);
+	}
+	ShowReferenceTab(bShown ? 1 : 0);
+}
+
+void SBangoScriptEditor::ShowReferenceTab(int32 Tab)
+{
+	if (ReferenceTab == Tab)
+	{
+		return;
+	}
+	ReferenceTab = Tab;
+	// Read again, so what other modules (or this script's functions) have added since shows up.
+	if (Tab == 1)
+	{
+		RefreshNodeList();
+	}
+	else
+	{
+		RefreshCommandList();
+	}
+}
+
+void SBangoScriptEditor::OnFocusChanging(const FWeakWidgetPath& PreviousFocusPath, const FWidgetPath& NewWidgetPath, const FFocusEvent& InFocusEvent)
+{
+	SCompoundWidget::OnFocusChanging(PreviousFocusPath, NewWidgetPath, InFocusEvent);
+	if (ReferenceMode != ReferenceAuto)
+	{
+		return;
+	}
+	if (TextBox.IsValid() && NewWidgetPath.ContainsWidget(TextBox.Get()))
+	{
+		ShowReferenceTab(0);
+	}
+	else if (GraphEditor.IsValid() && NewWidgetPath.ContainsWidget(GraphEditor.Get()))
+	{
+		ShowReferenceTab(1);
+	}
+}
+
 void SBangoScriptEditor::SetTextPaneOpen(bool bOpen, bool bAnimate)
 {
 	bTextPaneOpen = bOpen;
@@ -3388,36 +3548,39 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeReferenceTab(FReferenceList& List, c
 
 TSharedRef<SWidget> SBangoScriptEditor::MakeCommandsPane()
 {
-	int32 Tab = 0;
-	if (GConfig->GetInt(TEXT("BangoScriptEditor"), TEXT("ReferenceTab"), Tab, GEditorPerProjectIni))
+	int32 Mode = 0;
+	if (GConfig->GetInt(TEXT("BangoScriptEditor"), TEXT("ReferenceTab"), Mode, GEditorPerProjectIni))
 	{
-		ReferenceTab = Tab == 1 ? 1 : 0;
+		ReferenceMode = FMath::Clamp(Mode, 0, ReferenceAuto);
 	}
+	// What it shows to start with: AUTO starts with what the Graph switch would show.
+	ReferenceTab = ReferenceMode == ReferenceAuto ? (bGraphShown ? 1 : 0) : ReferenceMode;
 
 	return SNew(SBorder)
 		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
 		.Padding(0.0f)
 		[
 			SNew(SVerticalBox)
-			// The tabs: COMMANDS and NODES.
+			// The tabs: COMMANDS, NODES, and AUTO (one or the other, by what has the focus).
 			+ SVerticalBox::Slot()
 			.AutoHeight()
 			.Padding(8.0f, 6.0f, 8.0f, 2.0f)
 			[
 				SNew(SSegmentedControl<int32>)
-				.Value_Lambda([this]() { return ReferenceTab; })
-				.OnValueChanged_Lambda([this](int32 NewTab)
+				.Value_Lambda([this]() { return ReferenceMode; })
+				.OnValueChanged_Lambda([this](int32 NewMode)
 				{
-					ReferenceTab = NewTab;
-					GConfig->SetInt(TEXT("BangoScriptEditor"), TEXT("ReferenceTab"), NewTab, GEditorPerProjectIni);
-					// Read again, so what other modules (or this script's functions) have added since shows up.
-					if (NewTab == 1)
+					ReferenceMode = NewMode;
+					GConfig->SetInt(TEXT("BangoScriptEditor"), TEXT("ReferenceTab"), NewMode, GEditorPerProjectIni);
+					if (NewMode != ReferenceAuto)
 					{
-						RefreshNodeList();
+						ShowReferenceTab(NewMode);
 					}
 					else
 					{
-						RefreshCommandList();
+						// Whatever has the focus now: the text box, or else the graph if it's shown.
+						const bool bTextFocused = TextBox.IsValid() && TextBox->HasAnyUserFocusOrFocusedDescendants();
+						ShowReferenceTab(bTextFocused || !bGraphShown ? 0 : 1);
 					}
 				})
 				+ SSegmentedControl<int32>::Slot(0)
@@ -3426,6 +3589,9 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeCommandsPane()
 				+ SSegmentedControl<int32>::Slot(1)
 				.Text(LOCTEXT("NodesTabLabel", "NODES"))
 				.ToolTip(LOCTEXT("NodesTabTooltip", "Every node you can place in the graph (commands whose value must be used aren't nodes). Hover one to see what it does."))
+				+ SSegmentedControl<int32>::Slot(ReferenceAuto)
+				.Text(LOCTEXT("AutoTabLabel", "AUTO"))
+				.ToolTip(LOCTEXT("AutoTabTooltip", "COMMANDS while you're in the script text, NODES while you're in the graph: it follows whichever you last clicked in."))
 			]
 			+ SVerticalBox::Slot()
 			.FillHeight(1.0f)
@@ -3569,20 +3735,6 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeTextPane()
 						return FReply::Handled();
 					})
 				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.Padding(4.0f, 0.0f, 0.0f, 0.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("RevertText", "Revert"))
-					.ToolTipText(LOCTEXT("RevertTextTooltip", "Throw away what was typed here, and show the graphs' text again."))
-					.IsEnabled_Lambda([this]() { return bTextEdited; })
-					.OnClicked_Lambda([this]()
-					{
-						RevertScriptText();
-						return FReply::Handled();
-					})
-				]
 			]
 			+ SVerticalBox::Slot()
 			.FillHeight(1.0f)
@@ -3685,7 +3837,7 @@ void SBangoScriptEditor::UpdateLineNumbers(const FString& Text)
 
 EActiveTimerReturnType SBangoScriptEditor::SyncLineNumbers(double, float)
 {
-	if (bTextPaneOpen && TextVScrollBar.IsValid() && LineNumberScroll.IsValid() && LineNumbers.IsValid())
+	if (IsTextPaneShown() && TextVScrollBar.IsValid() && LineNumberScroll.IsValid() && LineNumbers.IsValid())
 	{
 		// The text box puts its scroll position on the scrollbar as a fraction of its text's height. The numbers have one
 		// line per line of text in the same font, so their height is the text's: the same fraction of it, in pixels.
@@ -3700,7 +3852,7 @@ EActiveTimerReturnType SBangoScriptEditor::SyncLineNumbers(double, float)
 
 void SBangoScriptEditor::UpdateScriptText(const FBangoGraphDocument* Document)
 {
-	if (!bTextPaneOpen || bTextEdited || EdGraphs.Num() == 0)
+	if (!IsTextPaneShown() || bTextEdited || EdGraphs.Num() == 0)
 	{
 		return;
 	}
@@ -3992,7 +4144,7 @@ EActiveTimerReturnType SBangoScriptEditor::UpdateDebugging(double CurrentTime, f
 			It.RemoveCurrent();
 		}
 	}
-	if (bTextPaneOpen)
+	if (IsTextPaneShown())
 	{
 		UpdateLineMarkers();
 	}
@@ -4269,7 +4421,7 @@ void SBangoScriptEditor::ShowNodeByID(int64 NodeID)
 					GraphEditor->JumpToNode(Node, /*bRequestRename*/ false, /*bSelectNode*/ false);
 				}
 				// And its line in the script text, if the pane is open.
-				const int32 Line = bTextPaneOpen && TextBox.IsValid() ? FindTextLineOfNode(NodeID) : INDEX_NONE;
+				const int32 Line = IsTextPaneShown() && TextBox.IsValid() ? FindTextLineOfNode(NodeID) : INDEX_NONE;
 				if (Line != INDEX_NONE)
 				{
 					TextBox->GoTo(FTextLocation(Line, 0));
@@ -4586,15 +4738,43 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeToolbar()
 		LOCTEXT("Save", "Save"),
 		LOCTEXT("SaveTooltip", "Write the script to its .bango file (Ctrl+S). Text typed in the script text pane is applied first."),
 		FSlateIcon(StyleSet, "AssetEditor.SaveAsset"));
+	// Reload for a script whose text is a .bango file; Revert for one kept in its asset or property, which nothing else
+	// changes behind the editor's back (outside changes to those are picked up by themselves).
 	Toolbar.AddToolBarButton(
 		FUIAction(
 			FExecuteAction::CreateLambda([this]() { OnReloadClicked(); }),
-			// Also when the text didn't read, so it can be fixed and reloaded.
-			FCanExecuteAction::CreateLambda([this]() { return !OpenScript.IsEmpty(); })),
+			// Reload: also when the text didn't read, so it can be fixed in the file and reloaded.
+			FCanExecuteAction::CreateLambda([this]() { return !OpenScript.IsEmpty() && (IsReadFromFile() || HasUnsavedChanges()); })),
 		NAME_None,
-		LOCTEXT("Reload", "Reload"),
-		LOCTEXT("ReloadTooltip", "Read the script again from its .bango file, to pick up changes made to the text outside the graph editor. Asks first if there are unsaved changes."),
+		TAttribute<FText>::CreateLambda([this]() { return IsReadFromFile() ? LOCTEXT("Reload", "Reload") : LOCTEXT("Revert", "Revert"); }),
+		TAttribute<FText>::CreateLambda([this]()
+		{
+			return IsReadFromFile()
+				? LOCTEXT("ReloadTooltip", "Read the script again from its .bango file, to pick up changes made to the file outside the graph editor. Asks first if there are unsaved changes.")
+				: LOCTEXT("RevertTooltip", "Throw away your unsaved changes, and go back to the script as it was last saved.");
+		}),
 		FSlateIcon(StyleSet, "Icons.Refresh"));
+	// (LINKED), for a script asset linked to its .bango file: the asset's one property, shown here (it has no Details tab).
+	Toolbar.AddWidget(
+		SNew(SBox)
+		.VAlign(VAlign_Center)
+		.Padding(FMargin(6.0f, 0.0f, 4.0f, 0.0f))
+		.Visibility_Lambda([this]()
+		{
+			const UBangoScriptAsset* Asset = OpenAsset.Get();
+			return !InlineTarget.IsValid() && Asset && Asset->bLinked ? EVisibility::Visible : EVisibility::Collapsed;
+		})
+		[
+			SNew(STextBlock)
+			.Text(LOCTEXT("LinkedLabel", "(LINKED)"))
+			.Font(FAppStyle::GetFontStyle("BoldFont"))
+			.ColorAndOpacity(FLinearColor(0.45f, 0.78f, 1.0f))
+			.ToolTipText_Lambda([this]()
+			{
+				return FText::Format(LOCTEXT("LinkedLabelTooltip", "This script is linked to its .bango file, {0}: the file is the script (it can be edited in another editor too), and the asset keeps a copy of it. Unlink it from the asset's right-click menu in the Content Browser."),
+					FText::FromString(FPaths::GetCleanFilename(OpenPath)));
+			})
+		]);
 	Toolbar.EndSection();
 
 	Toolbar.BeginSection("Compile");
@@ -4770,12 +4950,31 @@ FReply SBangoScriptEditor::OnCompileClicked()
 	return FReply::Handled();
 }
 
+bool SBangoScriptEditor::IsReadFromFile() const
+{
+	return !InlineTarget.IsValid() && !OpenPath.IsEmpty();
+}
+
 FReply SBangoScriptEditor::OnReloadClicked()
 {
-	if (ConfirmCloseScript())
+	RefreshDirty(); // a script in a tab that isn't shown isn't polled
+	if (bTextEdited || (bDirty && EdGraphs.Num() > 0))
 	{
-		ReloadKeepingView();
+		const FText Name = FText::FromString(GetScriptFileLabel());
+		const bool bReload = IsReadFromFile();
+		const EAppReturnType::Type Answer = FMessageDialog::Open(EAppMsgType::OkCancel,
+			bReload
+				? FText::Format(LOCTEXT("ReloadConfirm", "Reload {0} from its .bango file?\n\nYour unsaved changes here will be thrown away. (This can't be undone.)"), Name)
+				: FText::Format(LOCTEXT("RevertConfirm", "Revert {0}?\n\nYour unsaved changes will be thrown away, and the script goes back to how it was last saved. (This can't be undone.)"), Name),
+			bReload ? LOCTEXT("ReloadConfirmTitle", "Reload Script") : LOCTEXT("RevertConfirmTitle", "Revert Script"));
+		if (Answer != EAppReturnType::Ok)
+		{
+			return FReply::Handled();
+		}
+		bDirty = false; // thrown away on purpose: no recovery copy when the editor closes
+		bTextEdited = false;
 	}
+	ReloadKeepingView();
 	return FReply::Handled();
 }
 
@@ -4797,8 +4996,20 @@ bool SBangoScriptEditor::Save()
 	}
 	if (bTextEdited && !ApplyScriptText())
 	{
-		Notify(FText::Format(LOCTEXT("CantSaveText", "Can't save: the script text doesn't read. Fix it, or Revert it. {0}"), FText::FromString(TextError)), false);
-		return false;
+		// Text that doesn't read as a script is saved as it was typed, so work isn't lost: the script is then opened
+		// as one whose text doesn't read (fixed in the text pane), as it would be by reopening it.
+		const FString Typed = TextBox->GetText().ToString();
+		const FString ReadError = TextError;
+		if (!WriteOpenScript(Typed))
+		{
+			return false;
+		}
+		bTextEdited = false;
+		bDirty = false;
+		ReloadKeepingView();
+		Notify(FText::Format(LOCTEXT("SavedUnreadable", "Saved {0}, but its text doesn't read as a script, so it can't be shown as a graph (or run) until it's fixed: {1}"),
+			FText::FromString(GetScriptFileLabel()), FText::FromString(ReadError)), false);
+		return true;
 	}
 	FBangoGraphDocument Document;
 	FString Error;
@@ -4808,7 +5019,28 @@ bool SBangoScriptEditor::Save()
 		Notify(FText::Format(LOCTEXT("CantSave", "Can't save: {0}"), FText::FromString(Error)), false);
 		return false;
 	}
+	if (!WriteOpenScript(Text))
+	{
+		return false;
+	}
+	SavedDocument = Document;
+	bDirty = false;
 
+	// What was saved is compiled too, for the Compile Test icon (as when the script is opened). A script with an error
+	// is still saved; the notification says so. (Compile Test marks the error on its node.)
+	FString CompileError;
+	CompileQuietly(&CompileError);
+	if (CompileStatus == ECompileStatus::Error && !CompileError.IsEmpty())
+	{
+		Notify(FText::Format(LOCTEXT("SavedWithError", "Saved {0}, but it doesn't compile: {1}"), FText::FromString(GetScriptFileLabel()), FText::FromString(CompileError)), false);
+		return true;
+	}
+	Notify(FText::Format(LOCTEXT("Saved", "Saved {0}."), FText::FromString(GetScriptFileLabel())), true);
+	return true;
+}
+
+bool SBangoScriptEditor::WriteOpenScript(const FString& Text)
+{
 	// Don't silently overwrite changes made to the file outside the editor.
 	const FDateTime FileTime = OpenPath.IsEmpty() ? FDateTime::MinValue() : IFileManager::Get().GetTimeStamp(*OpenPath);
 	// (Not when the user already chose Keep Mine for this change.)
@@ -4874,21 +5106,8 @@ bool SBangoScriptEditor::Save()
 	}
 
 	OpenFileTime = OpenPath.IsEmpty() ? FDateTime::MinValue() : IFileManager::Get().GetTimeStamp(*OpenPath);
-	SavedDocument = Document;
-	bDirty = false;
 	bChangedOnDisk = false;
 	KeptFileTime = FDateTime::MinValue();
-
-	// What was saved is compiled too, for the Compile Test icon (as when the script is opened). A script with an error
-	// is still saved; the notification says so. (Compile Test marks the error on its node.)
-	FString CompileError;
-	CompileQuietly(&CompileError);
-	if (CompileStatus == ECompileStatus::Error && !CompileError.IsEmpty())
-	{
-		Notify(FText::Format(LOCTEXT("SavedWithError", "Saved {0}, but it doesn't compile: {1}"), FText::FromString(GetScriptFileLabel()), FText::FromString(CompileError)), false);
-		return true;
-	}
-	Notify(FText::Format(LOCTEXT("Saved", "Saved {0}."), FText::FromString(GetScriptFileLabel())), true);
 	return true;
 }
 
