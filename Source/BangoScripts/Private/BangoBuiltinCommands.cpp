@@ -12,6 +12,9 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/Controller.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/PrimitiveComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/MovementComponent.h"
 
 namespace BangoBuiltinPrivate
 {
@@ -1163,6 +1166,91 @@ namespace Bango
 					}
 				}
 				return EBangoCommandResult::Done;
+			};
+			Add(Commands, Command);
+		}
+
+		// GetVelocity(entity) -> vector3: the actor's velocity, read from what SetVelocity would set. Like GetPos, the
+		// entity is its only argument.
+		{
+			FBangoCommand Command;
+			Command.Signature = FBangoCommandSignature::Make(TEXT("GetVelocity")).Param(TEXT("Entity"), Entity).Returns(Vector3).InCategory(TEXT("Actors"))
+				.Describe(TEXT("The actor's velocity, in cm per second (world space): its character movement's, its physics-simulating root's, or its movement component's, as SetVelocity sets. Otherwise its root's velocity, which is [0, 0, 0] for an actor nothing moves."));
+			Command.Start = [](FBangoCommandCall& Call)
+			{
+				if (!RequireArgs(Call, 1))
+				{
+					return EBangoCommandResult::Failed;
+				}
+				const AActor* Actor = ResolveActor(Call, Call.Args[0]);
+				if (!Actor)
+				{
+					return EBangoCommandResult::Failed;
+				}
+				FVector Velocity = Actor->GetVelocity(); // the root's: for an actor none of the below move
+				if (const ACharacter* Character = Cast<ACharacter>(Actor); Character && Character->GetCharacterMovement())
+				{
+					Velocity = Character->GetCharacterMovement()->Velocity;
+				}
+				else if (UPrimitiveComponent* Root = Cast<UPrimitiveComponent>(Actor->GetRootComponent()); Root && Root->IsSimulatingPhysics())
+				{
+					Velocity = Root->GetPhysicsLinearVelocity();
+				}
+				else if (const UMovementComponent* Movement = Actor->FindComponentByClass<UMovementComponent>())
+				{
+					Velocity = Movement->Velocity;
+				}
+				Call.Result = MakeVector(Velocity);
+				return EBangoCommandResult::Done;
+			};
+			Add(Commands, Command);
+		}
+
+		// entity SetVelocity(velocity): what moves it decides how: a character's movement, a simulating root, or another
+		// movement component (a projectile's, a floating pawn's).
+		{
+			FBangoCommand Command;
+			Command.Signature = FBangoCommandSignature::Make(TEXT("SetVelocity")).Target(Entity).Param(TEXT("Velocity"), Vector3).InCategory(TEXT("Actors"))
+				.Describe(TEXT("Sets the actor's velocity, in cm per second (world space). A character keeps moving from it under its own movement rules (friction, gravity, its input), and one on the ground given an upward velocity leaves the ground. A physics-simulating actor gets it as its linear velocity. Fails for an actor with nothing that moves it."));
+			Command.Start = [](FBangoCommandCall& Call)
+			{
+				AActor* Actor = ResolveActor(Call, Call.Target);
+				if (!Actor || !RequireArgs(Call, 1))
+				{
+					return EBangoCommandResult::Failed;
+				}
+				const FVector Velocity = GetVector(Call.Args[0]);
+
+				// A character: its movement's velocity. On the ground, an upward velocity would be lost to the ground
+				// snapping it back down, so it falls (jumps) instead, as launching a character does.
+				if (const ACharacter* Character = Cast<ACharacter>(Actor))
+				{
+					if (UCharacterMovementComponent* Movement = Character->GetCharacterMovement())
+					{
+						Movement->Velocity = Velocity;
+						if (Velocity.Z > 0.0 && Movement->IsMovingOnGround())
+						{
+							Movement->SetMovementMode(MOVE_Falling);
+						}
+						Movement->UpdateComponentVelocity();
+						return EBangoCommandResult::Done;
+					}
+				}
+				// Physics: a root that simulates it.
+				if (UPrimitiveComponent* Root = Cast<UPrimitiveComponent>(Actor->GetRootComponent()); Root && Root->IsSimulatingPhysics())
+				{
+					Root->SetPhysicsLinearVelocity(Velocity);
+					return EBangoCommandResult::Done;
+				}
+				// Another movement component (projectile, floating pawn, ...).
+				if (UMovementComponent* Movement = Actor->FindComponentByClass<UMovementComponent>())
+				{
+					Movement->Velocity = Velocity;
+					Movement->UpdateComponentVelocity();
+					return EBangoCommandResult::Done;
+				}
+				Call.Fail(FString::Printf(TEXT("'%s' has nothing that moves it (no character movement, physics-simulating root or movement component), so it has no velocity to set."), *Actor->GetName()));
+				return EBangoCommandResult::Failed;
 			};
 			Add(Commands, Command);
 		}

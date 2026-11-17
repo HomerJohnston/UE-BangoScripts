@@ -46,6 +46,14 @@ public:
 	 */
 	EBangoSyntaxKind Classify(int32 LineIndex, const FString& Name) const;
 
+	/**
+	 * Which variable a name on a line is, as a key: two uses of a name are the same variable if their keys are equal.
+	 * A parameter of the line's graph, the local visible there (or declared there: a spawn's id is declared on the
+	 * spawn's line, but visible only after its block), or else the global of that name. For highlighting a variable's
+	 * other uses.
+	 */
+	FString GetVariableKey(int32 LineIndex, const FString& Name) const;
+
 	/** The graph a line belongs to: 0 for the main graph, then one per function in file order. */
 	int32 GetLineGraph(int32 LineIndex) const;
 
@@ -91,6 +99,9 @@ private:
 		FString Name;
 		FString Type;
 		int32 Graph = 0;
+		/** The line it's declared on. */
+		int32 DeclLine = 0;
+		/** The first line it's visible on: its declaration's, or for a spawn's id, the one its block closes on. */
 		int32 StartLine = 0;
 		/** The line of the `}` that closes its block, or MAX_int32 (a graph's top level, or a block not closed yet). */
 		int32 EndLine = MAX_int32;

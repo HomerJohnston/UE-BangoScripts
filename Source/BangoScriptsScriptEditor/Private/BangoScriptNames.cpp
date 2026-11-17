@@ -94,6 +94,7 @@ void FBangoScriptNames::Build(const TArray<FString>& Lines, const TArray<TArray<
 		Local.Name = Name;
 		Local.Type = Type;
 		Local.Graph = InGraph;
+		Local.DeclLine = StartLine;
 		Local.StartLine = StartLine;
 		return Locals.Num() - 1;
 	};
@@ -275,6 +276,31 @@ EBangoSyntaxKind FBangoScriptNames::Classify(int32 LineIndex, const FString& Nam
 		}
 	}
 	return Contains(Globals, Name) ? EBangoSyntaxKind::Global : EBangoSyntaxKind::UndeclaredGlobal;
+}
+
+FString FBangoScriptNames::GetVariableKey(int32 LineIndex, const FString& Name) const
+{
+	const int32 Graph = GetLineGraph(LineIndex);
+	if (Graphs.IsValidIndex(Graph) && Contains(Graphs[Graph].Params, Name))
+	{
+		return FString::Printf(TEXT("param %d %s"), Graph, *Name);
+	}
+	// Declared on this line (its declaration is one of its uses, even where it isn't visible yet), or visible here.
+	for (int32 I = Locals.Num() - 1; I >= 0; --I)
+	{
+		if (Locals[I].Graph == Graph && Locals[I].DeclLine == LineIndex && Locals[I].Name.Equals(Name, ESearchCase::CaseSensitive))
+		{
+			return FString::Printf(TEXT("local %d"), I);
+		}
+	}
+	for (int32 I = Locals.Num() - 1; I >= 0; --I) // the innermost visible one, as FindVisibleLocal
+	{
+		if (Locals[I].IsVisible(Graph, LineIndex) && Locals[I].Name.Equals(Name, ESearchCase::CaseSensitive))
+		{
+			return FString::Printf(TEXT("local %d"), I);
+		}
+	}
+	return FString::Printf(TEXT("global %s"), *Name);
 }
 
 const FBangoScriptNames::FLocalName* FBangoScriptNames::FindVisibleLocal(int32 LineIndex, const FString& Name) const

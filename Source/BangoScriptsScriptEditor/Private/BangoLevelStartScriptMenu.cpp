@@ -100,8 +100,7 @@ namespace BangoLevelStartScriptMenuPrivate
 
 		UPackage* Package = CreatePackage(*(Folder / AssetName));
 		UBangoScriptAsset* Script = NewObject<UBangoScriptAsset>(Package, *AssetName, RF_Public | RF_Standalone | RF_Transactional);
-		Script->Source = TEXT("// The level's start script: it runs when the level starts, before anything else can start a script.\n")
-			TEXT("// It must finish straight away: put anything that waits (Sleep, ...) in a spawn block. It has no self.\n");
+		Script->Source = TEXT("// The level's start script: it runs when the level starts, before anything else can start a script.\n\nLatent commands are not allowed.");
 		FAssetRegistryModule::AssetCreated(Script);
 		Package->MarkPackageDirty();
 		SetStartScript(Script);

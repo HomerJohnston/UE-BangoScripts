@@ -386,6 +386,17 @@ bool FBangoScriptNamesTest::RunTest(const FString& Parameters)
 	Names.GetVisibleNames(17, Visible);                   // line 18
 	TestFalse(TEXT("A block's local isn't offered after the block"), Visible.ContainsByPredicate([](const FBangoVisibleName& Name) { return Name.Name.Equals(TEXT("_b"), ESearchCase::CaseSensitive); }));
 
+	// Variable keys (for highlighting a variable's other uses): the same variable, not just the same name.
+	auto SameVariable = [&Names](int32 LineA, int32 LineB, const TCHAR* Name)
+	{
+		return Names.GetVariableKey(LineA - 1, Name) == Names.GetVariableKey(LineB - 1, Name);
+	};
+	TestFalse(TEXT("The outer and inner _a are different variables"), SameVariable(3, 8, TEXT("_a")));
+	TestTrue(TEXT("The inner _a's declaration and use are one variable"), SameVariable(7, 8, TEXT("_a")));
+	TestFalse(TEXT("The local gold isn't the global gold"), SameVariable(6, 1, TEXT("gold")));
+	TestTrue(TEXT("The global gold, either side of the block that hides it"), SameVariable(1, 12, TEXT("gold")));
+	TestTrue(TEXT("A spawn's id: its declaration and its use after the block"), SameVariable(14, 18, TEXT("_t")));
+
 	return true;
 }
 

@@ -80,6 +80,14 @@ private:
 	/** Puts the bracket boxes on the layout for the current cursor, replacing the ones there. */
 	void UpdateBracketHighlights();
 
+	/**
+	 * With the cursor in (or just after) a name: boxes every use of it, the one at the cursor included, in the bracket
+	 * boxes' faint grey. A variable's are the same variable's, not just the same name's (FBangoScriptNames::
+	 * GetVariableKey): a local in another block, or a global its graph's local hides, isn't boxed. A label's are in
+	 * its graph. A function's or command's, and an @entity's, are any in the text. Keywords and directives aren't names.
+	 */
+	void UpdateNameHighlights();
+
 	/** Puts the probe's highlight on the layout, replacing the one there. */
 	void UpdateProbeHighlight();
 
@@ -105,6 +113,7 @@ private:
 	/** The cursor, for the bracket boxes. */
 	FBangoTextPosition BracketCursor;
 	TArray<FTextLineHighlight> BracketHighlights;
+	TArray<FTextLineHighlight> NameHighlights;
 	TSharedPtr<ISlateLineHighlighter> MatchHighlighter;
 	TSharedPtr<ISlateLineHighlighter> UnmatchedHighlighter;
 

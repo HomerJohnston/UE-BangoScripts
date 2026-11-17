@@ -350,6 +350,86 @@ void FBangoSyntaxMarshaller::SetCursor(const FBangoTextPosition& InCursor)
 {
 	BracketCursor = InCursor;
 	UpdateBracketHighlights();
+	UpdateNameHighlights();
+}
+
+void FBangoSyntaxMarshaller::UpdateNameHighlights()
+{
+	if (LastLayout == nullptr)
+	{
+		return;
+	}
+	RemoveHighlights(NameHighlights);
+	if (!CachedLines.IsValidIndex(BracketCursor.Line) || !CachedTokens.IsValidIndex(BracketCursor.Line))
+	{
+		return;
+	}
+
+	// What kind of name a token is, for matching: a variable (the tokenizer marks every name that isn't a call as
+	// Global; which variable it is comes from where it is), a function or command (a name followed by '(', or an array
+	// command), a label (after label or goto: one graph's), or an @entity. Keywords and directives aren't names
+	// (player and self are coloured as entities, but they're keywords).
+	enum class ENameGroup : uint8 { None, Variable, Call, Label, Entity };
+	auto GroupOf = [this](int32 LineIndex, const FBangoSyntaxToken& Token)
+	{
+		switch (Token.Kind)
+		{
+		case EBangoSyntaxKind::Global:    return ENameGroup::Variable;
+		case EBangoSyntaxKind::Call:
+		case EBangoSyntaxKind::Builtin:   return ENameGroup::Call;
+		case EBangoSyntaxKind::LabelName: return ENameGroup::Label;
+		case EBangoSyntaxKind::Entity:    return Token.Len > 1 && CachedLines[LineIndex][Token.Start] == TEXT('@') ? ENameGroup::Entity : ENameGroup::None;
+		default:                          return ENameGroup::None;
+		}
+	};
+
+	// The name the cursor is in or just after.
+	const FBangoSyntaxToken* Under = nullptr;
+	ENameGroup Group = ENameGroup::None;
+	for (const FBangoSyntaxToken& Token : CachedTokens[BracketCursor.Line])
+	{
+		if (BracketCursor.Column >= Token.Start && BracketCursor.Column <= Token.Start + Token.Len)
+		{
+			const ENameGroup TokenGroup = GroupOf(BracketCursor.Line, Token);
+			if (TokenGroup != ENameGroup::None)
+			{
+				Under = &Token;
+				Group = TokenGroup;
+				break;
+			}
+		}
+	}
+	if (!Under)
+	{
+		return;
+	}
+	const FString Name = CachedLines[BracketCursor.Line].Mid(Under->Start, Under->Len);
+	const FString Key = Group == ENameGroup::Variable ? ScriptNames.GetVariableKey(BracketCursor.Line, Name) : FString();
+	const int32 LabelGraph = ScriptNames.GetLineGraph(BracketCursor.Line);
+
+	// Every use of it, the one at the cursor included.
+	const int32 NumLines = FMath::Min(LastLayout->GetLineModels().Num(), CachedLines.Num());
+	for (int32 LineIndex = 0; LineIndex < NumLines && LineIndex < CachedTokens.Num(); ++LineIndex)
+	{
+		const FString& Line = CachedLines[LineIndex];
+		for (const FBangoSyntaxToken& Token : CachedTokens[LineIndex])
+		{
+			if (Token.Len != Name.Len() || GroupOf(LineIndex, Token) != Group || FCString::Strncmp(*Line + Token.Start, *Name, Token.Len) != 0)
+			{
+				continue;
+			}
+			// The same variable, not just the same name; a label only in its own graph. Functions, commands and
+			// entities are the file's (and the world's), so their name is enough.
+			if ((Group == ENameGroup::Variable && ScriptNames.GetVariableKey(LineIndex, Name) != Key)
+				|| (Group == ENameGroup::Label && ScriptNames.GetLineGraph(LineIndex) != LabelGraph))
+			{
+				continue;
+			}
+			FTextLineHighlight Highlight(LineIndex, FTextRange(Token.Start, Token.Start + Token.Len), BangoSyntaxMarshallerPrivate::BracketHighlightZOrder, MatchHighlighter.ToSharedRef());
+			LastLayout->AddLineHighlight(Highlight);
+			NameHighlights.Add(Highlight);
+		}
+	}
 }
 
 void FBangoSyntaxMarshaller::UpdateBracketHighlights()
@@ -506,6 +586,8 @@ void FBangoSyntaxMarshaller::SetText(const FString& SourceString, FTextLayout& T
 	LastLayout = &TargetTextLayout;
 	BracketHighlights.Reset();
 	UpdateBracketHighlights();
+	NameHighlights.Reset();
+	UpdateNameHighlights();
 	ProbeHighlights.Reset();
 	UpdateProbeHighlight();
 	ErrorHighlights.Reset();
