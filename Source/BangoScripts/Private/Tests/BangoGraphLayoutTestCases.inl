@@ -159,8 +159,8 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 			TEXT("#set inputs (string _who, int _times = 1)\n")
 			TEXT("global int gold;\n")
 			TEXT("global string[] names;\n")
-			TEXT("int _count = 0;\n")
-			TEXT("int _rounds;\n")
+			TEXT("scriptVar int _count = 0;\n")
+			TEXT("scriptVar int _rounds;\n")
 			TEXT("forEach (_name in names)     //@3(0, 2)\n")
 			TEXT("{\n")
 			TEXT("\tLog(_name);                //@4(1, 3)\n")
@@ -168,13 +168,14 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 			TEXT("for (int _i = 0; _i <= 3; _i++)  //@5(0, 4)\n")
 			TEXT("{\n")
 			TEXT("\tbank = _who GetPos().x;   //@6(1, 5)\n")
+			TEXT("\tfloat _d = 0.5;           //@10(1, 6)\n")
 			TEXT("};\n")
 			TEXT("for (int _i = 9; _i > 0; _i--)    //@9(0, 6)\n")   // a second loop with an _i: it gets its own row
 			TEXT("{\n")
 			TEXT("};\n")
 			TEXT("function void F(int _n)\n")
 			TEXT("{\n")
-			TEXT("\tbool _done = false;\n")
+			TEXT("\tscriptVar bool _done = false;\n")
 			TEXT("\tgold += _n;                //@8(0, 1)\n")
 			TEXT("};\n");
 		FBangoGraphDocument VarDoc;
@@ -190,7 +191,8 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 				FString Out;
 				for (const FBangoGraphVariable& V : Vars)
 				{
-					const TCHAR* Kind = V.Kind == FBangoGraphVariable::EKind::Param ? TEXT("param") : V.Kind == FBangoGraphVariable::EKind::Local ? TEXT("local")
+					const TCHAR* Kind = V.Kind == FBangoGraphVariable::EKind::Param ? TEXT("param") : V.Kind == FBangoGraphVariable::EKind::ScriptVar ? TEXT("scriptVar")
+						: V.Kind == FBangoGraphVariable::EKind::Local ? TEXT("local")
 						: V.Kind == FBangoGraphVariable::EKind::Loop ? TEXT("loop") : TEXT("global");
 					Out += FString::Printf(TEXT("%s %s:%s @%d/%d; "), Kind, *V.Name, *V.Type, V.DeclGraph, V.Index);
 				}
@@ -200,13 +202,13 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 			Bango::GetGraphVariables(VarDoc, INDEX_NONE, VarContext, Vars);
 			// Parameters and locals in order, loop variables by node, the file's globals in order, then `bank`, which
 			// is used but declared nowhere in the file.
-			const FString ExpectedMain = TEXT("param _who:string @-1/0; param _times:int @-1/1; local _count:int @-1/0; local _rounds:int @-1/1; loop _name:string @-1/1; loop _i:int @-1/3; loop _i:int @-1/5; global gold:int @-1/0; global names:string[] @-1/1; global bank: @-1/-1; ");
+			const FString ExpectedMain = TEXT("param _who:string @-1/0; param _times:int @-1/1; scriptVar _count:int @-1/0; scriptVar _rounds:int @-1/1; loop _name:string @-1/1; loop _i:int @-1/3; local _d:float @-1/5; loop _i:int @-1/6; global gold:int @-1/0; global names:string[] @-1/1; global bank: @-1/-1; ");
 			if (Describe(Vars) != ExpectedMain)
 			{
 				OutFailures.Add(TEXT("variables (main): expected ") + ExpectedMain + TEXT("\n got ") + Describe(Vars));
 			}
 			Bango::GetGraphVariables(VarDoc, 0, VarContext, Vars);
-			const FString ExpectedF = TEXT("param _n:int @0/0; local _done:bool @0/0; global gold:int @-1/0; global names:string[] @-1/1; ");
+			const FString ExpectedF = TEXT("param _n:int @0/0; scriptVar _done:bool @0/0; global gold:int @-1/0; global names:string[] @-1/1; ");
 			if (Describe(Vars) != ExpectedF)
 			{
 				OutFailures.Add(TEXT("variables (F): expected ") + ExpectedF + TEXT("\n got ") + Describe(Vars));
@@ -561,14 +563,19 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 		const TCHAR* Source =
 			TEXT("#set inputs (int _count, string[] _names = [])\n")
 			TEXT("global float speed;\n")
-			TEXT("string _title = \"x\";\n")
-			TEXT("int _n = 1;\n")
-			TEXT("vector3 _pos = [1, 2, 3];\n")
+			TEXT("scriptVar string _title = \"x\";\n")
+			TEXT("scriptVar int _n = 1;\n")
+			TEXT("scriptVar vector3 _pos = [1, 2, 3];\n")
 			TEXT("_title = \"y\";    //@3(0, 2)\n")
 			TEXT("speed *= 2;    //@4(0, 3)\n")
 			TEXT("if (_count > 0)    //@5(0, 4)\n{\n")
-			TEXT("\t_n += 2;    //@7(1, 6)\n}\nelse\n{\n")
-			TEXT("\t_n = 4;    //@9(2, 6)\n};\n")
+			TEXT("\t_n += 2;    //@7(1, 6)\n")
+			TEXT("\tfloat _d = 1.5;    //@40(1, 7)\n")
+			TEXT("\t_d = 2.5;    //@41(1, 8)\n")
+			TEXT("\tint _k;    //@43(1, 9)\n}\nelse\n{\n")
+			TEXT("\t_n = 4;    //@9(2, 6)\n")
+			TEXT("\t_d = 3;    //@42(2, 7)\n};\n")
+			TEXT("int _t = spawn    //@44(0, 16)\n{\n};\n")
 			TEXT("for (int _i = 0; _i < 3; _i++)    //@11(0, 8)\n{\n")
 			TEXT("\t_names[_i] = \"z\";    //@12(1, 9)\n};\n")
 			TEXT("forEach (_name in _names)    //@13(0, 10)\n{\n")
@@ -588,6 +595,11 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 			{ 3,  TEXT("Set (Generic) | Var (x string): `_title` | To <string>: `\"y\"`") },
 			{ 4,  TEXT("Multiply (Generic) | Var (x float): `speed` | By <float>: `2`") },
 			{ 7,  TEXT("Add To (Generic) | Var (x int): `_n` | Value <int>: `2`") },
+			{ 40, TEXT("Local Float (Generic) | Name (x float): `_d` | Value <float>: `1.5`") },
+			{ 41, TEXT("Set (Generic) | Var (x float): `_d` | To <float>: `2.5`") },
+			{ 42, TEXT("Set (Generic) | Var (x): `_d` | To: `3`") },
+			{ 43, TEXT("Local Int (Generic) | Name (x int): `_k` | Value <int>: -") },
+			{ 44, TEXT("Spawn (Generic) | Var (x int) <int>: `int _t`?") },
 			{ 9,  TEXT("Set (Generic) | Var (x int): `_n` | To <int>: `4`") },
 			{ 10, TEXT("Set (Generic) | Var (x): `_name` | To: `3`") },
 			{ 12, TEXT("Set (Generic) | Var (x string): `_names[_i]` | To <string>: `\"z\"`") },
@@ -640,7 +652,7 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 			OutFailures.Add(TEXT("variable types: the same document should give matching contexts"));
 		}
 		FBangoGraphDocument Renamed = VarDoc;
-		for (FBangoGraphDecl& Local : Renamed.Main.Locals)
+		for (FBangoGraphDecl& Local : Renamed.Main.ScriptVars)
 		{
 			if (Local.Name == FString(TEXT("_title")))
 			{

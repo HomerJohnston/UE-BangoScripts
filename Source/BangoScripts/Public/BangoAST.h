@@ -301,13 +301,23 @@ protected:
 using FBangoStmtPtr = TUniquePtr<FBangoStmt>;
 using FBangoBlock = TArray<FBangoStmtPtr>;
 
-/** `int _x = 1;` or `global int x;` */
+/**
+ * `int _x = 1;` (a local), `scriptVar int _x = 1;` (a script variable) or `global int x;` (a global).
+ *  - A local can be declared anywhere: it exists from its declaration to the end of its block (as in C), and gets
+ *    its value each time the declaration runs. It's a graph node ("Local Int" and so on).
+ *  - A script variable is declared at the top of its graph, before its code, with a fixed value (or none); it
+ *    exists in the whole graph and gets its value when the graph starts. It isn't a node: the editor lists it.
+ *  - A global is declared at the top of the file, without a value.
+ */
 struct FBangoVarDeclStmt : FBangoStmt
 {
 	static constexpr EBangoStmtKind StaticKind = EBangoStmtKind::VarDecl;
 	FBangoVarDeclStmt() : FBangoStmt(StaticKind) {}
 
 	bool bGlobal = false;
+	bool bScriptVar = false;
+	/** A local: not global, not a script variable. */
+	bool IsLocal() const { return !bGlobal && !bScriptVar; }
 	FBangoType Type;
 	FString Name;
 	/** Null if declared without a value (nil). */
@@ -426,8 +436,8 @@ struct FBangoSpawnStmt : FBangoStmt
 	/** Where the copy's id goes (an int variable, or an element of an int array), or null. */
 	FBangoExprPtr IdTarget;
 	/**
-	 * `int _t = spawn { ... }`: the line declares the variable too (IdTarget is then its name). Declarations go at the
-	 * top, so this doesn't compile; the text pane's Apply (Bango::HoistLateLocals) moves `int _t;` up and leaves `_t = spawn`.
+	 * `int _t = spawn { ... }`: the line declares the variable too, as a local (IdTarget is then its name). It's
+	 * visible after the spawn (not in its block), like a local declared there.
 	 */
 	bool bDeclaresId = false;
 	FBangoType IdType;

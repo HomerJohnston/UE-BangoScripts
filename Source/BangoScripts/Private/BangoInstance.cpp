@@ -1969,14 +1969,23 @@ bool FBangoInstance::MakeReloadedFrames(TArray<FBangoFrame>& OutFrames, FString&
 			}
 			if (Node >= 0)
 			{
+				// A local's declaration node has one slot, a loop has its variable and its bookkeeping. A local renamed
+				// in its node is a new local, which starts as nil like any other the new version adds.
+				int32 OldNodeSlots = 0;
+				int32 NewNodeSlots = 0;
 				for (int32 j = 0; j < OldFn.SlotTypes.Num(); ++j)
 				{
-					if (SlotNode(OldFn, j) == Node)
-					{
-						// The loop is the same, but its variable changed: a loop under way can't be carried over.
-						OutReason = FString::Printf(TEXT("In %s, the loop at node %lld has a new variable, '%s'."), *DescribeFunction(OldFn), Node, *Name);
-						return false;
-					}
+					OldNodeSlots += SlotNode(OldFn, j) == Node ? 1 : 0;
+				}
+				for (int32 j = 0; j < NewFn.SlotTypes.Num(); ++j)
+				{
+					NewNodeSlots += SlotNode(NewFn, j) == Node ? 1 : 0;
+				}
+				if (OldNodeSlots > 0 && !(OldNodeSlots == 1 && NewNodeSlots == 1))
+				{
+					// The loop is the same, but its variable changed: a loop under way can't be carried over.
+					OutReason = FString::Printf(TEXT("In %s, the loop at node %lld has a new variable, '%s'."), *DescribeFunction(OldFn), Node, *Name);
+					return false;
 				}
 			}
 			// A start value of self is the owner's Bango ID, as when the local's declaration runs (nil if there's no owner).

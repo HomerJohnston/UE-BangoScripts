@@ -586,9 +586,12 @@ namespace BangoParserPrivate
 				default:
 					break;
 				}
-				if (IsTypeKeyword(Next.Kind) || Next.Kind == EBangoTokenKind::KwGlobal)
+				// A local's declaration is a node, so it can be disabled; script variables and globals aren't nodes.
+				if (Next.Kind == EBangoTokenKind::KwGlobal || Next.Kind == EBangoTokenKind::KwScriptVar)
 				{
-					return FailPlain(Next.Loc, TEXT("A declaration can't be disabled with '/*' and '*/': it isn't a graph node. Only statements can be disabled."));
+					return FailPlain(Next.Loc, Next.Kind == EBangoTokenKind::KwGlobal
+						? TEXT("A global declaration can't be disabled with '/*' and '*/': it isn't a graph node. Only statements can be disabled.")
+						: TEXT("A scriptVar declaration can't be disabled with '/*' and '*/': it isn't a graph node. Only statements can be disabled."));
 				}
 				FBangoStmtPtr Stmt = ParseStatement();
 				if (!Stmt)
@@ -937,6 +940,7 @@ namespace BangoParserPrivate
 			switch (First.Kind)
 			{
 			case EBangoTokenKind::KwGlobal:   Stmt = ParseVarDecl(true); break;
+			case EBangoTokenKind::KwScriptVar: Stmt = ParseVarDecl(false, true); break;
 			case EBangoTokenKind::KwBreak:    Advance(); Stmt = MakeUnique<FBangoBreakStmt>(); break;
 			case EBangoTokenKind::KwContinue: Advance(); Stmt = MakeUnique<FBangoContinueStmt>(); break;
 			case EBangoTokenKind::KwReturn:   Stmt = ParseReturn(); break;
@@ -994,19 +998,21 @@ namespace BangoParserPrivate
 		}
 
 		/** `global T name [= e]` or `T _name [= e]`, without the ';'. */
-		FBangoStmtPtr ParseVarDecl(bool bGlobal)
+		FBangoStmtPtr ParseVarDecl(bool bGlobal, bool bScriptVar = false)
 		{
 			TUniquePtr<FBangoVarDeclStmt> Decl = MakeUnique<FBangoVarDeclStmt>();
 			Decl->Loc = Cur().Loc;
 			Decl->bGlobal = bGlobal;
+			Decl->bScriptVar = bScriptVar;
 
-			if (bGlobal)
+			if (bGlobal || bScriptVar)
 			{
 				Advance();
 				if (!IsTypeKeyword(Cur().Kind))
 				{
-					Fail(Cur().Loc, FString::Printf(TEXT("Expected a type after 'global' (for example 'global int gold;'), but found %s."),
-						*Bango::DescribeToken(Cur())));
+					Fail(Cur().Loc, bGlobal
+						? FString::Printf(TEXT("Expected a type after 'global' (for example 'global int gold;'), but found %s."), *Bango::DescribeToken(Cur()))
+						: FString::Printf(TEXT("Expected a type after 'scriptVar' (for example 'scriptVar int _tries = 3;'), but found %s."), *Bango::DescribeToken(Cur())));
 					return nullptr;
 				}
 			}
@@ -1502,7 +1508,6 @@ namespace BangoParserPrivate
 			FBangoType IdType;
 			FString IdName;
 			FBangoSourceLocation IdNameLoc;
-			int32 IdTok = TargetTok;
 			if (IsTypeKeyword(Cur().Kind))
 			{
 				// `int _t = spawn`: a declaration as well (see FBangoSpawnStmt::bDeclaresId).
@@ -1510,7 +1515,6 @@ namespace BangoParserPrivate
 				{
 					return nullptr;
 				}
-				IdTok = Pos;
 				if (!ExpectName(IdName, IdNameLoc, TEXT("after the type")))
 				{
 					return nullptr;
@@ -1566,7 +1570,7 @@ namespace BangoParserPrivate
 			}
 			if (Stmt->IdTarget)
 			{
-				SetTextSpan(*Stmt, IdTok, AssignTok); // the place (without a type), for the node's Id field
+				SetTextSpan(*Stmt, TargetTok, AssignTok); // the place, with its type if it declares one (`int _t`), for the node's Var field
 			}
 			else
 			{
@@ -1621,9 +1625,11 @@ namespace BangoParserPrivate
 			if (!Check(EBangoTokenKind::Semicolon))
 			{
 				const FBangoSourceLocation InitLoc = Cur().Loc;
-				if (Check(EBangoTokenKind::KwGlobal))
+				if (Check(EBangoTokenKind::KwGlobal) || Check(EBangoTokenKind::KwScriptVar))
 				{
-					Fail(InitLoc, TEXT("A for loop can't declare a global. Declare it on its own line before the loop."));
+					Fail(InitLoc, Check(EBangoTokenKind::KwGlobal)
+						? TEXT("A for loop can't declare a global. Declare it at the top of the file.")
+						: TEXT("A for loop can't declare a scriptVar. Its variable is declared with just a type: 'for (int _i = 0; ...)'."));
 					return nullptr;
 				}
 				Stmt->Init = IsTypeKeyword(Cur().Kind) ? ParseVarDecl(false) : ParseSimpleStatement(TEXT("for loop header"));
@@ -1661,7 +1667,7 @@ namespace BangoParserPrivate
 			if (!Check(EBangoTokenKind::RParen))
 			{
 				const FBangoSourceLocation StepLoc = Cur().Loc;
-				if (IsTypeKeyword(Cur().Kind) || Check(EBangoTokenKind::KwGlobal))
+				if (IsTypeKeyword(Cur().Kind) || Check(EBangoTokenKind::KwGlobal) || Check(EBangoTokenKind::KwScriptVar))
 				{
 					Fail(StepLoc, TEXT("The last part of a for loop can't be a declaration. Use an assignment like '_i++'."));
 					return nullptr;
@@ -2151,7 +2157,7 @@ namespace BangoParserPrivate
 				break;
 			}
 
-			if (IsTypeKeyword(Token.Kind) || Token.Kind == EBangoTokenKind::KwGlobal)
+			if (IsTypeKeyword(Token.Kind) || Token.Kind == EBangoTokenKind::KwGlobal || Token.Kind == EBangoTokenKind::KwScriptVar)
 			{
 				Fail(Token.Loc, TEXT("A declaration must be a statement on its own line, like 'int _x = 5;'."));
 				return nullptr;

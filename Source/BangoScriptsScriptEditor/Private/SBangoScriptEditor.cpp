@@ -320,7 +320,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 						.AutoHeight()
 						.Padding(0.0f, 0.0f, 0.0f, 2.0f)
 						[
-							MakeFoldout(LOCTEXT("LocalsHeading", "LOCAL VARS"), &bLocalsExpanded,
+							MakeFoldout(LOCTEXT("ScriptVarsHeading", "SCRIPT VARS"), &bLocalsExpanded,
 								SNew(SBox)
 								.Padding(0.0f, 0.0f, 0.0f, 0.0f)
 								[
@@ -347,7 +347,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 								SNew(SButton)
 								.ButtonStyle(FAppStyle::Get(), "SimpleButton")
 								.ContentPadding(FMargin(4.0f, 0.0f))
-								.ToolTipText(LOCTEXT("LocalsHeadingAddTooltip", "Add a local to this graph, with the value it starts with."))
+								.ToolTipText(LOCTEXT("ScriptVarsHeadingAddTooltip", "Add a script variable to this graph, with the value it starts with. (For a local, which can be given its value anywhere, add a Local node.)"))
 								.IsEnabled_Lambda([this]() { return GetShownEntryNode() != nullptr; })
 								.OnClicked_Lambda([this]() { return OnAddDeclClicked(false); })
 								[
@@ -1643,9 +1643,10 @@ FString SBangoScriptEditor::CheckInputName(int32 Index, const FString& NewName) 
 	}
 	for (const TSharedPtr<FBangoGraphVariable>& Variable : VariableItems)
 	{
-		if ((Variable->Kind == FBangoGraphVariable::EKind::Local || Variable->Kind == FBangoGraphVariable::EKind::Loop) && Variable->Name.Equals(NewName, ESearchCase::CaseSensitive))
+		if ((Variable->Kind == FBangoGraphVariable::EKind::ScriptVar || Variable->Kind == FBangoGraphVariable::EKind::Local || Variable->Kind == FBangoGraphVariable::EKind::Loop)
+			&& Variable->Name.Equals(NewName, ESearchCase::CaseSensitive))
 		{
-			return FString::Printf(TEXT("This graph already has a local called %s."), *NewName);
+			return FString::Printf(TEXT("This graph already has a variable called %s."), *NewName);
 		}
 	}
 	return FString();
@@ -1738,7 +1739,7 @@ void SBangoScriptEditor::UpdateVariables(const FBangoGraphDocument& Document, co
 	}
 
 	// The rows: the file's globals, then (greyed) the ones the graph uses that the file doesn't declare; the graph's
-	// locals, then (greyed) its loop variables.
+	// script variables, then (greyed) the locals its nodes declare and its loop variables.
 	TArray<TSharedPtr<FDeclEntry>> Globals;
 	TArray<TSharedPtr<FDeclEntry>> Locals;
 	const FBangoGraph* Shown = !EdGraphs.IsValidIndex(ShownGraph) ? nullptr : ShownGraph == 0 ? &Document.Main
@@ -1753,23 +1754,25 @@ void SBangoScriptEditor::UpdateVariables(const FBangoGraphDocument& Document, co
 			Item->Decl = Document.Globals[i];
 			Globals.Add(Item);
 		}
-		for (int32 i = 0; i < Shown->Locals.Num(); ++i)
+		for (int32 i = 0; i < Shown->ScriptVars.Num(); ++i)
 		{
 			TSharedPtr<FDeclEntry> Item = MakeShared<FDeclEntry>();
 			Item->Index = i;
-			Item->Decl = Shown->Locals[i];
+			Item->Decl = Shown->ScriptVars[i];
 			Locals.Add(Item);
 		}
 		for (const FBangoGraphVariable& Variable : Variables)
 		{
 			const bool bUndeclared = Variable.Kind == FBangoGraphVariable::EKind::Global && Variable.Index == INDEX_NONE;
-			if (!bUndeclared && Variable.Kind != FBangoGraphVariable::EKind::Loop)
+			const bool bNodeLocal = Variable.Kind == FBangoGraphVariable::EKind::Local;
+			if (!bUndeclared && !bNodeLocal && Variable.Kind != FBangoGraphVariable::EKind::Loop)
 			{
 				continue;
 			}
 			TSharedPtr<FDeclEntry> Item = MakeShared<FDeclEntry>();
 			Item->bGlobal = bUndeclared;
 			Item->bReadOnly = true;
+			Item->bNodeLocal = bNodeLocal;
 			Item->Decl.Name = Variable.Name;
 			Item->Decl.Type = Variable.Type;
 			Item->LoopNode = bUndeclared ? INDEX_NONE : Variable.Index;
@@ -1783,8 +1786,8 @@ void SBangoScriptEditor::UpdateVariables(const FBangoGraphDocument& Document, co
 	{
 		for (const TSharedPtr<FDeclEntry>& Item : *List)
 		{
-			Shape += FString::Printf(TEXT("%d %d %d %s %s %d %s %s %d|"), Item->bGlobal ? 1 : 0, Item->Index, Item->bReadOnly ? 1 : 0, *Item->Decl.Type, *Item->Decl.Name,
-				Item->Decl.bHasValue ? 1 : 0, *Item->Decl.Value, *Item->Decl.Comment, Item->LoopNode);
+			Shape += FString::Printf(TEXT("%d %d %d %s %s %d %s %s %d %d|"), Item->bGlobal ? 1 : 0, Item->Index, Item->bReadOnly ? 1 : 0, *Item->Decl.Type, *Item->Decl.Name,
+				Item->Decl.bHasValue ? 1 : 0, *Item->Decl.Value, *Item->Decl.Comment, Item->LoopNode, Item->bNodeLocal ? 1 : 0);
 		}
 		Shape += TEXT("#");
 	}
@@ -1822,7 +1825,7 @@ TArray<FBangoGraphDecl> SBangoScriptEditor::GetDecls(bool bGlobal) const
 	const UBangoEdGraphNode* Entry = bGlobal ? (EdGraphs.Num() > 0 ? BangoScriptEditor::FindEntryNode(EdGraphs[0].Get()) : nullptr) : GetShownEntryNode();
 	if (Entry)
 	{
-		for (const FBangoEdDecl& Decl : bGlobal ? Entry->Globals : Entry->Locals)
+		for (const FBangoEdDecl& Decl : bGlobal ? Entry->Globals : Entry->ScriptVars)
 		{
 			Decls.Add(Decl.ToGraphDecl());
 		}
@@ -1840,7 +1843,7 @@ bool SBangoScriptEditor::ApplyDecls(bool bGlobal, const TArray<FBangoGraphDecl>&
 	}
 	const FScopedTransaction Transaction(Description);
 	Entry->Modify();
-	TArray<FBangoEdDecl>& Target = bGlobal ? Entry->Globals : Entry->Locals;
+	TArray<FBangoEdDecl>& Target = bGlobal ? Entry->Globals : Entry->ScriptVars;
 	Target.Reset();
 	for (const FBangoGraphDecl& Decl : Decls)
 	{
@@ -1866,7 +1869,7 @@ bool SBangoScriptEditor::ApplyDecls(bool bGlobal, const TArray<FBangoGraphDecl>&
 					Bango::ReadEntryParams(GraphEntry->Text, g > 0, GraphParams);
 				}
 				const bool bHidden = GraphEntry
-					&& (GraphEntry->Locals.ContainsByPredicate([&RenamedFrom](const FBangoEdDecl& Decl) { return Decl.Name.Equals(RenamedFrom, ESearchCase::CaseSensitive); })
+					&& (GraphEntry->ScriptVars.ContainsByPredicate([&RenamedFrom](const FBangoEdDecl& Decl) { return Decl.Name.Equals(RenamedFrom, ESearchCase::CaseSensitive); })
 						|| GraphParams.ContainsByPredicate([&RenamedFrom](const FBangoEntryParam& Param) { return Param.Name.Equals(RenamedFrom, ESearchCase::CaseSensitive); }));
 				if (bHidden)
 				{
@@ -1914,10 +1917,10 @@ FReply SBangoScriptEditor::OnAddDeclClicked(bool bGlobal)
 	}
 	FBangoGraphDecl& Added = Decls.AddDefaulted_GetRef();
 	Added.Type = TEXT("bool");
-	Added.Name = Bango::MakeUniqueName(bGlobal ? TEXT("newGlobal") : TEXT("_newLocal"), Used);
+	Added.Name = Bango::MakeUniqueName(bGlobal ? TEXT("newGlobal") : TEXT("_newScriptVar"), Used);
 	bPendingDeclGlobal = bGlobal;
 	PendingDeclRename = Decls.Num() - 1;
-	if (!ApplyDecls(bGlobal, Decls, bGlobal ? LOCTEXT("AddGlobalTransaction", "Add Bango Global") : LOCTEXT("AddLocalTransaction", "Add Bango Local")))
+	if (!ApplyDecls(bGlobal, Decls, bGlobal ? LOCTEXT("AddGlobalTransaction", "Add Bango Global") : LOCTEXT("AddScriptVarTransaction", "Add Bango Script Variable")))
 	{
 		PendingDeclRename = INDEX_NONE;
 	}
@@ -1969,7 +1972,7 @@ void SBangoScriptEditor::DeleteDecl(bool bGlobal, int32 Index)
 		}
 	}
 	Decls.RemoveAt(Index);
-	ApplyDecls(bGlobal, Decls, bGlobal ? LOCTEXT("DeleteGlobalTransaction", "Remove Bango Global") : LOCTEXT("DeleteLocalTransaction", "Remove Bango Local"));
+	ApplyDecls(bGlobal, Decls, bGlobal ? LOCTEXT("DeleteGlobalTransaction", "Remove Bango Global") : LOCTEXT("DeleteScriptVarTransaction", "Remove Bango Script Variable"));
 }
 
 void SBangoScriptEditor::SetDeclType(bool bGlobal, int32 Index, const FString& Type)
@@ -1986,7 +1989,7 @@ void SBangoScriptEditor::SetDeclType(bool bGlobal, int32 Index, const FString& T
 		Decls[Index].bHasValue = false;
 		Decls[Index].Value.Reset();
 	}
-	ApplyDecls(bGlobal, Decls, bGlobal ? LOCTEXT("SetGlobalTypeTransaction", "Change Bango Global Type") : LOCTEXT("SetLocalTypeTransaction", "Change Bango Local Type"));
+	ApplyDecls(bGlobal, Decls, bGlobal ? LOCTEXT("SetGlobalTypeTransaction", "Change Bango Global Type") : LOCTEXT("SetScriptVarTypeTransaction", "Change Bango Script Variable Type"));
 }
 
 void SBangoScriptEditor::SetDeclValue(int32 Index, const FString& Typed)
@@ -2020,7 +2023,7 @@ void SBangoScriptEditor::SetDeclValue(int32 Index, const FString& Typed)
 	}
 	Decl.bHasValue = bHasValue;
 	Decl.Value = bHasValue ? Value : FString();
-	ApplyDecls(false, Decls, LOCTEXT("SetLocalValueTransaction", "Change Bango Local Value"));
+	ApplyDecls(false, Decls, LOCTEXT("SetScriptVarValueTransaction", "Change Bango Script Variable Value"));
 }
 
 void SBangoScriptEditor::MoveDecl(bool bGlobal, int32 From, int32 To)
@@ -2038,7 +2041,7 @@ void SBangoScriptEditor::MoveDecl(bool bGlobal, int32 From, int32 To)
 		return;
 	}
 	Decls.Insert(Moved, Insert);
-	ApplyDecls(bGlobal, Decls, bGlobal ? LOCTEXT("MoveGlobalTransaction", "Reorder Bango Globals") : LOCTEXT("MoveLocalTransaction", "Reorder Bango Locals"));
+	ApplyDecls(bGlobal, Decls, bGlobal ? LOCTEXT("MoveGlobalTransaction", "Reorder Bango Globals") : LOCTEXT("MoveScriptVarTransaction", "Reorder Bango Script Variables"));
 }
 
 FString SBangoScriptEditor::CheckDeclName(bool bGlobal, int32 Index, const FString& NewName) const
@@ -2051,23 +2054,25 @@ FString SBangoScriptEditor::CheckDeclName(bool bGlobal, int32 Index, const FStri
 	if (!BangoScriptEditorPrivate::IsVariableName(NewName))
 	{
 		return FString::Printf(TEXT("A %s's name has only letters, digits and _, doesn't start with a digit, and isn't a keyword (like %s)."),
-			bGlobal ? TEXT("global") : TEXT("local"), bGlobal ? TEXT("gold or questLog") : TEXT("count or _count"));
+			bGlobal ? TEXT("global") : TEXT("script variable"), bGlobal ? TEXT("gold or questLog") : TEXT("count or _count"));
 	}
 	for (int32 i = 0; i < Decls.Num(); ++i)
 	{
 		if (i != Index && Decls[i].Name.Equals(NewName, ESearchCase::CaseSensitive))
 		{
-			return FString::Printf(TEXT("There's already a %s called %s."), bGlobal ? TEXT("global") : TEXT("local"), *NewName);
+			return FString::Printf(TEXT("There's already a %s called %s."), bGlobal ? TEXT("global") : TEXT("script variable"), *NewName);
 		}
 	}
 	if (!bGlobal)
 	{
 		for (const TSharedPtr<FBangoGraphVariable>& Variable : VariableItems)
 		{
-			if ((Variable->Kind == FBangoGraphVariable::EKind::Param || Variable->Kind == FBangoGraphVariable::EKind::Loop) && Variable->Name.Equals(NewName, ESearchCase::CaseSensitive))
+			if ((Variable->Kind == FBangoGraphVariable::EKind::Param || Variable->Kind == FBangoGraphVariable::EKind::Loop || Variable->Kind == FBangoGraphVariable::EKind::Local)
+				&& Variable->Name.Equals(NewName, ESearchCase::CaseSensitive))
 			{
 				return FString::Printf(TEXT("%s is already a %s of this graph."), *NewName,
-					Variable->Kind == FBangoGraphVariable::EKind::Param ? TEXT("parameter") : TEXT("loop's variable"));
+					Variable->Kind == FBangoGraphVariable::EKind::Param ? TEXT("parameter")
+					: Variable->Kind == FBangoGraphVariable::EKind::Loop ? TEXT("loop's variable") : TEXT("local, declared by a node"));
 			}
 		}
 	}
@@ -2083,7 +2088,7 @@ void SBangoScriptEditor::RenameDecl(bool bGlobal, int32 Index, const FString& Ne
 	}
 	const FString OldName = Decls[Index].Name;
 	Decls[Index].Name = NewName;
-	ApplyDecls(bGlobal, Decls, bGlobal ? LOCTEXT("RenameGlobalTransaction", "Rename Bango Global") : LOCTEXT("RenameLocalTransaction", "Rename Bango Local"), OldName, NewName);
+	ApplyDecls(bGlobal, Decls, bGlobal ? LOCTEXT("RenameGlobalTransaction", "Rename Bango Global") : LOCTEXT("RenameScriptVarTransaction", "Rename Bango Script Variable"), OldName, NewName);
 }
 
 void SBangoScriptEditor::OnDeclClicked(TSharedPtr<FDeclEntry> Item)
@@ -2127,6 +2132,8 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateDeclRow(TSharedPtr<FDeclEntr
 		.ToolTipText(Entry.bReadOnly
 			? (bGlobal
 				? LOCTEXT("UndeclaredGlobalTooltip", "Used here, but this script doesn't declare it: another script or a Blueprint may (or it's a typo). Click + to declare it here. Drag it onto the graph to use it.")
+				: Entry.bNodeLocal
+				? LOCTEXT("NodeLocalTooltip", "A local, declared by a Local node (or a Spawn that keeps its copy's id). It exists from that node to the end of its block. Click to show the node. Drag it onto the graph to use it.")
 				: LOCTEXT("LoopVariableTooltip", "A loop's variable, declared by its For or For Each node. Click to show the loop. Drag it onto the graph to use it."))
 			: FText::FromString(Entry.Decl.Comment))
 		// Dragged by anything but its handle, a variable goes onto the graph.
@@ -2359,7 +2366,7 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateDeclRow(TSharedPtr<FDeclEntr
 				.ContentPadding(FMargin(3.0f, 0.0f))
 				.ToolTipText(bGlobal
 					? LOCTEXT("DeleteGlobalTooltip", "Remove this declaration (asks first if the script uses it). Its uses are left as they are.")
-					: LOCTEXT("DeleteLocalTooltip", "Remove this local. Its uses in the graph are left as they are."))
+					: LOCTEXT("DeleteScriptVarTooltip", "Remove this script variable. Its uses in the graph are left as they are."))
 				.OnClicked_Lambda([this, bGlobal, Index]()
 				{
 					DeleteDecl(bGlobal, Index);
@@ -3724,20 +3731,8 @@ bool SBangoScriptEditor::ApplyScriptText()
 	{
 		return false;
 	}
-	// Locals can be declared anywhere while typing: they're moved up to their graph's other locals first.
-	const FString Typed = TextBox->GetText().ToString();
-	FString Text;
+	const FString Text = TextBox->GetText().ToString();
 	FBangoCompileError Error;
-	if (!Bango::HoistLateLocals(Typed, Text, Error))
-	{
-		Error.FileName = GetScriptFileLabel();
-		SetTextError(Error, true);
-		if (Error.Line > 0)
-		{
-			TextBox->GoTo(FTextLocation(Error.Line - 1, FMath::Max(Error.Column - 1, 0)));
-		}
-		return false;
-	}
 	FBangoGraphDocument Document;
 	if (!Bango::BuildGraph(Text, GetScriptFileLabel(), Document, Error))
 	{

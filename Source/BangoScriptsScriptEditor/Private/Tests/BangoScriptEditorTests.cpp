@@ -308,7 +308,7 @@ bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 	// types are kept by.
 	{
 		FBangoGraphDocument VarDoc;
-		if (TestTrue(TEXT("build variable graph"), Bango::BuildGraph(TEXT("int _n = 1;\n_n = 2;    //@2(0, 1)\n"), TEXT("vars.bango"), VarDoc, Error)))
+		if (TestTrue(TEXT("build variable graph"), Bango::BuildGraph(TEXT("scriptVar int _n = 1;\n_n = 2;    //@2(0, 1)\n"), TEXT("vars.bango"), VarDoc, Error)))
 		{
 			const TSharedPtr<FBangoNodeLayoutContext> VarContext = MakeShared<FBangoNodeLayoutContext>(Bango::MakeNodeLayoutContext(VarDoc, &FBangoModule::Get().GetCommands()));
 			TStrongObjectPtr<UEdGraph> VarGraph(BangoScriptEditor::CreateEdGraph(VarDoc.Main, VarContext));

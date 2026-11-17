@@ -31,7 +31,7 @@ namespace BangoLineTokenizerPrivate
 	static const TCHAR* const FlowKeywords[]   = { TEXT("if"), TEXT("else"), TEXT("while"), TEXT("for"), TEXT("forEach"), TEXT("in"), TEXT("sequence"), TEXT("spawn"), TEXT("switch"), TEXT("case"), TEXT("default") };
 	static const TCHAR* const JumpKeywords[]   = { TEXT("return"), TEXT("break"), TEXT("continue") };
 	static const TCHAR* const LabelKeywords[]  = { TEXT("label"), TEXT("goto") };
-	static const TCHAR* const DeclKeywords[]   = { TEXT("global"), TEXT("function") };
+	static const TCHAR* const DeclKeywords[]   = { TEXT("global"), TEXT("scriptVar"), TEXT("function") };
 	static const TCHAR* const TypeNames[]      = { TEXT("bool"), TEXT("int"), TEXT("float"), TEXT("string"), TEXT("entity"), TEXT("text"), TEXT("vector2"), TEXT("vector3"), TEXT("void") };
 	static const TCHAR* const Constants[]      = { TEXT("true"), TEXT("false") };
 	static const TCHAR* const NilWord[]        = { TEXT("nil") };

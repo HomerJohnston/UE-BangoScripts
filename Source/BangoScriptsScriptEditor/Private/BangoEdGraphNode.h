@@ -129,9 +129,9 @@ public:
 	UPROPERTY(Transient)
 	bool bMovedByUser = false;
 
-	/** Entry nodes only: the locals declared at the top of this graph (FBangoGraph::Locals). Edited in the Locals list. */
+	/** Entry nodes only: the script variables declared at the top of this graph (FBangoGraph::ScriptVars). Edited in the Script Variables list. */
 	UPROPERTY()
-	TArray<FBangoEdDecl> Locals;
+	TArray<FBangoEdDecl> ScriptVars;
 
 	/** The main Script Start node only: the file's globals (FBangoGraphDocument::Globals). Edited in the Globals list. */
 	UPROPERTY()

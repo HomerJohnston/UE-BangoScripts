@@ -594,7 +594,7 @@ namespace BangoGraphLayoutPrivate
 			|| Kind == EBangoTokenKind::KwVector2 || Kind == EBangoTokenKind::KwVector3;
 	}
 
-	/** Reads a declaration like `int _x = 5`, `global string[] log` or a for loop's `int _i = 0`. */
+	/** Reads a declaration like `int _x = 5`, `global string[] log`, a for loop's `int _i = 0` or a Spawn's `int _t`. */
 	static bool ReadDeclaration(const FString& Text, bool& bOutGlobal, FString& OutType, FString& OutName)
 	{
 		const FTokens Tok(Text);
@@ -604,7 +604,7 @@ namespace BangoGraphLayoutPrivate
 		}
 		int32 i = 0;
 		bOutGlobal = Tok.Is(0, EBangoTokenKind::KwGlobal);
-		if (bOutGlobal)
+		if (bOutGlobal || Tok.Is(0, EBangoTokenKind::KwScriptVar))
 		{
 			++i;
 		}
@@ -686,6 +686,43 @@ namespace BangoGraphLayoutPrivate
 		return ArrayType.EndsWith(TEXT("[]"), ESearchCase::CaseSensitive) ? ArrayType.Left(ArrayType.Len() - 2) : FString();
 	}
 
+	/** The local a Local node declares, or a Spawn node for its id (`int _t`), or false. */
+	static bool ReadNodeLocal(const FBangoGraphNode& Node, FString& OutType, FString& OutName)
+	{
+		bool bGlobal = false;
+		return (Node.Kind == EBangoGraphNodeKind::Local || Node.Kind == EBangoGraphNodeKind::Spawn) && !Node.bDisabled
+			&& ReadDeclaration(Node.Text, bGlobal, OutType, OutName) && !bGlobal;
+	}
+
+	static void DeclareNodeLocal(const FBangoGraphNode& Node, FVarScope& Scope)
+	{
+		FString Type;
+		FString Name;
+		if (ReadNodeLocal(Node, Type, Name))
+		{
+			// A local's name hides a global's, so it replaces whatever was visible by that name.
+			Scope.Add(Name, Type);
+		}
+	}
+
+	/** "Local Int", "Local Float Array", "Local Vector3": the title of a Local node declaring Type. */
+	static FString LocalNodeTitle(const FString& Type)
+	{
+		FString Base = Type;
+		int32 Arrays = 0;
+		while (Base.EndsWith(TEXT("[]"), ESearchCase::CaseSensitive))
+		{
+			Base.LeftChopInline(2);
+			++Arrays;
+		}
+		FString Title = FString(TEXT("Local ")) + (Base.IsEmpty() ? Base : Base.Left(1).ToUpper() + Base.Mid(1));
+		for (int32 i = 0; i < Arrays; ++i)
+		{
+			Title += TEXT(" Array");
+		}
+		return Title;
+	}
+
 	/** Walks one graph's chains, recording what each node can see (FBangoNodeLayoutContext::VisibleVariables). */
 	struct FScopeWalker
 	{
@@ -711,6 +748,10 @@ namespace BangoGraphLayoutPrivate
 				}
 				switch (Node.Kind)
 				{
+				case EBangoGraphNodeKind::Local:
+					// Visible to the nodes after it in this chain, and in their blocks (C-style block scope).
+					DeclareNodeLocal(Node, Scope);
+					break;
 				case EBangoGraphNodeKind::If:
 					Chain(Node.Branches[0], Scope);
 					Chain(Node.Branches[1], Scope);
@@ -724,6 +765,10 @@ namespace BangoGraphLayoutPrivate
 					for (const int32 Output : Node.Branches)
 					{
 						Chain(Output, Scope);
+					}
+					if (Node.Kind == EBangoGraphNodeKind::Spawn)
+					{
+						DeclareNodeLocal(Node, Scope); // `int _t = spawn`: after it, not in its block
 					}
 					break;
 				case EBangoGraphNodeKind::For:
@@ -845,7 +890,7 @@ namespace BangoGraphLayoutPrivate
 		{
 			FVarScope Base = Globals;
 			AddEntryParams(*Graph, Base);
-			for (const FBangoGraphDecl& Local : Graph->Locals)
+			for (const FBangoGraphDecl& Local : Graph->ScriptVars)
 			{
 				DeclareVariable(Base, Local.Name, Local.Type);
 			}
@@ -962,6 +1007,46 @@ namespace BangoGraphLayoutPrivate
 			Out.Fields.Add(Var);
 			FBangoNodeField Value = Tok.Field(bScales ? TEXT("By") : (bSet ? TEXT("To") : TEXT("Value")), Var.VariableType, Op + 1, N);
 			Value.InsertPrefix = TEXT(" "); // `_x =` becomes `_x = 5`
+			Out.Fields.Add(Value);
+			return;
+		}
+
+		case EBangoGraphNodeKind::Local:
+		{
+			// `int _x = 5`: "Local Int", with a Name row and a Value row (of the local's type; empty for no value).
+			bool bGlobal = false;
+			FString Type;
+			FString Name;
+			if (!ReadDeclaration(Node.Text, bGlobal, Type, Name) || bGlobal)
+			{
+				break;
+			}
+			int32 NameTok = 0;
+			while (NameTok < N && !(Tok.Is(NameTok, EBangoTokenKind::Identifier) && Tok.T[NameTok].Text.Equals(Name, ESearchCase::CaseSensitive)))
+			{
+				++NameTok;
+			}
+			const bool bHasValue = Tok.Is(NameTok + 1, EBangoTokenKind::Assign);
+			if (NameTok >= N || (NameTok + 1 < N && !bHasValue))
+			{
+				break;
+			}
+			Out.Title = LocalNodeTitle(Type);
+			Out.Description = FString::Printf(TEXT("Declares a local (%s), which exists from here to the end of the block it's in, and gives it its value each time this runs."), *Type);
+			FBangoNodeField NameField = Tok.Field(TEXT("Name"), FString(), NameTok, NameTok + 1);
+			NameField.bVariable = true;
+			NameField.VariableType = Type;
+			Out.Fields.Add(NameField);
+			FBangoNodeField Value = Tok.Field(TEXT("Value"), Type, bHasValue ? NameTok + 2 : N, N);
+			if (bHasValue)
+			{
+				Value.OuterBegin = Tok.EndOf(NameTok); // clearing it removes ` = ...` too
+			}
+			else
+			{
+				Value.Begin = Value.End = Value.OuterBegin = Value.OuterEnd = Tok.EndOf(NameTok);
+			}
+			Value.InsertPrefix = TEXT(" = ");
 			Out.Fields.Add(Value);
 			return;
 		}
@@ -1092,8 +1177,16 @@ namespace BangoGraphLayoutPrivate
 
 		case EBangoGraphNodeKind::Spawn:
 		{
-			// Where the copy's id goes, if anywhere (an int variable): `_timer = spawn`. Shown as "Var [_timer] = New Handle".
+			// Where the copy's id goes, if anywhere (an int variable): `_timer = spawn`, or a local declared for it
+			// (`int _timer = spawn`). Shown as "Var [_timer] = New Handle".
 			FBangoNodeField Var = WholeText(TEXT("Var"), TEXT("int"), Node.Text, true);
+			FString DeclaredType;
+			FString DeclaredName;
+			if (ReadNodeLocal(Node, DeclaredType, DeclaredName))
+			{
+				Var.bVariable = true;
+				Var.VariableType = DeclaredType;
+			}
 			Var.ValueSuffix = TEXT("= ");
 			Var.ValueSuffixItalic = TEXT("New Handle");
 			Out.Fields.Add(Var);
@@ -1129,8 +1222,9 @@ namespace Bango
 		TSet<FString> SeenLoops;
 		auto Add = [&Seen, &SeenLoops](TArray<FBangoGraphVariable>& To, const FString& Name, const FString& Type, FBangoGraphVariable::EKind Kind, int32 DeclGraph, int32 DeclIndex)
 		{
-			// A name is listed once, except that every loop gets its own row: two For loops can each have an `i`.
-			const bool bLoop = Kind == FBangoGraphVariable::EKind::Loop;
+			// A name is listed once, except that every loop and node local gets its own row: two For loops can each
+			// have an `i`, and two blocks a `_d`.
+			const bool bLoop = Kind == FBangoGraphVariable::EKind::Loop || Kind == FBangoGraphVariable::EKind::Local;
 			if (Name.IsEmpty() || (Seen.Contains(Name) && !(bLoop && SeenLoops.Contains(Name))))
 			{
 				return;
@@ -1156,13 +1250,13 @@ namespace Bango
 			Add(Params, EntryParams[i].Name, EntryParams[i].Type, FBangoGraphVariable::EKind::Param, GraphIndex, i);
 		}
 
-		// The locals declared at the top of the graph, in order.
-		for (int32 i = 0; i < Graph->Locals.Num(); ++i)
+		// The script variables declared at the top of the graph, in order.
+		for (int32 i = 0; i < Graph->ScriptVars.Num(); ++i)
 		{
-			Add(Locals, Graph->Locals[i].Name, Graph->Locals[i].Type, FBangoGraphVariable::EKind::Local, GraphIndex, i);
+			Add(Locals, Graph->ScriptVars[i].Name, Graph->ScriptVars[i].Type, FBangoGraphVariable::EKind::ScriptVar, GraphIndex, i);
 		}
 
-		// Loop variables, in node order: one for each loop, even when two loops use the same name.
+		// Locals declared by nodes, and loop variables, in node order: one for each node, even when two use the same name.
 		TArray<FBangoGraphVariable> Loops;
 		for (int32 i = 1; i < Graph->Nodes.Num(); ++i)
 		{
@@ -1170,7 +1264,11 @@ namespace Bango
 			bool bGlobal = false;
 			FString Type;
 			FString Name;
-			if (Node.Kind == EBangoGraphNodeKind::For && ReadDeclaration(Node.Text, bGlobal, Type, Name) && !bGlobal)
+			if (ReadNodeLocal(Node, Type, Name))
+			{
+				Add(Loops, Name, Type, FBangoGraphVariable::EKind::Local, GraphIndex, i);
+			}
+			else if (Node.Kind == EBangoGraphNodeKind::For && ReadDeclaration(Node.Text, bGlobal, Type, Name) && !bGlobal)
 			{
 				Add(Loops, Name, Type, FBangoGraphVariable::EKind::Loop, GraphIndex, i);
 			}

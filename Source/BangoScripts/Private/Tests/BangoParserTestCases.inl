@@ -263,7 +263,7 @@ static const FBangoParserTestCase GBangoParserTestCases[] =
 	{ TEXT("disabled: closes an outer block"), TEXT("if (a)\n{\n\t/* x();\n};\n*/"), nullptr, TEXT("(4:1)"), TEXT("opened before the '/*'") },
 	{ TEXT("disabled: no functions"), TEXT("/*\nfunction void F()\n{\n};\n*/"), nullptr, TEXT("(2:1)"), TEXT("A function can't be disabled") },
 	{ TEXT("disabled: no defines"), TEXT("/*\n#set inputs (int _a)\n*/"), nullptr, TEXT("(2:1)"), TEXT("can't be disabled") },
-	{ TEXT("disabled: no declarations"), TEXT("/* int _a = 1; */"), nullptr, TEXT("(1:4)"), TEXT("A declaration can't be disabled") },
+	{ TEXT("disabled: no scriptVars"), TEXT("/* scriptVar int _a = 1; */"), nullptr, TEXT("(1:4)"), TEXT("can't be disabled") },
 	{ TEXT("disabled: two on a line"), TEXT("/* a(); */ /* b(); */"), TEXT("(disabled (call a)) (disabled (call b))"), nullptr, nullptr },
 	{ TEXT("disabled: bad code inside gets the note"), TEXT("/*\nTalk(\"a\"\n*/"), nullptr, TEXT("(3:1)"), TEXT("must still be Bango statements") },
 	{ TEXT("unclosed block"), TEXT("while (a)\n{\n\tTalk();"), nullptr, TEXT("(3:9)"), TEXT("never closed") },

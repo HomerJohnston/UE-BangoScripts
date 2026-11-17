@@ -96,10 +96,10 @@ namespace BangoGraphWriterPrivate
 				AddHeading(Bango::GetGlobalVarsHeadingComment());
 				WriteDecls(Doc.Globals, true, 0);
 			}
-			if (Doc.Main.Locals.Num() > 0)
+			if (Doc.Main.ScriptVars.Num() > 0)
 			{
-				AddHeading(Bango::GetLocalVarsHeadingComment());
-				WriteDecls(Doc.Main.Locals, false, 0);
+				AddHeading(Bango::GetScriptVarsHeadingComment());
+				WriteDecls(Doc.Main.ScriptVars, false, 0);
 			}
 
 			// The main graph's code and disconnected chains, under their heading if there are any.
@@ -142,9 +142,9 @@ namespace BangoGraphWriterPrivate
 				AddComment(Entry.Comment, 0, -1);
 				AddCode(0, -1, FString(TEXT("function ")) + Entry.Text, nullptr);
 				AddCode(0, -1, TEXT("{"), nullptr);
-				if (Function.Locals.Num() > 0)
+				if (Function.ScriptVars.Num() > 0)
 				{
-					WriteDecls(Function.Locals, false, 1);
+					WriteDecls(Function.ScriptVars, false, 1);
 					if (Entry.Next != INDEX_NONE)
 					{
 						AddBlank();
@@ -204,13 +204,13 @@ namespace BangoGraphWriterPrivate
 			return false;
 		}
 
-		/** `global int gold;` or `int _count = 0;`, each under its comment. Declarations have no metadata. */
+		/** `global int gold;` or `scriptVar int _count = 0;`, each under its comment. Declarations have no metadata. */
 		void WriteDecls(const TArray<FBangoGraphDecl>& Decls, bool bGlobal, int32 Indent)
 		{
 			for (const FBangoGraphDecl& Decl : Decls)
 			{
 				AddComment(Decl.Comment, Indent, -1);
-				FString Code = bGlobal ? FString(TEXT("global ")) : FString();
+				FString Code = bGlobal ? FString(TEXT("global ")) : FString(TEXT("scriptVar "));
 				Code += Decl.Type + TEXT(" ") + Decl.Name;
 				if (Decl.bHasValue && !bGlobal)
 				{
@@ -448,6 +448,7 @@ namespace BangoGraphWriterPrivate
 		{
 			switch (Kind)
 			{
+			case EBangoGraphNodeKind::Local:
 			case EBangoGraphNodeKind::Assign:
 			case EBangoGraphNodeKind::IncDec:  return 2;
 			case EBangoGraphNodeKind::Call:    return 3;
@@ -558,6 +559,7 @@ namespace BangoGraphWriterPrivate
 
 			case EBangoGraphNodeKind::Assign:
 			case EBangoGraphNodeKind::IncDec:
+			case EBangoGraphNodeKind::Local:
 			case EBangoGraphNodeKind::Call:
 				AddCode(Indent, Detached, Text + TEXT(";"), &Node);
 				return true;

@@ -167,7 +167,9 @@ struct BANGOSCRIPTS_API FBangoGraphVariable
 	{
 		/** A parameter of the script (main graph) or of the function. Index: its position. */
 		Param,
-		/** A local declared at the top of the graph. Index: into the graph's Locals. */
+		/** A script variable (scriptVar) declared at the top of the graph. Index: into the graph's ScriptVars. */
+		ScriptVar,
+		/** A local declared by a node: a Local node, or a Spawn that declares its id. Index: that node. */
 		Local,
 		/** A For's counter or a For Each's variable. Index: the loop's node. */
 		Loop,
@@ -178,7 +180,7 @@ struct BANGOSCRIPTS_API FBangoGraphVariable
 	FString Name;
 	/** "int", "string[]", ...; empty if it can't be told (like a global declared only by another script). */
 	FString Type;
-	EKind Kind = EKind::Local;
+	EKind Kind = EKind::ScriptVar;
 	/** The graph it belongs to: INDEX_NONE for the main graph (and for globals), else a function's index. */
 	int32 DeclGraph = INDEX_NONE;
 	/** See EKind. INDEX_NONE for a global the file doesn't declare (another script's, or a typo). */

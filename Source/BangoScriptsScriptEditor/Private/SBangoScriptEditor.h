@@ -137,16 +137,21 @@ private:
 	// The shown graph's variables (see Bango::GetGraphVariables), for names and types.
 	TArray<TSharedPtr<FBangoGraphVariable>> VariableItems;
 
-	// GLOBALS and LOCALS: the file's global declarations, and the shown graph's locals, from the entry nodes.
+	// GLOBAL VARS and SCRIPT VARS: the file's global declarations, and the shown graph's script variables, from the entry nodes.
 	struct FDeclEntry
 	{
 		bool bGlobal = false;
-		/** Into the globals or the graph's locals; INDEX_NONE for a read-only row. */
+		/** Into the globals or the graph's script variables; INDEX_NONE for a read-only row. */
 		int32 Index = INDEX_NONE;
 		FBangoGraphDecl Decl;
-		/** A loop variable (Locals) or a global declared elsewhere (Globals): shown greyed, not edited here. */
+		/**
+		 * A loop variable or a local declared by a node (in the SCRIPT VARS list), or a global declared elsewhere
+		 * (GLOBAL VARS): shown greyed, not edited here.
+		 */
 		bool bReadOnly = false;
-		/** A loop variable: the loop's node, in the shown graph. */
+		/** A local declared by a node (a Local node, or a Spawn), rather than a loop variable. */
+		bool bNodeLocal = false;
+		/** A loop variable or a node's local: the node that declares it, in the shown graph. */
 		int32 LoopNode = INDEX_NONE;
 		TWeakPtr<SInlineEditableTextBlock> NameWidget;
 	};
@@ -345,7 +350,7 @@ private:
 	bool ApplyInputs(const TArray<FBangoEntryParam>& Params, const FText& Description, const FString& RenamedFrom = FString(), const FString& RenamedTo = FString());
 
 	// GLOBALS and LOCALS
-	/** Reads the shown graph's variables, and the Globals and Locals lists, again if they changed. Document and Context are the script as it is now. */
+	/** Reads the shown graph's variables, and the Globals and Script Variables lists, again if they changed. Document and Context are the script as it is now. */
 	void UpdateVariables(const FBangoGraphDocument& Document, const FBangoNodeLayoutContext& Context);
 	/** UpdateVariables, reading the graphs first. */
 	void UpdateVariablesNow();

@@ -53,9 +53,9 @@ namespace BangoScriptEditor
 			Node->bCommentBubblePinned = Node->bCommentBubbleVisible;
 			if (Source.Kind == EBangoGraphNodeKind::Entry)
 			{
-				for (const FBangoGraphDecl& Local : Graph.Locals)
+				for (const FBangoGraphDecl& Local : Graph.ScriptVars)
 				{
-					Node->Locals.Add(FBangoEdDecl::From(Local));
+					Node->ScriptVars.Add(FBangoEdDecl::From(Local));
 				}
 			}
 			Node->UpdateLayout();
@@ -246,9 +246,9 @@ namespace BangoScriptEditor
 					Out.Branches[Branch] = Target(Node->GetBranchPin(Branch), Index);
 				}
 			}
-			for (const FBangoEdDecl& Local : Nodes[0]->Locals)
+			for (const FBangoEdDecl& Local : Nodes[0]->ScriptVars)
 			{
-				Graph.Locals.Add(Local.ToGraphDecl());
+				Graph.ScriptVars.Add(Local.ToGraphDecl());
 			}
 			if (Graph.bIsFunction)
 			{

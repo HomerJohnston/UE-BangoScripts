@@ -130,9 +130,10 @@ struct FBangoFunctionCode
 	/** Names for errors and debugging. Hidden slots (forEach bookkeeping) have names in parentheses. */
 	TArray<FString> SlotNames;
 	/**
-	 * For reloading: the NodeID of the for or forEach loop a slot belongs to (its variable and bookkeeping), so two
-	 * loops' variables of the same name are told apart. -1 for parameters and the graph's locals; -2 for a loop
-	 * without node metadata (such slots aren't carried over).
+	 * For reloading: the node a slot belongs to, so two slots of the same name are told apart: the for or forEach loop
+	 * (its variable and bookkeeping), or a local's declaration node (a declaration, or a spawn that declares its id).
+	 * -1 for parameters, scriptVars, and locals without node metadata (matched by name); -2 for a loop without node
+	 * metadata (such slots aren't carried over).
 	 */
 	TArray<int64> SlotNodeIDs;
 	/** For reloading: each slot's declared starting value (nil if it has none), given to a local a new version adds. */

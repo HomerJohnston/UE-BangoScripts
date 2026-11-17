@@ -371,6 +371,12 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 	{ TEXT("disabled: a break in a loop"), TEXT("int _i = 0;\nwhile (_i < 3)\n{\n\t_i++;\n\t/* break; */\n};\nTalk(\"{0}\", _i);"), TEXT("3"), nullptr, nullptr },
 	{ TEXT("disabled: inside a disabled block"), TEXT("/*\nif (true)\n{\n\tTalk(\"in\");\n\t/* Talk(\"off\"); */\n};\n*/\nif (true)\n{\n\t/* return; */\n\tTalk(\"after\");\n};"), TEXT("after"), nullptr, nullptr },
 
+	// ---- Locals ----
+	{ TEXT("locals: set each time the declaration runs"), TEXT("for (int _i = 0; _i < 3; _i++)\n{\n\tint _n = 10;\n\t_n += _i;\n\tTalk(\"{0}\", _n);\n};"), TEXT("10|11|12"), nullptr, nullptr },
+	{ TEXT("locals: declared after code, worked out there"), TEXT("int _a = 2;\nTalk(\"start\");\nint _b = _a * 3;\nTalk(\"{0}\", _b);"), TEXT("start|6"), nullptr, nullptr },
+	{ TEXT("locals: the same name in sibling blocks"), TEXT("if (true)\n{\n\tstring _s = \"a\";\n\tTalk(_s);\n};\nif (true)\n{\n\tint _s = 7;\n\tTalk(\"{0}\", _s);\n};"), TEXT("a|7"), nullptr, nullptr },
+	{ TEXT("locals: a spawn's declared id"), TEXT("int _t = spawn\n{\n};\nTalk(\"{0}\", _t > 0);"), TEXT("true"), nullptr, nullptr },
+
 	// ---- Vectors ----
 	{ TEXT("vector literals and operators"),
 		TEXT("vector3 _v1 = [1, 2, 3];\nvector3 _v2 = [0.5, 0, -1];\nvector3 _vec;\nvector2 _w;\n_vec = _v1 + _v2;\nTalk(\"{0} {1} {2} {3}\", _vec, _v1 - _v2, _v1 * 2, 2 * _v1 / 4);\nTalk(\"{0} {1} {2}\", -_v1, _v1 == [1, 2, 3], _v1 != _v2);\n_w = [3, 4];\nTalk(\"{0} {1}\", _w, _w.x * _w.x + _w.y * _w.y);"),
@@ -826,13 +832,13 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 
 		// A moving platform: the math in the loop changes while it runs, and a local is added.
 		const TCHAR* PlatformV1 =
-			TEXT("float _x = 0;\nfloat _speed = 1;\n")
+			TEXT("scriptVar float _x = 0;\nscriptVar float _speed = 1;\n")
 			TEXT("while (true)    //@1(0, 0)\n{\n")
 			TEXT("\t_x += _speed;    //@2(2, 0)\n")
 			TEXT("\tTalk(\"{0}\", _x);    //@3(4, 0)\n")
 			TEXT("\tSleep(0);    //@4(6, 0)\n};");
 		const TCHAR* PlatformV2 =
-			TEXT("float _x = 0;\nfloat _speed = 1;\nfloat _extra = 5;\n")
+			TEXT("scriptVar float _x = 0;\nscriptVar float _speed = 1;\nscriptVar float _extra = 5;\n")
 			TEXT("while (true)    //@1(0, 0)\n{\n")
 			TEXT("\t_x += _speed * 10;    //@2(2, 0)\n")
 			TEXT("\tTalk(\"{0} {1}\", _x, _extra);    //@3(4, 0)\n")
@@ -851,12 +857,38 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			Expect(LastLog() == TEXT("21.0 5.0"), TEXT("reload: keeps running the new version"));
 		}
 
+		// Locals in a block: matched by their declaring node; one the new version adds above where it's paused starts
+		// as nil, and gets its value the next time its declaration runs.
+		{
+			const TCHAR* LocalsV1 =
+				TEXT("while (true)    //@1(0, 0)\n{\n")
+				TEXT("\tfloat _d = 2;    //@5(1, 0)\n")
+				TEXT("\tSleep(0);    //@4(2, 0)\n")
+				TEXT("\t_d += 1;    //@6(3, 0)\n")
+				TEXT("\tTalk(\"{0}\", _d);    //@7(4, 0)\n};");
+			const TCHAR* LocalsV2 =
+				TEXT("while (true)    //@1(0, 0)\n{\n")
+				TEXT("\tfloat _d = 2;    //@5(1, 0)\n")
+				TEXT("\tbool _n = true;    //@8(1, 1)\n")
+				TEXT("\tSleep(0);    //@4(2, 0)\n")
+				TEXT("\t_d += 1;    //@6(3, 0)\n")
+				TEXT("\tTalk(\"{0} {1}\", _d, IsNil(_n));    //@7(4, 0)\n};");
+			FReloadRun Run;
+			Expect(StartRun(Run, Compile(LocalsV1)) && Log.Num() == 0, TEXT("reload locals: waits in the loop"));
+			FString ReloadError;
+			Expect(Run.Instance.RequestReload(Compile(LocalsV2), Commands, ReloadError), *(FString(TEXT("reload locals: the request is accepted: ")) + ReloadError));
+			Run.Instance.Resume(Context);
+			Expect(LastLog() == TEXT("3.0 true"), *(FString(TEXT("reload locals: _d kept by its node, the new _n is nil: ")) + LastLog()));
+			Run.Instance.Resume(Context);
+			Expect(LastLog() == TEXT("3.0 false"), *(FString(TEXT("reload locals: _n's declaration ran: ")) + LastLog()));
+		}
+
 		// A local that changes type can't be carried over: it keeps the old version, and says why.
 		{
 			FReloadRun Run;
 			StartRun(Run, Compile(PlatformV1));
 			FString ReloadError;
-			Run.Instance.RequestReload(Compile(TEXT("int _x = 0;\nfloat _speed = 1;\nwhile (true)    //@1(0, 0)\n{\n\t_x += 5;    //@2(2, 0)\n\tTalk(\"{0}\", _x);    //@3(4, 0)\n\tSleep(0);    //@4(6, 0)\n};")), Commands, ReloadError);
+			Run.Instance.RequestReload(Compile(TEXT("scriptVar int _x = 0;\nscriptVar float _speed = 1;\nwhile (true)    //@1(0, 0)\n{\n\t_x += 5;    //@2(2, 0)\n\tTalk(\"{0}\", _x);    //@3(4, 0)\n\tSleep(0);    //@4(6, 0)\n};")), Commands, ReloadError);
 			Run.Instance.Resume(Context);
 			FString Message;
 			const EBangoReloadResult TypeResult = Run.Instance.TakeReloadResult(Message);

@@ -10,7 +10,7 @@ namespace BangoGraphMenuPrivate
 	/** Every name written in the graph's nodes and declared at its top, so made-up names don't clash with anything. */
 	static void AddNamesInGraph(const FBangoGraph& Graph, TSet<FString>& Used)
 	{
-		for (const FBangoGraphDecl& Local : Graph.Locals)
+		for (const FBangoGraphDecl& Local : Graph.ScriptVars)
 		{
 			Used.Add(Local.Name);
 		}
@@ -194,8 +194,18 @@ namespace Bango
 		Menu.Add(Flow, EBangoGraphNodeKind::Reroute, FString(), TEXT("knot wire"))
 			.Description = TEXT("A bend in a wire, to tidy the graph. It does nothing when the script runs.");
 
-		// ---- Variables (declared in the editor's Globals and Locals lists, not by nodes) ----
+		// ---- Variables: Local nodes declare locals (globals and script variables are declared in the editor's lists) ----
 		const FString Vars = TEXT("Variables");
+		for (const TCHAR* Type : { TEXT("bool"), TEXT("int"), TEXT("float"), TEXT("string"), TEXT("entity"), TEXT("text"), TEXT("vector2"), TEXT("vector3") })
+		{
+			for (const bool bArray : { false, true })
+			{
+				const FString TypeText = FString(Type) + (bArray ? TEXT("[]") : TEXT(""));
+				const FString Base = FString(TEXT("_new")) + CapitalizeFirst(Type) + (bArray ? TEXT("Array") : TEXT(""));
+				Menu.Add(Vars, EBangoGraphNodeKind::Local, TypeText + TEXT(" ") + Bango::MakeUniqueName(Base, Used),
+					FString(TEXT("local declare new variable ")) + Type + (bArray ? TEXT(" array list") : TEXT("")));
+			}
+		}
 		Menu.Add(Vars, EBangoGraphNodeKind::Assign, TEXT("="), TEXT("set assign =")).Description = TEXT("Gives a variable a new value.");
 		Menu.Add(Vars, EBangoGraphNodeKind::Assign, TEXT("+="), TEXT("add plus +=")).Description = TEXT("Adds a value to a variable.");
 		Menu.Add(Vars, EBangoGraphNodeKind::Assign, TEXT("-="), TEXT("subtract minus -=")).Description = TEXT("Subtracts a value from a variable.");

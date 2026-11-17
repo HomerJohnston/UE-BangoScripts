@@ -46,13 +46,13 @@ bool FBangoGraph::operator==(const FBangoGraph& Other) const
 			return false;
 		}
 	}
-	if (Locals.Num() != Other.Locals.Num())
+	if (ScriptVars.Num() != Other.ScriptVars.Num())
 	{
 		return false;
 	}
-	for (int32 i = 0; i < Locals.Num(); ++i)
+	for (int32 i = 0; i < ScriptVars.Num(); ++i)
 	{
-		if (Locals[i] != Other.Locals[i])
+		if (ScriptVars[i] != Other.ScriptVars[i])
 		{
 			return false;
 		}
@@ -164,6 +164,7 @@ namespace Bango
 		case EBangoGraphNodeKind::Entry:    return TEXT("Entry");
 		case EBangoGraphNodeKind::Assign:   return TEXT("Set");
 		case EBangoGraphNodeKind::IncDec:   return TEXT("Set");
+		case EBangoGraphNodeKind::Local:    return TEXT("Local");
 		case EBangoGraphNodeKind::Call:     return TEXT("Call");
 		case EBangoGraphNodeKind::If:       return TEXT("If");
 		case EBangoGraphNodeKind::While:    return TEXT("While");
@@ -347,6 +348,7 @@ namespace BangoGraphPrivate
 		{
 		case EBangoStmtKind::Assign:   return EBangoGraphNodeKind::Assign;
 		case EBangoStmtKind::IncDec:   return EBangoGraphNodeKind::IncDec;
+		case EBangoStmtKind::VarDecl:  return EBangoGraphNodeKind::Local;
 		case EBangoStmtKind::Call:     return EBangoGraphNodeKind::Call;
 		case EBangoStmtKind::If:       return EBangoGraphNodeKind::If;
 		case EBangoStmtKind::While:    return EBangoGraphNodeKind::While;
@@ -585,9 +587,9 @@ namespace BangoGraphPrivate
 		}
 
 		/**
-		 * Reads the declarations at Block[Start...] (the top of a graph) into the file's Globals and the graph's
-		 * Locals, and returns the index of the first statement after them. A global with a value fails: the
-		 * graph has nowhere to keep it, and it doesn't compile.
+		 * Reads the global and scriptVar declarations at Block[Start...] (the top of a graph) into the file's Globals
+		 * and the graph's ScriptVars, and returns the index of the first statement after them (a local's declaration
+		 * is a node). A global with a value fails: the graph has nowhere to keep it, and it doesn't compile.
 		 */
 		int32 ReadDecls(int32 Graph, const FBangoBlock& Block, int32 Start, TArray<FTarget>& Targets)
 		{
@@ -595,12 +597,12 @@ namespace BangoGraphPrivate
 			for (; i < Block.Num(); ++i)
 			{
 				const FBangoVarDeclStmt* Decl = Block[i]->As<FBangoVarDeclStmt>();
-				if (!Decl)
+				if (!Decl || Decl->IsLocal())
 				{
 					break;
 				}
-				// Globals go at the top of the file, before the main graph's locals.
-				if (Decl->bGlobal && (Graph >= 0 || Doc.Main.Locals.Num() > 0))
+				// Globals go at the top of the file, before the main graph's script variables.
+				if (Decl->bGlobal && (Graph >= 0 || Doc.Main.ScriptVars.Num() > 0))
 				{
 					break; // BuildNode fails on it
 				}
@@ -628,7 +630,7 @@ namespace BangoGraphPrivate
 				}
 				else
 				{
-					Target.Decl = GraphAt(Graph).Locals.Add(Out);
+					Target.Decl = GraphAt(Graph).ScriptVars.Add(Out);
 				}
 				Targets.Add(Target);
 			}
@@ -666,18 +668,14 @@ namespace BangoGraphPrivate
 
 		int32 BuildNode(int32 Graph, const FBangoStmt& Stmt, TArray<FTarget>* Targets)
 		{
-			if (const FBangoSpawnStmt* SpawnDecl = Stmt.As<FBangoSpawnStmt>(); SpawnDecl && SpawnDecl->bDeclaresId && !bFailed)
+			if (const FBangoVarDeclStmt* Decl = Stmt.As<FBangoVarDeclStmt>(); Decl && !Decl->IsLocal())
 			{
-				Fail(SpawnDecl->Loc.Line, FString::Printf(TEXT("'%s' is declared here, but declarations go at the top: locals at the top of their script or function. Move '%s %s;' there in the text and write '%s = spawn' here, then open the script again."),
-					*SpawnDecl->IdName, *SpawnDecl->IdType.ToString(), *SpawnDecl->IdName, *SpawnDecl->IdName));
-				bFailed = true;
-			}
-			if (const FBangoVarDeclStmt* Decl = Stmt.As<FBangoVarDeclStmt>())
-			{
-				// Declarations are only at the top of a graph (ReadDecls); there's no node for one anywhere else.
+				// Globals and scriptVars are only at the top of a graph (ReadDecls); there's no node for one anywhere else.
 				if (!bFailed)
 				{
-					Fail(Decl->Loc.Line, FString::Printf(TEXT("'%s' is declared here, but declarations go at the top: globals after the #set lines, and locals at the top of their script or function. Move it there in the text (set its value here with '%s = ...;' if it needs one), then open the script again."), *Decl->Name, *Decl->Name));
+					Fail(Decl->Loc.Line, Decl->bGlobal
+						? FString::Printf(TEXT("'%s' is declared here, but globals are declared at the top of the file, after the #set lines. Move it there in the text, then open the script again."), *Decl->Name)
+						: FString::Printf(TEXT("'%s' is declared here, but scriptVars are declared at the top of their script or function. Move it there in the text (or drop 'scriptVar' to make it a local), then open the script again."), *Decl->Name));
 					bFailed = true;
 				}
 			}
@@ -856,7 +854,7 @@ namespace BangoGraphPrivate
 
 			if (Chosen && Chosen->Decl != INDEX_NONE)
 			{
-				FBangoGraphDecl& Decl = Chosen->bGlobal ? Doc.Globals[Chosen->Decl] : GraphAt(Chosen->Graph).Locals[Chosen->Decl];
+				FBangoGraphDecl& Decl = Chosen->bGlobal ? Doc.Globals[Chosen->Decl] : GraphAt(Chosen->Graph).ScriptVars[Chosen->Decl];
 				AppendDeclComment(Decl, Comment.Text);
 			}
 			else if (Chosen)
@@ -934,9 +932,10 @@ namespace BangoGraphPrivate
 			}
 			for (const FBangoStmtPtr& Stmt : SnippetScript.TopLevel)
 			{
-				if (Stmt->Kind == EBangoStmtKind::VarDecl)
+				const FBangoVarDeclStmt* Decl = Stmt->As<FBangoVarDeclStmt>();
+				if (Decl && !Decl->IsLocal())
 				{
-					return Fail(Stmt->Loc.Line, TEXT("Disconnected nodes (//~ lines) can't contain a declaration: declarations go at the top of their script or function."));
+					return Fail(Stmt->Loc.Line, TEXT("Disconnected nodes (//~ lines) can't contain a global or scriptVar declaration: those go at the top of their script or function."));
 				}
 			}
 
@@ -1088,9 +1087,9 @@ namespace Bango
 		return TEXT(" ============ GLOBAL VARS =====================");
 	}
 
-	const TCHAR* GetLocalVarsHeadingComment()
+	const TCHAR* GetScriptVarsHeadingComment()
 	{
-		return TEXT(" ============ LOCAL VARS ======================");
+		return TEXT(" ============ SCRIPT VARS =====================");
 	}
 
 	const TCHAR* GetScriptBodyHeadingComment()

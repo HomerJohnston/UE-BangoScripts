@@ -21,9 +21,9 @@ static FString BangoCheckGraphRoundTrip(const TCHAR* Name, const FString& Source
 	FBangoGraphDocument Doc1;
 	if (!Bango::BuildGraph(Source, TEXT("test.bango"), Doc1, Error))
 	{
-		if (Error.Message.Contains(TEXT("declaration")))
+		if (Error.Message.Contains(TEXT("declaration")) || Error.Message.Contains(TEXT("is declared here")))
 		{
-			return FString(); // declarations the graph can't hold (not at the top, or a global with a value): fixed in the text
+			return FString(); // declarations the graph can't hold (a global or scriptVar not at the top, or a global with a value): fixed in the text
 		}
 		return FString::Printf(TEXT("[%s] BuildGraph failed: %s"), Name, *Error.ToString());
 	}
@@ -363,69 +363,6 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		Options.bCompact = true;
 		Expect(bCommentedBuilt && Bango::WriteGraphText(Commented, Text, WriteError, Options) && Text == FString(TEXT("\n// first\nSleep(1);\n")),
 			FString(TEXT("compact: a leading comment isn't made the description:\n")) + Text);
-	}
-
-	// ---- The text pane's Apply: locals declared further down are moved up (Bango::HoistLateLocals) ----
-	{
-		const TCHAR* Source =
-			TEXT("int _a = 1;\n")
-			TEXT("// first\n")
-			TEXT("Talk(\"x\");    //@1(0, 0)\n")
-			TEXT("int _n = 3;\n")
-			TEXT("float _d = Distance(GetPos(@a), [0, 0, 0]);\n")
-			TEXT("if (_n > 1)    //@2(1, 0)\n")
-			TEXT("{\n")
-			TEXT("\tvector3 _p = GetPos(@b);\n")
-			TEXT("}\n")
-			TEXT("function void F()\n")
-			TEXT("{\n")
-			TEXT("\tTalk(\"f\");    //@3(0, 0)\n")
-			TEXT("\tbool _b = Chance(0.5);\n")
-			TEXT("}\n");
-		const TCHAR* Expected =
-			TEXT("int _a = 1;\n")
-			TEXT("int _n = 3;\n")
-			TEXT("float _d;\n")
-			TEXT("vector3 _p;\n")
-			TEXT("// first\n")
-			TEXT("Talk(\"x\");    //@1(0, 0)\n")
-			TEXT("_d = Distance(GetPos(@a), [0, 0, 0]);\n")
-			TEXT("if (_n > 1)    //@2(1, 0)\n")
-			TEXT("{\n")
-			TEXT("\t_p = GetPos(@b);\n")
-			TEXT("}\n")
-			TEXT("function void F()\n")
-			TEXT("{\n")
-			TEXT("\tbool _b;\n")
-			TEXT("\tTalk(\"f\");    //@3(0, 0)\n")
-			TEXT("\t_b = Chance(0.5);\n")
-			TEXT("}\n");
-		FString Hoisted;
-		FBangoCompileError Error;
-		Expect(Bango::HoistLateLocals(Source, Hoisted, Error) && Hoisted == FString(Expected), FString(TEXT("HoistLateLocals:\n")) + Hoisted);
-		FBangoGraphDocument Doc;
-		Expect(Bango::BuildGraph(Hoisted, TEXT("hoist.bango"), Doc, Error) && Doc.Main.Locals.Num() == 4, FString(TEXT("HoistLateLocals: the result reads: ")) + Error.ToString());
-
-		FString Same;
-		Expect(Bango::HoistLateLocals(Expected, Same, Error) && Same == FString(Expected), TEXT("HoistLateLocals: nothing to move"));
-		Expect(!Bango::HoistLateLocals(TEXT("int _x;\nTalk(\"x\");\nint _x = 2;\n"), Same, Error) && Error.Line == 3 && Error.Message.Contains(TEXT("declared twice")),
-			TEXT("HoistLateLocals: a name declared twice"));
-		// `int _t = spawn`: `int _t;` goes up with the other locals, and `_t = spawn` stays, in a block too.
-		Expect(Bango::HoistLateLocals(TEXT("float _a;\n\nTalk(\"x\");\nint _t = spawn\n{\n\tSleep(1);\n}\nif (true)\n{\n\tint[] _ids = spawn\n\t{\n\t}\n}\n"), Same, Error)
-			&& Same == FString(TEXT("float _a;\nint _t;\nint[] _ids;\n\nTalk(\"x\");\n_t = spawn\n{\n\tSleep(1);\n}\nif (true)\n{\n\t_ids = spawn\n\t{\n\t}\n}\n")),
-			FString(TEXT("HoistLateLocals: int _t = spawn:\n")) + Same);
-		Expect(!Bango::HoistLateLocals(TEXT("int _t;\nint _t = spawn\n{\n}\n"), Same, Error) && Error.Message.Contains(TEXT("declared twice")),
-			TEXT("HoistLateLocals: int _t = spawn, declared twice"));
-		Expect(Bango::HoistLateLocals(TEXT("#set inputs (int _n = 3)\n\nfloat _a;\n\nTalk(\"x\");\nint foo;\n"), Same, Error)
-			&& Same == FString(TEXT("#set inputs (int _n = 3)\n\nfloat _a;\nint foo;\n\nTalk(\"x\");\n")),
-			FString(TEXT("HoistLateLocals: after the inputs line and the locals: ")) + Same);
-		Expect(Bango::HoistLateLocals(TEXT("#set inputs (int _n = 3)\n\nTalk(\"x\");\nint foo;\n"), Same, Error)
-			&& Same == FString(TEXT("#set inputs (int _n = 3)\n\nint foo;\nTalk(\"x\");\n")),
-			FString(TEXT("HoistLateLocals: after the inputs line, with no locals: ")) + Same);
-		Expect(Bango::HoistLateLocals(TEXT("// note\nTalk(\"x\");\nint _x = 2;\n"), Same, Error) && Same == FString(TEXT("// note\nint _x = 2;\nTalk(\"x\");\n")),
-			FString(TEXT("HoistLateLocals: before the first statement, under the description: ")) + Same);
-		Expect(Bango::HoistLateLocals(TEXT("Talk(\"x\");\n\n// note\nTalk(\"y\");\nint _x = 2;\n"), Same, Error) && Same == FString(TEXT("int _x = 2;\nTalk(\"x\");\n\n// note\nTalk(\"y\");\n")),
-			FString(TEXT("HoistLateLocals: above the first statement's comment: ")) + Same);
 	}
 
 	// ---- Disabled nodes: inline for simple nodes, marker lines around block nodes, nested, in disconnected chains ----
@@ -837,16 +774,16 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		// control, and above a statement with a comment.
 		{
 			const TCHAR* GroupSource =
-				TEXT("global int b;\nint _a = 1;\n_a = 2; //@3(0,2)\n_a++; //@4(0,3)\nTalk(\"x\"); //@5(0,4)\nLog(\"y\"); //@6(0,5)\n")
+				TEXT("global int b;\nscriptVar int _a = 1;\n_a = 2; //@3(0,2)\n_a++; //@4(0,3)\nTalk(\"x\"); //@5(0,4)\nLog(\"y\"); //@6(0,5)\n")
 				TEXT("// about z\nLog(\"z\"); //@7(0,6)\nif (true) //@8(0,7)\n{\nLog(\"in\"); //@9(1,8)\nbreak; //@10(1,9)\n}\nreturn; //@11(0,10)\n");
 			const TCHAR* GroupExpected =
 				TEXT("// ============ GLOBAL VARS =====================\n")
 				TEXT("\n")
 				TEXT("global int b;\n")
 				TEXT("\n")
-				TEXT("// ============ LOCAL VARS ======================\n")
+				TEXT("// ============ SCRIPT VARS =====================\n")
 				TEXT("\n")
-				TEXT("int _a = 1;\n")
+				TEXT("scriptVar int _a = 1;\n")
 				TEXT("\n")
 				TEXT("// ============ SCRIPT BODY =====================\n")
 				TEXT("\n")
@@ -873,8 +810,8 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				&& GroupText == FString(GroupExpected), FString(TEXT("spacing groups: unexpected text:\n")) + GroupText + Error.ToString() + WriteError);
 		}
 
-		// Declarations aren't nodes: the file's globals and each graph's locals, with their comments, written at the
-		// top in a fixed layout.
+		// Global and scriptVar declarations aren't nodes: the file's globals and each graph's script variables, with
+		// their comments, written at the top in a fixed layout.
 		{
 			const TCHAR* DeclSource =
 				TEXT("#set LOCTEXT_NAMESPACE \"Decls\"\n")
@@ -889,12 +826,12 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				TEXT("global int gold;\n")
 				TEXT("global string[] names;\n")
 				TEXT("\n")
-				TEXT("// ============ LOCAL VARS ======================\n")
+				TEXT("// ============ SCRIPT VARS =====================\n")
 				TEXT("\n")
 				TEXT("// how many\n")
-				TEXT("int _count = 0;\n")
-				TEXT("text _t = LOCTEXT(\"k\", \"a = b\");\n")
-				TEXT("vector3 _p = [0, -1, 2.5];\n")
+				TEXT("scriptVar int _count = 0;\n")
+				TEXT("scriptVar text _t = LOCTEXT(\"k\", \"a = b\");\n")
+				TEXT("scriptVar vector3 _p = [0, -1, 2.5];\n")
 				TEXT("\n")
 				TEXT("// ============ SCRIPT BODY =====================\n")
 				TEXT("\n")
@@ -904,7 +841,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				TEXT("\n")
 				TEXT("function void F()\n")
 				TEXT("{\n")
-				TEXT("\tbool _done = true;\n")
+				TEXT("\tscriptVar bool _done = true;\n")
 				TEXT("\n")
 				TEXT("\tTalk(\"y\");    //@2(0, 0)\n")
 				TEXT("}\n")
@@ -913,7 +850,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				TEXT("\n")
 				TEXT("function void G()\n")
 				TEXT("{\n")
-				TEXT("\tint _unused;\n")
+				TEXT("\tscriptVar int _unused;\n")
 				TEXT("}\n");
 			FBangoGraphDocument DeclDoc;
 			FString DeclText;
@@ -923,11 +860,11 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			{
 				Expect(DeclDoc.Globals.Num() == 2 && DeclDoc.Globals[0].Name == FString(TEXT("gold")) && DeclDoc.Globals[0].Comment == FString(TEXT("the gold"))
 					&& DeclDoc.Globals[1].Type == FString(TEXT("string[]")), TEXT("declarations: globals, with their comments"));
-				Expect(DeclDoc.Main.Locals.Num() == 3 && DeclDoc.Main.Locals[0].Value == FString(TEXT("0")) && DeclDoc.Main.Locals[0].Comment == FString(TEXT("how many"))
-					&& DeclDoc.Main.Locals[1].Value == FString(TEXT("LOCTEXT(\"k\", \"a = b\")")) && DeclDoc.Main.Locals[2].Value == FString(TEXT("[0, -1, 2.5]")),
-					TEXT("declarations: the main graph's locals and their values"));
-				Expect(DeclDoc.Main.Nodes.Num() == 2 && DeclDoc.Functions.Num() == 2 && DeclDoc.Functions[0].Locals.Num() == 1 && DeclDoc.Functions[0].Locals[0].Value == FString(TEXT("true"))
-					&& DeclDoc.Functions[1].Locals.Num() == 1 && !DeclDoc.Functions[1].Locals[0].bHasValue, TEXT("declarations: no nodes for them; functions have their own locals"));
+				Expect(DeclDoc.Main.ScriptVars.Num() == 3 && DeclDoc.Main.ScriptVars[0].Value == FString(TEXT("0")) && DeclDoc.Main.ScriptVars[0].Comment == FString(TEXT("how many"))
+					&& DeclDoc.Main.ScriptVars[1].Value == FString(TEXT("LOCTEXT(\"k\", \"a = b\")")) && DeclDoc.Main.ScriptVars[2].Value == FString(TEXT("[0, -1, 2.5]")),
+					TEXT("declarations: the main graph's script variables and their values"));
+				Expect(DeclDoc.Main.Nodes.Num() == 2 && DeclDoc.Functions.Num() == 2 && DeclDoc.Functions[0].ScriptVars.Num() == 1 && DeclDoc.Functions[0].ScriptVars[0].Value == FString(TEXT("true"))
+					&& DeclDoc.Functions[1].ScriptVars.Num() == 1 && !DeclDoc.Functions[1].ScriptVars[0].bHasValue, TEXT("declarations: no nodes for them; functions have their own script variables"));
 				Expect(Bango::WriteGraphText(DeclDoc, DeclText, WriteError) && DeclText == FString(DeclSource),
 					FString(TEXT("declarations: written back the same:\n")) + DeclText + WriteError);
 			}
@@ -935,17 +872,17 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			// What the graph can't hold is refused, with a message saying how to fix the text.
 			const TCHAR* const Refused[] =
 			{
-				TEXT("Talk(\"x\");\nint _late;\n"),
-				TEXT("if (true)\n{\n\tint _inner;\n}\n"),
+				TEXT("Talk(\"x\");\nscriptVar int _late;\n"),
+				TEXT("if (true)\n{\n\tscriptVar int _inner;\n}\n"),
 				TEXT("global int gold = 1;\n"),
 				TEXT("int _x;\nglobal int gold;\n"),
 				TEXT("function void F()\n{\n\tglobal int g;\n}\n"),
-				TEXT("Talk(\"a\");\n//~ int _gone;\n"),
+				TEXT("Talk(\"a\");\n//~ scriptVar int _gone;\n"),
 			};
 			for (const TCHAR* Bad : Refused)
 			{
 				FBangoGraphDocument BadDoc;
-				Expect(!Bango::BuildGraph(Bad, TEXT("bad.bango"), BadDoc, Error) && Error.Message.Contains(TEXT("declaration")),
+				Expect(!Bango::BuildGraph(Bad, TEXT("bad.bango"), BadDoc, Error) && (Error.Message.Contains(TEXT("declaration")) || Error.Message.Contains(TEXT("is declared here"))),
 					FString(TEXT("declarations: should be refused: ")) + Bad + TEXT(" -> ") + Error.ToString());
 			}
 		}

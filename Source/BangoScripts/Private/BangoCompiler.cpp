@@ -86,6 +86,8 @@ namespace BangoCompilerPrivate
 		int32 Address = 0;
 		int32 BlockId = 0;
 		int32 Line = 0;
+		/** The locals (slots) in scope at the label, for ResolveGotos: a goto mustn't jump past a declaration. */
+		TArray<int32> SlotsInScope;
 	};
 
 	struct FGotoFixup
@@ -95,6 +97,15 @@ namespace BangoCompilerPrivate
 		int32 BlockId = 0;
 		FBangoSourceLocation Loc;
 		const FBangoStmt* Stmt = nullptr;
+		TArray<int32> SlotsInScope;
+	};
+
+	/** A local (or loop variable) declared somewhere in the graph being compiled, for out-of-scope errors. */
+	struct FGraphLocal
+	{
+		int32 Line = 0;
+		bool bLoopVar = false;
+		bool bDisabled = false;
 	};
 
 	struct FPlaceInfo
@@ -308,12 +319,20 @@ namespace BangoCompilerPrivate
 		{
 			Fn->SlotNames.Add(Name);
 			Fn->SlotNodeIDs.Add(LoopNodeForSlots);
+			SlotLines.Add(CurrentLoc.Line);
 			Fn->SlotStartValues.Add(FBangoValue::MakeNil(Type));
 			return Fn->SlotTypes.Add(Type);
 		}
 
-		/** For reloading (FBangoFunctionCode::SlotNodeIDs): the loop whose slots are being made, or -1. */
+		/**
+		 * For reloading (FBangoFunctionCode::SlotNodeIDs): the loop whose slots are being made, or the local
+		 * declaration node whose slot is (its NodeID; -1 without metadata, matched by name), or -1.
+		 */
 		int64 LoopNodeForSlots = -1;
+		/** The line each slot of the graph being compiled was declared on (for goto errors). */
+		TArray<int32> SlotLines;
+		/** Every local and loop variable declared in the graph being compiled, in scope here or not (CollectGraphLocals). */
+		TBangoNameMap<FGraphLocal> GraphLocals;
 
 		/** The value AllocSlot gives slots made while compiling Stmt's loop header. */
 		static int64 LoopSlotNode(const FBangoStmt& Stmt)
@@ -664,11 +683,14 @@ namespace BangoCompilerPrivate
 					? FString::Printf(TEXT("Globals are declared at the top of the file, not in a function: move 'global %s %s;' up there, after the #set lines."), *Decl.Type.ToString(), *Decl.Name)
 					: FString::Printf(TEXT("Globals are declared at the top of the file, after the #set lines and before everything else: move 'global %s %s;' up there."), *Decl.Type.ToString(), *Decl.Name));
 			}
-			return Fail(Decl.Loc, FString::Printf(TEXT("Locals are declared at the top of their %s, before its first statement: move '%s %s;' up there, and set it here with '%s = ...;' if it needs a value at this point."),
-				bInFunction ? TEXT("function") : TEXT("script"), *Decl.Type.ToString(), *Decl.Name, *Decl.Name));
+			return Fail(Decl.Loc, FString::Printf(TEXT("scriptVar declarations go at the top of their %s, before its code: move 'scriptVar %s %s;' up there. Or drop 'scriptVar' to declare a local here, which exists from here to the end of its block."),
+				bInFunction ? TEXT("function") : TEXT("script"), *Decl.Type.ToString(), *Decl.Name));
 		}
 
-		/** A declaration nested in a block (not a for header, which isn't in a block). */
+		/**
+		 * A global or scriptVar declaration nested in a block (they only go at the top). Locals can be declared in
+		 * blocks; a for header isn't in a block.
+		 */
 		bool CheckNoDeclsInBlock(const FBangoBlock& Block, bool bInFunction)
 		{
 			for (const FBangoStmtPtr& Stmt : Block)
@@ -686,7 +708,10 @@ namespace BangoCompilerPrivate
 			switch (Stmt.Kind)
 			{
 			case EBangoStmtKind::VarDecl:
-				return FailMisplacedDecl(*Stmt.As<FBangoVarDeclStmt>(), bInFunction);
+			{
+				const FBangoVarDeclStmt& Decl = *Stmt.As<FBangoVarDeclStmt>();
+				return Decl.IsLocal() || FailMisplacedDecl(Decl, bInFunction);
+			}
 			case EBangoStmtKind::If:
 			{
 				const FBangoIfStmt& If = *Stmt.As<FBangoIfStmt>();
@@ -726,19 +751,22 @@ namespace BangoCompilerPrivate
 			}
 		}
 
-		/** Declarations aren't graph nodes (they're listed in the editor's side panel), so they have no metadata. */
+		/**
+		 * Global and scriptVar declarations aren't graph nodes (globals and script variables are listed in the editor's
+		 * side panel), so they have no metadata. (A local's declaration is a node.)
+		 */
 		bool CheckDeclHasNoMetadata(const FBangoVarDeclStmt& Decl)
 		{
 			if (Decl.Node.bHasMetadata)
 			{
 				CurrentStmt = nullptr; // the error isn't on a node
-				return Fail(Decl.Loc, TEXT("A declaration isn't a graph node, so it can't have node metadata: remove the //@ comment."));
+				return Fail(Decl.Loc, TEXT("A global or scriptVar declaration isn't a graph node, so it can't have node metadata: remove the //@ comment."));
 			}
 			return true;
 		}
 
-		/** A local declared at the top of a graph: its starting value must be a fixed value. */
-		bool CheckLocalDecl(const FBangoVarDeclStmt& Decl)
+		/** A scriptVar declaration: no metadata, and its starting value must be a fixed value. */
+		bool CheckScriptVarDecl(const FBangoVarDeclStmt& Decl)
 		{
 			if (!CheckDeclHasNoMetadata(Decl))
 			{
@@ -747,17 +775,17 @@ namespace BangoCompilerPrivate
 			if (Decl.Init.IsValid() && !IsFixedValue(*Decl.Init))
 			{
 				CurrentStmt = &Decl;
-				return Fail(Decl.Init->Loc, FString::Printf(TEXT("A local's starting value must be a fixed value: a number, a string, true, false, nil, a Bango ID like @john, a text, or an array of those. Declare it as '%s %s;' and set it in the code: '%s = ...;'."),
-					*Decl.Type.ToString(), *Decl.Name, *Decl.Name));
+				return Fail(Decl.Init->Loc, FString::Printf(TEXT("A scriptVar's starting value must be a fixed value: a number, a string, true, false, nil, a Bango ID like @john, a text, or an array of those. Drop 'scriptVar' to declare a local, which can be given any value where it's declared: '%s %s = ...;'."),
+					*Decl.Type.ToString(), *Decl.Name));
 			}
 			return true;
 		}
 
 		/**
-		 * Globals are declared only at the top of the file (after the #set lines, before the main graph's locals and
-		 * anything else, functions included), once each and without a value. Locals are declared only at the top of
-		 * their graph, with fixed starting values. Loop variables (for and forEach headers) aren't in a block, so they
-		 * aren't checked here.
+		 * Globals are declared only at the top of the file (after the #set lines, before the main graph's script
+		 * variables and anything else, functions included), once each and without a value. Script variables
+		 * (scriptVar) are declared only at the top of their graph, before its code, with fixed starting values. Locals
+		 * (plain declarations) can be anywhere, so they aren't checked here; nor are loop variables.
 		 */
 		bool CheckDeclarations()
 		{
@@ -769,7 +797,7 @@ namespace BangoCompilerPrivate
 
 			TMap<FString, int32> GlobalLines;
 			bool bInLead = true;
-			bool bSeenLocal = false;
+			bool bSeenScriptVar = false;
 			for (const FBangoStmtPtr& Stmt : Script.TopLevel)
 			{
 				if (Stmt->Kind == EBangoStmtKind::Params)
@@ -777,8 +805,9 @@ namespace BangoCompilerPrivate
 					continue;
 				}
 				const FBangoVarDeclStmt* Decl = Stmt->As<FBangoVarDeclStmt>();
-				if (!Decl)
+				if (!Decl || Decl->IsLocal())
 				{
+					// The script's code (a local's declaration is code): no more globals or scriptVars after it.
 					bInLead = false;
 					if (!CheckNoDeclsInStmt(*Stmt, false))
 					{
@@ -797,9 +826,9 @@ namespace BangoCompilerPrivate
 					{
 						return false;
 					}
-					if (bSeenLocal)
+					if (bSeenScriptVar)
 					{
-						return Fail(Decl->Loc, FString::Printf(TEXT("Global declarations come before the script's locals: move 'global %s %s;' above them."), *Decl->Type.ToString(), *Decl->Name));
+						return Fail(Decl->Loc, FString::Printf(TEXT("Global declarations come before the script's scriptVars: move 'global %s %s;' above them."), *Decl->Type.ToString(), *Decl->Name));
 					}
 					if (Decl->Init.IsValid())
 					{
@@ -813,8 +842,8 @@ namespace BangoCompilerPrivate
 				}
 				else
 				{
-					bSeenLocal = true;
-					if (!CheckLocalDecl(*Decl))
+					bSeenScriptVar = true;
+					if (!CheckScriptVarDecl(*Decl))
 					{
 						return false;
 					}
@@ -827,7 +856,7 @@ namespace BangoCompilerPrivate
 				for (const FBangoStmtPtr& Stmt : Function->Body)
 				{
 					const FBangoVarDeclStmt* Decl = Stmt->As<FBangoVarDeclStmt>();
-					if (!Decl)
+					if (!Decl || Decl->IsLocal())
 					{
 						bInFunctionLead = false;
 						if (!CheckNoDeclsInStmt(*Stmt, true))
@@ -840,7 +869,7 @@ namespace BangoCompilerPrivate
 					{
 						return FailMisplacedDecl(*Decl, true);
 					}
-					if (!CheckLocalDecl(*Decl))
+					if (!CheckScriptVarDecl(*Decl))
 					{
 						return false;
 					}
@@ -1025,8 +1054,11 @@ namespace BangoCompilerPrivate
 			Labels = TBangoNameMap<FLabel>();
 			DisabledLabels = TBangoNameMap<int32>();
 			Gotos.Reset();
+			SlotLines.Reset();
+			GraphLocals = TBangoNameMap<FGraphLocal>();
 			CurrentStmt = nullptr;
 			CurrentLoc = Ast ? Ast->Loc : FBangoSourceLocation();
+			CollectGraphLocals(Body, false);
 
 			PushScope();
 			if (!Ast && !DeclareScriptParams(Body))
@@ -1241,6 +1273,16 @@ namespace BangoCompilerPrivate
 					return Fail(Goto.Loc, FString::Printf(TEXT("'goto %s' jumps into a block (label '%s' is on line %d, inside a block this goto is not in). goto can jump out of blocks, but not into them."),
 						*Goto.Name, *Goto.Name, Label->Line));
 				}
+				// A local in scope at the label but not at the goto is declared between them: the jump would skip
+				// giving it its value.
+				for (const int32 Slot : Label->SlotsInScope)
+				{
+					if (!Goto.SlotsInScope.Contains(Slot))
+					{
+						return Fail(Goto.Loc, FString::Printf(TEXT("'goto %s' jumps past the declaration of local '%s' (line %d), so it would have no value at label '%s'. Declare it before the goto, or after the label."),
+							*Goto.Name, *Fn->SlotNames[Slot], SlotLines.IsValidIndex(Slot) ? SlotLines[Slot] : 0, *Goto.Name));
+					}
+				}
 				PatchJump(Goto.Instruction, Label->Address);
 			}
 			return true;
@@ -1259,6 +1301,103 @@ namespace BangoCompilerPrivate
 		void PopScope()
 		{
 			Scopes.Pop();
+		}
+
+		/** The slots of every local in scope here (for goto checks). */
+		TArray<int32> GetSlotsInScope() const
+		{
+			TArray<int32> Slots;
+			for (const FScope& Scope : Scopes)
+			{
+				for (const FLocalVar& Var : Scope.Vars)
+				{
+					Slots.Add(Var.Slot);
+				}
+			}
+			return Slots;
+		}
+
+		/** Notes every local and loop variable declared in Block (and its blocks), in GraphLocals. */
+		void CollectGraphLocals(const FBangoBlock& Block, bool bDisabled)
+		{
+			for (const FBangoStmtPtr& Stmt : Block)
+			{
+				CollectGraphLocals(*Stmt, bDisabled || Stmt->bDisabled);
+			}
+		}
+
+		void NoteGraphLocal(const FString& Name, int32 Line, bool bLoopVar, bool bDisabled)
+		{
+			if (!Name.IsEmpty() && !GraphLocals.Find(Name))
+			{
+				FGraphLocal Info;
+				Info.Line = Line;
+				Info.bLoopVar = bLoopVar;
+				Info.bDisabled = bDisabled;
+				GraphLocals.Add(Name, Info);
+			}
+		}
+
+		void CollectGraphLocals(const FBangoStmt& Stmt, bool bDisabled)
+		{
+			switch (Stmt.Kind)
+			{
+			case EBangoStmtKind::VarDecl:
+			{
+				const FBangoVarDeclStmt& Decl = *Stmt.As<FBangoVarDeclStmt>();
+				if (!Decl.bGlobal)
+				{
+					NoteGraphLocal(Decl.Name, Decl.Loc.Line, false, bDisabled);
+				}
+				break;
+			}
+			case EBangoStmtKind::If:
+				CollectGraphLocals(Stmt.As<FBangoIfStmt>()->Then, bDisabled);
+				CollectGraphLocals(Stmt.As<FBangoIfStmt>()->Else, bDisabled);
+				break;
+			case EBangoStmtKind::While:
+				CollectGraphLocals(Stmt.As<FBangoWhileStmt>()->Body, bDisabled);
+				break;
+			case EBangoStmtKind::For:
+			{
+				const FBangoForStmt& For = *Stmt.As<FBangoForStmt>();
+				if (const FBangoVarDeclStmt* Decl = For.Init.IsValid() ? For.Init->As<FBangoVarDeclStmt>() : nullptr)
+				{
+					NoteGraphLocal(Decl->Name, Stmt.Loc.Line, true, bDisabled);
+				}
+				CollectGraphLocals(For.Body, bDisabled);
+				break;
+			}
+			case EBangoStmtKind::ForEach:
+				NoteGraphLocal(Stmt.As<FBangoForEachStmt>()->VarName, Stmt.Loc.Line, true, bDisabled);
+				CollectGraphLocals(Stmt.As<FBangoForEachStmt>()->Body, bDisabled);
+				break;
+			case EBangoStmtKind::Sequence:
+				for (const FBangoBlock& Block : Stmt.As<FBangoSequenceStmt>()->Blocks)
+				{
+					CollectGraphLocals(Block, bDisabled);
+				}
+				break;
+			case EBangoStmtKind::Spawn:
+			{
+				const FBangoSpawnStmt& Spawn = *Stmt.As<FBangoSpawnStmt>();
+				if (Spawn.bDeclaresId)
+				{
+					NoteGraphLocal(Spawn.IdName, Stmt.Loc.Line, false, bDisabled);
+				}
+				CollectGraphLocals(Spawn.Body, bDisabled);
+				break;
+			}
+			case EBangoStmtKind::Switch:
+				for (const FBangoSwitchCase& Case : Stmt.As<FBangoSwitchStmt>()->Cases)
+				{
+					CollectGraphLocals(Case.Body, bDisabled);
+				}
+				CollectGraphLocals(Stmt.As<FBangoSwitchStmt>()->Default, bDisabled);
+				break;
+			default:
+				break;
+			}
 		}
 
 		const FLocalVar* FindLocal(const FString& Name) const
@@ -1378,7 +1517,9 @@ namespace BangoCompilerPrivate
 				return false;
 			}
 			// Where a reloaded script can carry on (FBangoStatementRange).
-			const bool bSimple = Stmt.Kind == EBangoStmtKind::Assign || Stmt.Kind == EBangoStmtKind::IncDec || Stmt.Kind == EBangoStmtKind::Call;
+			const FBangoVarDeclStmt* LocalDecl = Stmt.As<FBangoVarDeclStmt>();
+			const bool bSimple = Stmt.Kind == EBangoStmtKind::Assign || Stmt.Kind == EBangoStmtKind::IncDec || Stmt.Kind == EBangoStmtKind::Call
+				|| (LocalDecl && LocalDecl->IsLocal());
 			if (bSimple && Stmt.Node.bHasMetadata && Here() > Begin)
 			{
 				FBangoStatementRange Range;
@@ -1464,14 +1605,23 @@ namespace BangoCompilerPrivate
 				Emit(EBangoOp::PushNil, AddType(Decl.Type));
 			}
 
+			// A local's slot is told apart by its declaration node, for reloading (a for header's, by its loop's).
+			const int64 SlotNodeBefore = LoopNodeForSlots;
+			if (Decl.IsLocal() && LoopNodeForSlots == -1)
+			{
+				LoopNodeForSlots = Decl.Node.bHasMetadata ? Decl.Node.NodeID : -1;
+			}
 			int32 Slot = 0;
-			if (!DeclareLocal(Decl.Name, Decl.Type, Decl.Loc, Slot))
+			const bool bDeclared = DeclareLocal(Decl.Name, Decl.Type, Decl.Loc, Slot);
+			LoopNodeForSlots = SlotNodeBefore;
+			if (!bDeclared)
 			{
 				return false;
 			}
 			Emit(EBangoOp::StorePlace, AddPlace(EBangoPlaceKind::Local, Slot, 0));
-			// A local at the top of its graph has a fixed starting value (CheckLocalDecl), kept for reloading.
-			if (Decl.Init && LoopNodeForSlots == -1 && IsFixedValue(*Decl.Init))
+			// A scriptVar has a fixed starting value (CheckScriptVarDecl), kept for reloading. A local a reload adds
+			// starts as nil: its value may be worked out where it's declared, which a reload can't do.
+			if (Decl.Init && Decl.bScriptVar && IsFixedValue(*Decl.Init))
 			{
 				FBangoValue StartValue;
 				if (!EvaluateConstant(*Decl.Init, Decl.Type, Decl.Name, StartValue))
@@ -1613,10 +1763,25 @@ namespace BangoCompilerPrivate
 			{
 				return Fail(Spawn.Loc, TEXT("A condition can't spawn: it only works out its answer."));
 			}
+			// `int _t = spawn`: declares a local for the id first, told apart by the spawn's node for reloading. It's
+			// hidden while the block is compiled: the copy starts before the id is stored, so it would have no value there.
+			FLocalVar DeclaredId;
 			if (Spawn.bDeclaresId)
 			{
-				return Fail(Spawn.Loc, FString::Printf(TEXT("Locals are declared at the top of their %s, before its first statement: move '%s %s;' up there, and write '%s = spawn' here."),
-					FnAst ? TEXT("function") : TEXT("script"), *Spawn.IdType.ToString(), *Spawn.IdName, *Spawn.IdName));
+				if (!CanAssign(Spawn.IdType, FExprType::MakeKnown(FBangoType::Int()), Spawn.IdNameLoc, FString::Printf(TEXT("The spawned copy's id (an int) stored in '%s'"), *Spawn.IdName)))
+				{
+					return false;
+				}
+				const int64 SlotNodeBefore = LoopNodeForSlots;
+				LoopNodeForSlots = Spawn.Node.bHasMetadata ? Spawn.Node.NodeID : -1;
+				int32 Slot = 0;
+				const bool bDeclared = DeclareLocal(Spawn.IdName, Spawn.IdType, Spawn.IdNameLoc, Slot);
+				LoopNodeForSlots = SlotNodeBefore;
+				if (!bDeclared)
+				{
+					return false;
+				}
+				DeclaredId = Scopes.Last().Vars.Last();
 			}
 			// `_id = spawn`: the place's indexes (if any) first, then SpawnBlock pushes the copy's id, then it's stored.
 			FPlaceInfo IdPlace;
@@ -1640,7 +1805,15 @@ namespace BangoCompilerPrivate
 			PatchJump(SpawnAt, Here());
 			SpawnBlockIds.Add(BlockParents.Num()); // the block CompileBlock is about to open
 			SpawnLoopBases.Add(Loops.Num());
+			if (Spawn.bDeclaresId)
+			{
+				Scopes.Last().Vars.Pop(); // not visible in the block (see above)
+			}
 			const bool bCompiled = CompileBlock(Spawn.Body);
+			if (Spawn.bDeclaresId)
+			{
+				Scopes.Last().Vars.Add(DeclaredId);
+			}
 			SpawnLoopBases.Pop();
 			if (!bCompiled)
 			{
@@ -2026,6 +2199,7 @@ namespace BangoCompilerPrivate
 			Info.Address = Here();
 			Info.BlockId = Scopes.Last().BlockId;
 			Info.Line = Label.Loc.Line;
+			Info.SlotsInScope = GetSlotsInScope();
 			Labels.Add(Label.Name, Info);
 			return true;
 		}
@@ -2042,6 +2216,7 @@ namespace BangoCompilerPrivate
 			Fixup.BlockId = Scopes.Last().BlockId;
 			Fixup.Loc = Goto.Loc;
 			Fixup.Stmt = &Goto;
+			Fixup.SlotsInScope = GetSlotsInScope();
 			Gotos.Add(Fixup);
 			return true;
 		}
@@ -2079,6 +2254,15 @@ namespace BangoCompilerPrivate
 				Kind = EBangoPlaceKind::Local;
 				Index = Local->Slot;
 				RootType = FExprType::MakeKnown(Local->Type);
+			}
+			else if (const FGraphLocal* Elsewhere = GraphLocals.Find(Root->Name))
+			{
+				// A local of this graph, but not visible here. Its name hides any global of that name in this graph.
+				return Fail(Root->Loc, Elsewhere->bDisabled
+					? FString::Printf(TEXT("'%s' is declared on line %d, but that declaration is disabled."), *Root->Name, Elsewhere->Line)
+					: Elsewhere->bLoopVar
+					? FString::Printf(TEXT("'%s' is the variable of the loop on line %d, and only exists inside that loop. (If you meant a global called '%s', rename one of them: in a graph, a local's name hides a global's.)"), *Root->Name, Elsewhere->Line, *Root->Name)
+					: FString::Printf(TEXT("'%s' is a local declared on line %d, and isn't visible here: a local exists from its declaration to the end of its block. Use it there, or declare it further out. (If you meant a global called '%s', rename one of them: in a graph, a local's name hides a global's.)"), *Root->Name, Elsewhere->Line, *Root->Name));
 			}
 			else
 			{

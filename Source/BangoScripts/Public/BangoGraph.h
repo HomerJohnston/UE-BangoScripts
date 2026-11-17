@@ -33,6 +33,11 @@ enum class EBangoGraphNodeKind : uint8
 
 	Assign,
 	IncDec,
+	/**
+	 * `int _x = 1;`: declares a local, which exists from here to the end of its block, and sets it each time this
+	 * runs. Text: the declaration, like `int _x = 1` or `float[] _list` ("Local Int", "Local Float Array", ...).
+	 */
+	Local,
 	Call,
 	If,
 	While,
@@ -47,7 +52,8 @@ enum class EBangoGraphNodeKind : uint8
 	Switch,
 	/**
 	 * `spawn { }` or `_id = spawn { }`: its block (Branches[0], Run) starts as a separate running copy of the script;
-	 * Next (Then) follows straight away. Text: where the copy's id goes, or empty.
+	 * Next (Then) follows straight away. Text: where the copy's id goes, or empty; or a local it declares for it, with
+	 * its type (`int _t`).
 	 */
 	Spawn,
 	Break,
@@ -72,6 +78,7 @@ struct BANGOSCRIPTS_API FBangoGraphNode
 	 * The text the user edits, without keywords, brackets or ';':
 	 * - Entry: `int _a, string _b = "x"` (main graph) or `int AddScore(int _amount)` (function)
 	 * - Assign, IncDec, Call: the statement, like `_x += 2`, `_x++`, `john Speak("Hi")`
+	 * - Local: the declaration, like `int _x = 2` or `string _s`
 	 * - If, While, Switch: the condition or value. For: `int _i = 0; _i < 3; _i++`. ForEach: `_x in _array`
 	 * - Return: the value, or empty. Spawn: where the copy's id goes, or empty. Label, Goto: the label name. Break,
 	 *   Continue, Sequence, Reroute: empty.
@@ -105,15 +112,16 @@ struct BANGOSCRIPTS_API FBangoGraphNode
 };
 
 /**
- * A declaration: one of the file's globals (`global int gold;`), or a local at the top of a graph
- * (`int _count = 0;`). Declarations aren't nodes; the editor lists them beside the graph.
+ * A declaration: one of the file's globals (`global int gold;`), or a script variable at the top of a graph
+ * (`scriptVar int _count = 0;`). These aren't nodes; the editor lists them beside the graph. (A local, declared
+ * without `scriptVar`, is a node: EBangoGraphNodeKind::Local.)
  */
 struct BANGOSCRIPTS_API FBangoGraphDecl
 {
 	/** As written: `int`, `string[]`. */
 	FString Type;
 	FString Name;
-	/** Locals only: the starting value as written (a fixed value, like `0`, `"hi"` or `[1, 2]`). Globals never have one. */
+	/** Script variables only: the starting value as written (a fixed value, like `0`, `"hi"` or `[1, 2]`). Globals never have one. */
 	bool bHasValue = false;
 	FString Value;
 	/** From `//` lines above the declaration. Lines are separated by '\n'. */
@@ -134,8 +142,8 @@ struct BANGOSCRIPTS_API FBangoGraph
 	/** Nodes[0] is the entry node. */
 	TArray<FBangoGraphNode> Nodes;
 
-	/** The locals declared at the top of the graph, in order. */
-	TArray<FBangoGraphDecl> Locals;
+	/** The script variables (scriptVar) declared at the top of the graph, in order. */
+	TArray<FBangoGraphDecl> ScriptVars;
 
 	bool operator==(const FBangoGraph& Other) const;
 	bool operator!=(const FBangoGraph& Other) const { return !(*this == Other); }
@@ -222,7 +230,7 @@ namespace Bango
 	 */
 	BANGOSCRIPTS_API const TCHAR* GetScriptInputHeadingComment();
 	BANGOSCRIPTS_API const TCHAR* GetGlobalVarsHeadingComment();
-	BANGOSCRIPTS_API const TCHAR* GetLocalVarsHeadingComment();
+	BANGOSCRIPTS_API const TCHAR* GetScriptVarsHeadingComment();
 	BANGOSCRIPTS_API const TCHAR* GetScriptBodyHeadingComment();
 	BANGOSCRIPTS_API const TCHAR* GetFunctionsHeadingComment();
 	/** The line the writer puts between functions. */
@@ -240,10 +248,10 @@ namespace Bango
 
 	/**
 	 * Parses Source and builds its graph. Statements without //@ metadata get new NodeIDs and positions
-	 * near the node before them. The declarations at the top of the file and of each function become
-	 * Globals and Locals (any //@ metadata on them is dropped). Fails with a syntax error, if the `//~`
-	 * lines of disconnected nodes can't be read, if a declaration isn't at the top of its graph (so it
-	 * would need a node), or if a global declaration has a value.
+	 * near the node before them. The global and scriptVar declarations at the top of the file and of each
+	 * function become Globals and ScriptVars (any //@ metadata on them is dropped); locals are Local nodes.
+	 * Fails with a syntax error, if the `//~` lines of disconnected nodes can't be read, if a global or
+	 * scriptVar declaration isn't at the top of its graph, or if a global declaration has a value.
 	 */
 	BANGOSCRIPTS_API bool BuildGraph(const FString& Source, const FString& FileName, FBangoGraphDocument& OutDocument, FBangoCompileError& OutError);
 

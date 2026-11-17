@@ -185,6 +185,7 @@ void FBangoCompletion::GetKeywordItems(TArray<FBangoCompletionItem>& OutItems, b
 		{ TEXT("label"),    TEXT("jump"),        TEXT("label Name; marks a place that goto can jump to."), false },
 		{ TEXT("goto"),     TEXT("jump"),        TEXT("goto Name; jumps to a label."), false },
 		{ TEXT("global"),   TEXT("declaration"), TEXT("global int stage; declares a global, at the top of the file."), false },
+		{ TEXT("scriptVar"), TEXT("declaration"), TEXT("scriptVar int _count = 0; declares a script variable with a fixed starting value, at the top of the script or function."), false },
 		{ TEXT("function"), TEXT("declaration"), TEXT("function int AddScore(int _amount) { ... } defines a function, at the top level."), false },
 		{ TEXT("bool"),     TEXT("type"),        TEXT("true or false."), false },
 		{ TEXT("int"),      TEXT("type"),        TEXT("A whole number."), false },
