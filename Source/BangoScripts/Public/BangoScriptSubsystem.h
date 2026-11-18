@@ -111,7 +111,7 @@ public:
 
 	/**
 	 * Starts an inline script (an FBangoInlineScript property, spec section 15), as Spawn does a script asset: Args fill
-	 * its #set inputs line, in order, and it runs straight away until it first pauses. Its compiled program is kept
+	 * its #inputs line, in order, and it runs straight away until it first pauses. Its compiled program is kept
 	 * (FBangoModule::GetInlineProgram), so the same text isn't compiled again. Owner, the object it belongs to (usually
 	 * `this`), names it in errors and the debugger ("Door_1 (inline script)"), and is what `self` means, as for Spawn.
 	 * An empty script does nothing and gives an invalid handle, without an error. Its text is saved with it, so
@@ -141,7 +141,7 @@ public:
 
 	/**
 	 * Runs a condition registered with Bango::RegisterCondition and gives its answer. It runs straight away, to the end,
-	 * in this world, with its globals and actors; Args fill its #set inputs line, if it has one.
+	 * in this world, with its globals and actors; Args fill its #inputs line, if it has one.
 	 *
 	 * Gives True or False if it returned that. Gives Unset, with the reason in OutError, if it read a global that doesn't
 	 * exist or is nil: something not set up yet, which a caller usually treats as false without reporting it. Gives Error,

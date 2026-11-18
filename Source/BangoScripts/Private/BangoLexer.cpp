@@ -44,7 +44,6 @@ namespace BangoLexerPrivate
 		{ TEXT("vector2"), EBangoTokenKind::KwVector2 },
 		{ TEXT("vector3"), EBangoTokenKind::KwVector3 },
 		{ TEXT("void"), EBangoTokenKind::KwVoid },
-		{ TEXT("inputs"), EBangoTokenKind::KwInputs },
 		{ TEXT("IsNil"), EBangoTokenKind::KwIsNil },
 	};
 
@@ -322,10 +321,10 @@ namespace BangoLexerPrivate
 			return LexOperator(Loc);
 		}
 
-		/** `#set`, the script's settings lines. Must start its line and be followed by a space. */
+		/** `#inputs`, `#LOCTEXT_NAMESPACE` or `#USES_GRAPH_EDITOR`: the script's settings lines. Must start its line. */
 		bool LexDirective(const FBangoSourceLocation& Loc)
 		{
-			static const TCHAR* Usage = TEXT("Lines starting with '#' are the script's settings: #set inputs (...), #set LOCTEXT_NAMESPACE \"Name\" and #set USES_GRAPH_EDITOR.");
+			static const TCHAR* Usage = TEXT("Lines starting with '#' are the script's settings: #inputs (...), #LOCTEXT_NAMESPACE \"Name\" and #USES_GRAPH_EDITOR.");
 			Advance(); // #
 			const int32 Start = Pos;
 			while (!AtEnd() && IsIdentChar(Peek()))
@@ -333,12 +332,9 @@ namespace BangoLexerPrivate
 				Advance();
 			}
 			const FString Word = Source.Mid(Start, Pos - Start);
-			EBangoTokenKind Kind;
-			if (Word.Equals(TEXT("set"), ESearchCase::CaseSensitive))
-			{
-				Kind = EBangoTokenKind::HashSet;
-			}
-			else
+			if (!Word.Equals(TEXT("inputs"), ESearchCase::CaseSensitive)
+				&& !Word.Equals(TEXT("LOCTEXT_NAMESPACE"), ESearchCase::CaseSensitive)
+				&& !Word.Equals(TEXT("USES_GRAPH_EDITOR"), ESearchCase::CaseSensitive))
 			{
 				return Fail(Loc, FString::Printf(TEXT("Unknown '#%s'. %s"), *Word, Usage));
 			}
@@ -346,11 +342,7 @@ namespace BangoLexerPrivate
 			{
 				return Fail(Loc, FString::Printf(TEXT("'#%s' must start its line."), *Word));
 			}
-			if (Peek() != TEXT(' ') && Peek() != TEXT('\t'))
-			{
-				return Fail(Loc, FString::Printf(TEXT("Put a space after '#%s'. %s"), *Word, Usage));
-			}
-			FBangoToken& Token = AddToken(Kind, Loc);
+			FBangoToken& Token = AddToken(EBangoTokenKind::Directive, Loc);
 			Token.Text = FString(TEXT("#")) + Word;
 			return true;
 		}

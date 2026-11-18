@@ -151,9 +151,9 @@ namespace BangoParserPrivate
 				}
 				bParamsAllowed = bFirstItem;
 				bFirstItem = false;
-				if (Check(EBangoTokenKind::HashSet))
+				if (Check(EBangoTokenKind::Directive))
 				{
-					if (!ParseSet())
+					if (!ParseDirective())
 					{
 						return false;
 					}
@@ -263,7 +263,7 @@ namespace BangoParserPrivate
 			return true;
 		}
 
-		/** The rest of a #set line must be empty: no ';', no metadata, nothing after it. */
+		/** The rest of a settings line (#inputs, ...) must be empty: no ';', no metadata, nothing after it. */
 		bool FinishDirectiveLine(const FBangoToken& First, const TCHAR* What)
 		{
 			if (Check(EBangoTokenKind::Semicolon) && Cur().Loc.Line == First.Loc.Line)
@@ -281,43 +281,25 @@ namespace BangoParserPrivate
 			return true;
 		}
 
-		static bool IsLocNamespaceName(const FBangoToken& Token)
-		{
-			return Token.Kind == EBangoTokenKind::Identifier && Token.Text.Equals(TEXT("LOCTEXT_NAMESPACE"), ESearchCase::CaseSensitive);
-		}
-
-		static bool IsSettingName(const FBangoToken& Token, const TCHAR* Setting)
-		{
-			return Token.Kind == EBangoTokenKind::Identifier && Token.Text.Equals(Setting, ESearchCase::CaseSensitive);
-		}
-
 		/**
-		 * A settings line at the top of the script: `#set inputs (...)`, `#set LOCTEXT_NAMESPACE "Name"` or
-		 * `#set USES_GRAPH_EDITOR` (a flag, with nothing after it). The settings may come in any order, before or after
-		 * the inputs line, each once.
+		 * A settings line at the top of the script: `#inputs (...)`, `#LOCTEXT_NAMESPACE "Name"` or `#USES_GRAPH_EDITOR`
+		 * (a flag, with nothing after it). The settings may come in any order, before or after the inputs line, each once.
 		 */
-		bool ParseSet()
+		bool ParseDirective()
 		{
-			static const TCHAR* Usage = TEXT("Bango's settings are '#set inputs (...)', '#set LOCTEXT_NAMESPACE \"Name\"' and '#set USES_GRAPH_EDITOR'");
 			const FBangoToken& First = Cur();
+			const int32 FirstTok = Pos;
 			const bool bFirstItem = bParamsAllowed;
 			bParamsAllowed = false;
-			Advance();
-			const int32 NameTok = Pos;
-			const FBangoToken& Name = Cur();
-			if (Name.Loc.Line != First.Loc.Line)
-			{
-				return Fail(First.Loc, FString::Printf(TEXT("Expected a setting's name after '#set'. %s."), Usage));
-			}
 
-			if (Name.Kind == EBangoTokenKind::KwInputs)
+			if (First.Text.Equals(TEXT("#inputs"), ESearchCase::CaseSensitive))
 			{
 				if (!bFirstItem)
 				{
-					return Fail(First.Loc, TEXT("'#set inputs' must come at the top of the script, before any other statement or function (only the other #set lines may come before it)."));
+					return Fail(First.Loc, TEXT("'#inputs' must come at the top of the script, before any other statement or function (only the other settings lines may come before it)."));
 				}
 				FBangoStmtPtr Stmt = ParseParams();
-				if (!Stmt || !RequireOneLine(First.Loc.Line, Previous().Loc) || !FinishDirectiveLine(First, TEXT("#set inputs")))
+				if (!Stmt || !RequireOneLine(First.Loc.Line, Previous().Loc) || !FinishDirectiveLine(First, TEXT("#inputs")))
 				{
 					return false;
 				}
@@ -326,8 +308,8 @@ namespace BangoParserPrivate
 				{
 					return false;
 				}
-				// Inside inputs ( ... )
-				SetTextSpan(*Stmt, NameTok + 2, Pos - 1);
+				// Inside #inputs ( ... )
+				SetTextSpan(*Stmt, FirstTok + 2, Pos - 1);
 				Stmt->Node.bHasMetadata = true;
 				Stmt->Node.NodeID = 0;
 				Stmt->Node.X = 0;
@@ -336,13 +318,8 @@ namespace BangoParserPrivate
 				return true;
 			}
 
-			const bool bNamespace = IsLocNamespaceName(Name);
-			const bool bUsesGraphEditor = IsSettingName(Name, TEXT("USES_GRAPH_EDITOR"));
-			if (!bNamespace && !bUsesGraphEditor)
-			{
-				return Fail(Name.Loc, FString::Printf(TEXT("%s, but found %s."), Usage, *Bango::DescribeToken(Name)));
-			}
-			const TCHAR* What = bNamespace ? TEXT("#set LOCTEXT_NAMESPACE") : TEXT("#set USES_GRAPH_EDITOR");
+			const bool bNamespace = First.Text.Equals(TEXT("#LOCTEXT_NAMESPACE"), ESearchCase::CaseSensitive);
+			const TCHAR* What = bNamespace ? TEXT("#LOCTEXT_NAMESPACE") : TEXT("#USES_GRAPH_EDITOR");
 			const bool bOnlyParamsBefore = Script.Functions.Num() == 0
 				&& (Script.TopLevel.Num() == 0 || (Script.TopLevel.Num() == 1 && Script.GetParams()));
 			const FBangoSourceLocation& Earlier = bNamespace ? Script.LocNamespaceLoc : Script.UsesGraphEditorLoc;
@@ -352,10 +329,10 @@ namespace BangoParserPrivate
 			}
 			if (!bOnlyParamsBefore)
 			{
-				return Fail(First.Loc, FString::Printf(TEXT("'%s' must come at the top of the script, before any statement or function (only the other #set lines may come before it)."), What));
+				return Fail(First.Loc, FString::Printf(TEXT("'%s' must come at the top of the script, before any statement or function (only the other settings lines may come before it)."), What));
 			}
 			Advance();
-			if (bUsesGraphEditor)
+			if (!bNamespace)
 			{
 				// A flag: there or not, with nothing after it.
 				if (!FinishDirectiveLine(First, What))
@@ -367,10 +344,10 @@ namespace BangoParserPrivate
 				return true;
 			}
 			const FBangoToken& Value = Cur();
-			const FBangoSourceLocation& ValueLoc = Value.Loc.Line == First.Loc.Line ? Value.Loc : Name.Loc;
+			const FBangoSourceLocation& ValueLoc = Value.Loc.Line == First.Loc.Line ? Value.Loc : First.Loc;
 			if (Value.Kind != EBangoTokenKind::StringLiteral || Value.Loc.Line != First.Loc.Line)
 			{
-				return Fail(ValueLoc, TEXT("Write the namespace as a string: #set LOCTEXT_NAMESPACE \"Bango.Intro\""));
+				return Fail(ValueLoc, TEXT("Write the namespace as a string: #LOCTEXT_NAMESPACE \"Bango.Intro\""));
 			}
 			if (Value.Text.IsEmpty())
 			{
@@ -581,8 +558,8 @@ namespace BangoParserPrivate
 					return FailPlain(Next.Loc, FString::Printf(TEXT("This '}' closes a block that was opened before the '/*' on line %d. A disabled part must end with '*/' in the same block it starts in."), OpenLoc.Line));
 				case EBangoTokenKind::KwFunction:
 					return FailPlain(Next.Loc, TEXT("A function can't be disabled with '/*' and '*/': only statements can. Disable the nodes inside it instead."));
-				case EBangoTokenKind::HashSet:
-					return FailPlain(Next.Loc, TEXT("A '#set' line can't be disabled with '/*' and '*/': only statements can."));
+				case EBangoTokenKind::Directive:
+					return FailPlain(Next.Loc, FString::Printf(TEXT("A '%s' line can't be disabled with '/*' and '*/': only statements can."), *Next.Text));
 				default:
 					break;
 				}
@@ -946,13 +923,8 @@ namespace BangoParserPrivate
 			case EBangoTokenKind::KwReturn:   Stmt = ParseReturn(); break;
 			case EBangoTokenKind::KwLabel:    Stmt = ParseLabelOrGoto(true); break;
 			case EBangoTokenKind::KwGoto:     Stmt = ParseLabelOrGoto(false); break;
-			case EBangoTokenKind::HashSet:
-				Fail(First.Loc, TEXT("'#set' lines must come at the top of the script, outside any block or function."));
-				return nullptr;
-			case EBangoTokenKind::KwInputs:
-				Fail(First.Loc, bAllowParams
-					? TEXT("The parameters line is written '#set inputs (...)', with no ';'.")
-					: TEXT("'#set inputs' must come at the top of the script, before any other statement or function (only the other #set lines may come before it)."));
+			case EBangoTokenKind::Directive:
+				Fail(First.Loc, FString::Printf(TEXT("'%s' lines must come at the top of the script, outside any block or function."), *First.Text));
 				return nullptr;
 			default:
 				if (IsTypeKeyword(First.Kind))
@@ -1153,7 +1125,7 @@ namespace BangoParserPrivate
 		{
 			Advance();
 			TUniquePtr<FBangoParamsStmt> Stmt = MakeUnique<FBangoParamsStmt>();
-			if (!Expect(EBangoTokenKind::LParen, TEXT("after 'inputs'")))
+			if (!Expect(EBangoTokenKind::LParen, TEXT("after '#inputs'")))
 			{
 				return nullptr;
 			}

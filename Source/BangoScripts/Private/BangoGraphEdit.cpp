@@ -78,7 +78,7 @@ namespace Bango
 		switch (Kind)
 		{
 		case EBangoGraphNodeKind::Entry:
-			Source = bInFunctionGraph ? FString(TEXT("function ")) + Text + TEXT("\n{\n};") : FString(TEXT("#set inputs (")) + Text + TEXT(")");
+			Source = bInFunctionGraph ? FString(TEXT("function ")) + Text + TEXT("\n{\n};") : FString(TEXT("#inputs (")) + Text + TEXT(")");
 			break;
 		case EBangoGraphNodeKind::Assign:
 		case EBangoGraphNodeKind::IncDec:

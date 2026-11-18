@@ -116,9 +116,8 @@ void FBangoScriptNames::Build(const TArray<FString>& Lines, const TArray<TArray<
 			}
 		}
 
-		const bool bParamsLine = Code.Num() >= 2
-			&& TokenIs(Line, Code[0], EBangoSyntaxKind::Preprocessor, TEXT("#set"))
-			&& TokenIs(Line, Code[1], EBangoSyntaxKind::Preprocessor, TEXT("inputs"));
+		const bool bParamsLine = Code.Num() >= 1
+			&& TokenIs(Line, Code[0], EBangoSyntaxKind::Preprocessor, TEXT("#inputs"));
 		const bool bGlobalLine = Code.Num() >= 1 && TokenIs(Line, Code[0], EBangoSyntaxKind::DeclKeyword, TEXT("global"));
 		if (bParamsLine && Graphs[0].EntryLine == INDEX_NONE)
 		{

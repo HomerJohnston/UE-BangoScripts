@@ -120,7 +120,7 @@ private:
 	TArray<TSharedPtr<FGraphEntry>> FunctionItems;
 	TSharedPtr<SListView<TSharedPtr<FGraphEntry>>> FunctionList;
 
-	// INPUTS: the shown graph's parameters (the script's #set inputs, or the function's), from its entry node.
+	// INPUTS: the shown graph's parameters (the script's #inputs, or the function's), from its entry node.
 	struct FInputEntry
 	{
 		int32 Index = INDEX_NONE;
@@ -440,7 +440,7 @@ private:
 	void UpdateDescriptionBox();
 
 	// SCRIPT CONFIG
-	/** The script's localization namespace (#set LOCTEXT_NAMESPACE), from the main Script Start node; empty if it has none. */
+	/** The script's localization namespace (#LOCTEXT_NAMESPACE), from the main Script Start node; empty if it has none. */
 	FString GetScriptNamespace() const;
 	/** Sets the namespace from what was typed (empty removes the line), as one undoable edit. */
 	void SetScriptNamespace(const FString& Typed);
@@ -450,11 +450,11 @@ private:
 	/** The SCRIPT CONFIG boxes (UpdateNamespaceBox). */
 	void UpdateConfigBoxes();
 
-	/** How this editor writes the script it shows and saves: as its #set USES_GRAPH_EDITOR line says. */
+	/** How this editor writes the script it shows and saves: as its #USES_GRAPH_EDITOR line says. */
 	FBangoGraphWriteOptions GetWriteOptions() const;
 
 	/**
-	 * Turns on the script's #set USES_GRAPH_EDITOR once a node has been moved (dragged) while the script has at least
+	 * Turns on the script's #USES_GRAPH_EDITOR once a node has been moved (dragged) while the script has at least
 	 * the project's Large Script Threshold of nodes, so its layout is saved from then on. Run each poll.
 	 */
 	void CheckMovedNodes();

@@ -32,7 +32,7 @@ public:
 
 	/**
 	 * Large Script Threshold: when nodes are moved in the graph editor in a script with at least this many nodes, the
-	 * script gets a `#set USES_GRAPH_EDITOR` line, and from then on it's saved with section headings (// ==== ...) and
+	 * script gets a `#USES_GRAPH_EDITOR` line, and from then on it's saved with section headings (// ==== ...) and
 	 * node metadata (//@), so its layout is kept. Until then it's saved compact, so it reads like plain code, and its
 	 * nodes are laid out afresh each time it's opened. 0: moving any node adds the line.
 	 */

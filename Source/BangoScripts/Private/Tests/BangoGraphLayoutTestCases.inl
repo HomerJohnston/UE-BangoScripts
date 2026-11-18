@@ -156,7 +156,7 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 	// The VARIABLES list: parameters, locals and globals of one graph, with types and where each is declared.
 	{
 		const TCHAR* Source =
-			TEXT("#set inputs (string _who, int _times = 1)\n")
+			TEXT("#inputs (string _who, int _times = 1)\n")
 			TEXT("global int gold;\n")
 			TEXT("global string[] names;\n")
 			TEXT("scriptVar int _count = 0;\n")
@@ -561,7 +561,7 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 	// it's inside. Set nodes and the like show the variable's type, and their value takes it too.
 	{
 		const TCHAR* Source =
-			TEXT("#set inputs (int _count, string[] _names = [])\n")
+			TEXT("#inputs (int _count, string[] _names = [])\n")
 			TEXT("global float speed;\n")
 			TEXT("scriptVar string _title = \"x\";\n")
 			TEXT("scriptVar int _n = 1;\n")

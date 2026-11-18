@@ -192,7 +192,7 @@ namespace BangoCompilerPrivate
 			}
 			else
 			{
-				return Fail(Lit.Loc, TEXT("This text needs the script's namespace: add the line #set LOCTEXT_NAMESPACE \"Bango.Intro\" at the top of the script (under its description). (NSLOCTEXT and NSNOTELOCTEXT give their own namespace instead.)"));
+				return Fail(Lit.Loc, TEXT("This text needs the script's namespace: add the line #LOCTEXT_NAMESPACE \"Bango.Intro\" at the top of the script (under its description). (NSLOCTEXT and NSNOTELOCTEXT give their own namespace instead.)"));
 			}
 
 			const FString Id = Namespace + TEXT("\n") + Lit.TextKey;
@@ -681,7 +681,7 @@ namespace BangoCompilerPrivate
 			{
 				// What's left here if it moves: its value, as an assignment (a value up there would only be a default).
 				const FString Left = Decl.Init.IsValid() ? FString::Printf(TEXT(", and set it here with '%s = ...;'"), *Decl.Name) : FString();
-				return Fail(Decl.Loc, FString::Printf(TEXT("Globals are declared at the top of the file, after the #set lines and before everything else%s: move 'global %s %s;' up there%s. (The script editor's Apply does that for you.)"),
+				return Fail(Decl.Loc, FString::Printf(TEXT("Globals are declared at the top of the file, after the settings lines (#inputs and the others) and before everything else%s: move 'global %s %s;' up there%s. (The script editor's Apply does that for you.)"),
 					bInFunction ? TEXT(", not in a function") : TEXT(""), *Decl.Type.ToString(), *Decl.Name, *Left));
 			}
 			return Fail(Decl.Loc, FString::Printf(TEXT("scriptVar declarations go at the top of their %s, before its code: move 'scriptVar %s %s;' up there. Or drop 'scriptVar' to declare a local here, which exists from here to the end of its block."),
@@ -783,7 +783,7 @@ namespace BangoCompilerPrivate
 		}
 
 		/**
-		 * Globals are declared only at the top of the file (after the #set lines, before the main graph's script
+		 * Globals are declared only at the top of the file (after the settings lines (#inputs and the others), before the main graph's script
 		 * variables and anything else, functions included), once each and without a value. Script variables
 		 * (scriptVar) are declared only at the top of their graph, before its code, with fixed starting values. Locals
 		 * (plain declarations) can be anywhere, so they aren't checked here; nor are loop variables.

@@ -73,11 +73,11 @@ namespace BangoGraphWriterPrivate
 				}
 				if (Doc.bHasLocNamespace)
 				{
-					AddCode(0, -1, FString(TEXT("#set LOCTEXT_NAMESPACE ")) + Bango::MakeStringLiteral(Doc.LocNamespace), nullptr);
+					AddCode(0, -1, FString(TEXT("#LOCTEXT_NAMESPACE ")) + Bango::MakeStringLiteral(Doc.LocNamespace), nullptr);
 				}
 				if (bWriteUsesGraphEditor)
 				{
-					AddCode(0, -1, TEXT("#set USES_GRAPH_EDITOR"), nullptr);
+					AddCode(0, -1, TEXT("#USES_GRAPH_EDITOR"), nullptr);
 				}
 			}
 
@@ -88,7 +88,7 @@ namespace BangoGraphWriterPrivate
 				AddHeading(Bango::GetScriptInputHeadingComment());
 				AddComment(MainEntry.Comment, 0, -1);
 				// An empty inputs line still anchors the entry node's comment.
-				AddCode(0, -1, FString(TEXT("#set inputs (")) + MainEntry.Text + TEXT(")"), nullptr);
+				AddCode(0, -1, FString(TEXT("#inputs (")) + MainEntry.Text + TEXT(")"), nullptr);
 			}
 			// The declarations: globals, then the main graph's locals.
 			if (Doc.Globals.Num() > 0)

@@ -8,7 +8,7 @@
  * usually a line or two, like `Sleep(4); player AddItem("Pistol");`. In the editor's details panel it's a box to
  * type the script in, with an Edit button that opens the full graph editor in a window of its own.
  *
- * The script may start with a `#set inputs (...)` line; whoever spawns it passes the values, in order.
+ * The script may start with a `#inputs (...)` line; whoever spawns it passes the values, in order.
  */
 USTRUCT(BlueprintType, meta = (DisplayName = "Bango Inline Script"))
 struct BANGOSCRIPTS_API FBangoInlineScript

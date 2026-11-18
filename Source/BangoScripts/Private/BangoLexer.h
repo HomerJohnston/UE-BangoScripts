@@ -21,11 +21,13 @@ enum class EBangoTokenKind : uint8
 	KwBreak, KwContinue, KwReturn, KwLabel, KwGoto,
 	KwFunction, KwGlobal, KwScriptVar, KwTrue, KwFalse, KwNil,
 	KwBool, KwInt, KwDouble, KwString, KwEntity, KwText, KwVector2, KwVector3, KwVoid,
-	KwInputs,
 	KwIsNil,
 
-	/** `#set` at the start of a line: the script's settings lines (see FBangoScript). */
-	HashSet,
+	/**
+	 * A settings line's start: `#inputs`, `#LOCTEXT_NAMESPACE` or `#USES_GRAPH_EDITOR`, first on its line (see
+	 * FBangoScript). Its Text is the whole word, with the '#'.
+	 */
+	Directive,
 
 	// Punctuation
 	LParen, RParen, LBrace, RBrace, LBracket, RBracket, Semicolon, Comma, Colon,

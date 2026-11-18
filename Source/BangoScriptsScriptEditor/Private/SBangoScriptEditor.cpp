@@ -229,7 +229,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 								])
 						]
 
-						// SCRIPT CONFIG: the script's settings lines, saved under the description (#set LOCTEXT_NAMESPACE).
+						// SCRIPT CONFIG: the script's settings lines, saved under the description (#LOCTEXT_NAMESPACE).
 						+ SVerticalBox::Slot()
 						.AutoHeight()
 						.Padding(0.0f, 0.0f, 0.0f, 2.0f)
@@ -251,7 +251,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 								[
 									SAssignNew(NamespaceBox, SEditableTextBox)
 									.HintText(LOCTEXT("NamespaceHint", "none"))
-									.ToolTipText(LOCTEXT("NamespaceTooltip", "The namespace of this script's LOCTEXT texts, for translators' tools, like Bango.Intro. It's saved as #set LOCTEXT_NAMESPACE \"...\" at the top of the script, under the description. Leave it empty for none."))
+									.ToolTipText(LOCTEXT("NamespaceTooltip", "The namespace of this script's LOCTEXT texts, for translators' tools, like Bango.Intro. It's saved as #LOCTEXT_NAMESPACE \"...\" at the top of the script, under the description. Leave it empty for none."))
 									.IsReadOnly_Lambda([this]() { return EdGraphs.Num() == 0; })
 									.OnTextCommitted_Lambda([this](const FText& NewText, ETextCommit::Type CommitType)
 									{
@@ -291,7 +291,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 								{
 									return ShownGraph > 0
 										? LOCTEXT("AddFunctionInputTooltip", "Add a parameter to this function. Calls to it need a value for it.")
-										: LOCTEXT("AddScriptInputTooltip", "Add a parameter to this script (#set inputs): a value it's spawned with.");
+										: LOCTEXT("AddScriptInputTooltip", "Add a parameter to this script (#inputs): a value it's spawned with.");
 								})
 								.IsEnabled_Lambda([this]() { return GetShownEntryNode() != nullptr; })
 								.OnClicked(this, &SBangoScriptEditor::OnAddInputClicked)
@@ -3081,7 +3081,7 @@ void SBangoScriptEditor::UpdateConfigBoxes()
 FBangoGraphWriteOptions SBangoScriptEditor::GetWriteOptions() const
 {
 	FBangoGraphWriteOptions Options;
-	Options.bFollowUsesGraphEditor = true; // node metadata only once the script has #set USES_GRAPH_EDITOR
+	Options.bFollowUsesGraphEditor = true; // node metadata only once the script has #USES_GRAPH_EDITOR
 	return Options;
 }
 

@@ -1060,7 +1060,7 @@ void SBangoGraphNode::MoveTo(const FVector2f& NewPosition, FNodeSet& NodeFilter,
 	SGraphNode::MoveTo(NewPosition, NodeFilter, bMarkDirty);
 	if (BangoNode)
 	{
-		BangoNode->bMovedByUser = true; // for the script editor: a moved node can turn on #set USES_GRAPH_EDITOR
+		BangoNode->bMovedByUser = true; // for the script editor: a moved node can turn on #USES_GRAPH_EDITOR
 	}
 }
 

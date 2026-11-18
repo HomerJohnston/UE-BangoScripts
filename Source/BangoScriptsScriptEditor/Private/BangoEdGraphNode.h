@@ -110,7 +110,7 @@ public:
 	TSharedPtr<const FBangoNodeLayoutContext> LayoutContext;
 
 	/**
-	 * The main Script Start node only: the script's `#set LOCTEXT_NAMESPACE "..."` line, edited in the SCRIPT CONFIG panel
+	 * The main Script Start node only: the script's `#LOCTEXT_NAMESPACE "..."` line, edited in the SCRIPT CONFIG panel
 	 * (SetLocNamespace). Kept here, not in Text, since it isn't part of the inputs line.
 	 */
 	UPROPERTY()
@@ -119,7 +119,7 @@ public:
 	FString LocNamespace;
 
 	/**
-	 * The main Script Start node only: the script's `#set USES_GRAPH_EDITOR` line, so it's saved with its node metadata.
+	 * The main Script Start node only: the script's `#USES_GRAPH_EDITOR` line, so it's saved with its node metadata.
 	 * Turned on once nodes are moved in a script with at least the project's Large Script Threshold of nodes.
 	 */
 	UPROPERTY()
@@ -190,7 +190,7 @@ public:
 	bool SetFieldValue(int32 FieldIndex, const FString& Value, FString& OutError);
 
 	/**
-	 * The main Script Start node only: sets the script's namespace (the #set LOCTEXT_NAMESPACE line) as an undoable
+	 * The main Script Start node only: sets the script's namespace (the #LOCTEXT_NAMESPACE line) as an undoable
 	 * edit, from what was typed in SCRIPT CONFIG (a name, without quotes). Spaces around it are dropped; empty removes the
 	 * line. False if nothing changed.
 	 */

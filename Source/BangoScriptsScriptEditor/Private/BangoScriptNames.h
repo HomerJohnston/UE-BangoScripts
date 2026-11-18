@@ -5,7 +5,7 @@
 // (Bango Language Spec, section 4). One line can't tell, so the tokenizer calls every name a Global; this reads the
 // declarations of the whole file, which are all in fixed places:
 //  - globals: `global <type> name;`, in one block at the top of the file;
-//  - the main graph's parameters: `#set inputs (<type> name, ...)`;
+//  - the main graph's parameters: `#inputs (<type> name, ...)`;
 //  - a function's parameters: its header, `function <type> Name(<type> name, ...)`, which may span several lines;
 //  - locals and script variables: `<type> name ...;` and `scriptVar <type> name ...;`, visible from their line to the
 //    `}` that closes their block (C-style block scope; a graph's top level runs to the end of the graph);
@@ -60,7 +60,7 @@ public:
 	/** A graph's function name, or empty for the main graph (or a function whose name hasn't been typed yet). */
 	FString GetGraphFunctionName(int32 Graph) const;
 
-	/** Whether the line is its graph's entry: the `#set inputs` line, or a function's `function` line. */
+	/** Whether the line is its graph's entry: the `#inputs` line, or a function's `function` line. */
 	bool IsEntryLine(int32 LineIndex) const;
 
 	/** The entry line of the main graph (FunctionName empty) or of the function with that name, or INDEX_NONE. */

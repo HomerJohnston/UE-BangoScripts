@@ -418,7 +418,7 @@ namespace BangoGraphPrivate
 				MainTargets.Add(Target);
 				FirstTopLevel = 1;
 			}
-			// Comments on (or just above) the #set lines belong to Script Start, like the inputs line's.
+			// Comments on (or just above) the settings lines belong to Script Start, like the inputs line's.
 			for (const FBangoSourceLocation* Setting : { Script.bHasLocNamespace ? &Script.LocNamespaceLoc : nullptr, Script.bUsesGraphEditor ? &Script.UsesGraphEditorLoc : nullptr })
 			{
 				if (Setting)
@@ -668,7 +668,7 @@ namespace BangoGraphPrivate
 				if (!bFailed)
 				{
 					Fail(Decl->Loc.Line, Decl->bGlobal
-						? FString::Printf(TEXT("'%s' is declared here, but globals are declared at the top of the file, after the #set lines. Move it there in the text, then open the script again."), *Decl->Name)
+						? FString::Printf(TEXT("'%s' is declared here, but globals are declared at the top of the file, after the settings lines (#inputs and the others). Move it there in the text, then open the script again."), *Decl->Name)
 						: FString::Printf(TEXT("'%s' is declared here, but scriptVars are declared at the top of their script or function. Move it there in the text (or drop 'scriptVar' to make it a local), then open the script again."), *Decl->Name));
 					bFailed = true;
 				}

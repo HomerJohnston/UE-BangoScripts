@@ -45,14 +45,14 @@ namespace BangoInlineScriptCustomizationPrivate
 	constexpr int32 LayoutNoteFlashes = 2;
 	const FLinearColor LayoutNoteBackground(0.0f, 0.0f, 0.0f, 0.6f);
 
-	/** A `#set USES_GRAPH_EDITOR` line (Trimmed: without its indent), which asks for the graph layout to be saved. */
+	/** A `#USES_GRAPH_EDITOR` line (Trimmed: without its indent), which asks for the graph layout to be saved. */
 	static bool IsUsesGraphEditorLine(const FString& Trimmed)
 	{
-		if (!Trimmed.StartsWith(TEXT("#set"), ESearchCase::CaseSensitive))
+		if (!Trimmed.StartsWith(TEXT("#"), ESearchCase::CaseSensitive))
 		{
 			return false;
 		}
-		FString Rest = Trimmed.Mid(4).TrimStart();
+		FString Rest = Trimmed.Mid(1);
 		int32 CommentAt = INDEX_NONE;
 		if (Rest.FindChar(TEXT('/'), CommentAt))
 		{
@@ -70,9 +70,9 @@ namespace BangoInlineScriptCustomizationPrivate
 
 	/**
 	 * The script without its graph layout: no node metadata (//@), no section headings (// ====) and no
-	 * #set USES_GRAPH_EDITOR line, so it can be typed in its box. Written compact by the graph writer if it reads
+	 * #USES_GRAPH_EDITOR line, so it can be typed in its box. Written compact by the graph writer if it reads
 	 * (which leaves the line out); otherwise each line has its metadata taken off, and the headings, the
-	 * #set USES_GRAPH_EDITOR line and reroute lines (metadata only) are dropped.
+	 * #USES_GRAPH_EDITOR line and reroute lines (metadata only) are dropped.
 	 */
 	static FString StripNodeLayout(const FString& Script)
 	{
@@ -345,7 +345,7 @@ private:
 		return TextBox.IsValid() && TextBox->HasNodeMetadata();
 	}
 
-	/** Something Make Editable Inline takes out: node metadata, or a #set USES_GRAPH_EDITOR line. */
+	/** Something Make Editable Inline takes out: node metadata, or a #USES_GRAPH_EDITOR line. */
 	bool HasLayoutToRemove() const
 	{
 		return HasLayout() || (TextBox.IsValid() && BangoInlineScriptCustomizationPrivate::HasUsesGraphEditorLine(TextBox->GetText().ToString()));
@@ -356,7 +356,7 @@ private:
 		MenuBuilder.BeginSection(TEXT("BangoInlineScript"), LOCTEXT("InlineScriptSection", "Inline Script"));
 		MenuBuilder.AddMenuEntry(
 			LOCTEXT("MakeEditableInline", "Make Editable Inline"),
-			LOCTEXT("MakeEditableInlineTooltip", "Removes the script's node metadata, section headings and #set USES_GRAPH_EDITOR line, so it can be typed in here. Its graph loses its layout: the nodes are laid out afresh when it's next opened in the editor."),
+			LOCTEXT("MakeEditableInlineTooltip", "Removes the script's node metadata, section headings and #USES_GRAPH_EDITOR line, so it can be typed in here. Its graph loses its layout: the nodes are laid out afresh when it's next opened in the editor."),
 			FSlateIcon(),
 			FUIAction(
 				FExecuteAction::CreateSP(this, &SBangoInlineScriptBox::MakeEditableInline),

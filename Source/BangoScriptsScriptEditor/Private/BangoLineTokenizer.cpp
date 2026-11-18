@@ -36,7 +36,6 @@ namespace BangoLineTokenizerPrivate
 	static const TCHAR* const Constants[]      = { TEXT("true"), TEXT("false") };
 	static const TCHAR* const NilWord[]        = { TEXT("nil") };
 	static const TCHAR* const PlayerWord[]     = { TEXT("player"), TEXT("self") }; // the first local player's pawn, and the script's owner: entities, coloured like @john
-	static const TCHAR* const PreprocWords[]   = { TEXT("inputs"), TEXT("LOCTEXT_NAMESPACE"), TEXT("USES_GRAPH_EDITOR") };
 	static const TCHAR* const Builtins[]       = { TEXT("IsNil"), TEXT("Count"), TEXT("Push"), TEXT("InsertAt"), TEXT("Pop"), TEXT("RemoveAt") };
 	static const TCHAR* const VectorParts[]    = { TEXT("x"), TEXT("y"), TEXT("z") };
 
@@ -82,7 +81,7 @@ namespace BangoLineTokenizerPrivate
 				SkipSpaces();
 			}
 
-			// A settings line: #set and the word after it.
+			// A settings line: #inputs, #LOCTEXT_NAMESPACE or #USES_GRAPH_EDITOR, as one token.
 			if (Pos < Len && Line[Pos] == TEXT('#'))
 			{
 				const int32 Start = Pos++;
@@ -289,7 +288,6 @@ namespace BangoLineTokenizerPrivate
 			else if (IsOneOf(Line, Start, WordLen, Constants))      { Kind = EBangoSyntaxKind::Constant; }
 			else if (IsOneOf(Line, Start, WordLen, NilWord))        { Kind = EBangoSyntaxKind::Nil; }
 			else if (IsOneOf(Line, Start, WordLen, PlayerWord))     { Kind = EBangoSyntaxKind::Entity; }
-			else if (IsOneOf(Line, Start, WordLen, PreprocWords))   { Kind = EBangoSyntaxKind::Preprocessor; }
 			else if (IsOneOf(Line, Start, WordLen, Builtins))       { Kind = EBangoSyntaxKind::Builtin; }
 			else if (IsFollowedByOpenParen())                       { Kind = EBangoSyntaxKind::Call; }
 			// A name is the graph's local, parameter or loop variable if it has one, and otherwise a global. One line

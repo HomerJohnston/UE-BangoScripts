@@ -537,7 +537,7 @@ struct FBangoScriptParamDecl
 	FBangoExprPtr Default;
 };
 
-/** `#set inputs (int _a, string _b = "x")` Always the first statement of a script, if present. */
+/** `#inputs (int _a, string _b = "x")` Always the first statement of a script, if present. */
 struct FBangoParamsStmt : FBangoStmt
 {
 	static constexpr EBangoStmtKind StaticKind = EBangoStmtKind::Params;
@@ -587,7 +587,7 @@ struct FBangoScript
 	TArray<const FBangoLiteralExpr*> TextLiterals;
 
 	/**
-	 * `#set LOCTEXT_NAMESPACE "Bango.Intro"`: the namespace for the script's LOCTEXT and NOTELOCTEXT texts. Like the
+	 * `#LOCTEXT_NAMESPACE "Bango.Intro"`: the namespace for the script's LOCTEXT and NOTELOCTEXT texts. Like the
 	 * other settings lines, it comes before or after the inputs line (it's written before it), and before everything
 	 * else. Settings lines aren't statements: they have no graph nodes.
 	 */
@@ -596,7 +596,7 @@ struct FBangoScript
 	FBangoSourceLocation LocNamespaceLoc;
 
 	/**
-	 * `#set USES_GRAPH_EDITOR`: the graph editor saves this script with its section headings and node metadata (node
+	 * `#USES_GRAPH_EDITOR`: the graph editor saves this script with its section headings and node metadata (node
 	 * positions). Without it, the script is saved compact. The editor adds it once its nodes are moved in a script with
 	 * at least the project's Large Script Threshold of nodes.
 	 */

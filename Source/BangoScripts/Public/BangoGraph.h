@@ -161,17 +161,17 @@ struct BANGOSCRIPTS_API FBangoGraphDocument
 	 */
 	FString Description;
 
-	/** The script's `#set LOCTEXT_NAMESPACE "..."` line (see FBangoScript::LocNamespace). Saved after the description, above the inputs line. Edited in the editor's SCRIPT CONFIG panel. */
+	/** The script's `#LOCTEXT_NAMESPACE "..."` line (see FBangoScript::LocNamespace). Saved after the description, above the inputs line. Edited in the editor's SCRIPT CONFIG panel. */
 	bool bHasLocNamespace = false;
 	FString LocNamespace;
 
 	/**
-	 * The script's `#set USES_GRAPH_EDITOR` line (see FBangoScript): it's saved with its node metadata, when written
+	 * The script's `#USES_GRAPH_EDITOR` line (see FBangoScript): it's saved with its node metadata, when written
 	 * following it (FBangoGraphWriteOptions::bFollowUsesGraphEditor). Saved after the namespace line.
 	 */
 	bool bUsesGraphEditor = false;
 
-	/** The file's global declarations, in order (written after the #set lines). */
+	/** The file's global declarations, in order (written after the settings lines). */
 	TArray<FBangoGraphDecl> Globals;
 
 	FBangoGraph Main;
@@ -188,13 +188,13 @@ struct FBangoCompileError;
 struct FBangoGraphWriteOptions
 {
 	/**
-	 * Written as the script says: in full (section headings and node metadata) if it has `#set USES_GRAPH_EDITOR`,
+	 * Written as the script says: in full (section headings and node metadata) if it has `#USES_GRAPH_EDITOR`,
 	 * compact if not. The script editor's saves. Off: in full, whatever it says (unless bCompact).
 	 */
 	bool bFollowUsesGraphEditor = false;
 
 	/**
-	 * Always compact: no section headings, no node metadata (and so no reroutes), and no #set USES_GRAPH_EDITOR line.
+	 * Always compact: no section headings, no node metadata (and so no reroutes), and no #USES_GRAPH_EDITOR line.
 	 * For inline scripts made editable in their box.
 	 */
 	bool bCompact = false;
@@ -227,7 +227,7 @@ namespace Bango
 	BANGOSCRIPTS_API TArray<int32> GetFunctionWriteOrder(const FBangoGraphDocument& Document);
 
 	/**
-	 * The section headings the writer puts in a file (the text after the //): SCRIPT INPUTS above the #set inputs line,
+	 * The section headings the writer puts in a file (the text after the //): SCRIPT INPUTS above the #inputs line,
 	 * GLOBAL VARS and LOCAL VARS above the declarations, SCRIPT BODY above the main graph's code, and FUNCTIONS
 	 * above the first function. Every heading starts with "====".
 	 */
@@ -272,7 +272,7 @@ namespace Bango
 	/**
 	 * Whether WriteGraphText writes Document compact: no section headings and no node metadata (so no reroutes).
 	 * That's when Options.bCompact says so, or when following the script's flag (bFollowUsesGraphEditor) and it
-	 * has no #set USES_GRAPH_EDITOR line.
+	 * has no #USES_GRAPH_EDITOR line.
 	 */
 	BANGOSCRIPTS_API bool IsWrittenCompact(const FBangoGraphDocument& Document, const FBangoGraphWriteOptions& Options);
 }
