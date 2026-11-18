@@ -5,6 +5,9 @@
 #include "BangoCommand.h"
 #include "BangoScriptCache.h"
 
+struct FBangoInlineScript;
+struct FBangoInputsSignature;
+
 /**
  * The Bango runtime module. Holds the command table every script is compiled and run against,
  * and the cache of compiled scripts.
@@ -39,10 +42,14 @@ public:
 	FBangoScriptCache& GetScriptCache() { return ScriptCache; }
 
 	/**
-	 * An inline script's compiled program (FBangoInlineScript, spec section 15), compiled the first time this text is
-	 * asked for under this Name (what errors call it) and kept: the same text isn't compiled again.
+	 * An inline script's compiled program (FBangoInlineScript, spec section 15), with its inputs signature if it has
+	 * one, compiled the first time this text is asked for under this Name (what errors call it) and kept: the same text
+	 * isn't compiled again. Fails, with OutError, if it doesn't compile or its signature isn't registered.
 	 */
-	bool GetInlineProgram(const FString& Source, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError);
+	bool GetInlineProgram(const FBangoInlineScript& Script, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError);
+
+	/** GetInlineProgram for a script's text and its signature (null for none), as a saved script is restored. */
+	bool GetInlineProgram(const FString& Source, const FBangoInputsSignature* Signature, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError);
 
 private:
 	FBangoCommandTable Commands;

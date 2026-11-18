@@ -224,6 +224,7 @@ void FBangoCompletion::GatherItems(const FBangoScriptNames& Names, int32 LineInd
 		FBangoCompletionItem Item;
 		Item.Name = Name.Name;
 		Item.Detail = Name.Type;
+		Item.Description = Name.Tooltip;
 		switch (Name.Kind)
 		{
 		case EBangoSyntaxKind::Parameter: Item.Kind = EBangoCompletionKind::Parameter; break;

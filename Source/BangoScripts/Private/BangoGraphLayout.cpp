@@ -889,6 +889,13 @@ namespace BangoGraphLayoutPrivate
 		for (const FBangoGraph* Graph : Graphs)
 		{
 			FVarScope Base = Globals;
+			if (Graph == &Document.Main)
+			{
+				for (const FBangoGraphDecl& Input : Document.GivenInputs)
+				{
+					DeclareVariable(Base, Input.Name, Input.Type);
+				}
+			}
 			AddEntryParams(*Graph, Base);
 			for (const FBangoGraphDecl& Local : Graph->ScriptVars)
 			{
@@ -1242,7 +1249,14 @@ namespace Bango
 			Variable.Index = DeclIndex;
 		};
 
-		// Parameters, on the entry node, in order.
+		// An inline script's given inputs (its inputs signature's), then the parameters on the entry node, in order.
+		if (GraphIndex == INDEX_NONE)
+		{
+			for (const FBangoGraphDecl& Input : Document.GivenInputs)
+			{
+				Add(Params, Input.Name, Input.Type, FBangoGraphVariable::EKind::Param, GraphIndex, INDEX_NONE);
+			}
+		}
 		TArray<FBangoEntryParam> EntryParams;
 		Bango::ReadEntryParams(Graph->Nodes[0].Text, Graph->bIsFunction, EntryParams);
 		for (int32 i = 0; i < EntryParams.Num(); ++i)
@@ -1325,6 +1339,7 @@ namespace Bango
 	{
 		FBangoNodeLayoutContext Context;
 		Context.Commands = Commands;
+		Context.GivenInputs = Document.GivenInputs;
 		for (const FBangoGraph& Function : Document.Functions)
 		{
 			if (Function.Nodes.Num() == 0)
@@ -1502,6 +1517,28 @@ namespace Bango
 			else
 			{
 				ScriptEntryLayout(Node, Tok, Layout);
+				// The inputs its owner gives it come first. They aren't in the text, so they can't be edited here.
+				TArray<FBangoNodeField> Given;
+				for (const FBangoGraphDecl& Input : Context.GivenInputs)
+				{
+					FBangoNodeField Field;
+					Field.Label = Input.Name;
+					Field.TypeHint = Input.Type;
+					Field.Description = Input.Comment;
+					Field.bReadOnly = true;
+					Field.bHasValue = false;
+					Given.Add(MoveTemp(Field));
+				}
+				if (Given.Num() > 0)
+				{
+					for (FBangoNodeField& Field : Layout.Fields)
+					{
+						Field.SectionHeader.Reset();
+					}
+					Given[0].SectionHeader = TEXT("Input Params");
+					Given.Append(Layout.Fields);
+					Layout.Fields = MoveTemp(Given);
+				}
 			}
 			return Layout;
 		}

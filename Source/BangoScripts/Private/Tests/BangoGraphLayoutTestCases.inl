@@ -213,6 +213,34 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 			{
 				OutFailures.Add(TEXT("variables (F): expected ") + ExpectedF + TEXT("\n got ") + Describe(Vars));
 			}
+
+			// An inline script's given inputs (its inputs signature's): the main graph's first parameters, not a function's.
+			FBangoGraphDocument GivenDoc = VarDoc;
+			FBangoGraphDecl Given;
+			Given.Type = TEXT("entity");
+			Given.Name = TEXT("_trigger");
+			GivenDoc.GivenInputs.Add(Given);
+			const FBangoNodeLayoutContext GivenContext = Bango::MakeNodeLayoutContext(GivenDoc, &Commands);
+			Bango::GetGraphVariables(GivenDoc, INDEX_NONE, GivenContext, Vars);
+			if (!Describe(Vars).StartsWith(TEXT("param _trigger:entity @-1/-1; param _who:string @-1/0; "), ESearchCase::CaseSensitive))
+			{
+				OutFailures.Add(TEXT("variables (main, given inputs): got ") + Describe(Vars));
+			}
+			Bango::GetGraphVariables(GivenDoc, 0, GivenContext, Vars);
+			if (Describe(Vars) != ExpectedF)
+			{
+				OutFailures.Add(TEXT("variables (F, given inputs): got ") + Describe(Vars));
+			}
+			// Listed first on Script Start, read-only.
+			FBangoGraphNode StartNode;
+			StartNode.Kind = EBangoGraphNodeKind::Entry;
+			StartNode.Text = TEXT("int _n");
+			const FBangoNodeLayout StartLayout = Bango::GetNodeLayout(StartNode, false, GivenContext);
+			if (StartLayout.Fields.Num() != 2 || StartLayout.Fields[0].Label != TEXT("_trigger") || !StartLayout.Fields[0].bReadOnly
+				|| StartLayout.Fields[0].SectionHeader != TEXT("Input Params") || !StartLayout.Fields[1].SectionHeader.IsEmpty() || StartLayout.Fields[1].Label != TEXT("_n"))
+			{
+				OutFailures.Add(TEXT("Script Start with given inputs: wrong fields"));
+			}
 		}
 	}
 

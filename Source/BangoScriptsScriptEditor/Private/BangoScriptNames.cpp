@@ -3,6 +3,8 @@
 
 #include "BangoScriptNames.h"
 
+#include "BangoProgram.h"
+
 namespace BangoScriptNamesPrivate
 {
 	static bool IsCode(EBangoSyntaxKind Kind)
@@ -69,6 +71,12 @@ void FBangoScriptNames::Build(const TArray<FString>& Lines, const TArray<TArray<
 
 	Graphs.Reset();
 	Graphs.SetNum(1);
+	for (const FBangoVisibleName& Input : GivenInputs)
+	{
+		Graphs[0].Params.Add(Input.Name);
+		Graphs[0].ParamTypes.Add(Input.Type);
+		Graphs[0].ParamTooltips.Add(Input.Tooltip);
+	}
 	LineGraph.Reset();
 	Globals.Reset();
 	GlobalTypes.Reset();
@@ -361,7 +369,7 @@ int32 FBangoScriptNames::FindEntryLine(const FString& FunctionName) const
 void FBangoScriptNames::GetVisibleNames(int32 LineIndex, TArray<FBangoVisibleName>& OutNames) const
 {
 	TArray<FString> Seen;
-	auto Add = [&OutNames, &Seen](const FString& Name, const FString& Type, EBangoSyntaxKind Kind)
+	auto Add = [&OutNames, &Seen](const FString& Name, const FString& Type, EBangoSyntaxKind Kind, const FString& Tooltip = FString())
 	{
 		if (!Name.IsEmpty() && !Contains(Seen, Name))
 		{
@@ -370,6 +378,7 @@ void FBangoScriptNames::GetVisibleNames(int32 LineIndex, TArray<FBangoVisibleNam
 			Visible.Name = Name;
 			Visible.Type = Type;
 			Visible.Kind = Kind;
+			Visible.Tooltip = Tooltip;
 			OutNames.Add(Visible);
 		}
 	};
@@ -380,7 +389,8 @@ void FBangoScriptNames::GetVisibleNames(int32 LineIndex, TArray<FBangoVisibleNam
 		const FGraphNames& Names = Graphs[Graph];
 		for (int32 I = 0; I < Names.Params.Num(); ++I)
 		{
-			Add(Names.Params[I], Names.ParamTypes.IsValidIndex(I) ? Names.ParamTypes[I] : FString(), EBangoSyntaxKind::Parameter);
+			Add(Names.Params[I], Names.ParamTypes.IsValidIndex(I) ? Names.ParamTypes[I] : FString(), EBangoSyntaxKind::Parameter,
+				Names.ParamTooltips.IsValidIndex(I) ? Names.ParamTooltips[I] : FString());
 		}
 	}
 	// The visible locals, in the order they're declared; of two with one name, the inner one (FindVisibleLocal).
@@ -414,4 +424,23 @@ void FBangoScriptNames::GetVisibleNames(int32 LineIndex, TArray<FBangoVisibleNam
 		Signature += TEXT(")");
 		Add(Function.FunctionName, Signature, EBangoSyntaxKind::Function);
 	}
+}
+
+TArray<FBangoVisibleName> BangoTextEditor::GivenInputs(const FBangoInputsSignature& Signature)
+{
+	TArray<FBangoVisibleName> Inputs;
+	for (int32 I = 0; I < Signature.Params.Num(); ++I)
+	{
+		FBangoVisibleName Input;
+		Input.Name = Signature.Params[I].Name;
+		Input.Type = Signature.Params[I].Type.ToString();
+		Input.Kind = EBangoSyntaxKind::Parameter;
+		Input.Tooltip = Signature.Tooltips.IsValidIndex(I) ? Signature.Tooltips[I] : FString();
+		if (Input.Tooltip.IsEmpty())
+		{
+			Input.Tooltip = FString::Printf(TEXT("Given by %s."), *Signature.Label);
+		}
+		Inputs.Add(MoveTemp(Input));
+	}
+	return Inputs;
 }

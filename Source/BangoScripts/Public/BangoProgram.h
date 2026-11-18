@@ -158,6 +158,39 @@ struct FBangoScriptParamInfo
 	FBangoValue Default;
 };
 
+/**
+ * One input of an inputs signature, as its C++ writes it (Bango::RegisterInputsSignature): a type and a name, as in an
+ * #inputs line but without a default (`entity _activator`), and what it is, shown in the editor. Names should start
+ * with '_'.
+ */
+struct FBangoInputDecl
+{
+	FString Decl;
+	FString Tooltip;
+
+	FBangoInputDecl(const TCHAR* InDecl, const TCHAR* InTooltip = TEXT("")) : Decl(InDecl), Tooltip(InTooltip) {}
+	FBangoInputDecl(const FString& InDecl, const FString& InTooltip = FString()) : Decl(InDecl), Tooltip(InTooltip) {}
+};
+
+/**
+ * The inputs an object's C++ gives one of its inline scripts, in place of an #inputs line (spec section 15): the
+ * script reads them without declaring them, and can't have an #inputs line. Its owner passes their values in this order.
+ */
+struct FBangoInputsSignature
+{
+	/** Whose they are, for messages: "BangoTrigger's 'Activation'" ("'Activation'" for a global one). */
+	FString Label;
+	/** In order. None has a default. */
+	TArray<FBangoScriptParamInfo> Params;
+	/** One per input, maybe empty: what it is, for the editor. */
+	TArray<FString> Tooltips;
+
+	/** "entity _trigger, int _count": as an #inputs line would list them. */
+	BANGOSCRIPTS_API FString ToInputsText() const;
+	/** "_trigger, _count" */
+	BANGOSCRIPTS_API FString GetNames() const;
+};
+
 struct FBangoGlobalDecl
 {
 	FString Name;

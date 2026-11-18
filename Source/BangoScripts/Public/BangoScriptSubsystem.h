@@ -228,6 +228,12 @@ private:
 		/** True for a script spawned from text (SpawnFromSource): Source is its text, and it has no file. */
 		bool bFromSource = false;
 		FString Source;
+		/**
+		 * An inline script's inputs signature (FBangoInlineScript::UseInputsSignature), saved with it so it compiles the
+		 * same when it's restored: its class's path (empty for a global one) and its name (empty for none).
+		 */
+		FString SignatureClass;
+		FString SignatureName;
 		FBangoInstance Instance;
 		/** The newest version it's been asked to switch to (hot reload), so each version is asked for once. */
 		TSharedPtr<const FBangoProgram> ReloadTarget;
@@ -267,6 +273,8 @@ private:
 	void RunLevelStartScript(UWorld& InWorld);
 	/** Compiles a script's text (SpawnFromSource, and loading one that was saved). */
 	static bool CompileFromSource(const FString& Source, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError);
+	/** A restored inline script's program: compiled with its saved inputs signature, if it had one. */
+	static bool CompileSavedSource(const FRunningScript& Script, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError);
 	/** Resumes one script. Returns false once it has ended (for any reason). */
 	bool ResumeScript(FRunningScript& Script, float DeltaSeconds);
 	void ReportFailure(const FRunningScript& Script);

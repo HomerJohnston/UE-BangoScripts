@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 
 struct FBangoProgram;
+struct FBangoInlineScript;
+struct FBangoInputsSignature;
 
 /**
  * A condition registered with Bango::RegisterCondition: a script, or one expression, that answers true or false,
@@ -21,15 +23,16 @@ struct BANGOSCRIPTS_API FBangoConditionHandle
 namespace Bango
 {
 	/**
-	 * Compiles a condition (see Bango::CompileCondition for what Source can be) and keeps it until UnregisterCondition,
-	 * so checking it costs only running it. Name is what its errors show in place of a file name. There's no limit on how
-	 * many are registered. Registering the same Name and Source again gives the same handle, and the condition is kept
-	 * until each registration has been unregistered.
+	 * Compiles an inline script as a condition (see Bango::CompileCondition for what its text can be), with its inputs
+	 * signature if it has one, and keeps it until UnregisterCondition, so checking it costs only running it. Name is
+	 * what its errors show in place of a file name. There's no limit on how many are registered. Registering the same
+	 * Name, text and signature again gives the same handle, and the condition is kept until each registration has been
+	 * unregistered.
 	 *
-	 * Returns an invalid handle, with the compile error in OutError, if it doesn't compile. Commands it calls must be
-	 * registered first (built-in commands always are).
+	 * Returns an invalid handle, with the error in OutError, if it doesn't compile or its signature isn't registered.
+	 * Commands it calls must be registered first (built-in commands always are).
 	 */
-	BANGOSCRIPTS_API FBangoConditionHandle RegisterCondition(const FString& Source, const FString& Name, FString& OutError);
+	BANGOSCRIPTS_API FBangoConditionHandle RegisterCondition(const FBangoInlineScript& Script, const FString& Name, FString& OutError);
 
 	/** Releases one registration of a condition, and makes Handle invalid. Does nothing for an invalid or unknown handle. */
 	BANGOSCRIPTS_API void UnregisterCondition(FBangoConditionHandle& Handle);
@@ -41,5 +44,6 @@ namespace Bango
 	BANGOSCRIPTS_API int32 GetNumRegisteredConditions();
 
 	/** Compiles a condition without registering it, with the module's commands. Used by RegisterCondition. */
-	BANGOSCRIPTS_API bool CompileConditionProgram(const FString& Source, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError);
+	BANGOSCRIPTS_API bool CompileConditionProgram(const FString& Source, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError,
+		const FBangoInputsSignature* Signature = nullptr);
 }

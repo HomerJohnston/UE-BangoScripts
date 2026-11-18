@@ -266,6 +266,27 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 						.Padding(0.0f, 0.0f, 0.0f, 2.0f)
 						[
 							MakeFoldout(LOCTEXT("InputsHeading", "SCRIPT INPUTS"), &bInputsExpanded,
+								SNew(SVerticalBox)
+								// An inline script's given inputs (its inputs signature's), read-only.
+								+ SVerticalBox::Slot()
+								.AutoHeight()
+								[
+									SNew(SBox)
+									.HeightOverride_Lambda([this]() { return VariableListHeight(GivenInputItems.Num()); })
+									.Visibility_Lambda([this]() { return GivenInputItems.Num() > 0 ? EVisibility::Visible : EVisibility::Collapsed; })
+									[
+										SAssignNew(GivenInputList, SListView<TSharedPtr<FInputEntry>>)
+										.ListItemsSource(&GivenInputItems)
+										.SelectionMode(ESelectionMode::None)
+										.ScrollbarVisibility(EVisibility::Collapsed)
+										.ConsumeMouseWheel(EConsumeMouseWheel::Never)
+										.AllowOverscroll(EAllowOverscroll::No)
+										.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateGivenInputRow)
+									]
+								]
+								+ SVerticalBox::Slot()
+								.AutoHeight()
+								[
 								SNew(SBox)
 								.HeightOverride_Lambda([this]() { return VariableListHeight(InputItems.Num()); })
 								[
@@ -283,17 +304,24 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 											Name->EnterEditingMode(); // double-click renames
 										}
 									})
+								]
 								],
 								SNew(SButton)
 								.ButtonStyle(FAppStyle::Get(), "SimpleButton")
 								.ContentPadding(FMargin(4.0f, 0.0f))
 								.ToolTipText_Lambda([this]()
 								{
+									FString SignatureError;
+									const TSharedPtr<const FBangoInputsSignature> Signature = ShownGraph == 0 ? GetInputsSignature(SignatureError) : nullptr;
+									if (Signature.IsValid())
+									{
+										return FText::Format(LOCTEXT("AddGivenInputTooltip", "This script's inputs are given by {0}, so it can't have others."), FText::FromString(Signature->Label));
+									}
 									return ShownGraph > 0
 										? LOCTEXT("AddFunctionInputTooltip", "Add a parameter to this function. Calls to it need a value for it.")
 										: LOCTEXT("AddScriptInputTooltip", "Add a parameter to this script (#inputs): a value it's spawned with.");
 								})
-								.IsEnabled_Lambda([this]() { return GetShownEntryNode() != nullptr; })
+								.IsEnabled_Lambda([this]() { return GetShownEntryNode() != nullptr && (ShownGraph > 0 || GivenInputItems.Num() == 0); })
 								.OnClicked(this, &SBangoScriptEditor::OnAddInputClicked)
 								[
 									SNew(STextBlock).Text(LOCTEXT("AddInput", "+ Add"))
@@ -1225,7 +1253,10 @@ UBangoEdGraphNode* SBangoScriptEditor::GetShownEntryNode() const
 void SBangoScriptEditor::UpdateInputs()
 {
 	const UBangoEdGraphNode* Entry = GetShownEntryNode();
-	const FString Text = Entry ? Entry->Text : FString();
+	// The given inputs are part of what's shown: another inline script can have the same text with other ones.
+	FString SignatureError;
+	const TSharedPtr<const FBangoInputsSignature> Signature = ShownGraph == 0 ? GetInputsSignature(SignatureError) : nullptr;
+	const FString Text = (Entry ? Entry->Text : FString()) + TEXT("\n") + (Signature.IsValid() ? Signature->Label + TEXT(": ") + Signature->ToInputsText() : FString());
 	if (InputsGraph == ShownGraph && InputsText == Text && (Entry != nullptr || InputItems.Num() == 0))
 	{
 		return;
@@ -1233,10 +1264,30 @@ void SBangoScriptEditor::UpdateInputs()
 	InputsGraph = ShownGraph;
 	InputsText = Text;
 
+	GivenInputItems.Reset();
+	GivenTooltips.Reset();
+	if (Signature.IsValid())
+	{
+		for (int32 i = 0; i < Signature->Params.Num(); ++i)
+		{
+			TSharedPtr<FInputEntry> Item = MakeShared<FInputEntry>();
+			Item->Index = i;
+			Item->Param.Type = Signature->Params[i].Type.ToString();
+			Item->Param.Name = Signature->Params[i].Name;
+			GivenInputItems.Add(Item);
+			const FString Tooltip = Signature->Tooltips.IsValidIndex(i) ? Signature->Tooltips[i] : FString();
+			GivenTooltips.Add(Tooltip.IsEmpty() ? FString::Printf(TEXT("Given by %s."), *Signature->Label) : FString::Printf(TEXT("%s\n\nGiven by %s."), *Tooltip, *Signature->Label));
+		}
+	}
+	if (GivenInputList.IsValid())
+	{
+		GivenInputList->RequestListRefresh();
+	}
+
 	TArray<FBangoEntryParam> Params;
 	if (Entry)
 	{
-		Bango::ReadEntryParams(Text, ShownGraph > 0, Params);
+		Bango::ReadEntryParams(Entry->Text, ShownGraph > 0, Params);
 	}
 	InputItems.Reset();
 	for (int32 i = 0; i < Params.Num(); ++i)
@@ -1266,6 +1317,59 @@ void SBangoScriptEditor::UpdateInputs()
 		}));
 	}
 	PendingInputRename = INDEX_NONE;
+}
+
+TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateGivenInputRow(TSharedPtr<FInputEntry> Item, const TSharedRef<STableViewBase>& Owner)
+{
+	using namespace BangoScriptEditorPrivate;
+	const FBangoEntryParam Param = Item.IsValid() ? Item->Param : FBangoEntryParam();
+	const FText Tooltip = FText::FromString(Item.IsValid() && GivenTooltips.IsValidIndex(Item->Index) ? GivenTooltips[Item->Index] : FString());
+	FLinearColor Tint = FLinearColor::White;
+	const FSlateBrush* Icon = GetTypeIcon(Param.Type, Tint);
+	return SNew(STableRow<TSharedPtr<FInputEntry>>, Owner)
+		.Padding(FMargin(2.0f, 2.0f, 6.0f, 2.0f))
+		.ToolTipText(Tooltip)
+		// Dragged onto the graph like a variable from VARIABLES.
+		.OnDragDetected_Lambda([this, Param](const FGeometry&, const FPointerEvent& MouseEvent)
+		{
+			if (!MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+			{
+				return FReply::Unhandled();
+			}
+			return FReply::Handled().BeginDragDrop(FBangoVariableDragDrop::New(AsShared(), Param.Name, Param.Type, GetShownGraphNames()));
+		})
+		[
+			SNew(SBox)
+			.HeightOverride(VariableRowContentHeight)
+			.VAlign(VAlign_Center)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(4.0f, 0.0f, 6.0f, 0.0f)
+				[
+					SNew(SImage)
+					.Image(Icon)
+					.ColorAndOpacity(Tint)
+				]
+				+ SHorizontalBox::Slot()
+				.FillWidth(1.0f)
+				.VAlign(VAlign_Center)
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(Param.Name))
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(Param.Type))
+					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				]
+			]
+		];
 }
 
 TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateInputRow(TSharedPtr<FInputEntry> Item, const TSharedRef<STableViewBase>& Owner)
@@ -2479,6 +2583,11 @@ void SBangoScriptEditor::OpenInlineScript(const TSharedPtr<FBangoInlineScriptTar
 {
 	OpenAsset.Reset();
 	InlineTarget = Target;
+	if (TextBox.IsValid())
+	{
+		FString SignatureError;
+		TextBox->SetInputsSignature(GetInputsSignature(SignatureError));
+	}
 	if (Target.IsValid())
 	{
 		LoadScript(Target->GetScriptName());
@@ -2493,6 +2602,10 @@ void SBangoScriptEditor::OpenScriptAsset(UBangoScriptAsset* Asset)
 {
 	InlineTarget.Reset();
 	OpenAsset = Asset;
+	if (TextBox.IsValid())
+	{
+		TextBox->SetInputsSignature(nullptr);
+	}
 	if (Asset)
 	{
 		LoadScript(Asset->GetScriptName());
@@ -2592,7 +2705,9 @@ void SBangoScriptEditor::LoadScript(const FString& Script)
 
 void SBangoScriptEditor::ShowDocument(const FBangoGraphDocument& Document)
 {
-	LayoutContext = MakeShared<FBangoNodeLayoutContext>(Bango::MakeNodeLayoutContext(Document, &FBangoModule::Get().GetCommands()));
+	FBangoGraphDocument WithGivenInputs = Document;
+	AddGivenInputs(WithGivenInputs);
+	LayoutContext = MakeShared<FBangoNodeLayoutContext>(Bango::MakeNodeLayoutContext(WithGivenInputs, &FBangoModule::Get().GetCommands()));
 	EdGraphs.Add(TStrongObjectPtr<UEdGraph>(BangoScriptEditor::CreateEdGraph(Document.Main, LayoutContext)));
 	BangoScriptEditor::SetLocNamespace(EdGraphs[0].Get(), Document.bHasLocNamespace, Document.LocNamespace);
 	BangoScriptEditor::SetUsesGraphEditor(EdGraphs[0].Get(), Document.bUsesGraphEditor);
@@ -4023,6 +4138,7 @@ bool SBangoScriptEditor::BuildCurrentDocument(FBangoGraphDocument& OutDocument, 
 	{
 		return false;
 	}
+	AddGivenInputs(OutDocument); // not written: for layouts and variable lists
 	// A placeholder left without a value (WriteLog's {2} shown as "missing") is saved as nil.
 	if (LayoutContext.IsValid())
 	{
@@ -5022,11 +5138,45 @@ bool SBangoScriptEditor::IsCondition() const
 	return InlineTarget.IsValid() && InlineTarget->IsCondition();
 }
 
+TSharedPtr<const FBangoInputsSignature> SBangoScriptEditor::GetInputsSignature(FString& OutError) const
+{
+	return InlineTarget.IsValid() ? InlineTarget->GetInputsSignature(OutError) : nullptr;
+}
+
+void SBangoScriptEditor::AddGivenInputs(FBangoGraphDocument& Document) const
+{
+	Document.GivenInputs.Reset();
+	FString Error;
+	const TSharedPtr<const FBangoInputsSignature> Signature = GetInputsSignature(Error);
+	if (!Signature.IsValid())
+	{
+		return;
+	}
+	for (int32 i = 0; i < Signature->Params.Num(); ++i)
+	{
+		FBangoGraphDecl Input;
+		Input.Type = Signature->Params[i].Type.ToString();
+		Input.Name = Signature->Params[i].Name;
+		const FString Tooltip = Signature->Tooltips.IsValidIndex(i) ? Signature->Tooltips[i] : FString();
+		Input.Comment = Tooltip.IsEmpty() ? FString::Printf(TEXT("Given by %s."), *Signature->Label) : FString::Printf(TEXT("%s (Given by %s.)"), *Tooltip, *Signature->Label);
+		Document.GivenInputs.Add(MoveTemp(Input));
+	}
+}
+
 bool SBangoScriptEditor::CompileOpenScriptText(const FString& Text, const FString& FileName, FBangoProgram& OutProgram, FBangoCompileError& OutError) const
 {
+	FString SignatureError;
+	const TSharedPtr<const FBangoInputsSignature> Signature = GetInputsSignature(SignatureError);
+	if (!SignatureError.IsEmpty())
+	{
+		OutError = FBangoCompileError();
+		OutError.FileName = FileName;
+		OutError.Message = SignatureError;
+		return false;
+	}
 	return IsCondition()
-		? Bango::CompileCondition(Text, FileName, FBangoModule::Get().GetCommands(), OutProgram, OutError)
-		: Bango::CompileSource(Text, FileName, FBangoModule::Get().GetCommands(), OutProgram, OutError);
+		? Bango::CompileCondition(Text, FileName, FBangoModule::Get().GetCommands(), OutProgram, OutError, Signature.Get())
+		: Bango::CompileSource(Text, FileName, FBangoModule::Get().GetCommands(), OutProgram, OutError, Signature.Get());
 }
 
 void SBangoScriptEditor::ShowConditionExpressionMessage()

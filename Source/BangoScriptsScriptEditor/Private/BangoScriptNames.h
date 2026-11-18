@@ -31,13 +31,30 @@ struct FBangoVisibleName
 
 	/** Parameter, Local, Global or Function. */
 	EBangoSyntaxKind Kind = EBangoSyntaxKind::Local;
+
+	/** For an input given by an inputs signature: what it is (may be empty). */
+	FString Tooltip;
 };
+
+struct FBangoInputsSignature;
+
+namespace BangoTextEditor
+{
+	/** An inputs signature's inputs, for FBangoScriptNames::SetGivenInputs. */
+	TArray<FBangoVisibleName> GivenInputs(const FBangoInputsSignature& Signature);
+}
 
 class FBangoScriptNames
 {
 public:
 	/** Reads the declarations of a whole file: its lines, and each line's tokens from FBangoLineTokenizer. */
 	void Build(const TArray<FString>& Lines, const TArray<TArray<FBangoSyntaxToken>>& LineTokens);
+
+	/**
+	 * An inline script's inputs given by its inputs signature (FBangoInlineScript::UseInputsSignature): the main
+	 * graph's parameters, as if an #inputs line listed them. Each one's Name, Type and Tooltip. Used by the next Build.
+	 */
+	void SetGivenInputs(const TArray<FBangoVisibleName>& Inputs) { GivenInputs = Inputs; }
 
 	/**
 	 * What a name on a line is: Parameter, Local (a local, script variable or loop variable visible on that line),
@@ -81,6 +98,8 @@ private:
 	{
 		TArray<FString> Params;
 		TArray<FString> ParamTypes;
+		/** By index, for the given inputs (SetGivenInputs), which come first. */
+		TArray<FString> ParamTooltips;
 		FString FunctionName;
 		FString ReturnType;
 		int32 EntryLine = INDEX_NONE;
@@ -113,6 +132,8 @@ private:
 	const FLocalName* FindVisibleLocal(int32 LineIndex, const FString& Name) const;
 
 	TArray<FLocalName> Locals;
+
+	TArray<FBangoVisibleName> GivenInputs;
 
 	/** The graph each line belongs to. */
 	TArray<int32> LineGraph;

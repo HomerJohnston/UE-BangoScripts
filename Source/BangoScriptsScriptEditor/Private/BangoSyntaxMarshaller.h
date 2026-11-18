@@ -66,6 +66,13 @@ public:
 	/** The text's locals, parameters, globals and graphs, as of the last layout. */
 	const FBangoScriptNames& GetScriptNames() const { return ScriptNames; }
 
+	/** An inline script's inputs given by its inputs signature: coloured and offered as the main graph's parameters. */
+	void SetGivenInputs(const TArray<FBangoVisibleName>& Inputs)
+	{
+		ScriptNames.SetGivenInputs(Inputs);
+		MakeDirty();
+	}
+
 	// ITextLayoutMarshaller
 	virtual void SetText(const FString& SourceString, FTextLayout& TargetTextLayout) override;
 	virtual void GetText(FString& TargetString, const FTextLayout& SourceTextLayout) override;

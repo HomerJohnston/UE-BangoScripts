@@ -7,6 +7,9 @@
 #include "BangoBlueprintLibrary.h"
 #include "BangoBuiltinCommands.h"
 #include "BangoCompiler.h"
+#include "BangoConditions.h"
+#include "BangoInlineScript.h"
+#include "BangoInputsSignature.h"
 #include "BangoInstance.h"
 #include "BangoLocalization.h"
 #include "BangoScriptAsset.h"
@@ -331,15 +334,76 @@ bool FBangoModuleTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("missing script error"), Error.Contains(TEXT("not found"), ESearchCase::CaseSensitive));
 
 	// Inline scripts: compiled once per text (and name), with their parameters; an error isn't kept.
-	const FString Inline = TEXT("#inputs (int _count, string _name = \"you\")\nSleep(1); WriteScreen(_name);");
+	FBangoInlineScript Inline;
+	Inline.Source = TEXT("#inputs (int _count, string _name = \"you\")\nSleep(1); WriteScreen(_name);");
 	TSharedPtr<const FBangoProgram> InlineProgram;
 	TSharedPtr<const FBangoProgram> InlineAgain;
 	TestTrue(TEXT("inline script compiles"), Module.GetInlineProgram(Inline, TEXT("Test (inline script)"), InlineProgram, Error));
 	TestTrue(TEXT("inline script: the same text comes from the cache"), Module.GetInlineProgram(Inline, TEXT("Test (inline script)"), InlineAgain, Error) && InlineAgain == InlineProgram);
 	TestTrue(TEXT("inline script: its parameters"), InlineProgram.IsValid() && InlineProgram->Params.Num() == 2);
-	TestFalse(TEXT("inline script that doesn't compile"), Module.GetInlineProgram(TEXT("Sleep("), TEXT("Test (inline script)"), InlineProgram, Error));
+	FBangoInlineScript Broken;
+	Broken.Source = TEXT("Sleep(");
+	TestFalse(TEXT("inline script that doesn't compile"), Module.GetInlineProgram(Broken, TEXT("Test (inline script)"), InlineProgram, Error));
 	TestTrue(TEXT("inline script error names it"), Error.Contains(TEXT("Test (inline script)"), ESearchCase::CaseSensitive));
 	TestEqual(TEXT("inline script name"), UBangoScriptSubsystem::GetInlineScriptName(nullptr), FString(TEXT("Inline script")));
+
+	// Inputs signatures: an inline script's inputs given by its owner's C++ (BangoInputsSignature.h).
+	Bango::RegisterInputsSignature(nullptr, TEXT("BangoTests.Hit"), { { TEXT("entity _who"), TEXT("Who was hit.") }, { TEXT("int _damage") } });
+	const TSharedPtr<const FBangoInputsSignature> Hit = Bango::FindInputsSignature(nullptr, TEXT("BangoTests.Hit"));
+	TestTrue(TEXT("signature: a global one is registered"), Hit.IsValid() && Hit->Params.Num() == 2 && Hit->Tooltips[0] == TEXT("Who was hit.")
+		&& Hit->Label == TEXT("the global 'BangoTests.Hit'"));
+	FBangoInlineScript Signed;
+	Signed.Source = TEXT("Sleep(_damage);\nWriteScreen(\"hit\");");
+	Signed.UseInputsSignature(nullptr, TEXT("BangoTests.Hit"));
+	TSharedPtr<const FBangoProgram> SignedProgram;
+	TestTrue(TEXT("signature: the script compiles with its inputs"), Module.GetInlineProgram(Signed, TEXT("Test (inline script)"), SignedProgram, Error)
+		&& SignedProgram.IsValid() && SignedProgram->Params.Num() == 2 && SignedProgram->Params[1].Name == TEXT("_damage"));
+	const FBangoInlineScript SignedCopy = Signed;
+	TSharedPtr<const FBangoProgram> CopyProgram;
+	TestTrue(TEXT("signature: a copy keeps it"), SignedCopy.HasInputsSignature() && Module.GetInlineProgram(SignedCopy, TEXT("Test (inline script)"), CopyProgram, Error) && CopyProgram == SignedProgram);
+	FBangoInlineScript Unsigned;
+	Unsigned.Source = Signed.Source;
+	TSharedPtr<const FBangoProgram> UnsignedProgram;
+	TestTrue(TEXT("signature: the same text without it is another program"), Module.GetInlineProgram(Unsigned, TEXT("Test (inline script)"), UnsignedProgram, Error)
+		&& UnsignedProgram != SignedProgram && UnsignedProgram->Params.Num() == 0);
+	FBangoInlineScript WithInputs = Signed;
+	WithInputs.Source = TEXT("#inputs (int _n = 1)\nSleep(_n);");
+	TestFalse(TEXT("signature: no #inputs line"), Module.GetInlineProgram(WithInputs, TEXT("Test (inline script)"), InlineProgram, Error));
+	TestTrue(TEXT("signature: no #inputs line: the error"), Error.Contains(TEXT("This script's inputs are given by the global 'BangoTests.Hit': _who, _damage"), ESearchCase::CaseSensitive));
+	FBangoInlineScript Unregistered;
+	Unregistered.Source = TEXT("Sleep(1);");
+	Unregistered.UseInputsSignature(nullptr, TEXT("BangoTests.Nope"));
+	TestFalse(TEXT("signature: one that isn't registered"), Module.GetInlineProgram(Unregistered, TEXT("Test (inline script)"), InlineProgram, Error));
+	TestTrue(TEXT("signature: one that isn't registered: the error"), Error.Contains(TEXT("none is registered by that name"), ESearchCase::CaseSensitive));
+
+	FBangoInlineScript Condition = Signed;
+	Condition.Source = TEXT("_damage > 3 && IsNil(_who)");
+	FString ConditionError;
+	FBangoConditionHandle ConditionHandle = Bango::RegisterCondition(Condition, TEXT("Test condition"), ConditionError);
+	const TSharedPtr<const FBangoProgram> ConditionProgram = Bango::FindCondition(ConditionHandle);
+	TestTrue(TEXT("signature: a condition with one"), ConditionProgram.IsValid() && ConditionProgram->Params.Num() == 2);
+	if (!ConditionProgram.IsValid())
+	{
+		AddError(ConditionError);
+	}
+	Bango::UnregisterCondition(ConditionHandle);
+
+	// Per class, from a template only; a name without '_' is reported, but works; registering again replaces it.
+	AddExpectedError(TEXT("isn't a template, so it was ignored"), EAutomationExpectedErrorFlags::Contains, 1);
+	Bango::RegisterInputsSignature(Asset, TEXT("BangoTests.Asset"), { { TEXT("int _a") } });
+	TestFalse(TEXT("signature: not from an instance"), Bango::FindInputsSignature(Asset->GetClass(), TEXT("BangoTests.Asset")).IsValid());
+	AddExpectedError(TEXT("should begin with an underscore: 'count'"), EAutomationExpectedErrorFlags::Contains, 1);
+	Bango::RegisterInputsSignature(GetDefault<UBangoScriptAsset>(), TEXT("BangoTests.Asset"), { { TEXT("int count") } });
+	const TSharedPtr<const FBangoInputsSignature> ForClass = Bango::FindInputsSignature(UBangoScriptAsset::StaticClass(), TEXT("BangoTests.Asset"));
+	TestTrue(TEXT("signature: for a class"), ForClass.IsValid() && ForClass->Label == TEXT("BangoScriptAsset's 'BangoTests.Asset'") && ForClass->Params[0].Name == TEXT("count"));
+	TestFalse(TEXT("signature: not global"), Bango::FindInputsSignature(nullptr, TEXT("BangoTests.Asset")).IsValid());
+	Bango::RegisterInputsSignature(GetDefault<UBangoScriptAsset>(), TEXT("BangoTests.Asset"), { { TEXT("int _a") }, { TEXT("int _b") } });
+	const TSharedPtr<const FBangoInputsSignature> Replaced = Bango::FindInputsSignature(UBangoScriptAsset::StaticClass(), TEXT("BangoTests.Asset"));
+	TestTrue(TEXT("signature: registering again replaces it"), Replaced.IsValid() && Replaced->Params.Num() == 2);
+	FBangoInlineScript OfClass;
+	OfClass.Source = TEXT("Sleep(_a + _b);");
+	OfClass.UseInputsSignature(Asset, TEXT("BangoTests.Asset"));
+	TestTrue(TEXT("signature: an instance uses its class's"), Module.GetInlineProgram(OfClass, TEXT("Test (inline script)"), InlineProgram, Error) && InlineProgram->Params.Num() == 2);
 	return true;
 }
 

@@ -1,6 +1,7 @@
 #include "BangoInlineScriptCustomization.h"
 
 #include "BangoInlineScript.h"
+#include "BangoProgram.h"
 #include "BangoScriptReferences.h"
 #include "BangoGraph.h"
 #include "BangoParser.h"
@@ -133,6 +134,10 @@ public:
 
 		ReadValue(Shown, bMultipleValues);
 
+		// Inputs its owner's C++ gives it (FBangoInlineScript::UseInputsSignature): compiled and offered as its parameters.
+		FString SignatureError;
+		const TSharedPtr<const FBangoInputsSignature> Signature = FBangoInlineScriptTarget::GetInputsSignature(InStructHandle, SignatureError);
+
 		ChildSlot
 		[
 			SNew(SVerticalBox)
@@ -159,6 +164,7 @@ public:
 								.CompileAsYouType(true)
 								// A condition (`meta = (BangoCondition)`): compiled as one, so `_count > 3` is fine.
 								.Condition(InStructHandle->HasMetaData(TEXT("BangoCondition")))
+								.InputsSignature(Signature)
 								// self: the actor whose details show this script (lines to what it refers to, in the viewports)
 								.SelfActor_Lambda([this]() { return BangoScriptReferences::GetSelfActor(SelfOwner.Get()); })
 								.IsReadOnly_Lambda([this]() { return IsLocked(); })
@@ -257,6 +263,13 @@ public:
 			]
 		];
 
+		if (!SignatureError.IsEmpty())
+		{
+			// Its signature isn't registered: said here, since compiling without it can't say why its inputs are unknown.
+			FBangoCompileError Error;
+			Error.Message = SignatureError;
+			TextBox->ShowError(Error, false);
+		}
 	}
 
 	/** Keeps the box up to date with the property (undo, the window's Save, paste), except while it's being typed in. */

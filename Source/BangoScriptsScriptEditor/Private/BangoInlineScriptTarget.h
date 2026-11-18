@@ -7,6 +7,7 @@ class IPropertyHandle;
 class SWindow;
 class FProperty;
 struct FBangoInlineScript;
+struct FBangoInputsSignature;
 
 /**
  * One FBangoInlineScript property of one object (spec section 15), for the graph editor to read and write: the
@@ -40,6 +41,18 @@ public:
 	 * compiles it as one (Bango::CompileCondition), so it may be a single expression, like `_count > 3`.
 	 */
 	bool IsCondition() const { return bCondition; }
+
+	/**
+	 * The script's inputs signature (FBangoInlineScript::UseInputsSignature), or null if it has none, or, with
+	 * OutError, if it isn't registered.
+	 */
+	TSharedPtr<const FBangoInputsSignature> GetInputsSignature(FString& OutError) const;
+
+	/**
+	 * The same for what a details panel row shows: null, with no error, if the objects it shows have different
+	 * signatures (several selected).
+	 */
+	static TSharedPtr<const FBangoInputsSignature> GetInputsSignature(const TSharedRef<IPropertyHandle>& StructHandle, FString& OutError);
 
 	/**
 	 * Finds the FBangoInlineScript at Path in Owner: property names separated by '.', an array's element as

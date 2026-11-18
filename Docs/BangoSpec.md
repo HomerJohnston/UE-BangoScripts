@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.64)
+# Bango Language Spec (draft v0.65)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.65:** **inputs signatures**: a C++ class can give its inline scripts their inputs, so a designer doesn't write an `#inputs` line. The class registers a named list of inputs in its constructor, for its templates (`Bango::RegisterInputsSignature(this, "Activation", { { "entity _trigger", "The trigger itself." }, ... })`), and points a property at it (`ActivatedScript.UseInputsSignature(this, "Activation")`). The script reads `_trigger` and the others as parameters, can't have an `#inputs` line, and its owner passes their values in order. Input names should start with `_` (one that doesn't is reported, but works). The editor knows them: autocomplete (with their descriptions), colouring, errors as you type, the SCRIPT INPUTS list and the Script Start node (section 15, Inputs signatures). `Bango::RegisterCondition` and `FBangoModule::GetInlineProgram` take the `FBangoInlineScript` instead of its text. The keyword list no longer has `inputs` (it stopped being one in v0.64).
 
 **Changes in v0.64:** **the settings lines lose `#set`**: they're **`#inputs (...)`**, **`#LOCTEXT_NAMESPACE "Name"`** and **`#USES_GRAPH_EDITOR`**. `#set` is now an unknown `#` line, with no message of its own, and `inputs` is no longer a keyword, so it can be a name (section 1).
 
@@ -378,7 +380,7 @@ WriteScreen(ToString(NSLOCTEXT("Shared.UI", "Continue", "Continue")));
 - **Names are case-sensitive**: `john` and `John` are different names. This covers variables, globals, functions, labels, commands, keywords, type names and Bango ID names (`@john` and `@John` are different actors).
 - Calling a command or function with the wrong capitalisation is a compile error that suggests the right name: *"Unknown command or function 'writeScreen'. Did you mean 'WriteScreen'? Names are case-sensitive."*
 - A name is letters, digits and `_`, and doesn't start with a digit.
-- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn switch case default break continue return label goto function global scriptVar inputs player self true false nil bool int float string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
+- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn switch case default break continue return label goto function global scriptVar player self true false nil bool int float string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
 
 ### Locals and script variables
 A graph (the main script, or a function) has two kinds of variables of its own, besides its parameters and loop variables. Both only exist inside the running script instance.
@@ -969,7 +971,7 @@ These checks happen when the script is spawned. If any fails, the script doesn't
   UBangoScriptSubsystem::Get(this)->SpawnFromSource(Source, TEXT("Greeting"), Args);
   ```
   A script spawned from text keeps its text: saving the state saves it, and loading compiles it again (section 11). It isn't hot reloaded, since there's no file to watch, and no script editor tab follows it.
-- `UBangoScriptSubsystem::Spawn(InlineScript, Args, Owner)` starts an **inline script** (an `FBangoInlineScript` property, section 15), like `SpawnFromSource`, except that its compiled program is kept (`FBangoModule::GetInlineProgram`), so the same text is compiled once. `Owner` (usually `this`) names it in errors: `Door_1 (inline script)(1:7): ...`, and is what `self` means in it. An empty inline script does nothing and gives an invalid handle, without an error. `Spawn(InlineScript, Args, Owner, Error)` puts an error starting it in `Error` instead of showing it.
+- `UBangoScriptSubsystem::Spawn(InlineScript, Args, Owner)` starts an **inline script** (an `FBangoInlineScript` property, section 15), like `SpawnFromSource`, except that its compiled program is kept (`FBangoModule::GetInlineProgram(Script, Name, Program, Error)`), so the same text (with the same inputs signature) is compiled once. `Owner` (usually `this`) names it in errors: `Door_1 (inline script)(1:7): ...`, and is what `self` means in it. An empty inline script does nothing and gives an invalid handle, without an error. `Spawn(InlineScript, Args, Owner, Error)` puts an error starting it in `Error` instead of showing it.
   ```cpp
   TArray<FBangoValue> Args;
   Args.Add(FBangoValue::MakeString(EnemyType));
@@ -977,7 +979,7 @@ These checks happen when the script is spawned. If any fails, the script doesn't
   UBangoScriptSubsystem::Get(this)->Spawn(OnTriggerActivation, Args, this);   // #inputs (string _type, vector3 _at)
   ```
   The editor's debugger finds running copies of the inline script open in a window by its text (as last saved there).
-- `Bango::RegisterCondition(Source, Name, Error)` and `Bango::UnregisterCondition(Handle)` compile a **condition** once and keep it, and `UBangoScriptSubsystem::EvaluateCondition(Handle, Error, Args)` runs it and gives its answer (True, False, Unset or Error) (see Conditions below).
+- `Bango::RegisterCondition(InlineScript, Name, Error)` and `Bango::UnregisterCondition(Handle)` compile a **condition** (an inline script, with its inputs signature if it has one) once and keep it, and `UBangoScriptSubsystem::EvaluateCondition(Handle, Error, Args)` runs it and gives its answer (True, False, Unset or Error) (see Conditions below).
 - `Bango::ActorToEntity(Actor, Value, Error)` turns an actor into an entity argument: its Bango ID name, or `nil` for a null pointer. An actor with no Bango ID component, or whose Bango ID name isn't registered, is an error.
 - `FBangoModule::Get().GetScriptParams(ScriptPath, Params, Error)` reads a script's parameters (names, types, whether each has a default, and the default value) without running it.
 
@@ -1006,7 +1008,7 @@ A condition is **registered** once, which compiles it, then checked as often as 
 ```cpp
 // When the trigger is set up (BangoConditions.h):
 FString Error;
-FBangoConditionHandle Condition = Bango::RegisterCondition(TEXT("foundThings >= 10"), TEXT("Trigger.Gate"), Error);
+FBangoConditionHandle Condition = Bango::RegisterCondition(GateCondition, TEXT("Trigger.Gate"), Error); // an FBangoInlineScript: "foundThings >= 10"
 if (!Condition.IsValid())
 {
 	Bango::ReportError(Error); // it doesn't compile
@@ -1499,6 +1501,29 @@ An **`FBangoInlineScript`** (a struct, usable in C++ and Blueprint) holds a scri
 - Saving from the graph editor writes the script in the saved layout, as for any script: compact unless it has `#USES_GRAPH_EDITOR`, in full (with section headings and node metadata) if it does (section 12). Inline scripts have no `.bango` file to link.
 - **A script with node metadata isn't typed in its box**: it's laid out for the graph, so it's edited in the window. The box shows it without its metadata, read-only, with a note centred at its bottom (clear of its scrollbars): **Has graph layout**, whose tooltip says to click Edit for the full editor, or right-click > Make Editable Inline to remove the layout. Clicking the box makes the note flash yellow twice, so it's seen (selecting and copying text still work). **Make Editable Inline**, on the box's right-click menu, asks first (*"This action will remove all node metadata. The graph representation of this script will lose all layout information. Proceed?"*, Yes / Cancel), then writes the script compact (no metadata, no section headings, no `#USES_GRAPH_EDITOR` line), as one undoable change, and the box can be typed in. A script that doesn't read only has those taken off, line by line. It's also offered for a script with only the `#USES_GRAPH_EDITOR` line.
 - **Spawning** one: from C++ with `UBangoScriptSubsystem::Spawn(Script, Args, Owner)`, or Blueprint's **Spawn Bango Inline Script**, whose arguments are built with Make Bango Args and the Add Bango Arg nodes (section 10). The values are matched to its `#inputs` line when it starts. Its compiled program is kept by its text, so spawning it again doesn't compile it again. A running copy is saved with its text, and isn't hot reloaded. While its window is open, the Debug dropdown lists the running copies of it (found by its text, as last saved there).
+- **Inputs signatures** (`BangoInputsSignature.h`): a C++ class can give its inline scripts their inputs itself, so the script uses them without an `#inputs` line. In the class's constructor it registers each list of inputs once, by name, for its templates only, and points each property at one:
+  ```cpp
+  ABangoTrigger::ABangoTrigger()
+  {
+  	if (IsTemplate())
+  	{
+  		Bango::RegisterInputsSignature(this, TEXT("Activation"), {
+  			{ TEXT("entity _trigger"),   TEXT("The trigger itself.") },
+  			{ TEXT("entity _activator"), TEXT("The first matching actor inside with a Bango ID, or nil.") },
+  			{ TEXT("entity[] _inside"),  TEXT("Every matching actor inside with a Bango ID.") },
+  			{ TEXT("int _count") },
+  		});
+  	}
+  	ActivatedScript.UseInputsSignature(this, TEXT("Activation"));
+  	Condition.UseInputsSignature(this, TEXT("Activation"));
+  }
+  ```
+  - Each input is written as in an `#inputs` line, without a default (its owner always passes it), with an optional description for the editor. **Names should start with `_`**: one that doesn't is reported as an error (*"Predefined script inputs should begin with an underscore: 'count'. Please rename it to '_count'."*), but still works. An input that doesn't read, has a default or repeats a name is an error, and the signature isn't registered.
+  - It's registered for the class of `this` (the most derived: a Blueprint subclass gets its own copy), or, with `nullptr` for `this`, as a **global** signature, used with `UseInputsSignature(nullptr, Name)` (usually registered at module startup). Registering a name again for the same class replaces it, so a subclass's constructor can replace its parent's; the same list again changes nothing. Calling it for an object that isn't a template (a class default object or an archetype) is refused with an error, since every instance would register it again. It's safe on any thread (class default objects can be made while a level loads).
+  - `UseInputsSignature` isn't saved: each object sets it in its constructor, and editing, pasting or undoing the script's text doesn't change it. So it's for C++ classes only: an inline script that's a Blueprint variable, or in a Blueprint struct, has none.
+  - The script's **parameters are the signature's inputs**, in order: it reads `_trigger` and the others as it would an `#inputs` line's, and its owner passes their values in that order (`Spawn(Script, Args, Owner)`, `EvaluateCondition(Handle, Error, Args)`). It **can't have an `#inputs` line** (*"This script's inputs are given by BangoTrigger's 'Activation': _trigger, _activator, _inside, _count. Remove the #inputs line; the script can use them as they are."*), and a local in its main graph can't have an input's name (a function's can: functions don't see them). A signature that isn't registered (a misspelt name) is an error when it's compiled, and the script doesn't run.
+  - A running copy is saved with its signature's class and name, so it's compiled the same when it's restored (section 11).
+  - **In the editor**: the details panel's box and the script editor window compile it with its inputs as you type, autocomplete offers them as parameters (with their descriptions), and they're coloured as parameters. The window's SCRIPT INPUTS list shows them read-only above the (empty) list of the script's own, each with its description and whose signature it is in its tooltip; they can be dragged onto the graph like the other variables, and **+ Add** is off. The Script Start node lists them first. A signature that isn't registered is shown as the script's error. With several objects selected whose scripts have different signatures, the box uses none.
 - *Still to come (stage 3):* gathering their `LOCTEXT`s for translation, through an editor-only list of `FText`s kept in the struct, which Gather from Packages finds like any text property.
 
 ### Level start scripts

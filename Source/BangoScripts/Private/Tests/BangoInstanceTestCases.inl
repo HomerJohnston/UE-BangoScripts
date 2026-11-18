@@ -1040,6 +1040,86 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			}
 		}
 
+		// Inputs signatures (an inline script's inputs given by its owner's C++, Bango::RegisterInputsSignature).
+		{
+			FBangoInputsSignature Signature;
+			FString SignatureError;
+			TArray<FString> Warnings;
+			const TArray<FBangoInputDecl> Inputs = { { TEXT("entity _trigger"), TEXT("The trigger.") }, { TEXT("int _count") }, { TEXT("entity[] _inside") } };
+			Expect(Bango::ParseInputsSignature(Inputs, Signature, SignatureError, Warnings) && Warnings.Num() == 0,
+				*(FString(TEXT("signature: reads: ")) + SignatureError));
+			Signature.Label = TEXT("BangoTrigger's 'Activation'");
+			Expect(Signature.Params.Num() == 3 && Signature.Params[2].Type == FBangoType::ArrayOf(EBangoBaseType::Entity) && !Signature.Params[0].bHasDefault
+				&& Signature.Tooltips.Num() == 3 && Signature.Tooltips[0] == TEXT("The trigger.") && Signature.Tooltips[1].IsEmpty(),
+				TEXT("signature: its inputs and tooltips"));
+			Expect(Signature.ToInputsText() == TEXT("entity _trigger, int _count, entity[] _inside") && Signature.GetNames() == TEXT("_trigger, _count, _inside"),
+				*(FString(TEXT("signature: as text: ")) + Signature.ToInputsText()));
+
+			struct FBadInputs { const TCHAR* Name; TArray<FBangoInputDecl> Inputs; const TCHAR* ErrorContains; };
+			const FBadInputs BadCases[] = {
+				{ TEXT("a default"), { { TEXT("int _n = 1") } }, TEXT("can't have a default") },
+				{ TEXT("two in one entry"), { { TEXT("int _a, int _b") } }, TEXT("one input per entry") },
+				{ TEXT("the same name twice"), { { TEXT("int _a") }, { TEXT("bool _a") } }, TEXT("Two inputs are named '_a'") },
+				{ TEXT("not a type"), { { TEXT("thing _a") } }, TEXT("should be a type and a name") },
+			};
+			for (const FBadInputs& Case : BadCases)
+			{
+				FBangoInputsSignature Bad;
+				FString BadError;
+				TArray<FString> BadWarnings;
+				Expect(!Bango::ParseInputsSignature(Case.Inputs, Bad, BadError, BadWarnings) && BadError.Contains(Case.ErrorContains),
+					*FString::Printf(TEXT("signature: %s: %s"), Case.Name, *BadError));
+			}
+			{
+				FBangoInputsSignature NoUnderscore;
+				FString NoUnderscoreError;
+				TArray<FString> NoUnderscoreWarnings;
+				Expect(Bango::ParseInputsSignature({ { TEXT("int count") } }, NoUnderscore, NoUnderscoreError, NoUnderscoreWarnings)
+					&& NoUnderscore.Params.Num() == 1 && NoUnderscoreWarnings.Num() == 1 && NoUnderscoreWarnings[0].Contains(TEXT("should begin with an underscore: 'count'")),
+					TEXT("signature: a name without '_' works, with a warning"));
+			}
+
+			// Compiled with it: the inputs are the script's parameters, in order, and its owner passes them.
+			struct FSignatureCase { const TCHAR* Name; const TCHAR* Source; int32 Expected; const TCHAR* ErrorContains; };
+			const FSignatureCase SignatureCases[] = {
+				{ TEXT("reads its inputs"), TEXT("_count == 3 && IsNil(_trigger) && Count(_inside) == 0"), 1, nullptr },
+				{ TEXT("as a script"), TEXT("int _more = _count + 1;\nreturn _more == 4;"), 1, nullptr },
+				{ TEXT("no #inputs line"), TEXT("#inputs (int _n = 1)\n_n > 0"), -1, TEXT("This script's inputs are given by BangoTrigger's 'Activation': _trigger, _count, _inside. Remove the #inputs line") },
+				{ TEXT("a local can't have an input's name"), TEXT("int _count = 1;\nreturn true;"), -1, TEXT("'_count' is an input given by BangoTrigger's 'Activation'") },
+				{ TEXT("a function's own local can"), TEXT("function bool F()\n{\n\tint _count = 1;\n\treturn _count > 0;\n};\nreturn F();"), 1, nullptr },
+			};
+			for (const FSignatureCase& Case : SignatureCases)
+			{
+				TSharedPtr<FBangoProgram> SignedProgram = MakeShared<FBangoProgram>();
+				FBangoCompileError SignedError;
+				FString Outcome;
+				int32 Got = -1;
+				if (!Bango::CompileCondition(Case.Source, TEXT("sig"), Commands, *SignedProgram, SignedError, &Signature))
+				{
+					Outcome = SignedError.ToString();
+				}
+				else
+				{
+					FBangoGlobalStore SignatureGlobals;
+					Context.Globals = &SignatureGlobals;
+					FBangoInstance Instance;
+					FBangoRuntimeError StartError;
+					const TArray<FBangoValue> Args = { FBangoValue::MakeNil(FBangoType::Entity()), FBangoValue::MakeInt(3), FBangoValue::MakeArray(FBangoType::Entity(), TArray<FBangoValue>()) };
+					if (!Instance.Start(SignedProgram, Commands, SignatureGlobals, 1, StartError, Args))
+					{
+						Outcome = StartError.ToString();
+					}
+					else
+					{
+						const EBangoConditionResult Result = Instance.FinishCondition(Instance.Resume(Context), Outcome);
+						Got = Result == EBangoConditionResult::True ? 1 : Result == EBangoConditionResult::False ? 0 : -1;
+					}
+				}
+				const bool bOk = Case.Expected >= 0 ? Got == Case.Expected : Got == -1 && Outcome.Contains(Case.ErrorContains);
+				Expect(bOk, *FString::Printf(TEXT("signature: %s (got %d: %s)"), Case.Name, Got, *Outcome));
+			}
+		}
+
 		// A single-expression condition written as a script (the graph editor's "Write as 'return ...;'").
 		{
 			struct FToScriptCase { const TCHAR* Source; const TCHAR* Want; };

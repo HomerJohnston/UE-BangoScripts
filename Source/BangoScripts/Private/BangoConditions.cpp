@@ -2,6 +2,7 @@
 
 #include "Bango.h"
 #include "BangoCompiler.h"
+#include "BangoInlineScript.h"
 
 namespace BangoConditionsPrivate
 {
@@ -28,20 +29,21 @@ namespace BangoConditionsPrivate
 
 	static int64 NextId = 1;
 
-	static FString MakeKey(const FString& Source, const FString& Name)
+	static FString MakeKey(const FString& Source, const FString& Name, const FBangoInputsSignature* Signature)
 	{
-		return Name + TEXT("\n") + Source;
+		return Name + TEXT("\n") + (Signature ? Signature->Label + TEXT(": ") + Signature->ToInputsText() : FString()) + TEXT("\n") + Source;
 	}
 }
 
 namespace Bango
 {
-	bool CompileConditionProgram(const FString& Source, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError)
+	bool CompileConditionProgram(const FString& Source, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError,
+		const FBangoInputsSignature* Signature)
 	{
 		const FString ConditionName = Name.IsEmpty() ? FString(TEXT("Condition")) : Name;
 		TSharedPtr<FBangoProgram> Program = MakeShared<FBangoProgram>();
 		FBangoCompileError CompileError;
-		if (!CompileCondition(Source, ConditionName, FBangoModule::Get().GetCommands(), *Program, CompileError))
+		if (!CompileCondition(Source, ConditionName, FBangoModule::Get().GetCommands(), *Program, CompileError, Signature))
 		{
 			OutError = CompileError.ToString();
 			return false;
@@ -50,12 +52,20 @@ namespace Bango
 		return true;
 	}
 
-	FBangoConditionHandle RegisterCondition(const FString& Source, const FString& Name, FString& OutError)
+	FBangoConditionHandle RegisterCondition(const FBangoInlineScript& Script, const FString& Name, FString& OutError)
 	{
 		using namespace BangoConditionsPrivate;
 		FBangoConditionHandle Handle;
 		const FString ConditionName = Name.IsEmpty() ? FString(TEXT("Condition")) : Name;
-		const FString Key = MakeKey(Source, ConditionName);
+		FString SignatureError;
+		const TSharedPtr<const FBangoInputsSignature> Signature = Script.FindInputsSignature(SignatureError);
+		if (Script.HasInputsSignature() && !Signature.IsValid())
+		{
+			OutError = FString::Printf(TEXT("%s: %s"), *ConditionName, *SignatureError);
+			return Handle;
+		}
+		const FString& Source = Script.Source;
+		const FString Key = MakeKey(Source, ConditionName, Signature.Get());
 		if (const int64* Existing = GetIdsByKey().Find(Key))
 		{
 			++GetRegistered().Find(*Existing)->Registrations;
@@ -64,7 +74,7 @@ namespace Bango
 		}
 
 		TSharedPtr<const FBangoProgram> Program;
-		if (!CompileConditionProgram(Source, ConditionName, Program, OutError))
+		if (!CompileConditionProgram(Source, ConditionName, Program, OutError, Signature.Get()))
 		{
 			return Handle;
 		}

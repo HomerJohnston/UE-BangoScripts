@@ -317,7 +317,7 @@ FBangoScriptHandle UBangoBlueprintLibrary::SpawnBangoInlineScript(UObject* World
 	const FString Name = UBangoScriptSubsystem::GetInlineScriptName(Owner);
 	TSharedPtr<const FBangoProgram> Program;
 	FString Error;
-	if (!FBangoModule::Get().GetInlineProgram(Script.Source, Name, Program, Error))
+	if (!FBangoModule::Get().GetInlineProgram(Script, Name, Program, Error))
 	{
 		Bango::ReportError(Error);
 		return FBangoScriptHandle();

@@ -138,6 +138,8 @@ namespace BangoCompilerPrivate
 
 		/** A condition (Bango::CompileCondition): the main graph returns a bool. */
 		bool bCondition = false;
+		/** An inline script's inputs signature: its inputs are the main graph's parameters, and #inputs is an error. */
+		const FBangoInputsSignature* InputsSignature = nullptr;
 
 		bool Run()
 		{
@@ -216,6 +218,8 @@ namespace BangoCompilerPrivate
 		FBangoProgram& Program;
 		FBangoCompileError& Error;
 		bool bFailed = false;
+		/** While DeclareScriptParams declares the signature's inputs (DeclareLocal's check for them doesn't apply). */
+		bool bDeclaringSignature = false;
 
 		TBangoNameMap<FBangoType> DeclaredGlobals;
 		TBangoNameMap<int32> FunctionIndexes;
@@ -1203,10 +1207,37 @@ namespace BangoCompilerPrivate
 			return true;
 		}
 
-		/** Declares the inputs line's parameters as the first slots of the top level. */
+		/** Declares the inputs line's parameters (or the inputs signature's) as the first slots of the top level. */
 		bool DeclareScriptParams(const FBangoBlock& Body)
 		{
 			const FBangoParamsStmt* ParamsStmt = Body.Num() > 0 ? Body[0]->As<FBangoParamsStmt>() : nullptr;
+			if (InputsSignature)
+			{
+				if (ParamsStmt)
+				{
+					return Fail(ParamsStmt->Loc, FString::Printf(TEXT("This script's inputs are given by %s: %s. Remove the #inputs line; the script can use them as they are."),
+						*InputsSignature->Label, *InputsSignature->GetNames()));
+				}
+				// They come from C++, so errors about them point at the start of the script.
+				FBangoSourceLocation Start;
+				Start.Line = 1;
+				Start.Column = 1;
+				bDeclaringSignature = true;
+				for (int32 i = 0; i < InputsSignature->Params.Num(); ++i)
+				{
+					const FBangoScriptParamInfo& Input = InputsSignature->Params[i];
+					int32 Slot = 0;
+					if (!DeclareLocal(Input.Name, Input.Type, Start, Slot))
+					{
+						return false;
+					}
+					check(Slot == i);
+					Program.Params.Add(Input);
+				}
+				bDeclaringSignature = false;
+				Fn->NumParams = InputsSignature->Params.Num();
+				return true;
+			}
 			if (!ParamsStmt)
 			{
 				return true;
@@ -1442,8 +1473,23 @@ namespace BangoCompilerPrivate
 			return true;
 		}
 
+		/** In the main graph of a script with an inputs signature, a local can't have an input's name. */
+		bool CheckNotAnInput(const FString& Name, const FBangoSourceLocation& Loc)
+		{
+			if (InputsSignature && !FnAst && !bDeclaringSignature
+				&& InputsSignature->Params.ContainsByPredicate([&Name](const FBangoScriptParamInfo& Input) { return Input.Name.Equals(Name, ESearchCase::CaseSensitive); }))
+			{
+				return Fail(Loc, FString::Printf(TEXT("'%s' is an input given by %s, so it can't be declared here too. Use a different name."), *Name, *InputsSignature->Label));
+			}
+			return true;
+		}
+
 		bool DeclareLocal(const FString& Name, const FBangoType& Type, const FBangoSourceLocation& Loc, int32& OutSlot)
 		{
+			if (!CheckNotAnInput(Name, Loc))
+			{
+				return false;
+			}
 			if (FindLocal(Name))
 			{
 				return Fail(Loc, FString::Printf(TEXT("'%s' is already declared (as a local, a parameter or a loop's variable). Use a different name."), *Name));
@@ -1608,6 +1654,10 @@ namespace BangoCompilerPrivate
 			}
 
 			// The new local isn't visible in its own initializer.
+			if (!CheckNotAnInput(Decl.Name, Decl.Loc))
+			{
+				return false;
+			}
 			if (FindLocal(Decl.Name))
 			{
 				return Fail(Decl.Loc, FString::Printf(TEXT("'%s' is already declared (as a local, a parameter or a loop's variable). Use a different name."), *Decl.Name));
@@ -3203,22 +3253,69 @@ namespace BangoCompilerPrivate
 
 namespace Bango
 {
-	bool CompileScript(const FBangoScript& Script, const IBangoCommandLookup& Commands, FBangoProgram& OutProgram, FBangoCompileError& OutError)
+	bool CompileScript(const FBangoScript& Script, const IBangoCommandLookup& Commands, FBangoProgram& OutProgram, FBangoCompileError& OutError,
+		const FBangoInputsSignature* Signature)
 	{
 		OutError = FBangoCompileError();
 		OutError.FileName = Script.FileName;
 		BangoCompilerPrivate::FCompiler Compiler(Script, Commands, OutProgram, OutError);
+		Compiler.InputsSignature = Signature;
 		return Compiler.Run();
 	}
 
-	bool CompileSource(const FString& Source, const FString& FileName, const IBangoCommandLookup& Commands, FBangoProgram& OutProgram, FBangoCompileError& OutError)
+	bool CompileSource(const FString& Source, const FString& FileName, const IBangoCommandLookup& Commands, FBangoProgram& OutProgram, FBangoCompileError& OutError,
+		const FBangoInputsSignature* Signature)
 	{
 		FBangoScript Script;
 		if (!ParseScript(Source, FileName, Script, OutError))
 		{
 			return false;
 		}
-		return CompileScript(Script, Commands, OutProgram, OutError);
+		return CompileScript(Script, Commands, OutProgram, OutError, Signature);
+	}
+
+	bool ParseInputsSignature(const TArray<FBangoInputDecl>& Inputs, FBangoInputsSignature& OutSignature, FString& OutError, TArray<FString>& OutWarnings)
+	{
+		OutSignature.Params.Reset();
+		OutSignature.Tooltips.Reset();
+		for (const FBangoInputDecl& Input : Inputs)
+		{
+			// Read as an #inputs line would be, so the types and names follow the same rules.
+			FBangoScript Script;
+			FBangoCompileError ParseError;
+			const FBangoParamsStmt* Params = nullptr;
+			if (ParseScript(FString(TEXT("#inputs (")) + Input.Decl + TEXT(")"), TEXT("signature"), Script, ParseError))
+			{
+				Params = Script.GetParams();
+			}
+			if (!Params || Params->Params.Num() != 1)
+			{
+				OutError = FString::Printf(TEXT("Input '%s' should be a type and a name, like 'entity _who'%s"), *Input.Decl,
+					Params ? TEXT(" (one input per entry).") : *(FString(TEXT(": ")) + ParseError.Message));
+				return false;
+			}
+			const FBangoScriptParamDecl& Decl = Params->Params[0];
+			if (Decl.Default)
+			{
+				OutError = FString::Printf(TEXT("Input '%s' can't have a default: its owner always passes its value."), *Input.Decl);
+				return false;
+			}
+			if (OutSignature.Params.ContainsByPredicate([&Decl](const FBangoScriptParamInfo& Other) { return Other.Name.Equals(Decl.Name, ESearchCase::CaseSensitive); }))
+			{
+				OutError = FString::Printf(TEXT("Two inputs are named '%s'."), *Decl.Name);
+				return false;
+			}
+			if (!Decl.Name.StartsWith(TEXT("_"), ESearchCase::CaseSensitive))
+			{
+				OutWarnings.Add(FString::Printf(TEXT("Predefined script inputs should begin with an underscore: '%s'. Please rename it to '_%s'."), *Decl.Name, *Decl.Name));
+			}
+			FBangoScriptParamInfo Info;
+			Info.Name = Decl.Name;
+			Info.Type = Decl.Type;
+			OutSignature.Params.Add(MoveTemp(Info));
+			OutSignature.Tooltips.Add(Input.Tooltip);
+		}
+		return true;
 	}
 
 	namespace
@@ -3318,7 +3415,8 @@ namespace Bango
 		return true;
 	}
 
-	bool CompileCondition(const FString& Source, const FString& FileName, const IBangoCommandLookup& Commands, FBangoProgram& OutProgram, FBangoCompileError& OutError)
+	bool CompileCondition(const FString& Source, const FString& FileName, const IBangoCommandLookup& Commands, FBangoProgram& OutProgram, FBangoCompileError& OutError,
+		const FBangoInputsSignature* Signature)
 	{
 		// A single expression is compiled as `return <expression>;`.
 		static const FString ReturnPrefix = TEXT("return ");
@@ -3338,6 +3436,7 @@ namespace Bango
 			OutError.FileName = Script.FileName;
 			BangoCompilerPrivate::FCompiler Compiler(Script, Commands, OutProgram, OutError);
 			Compiler.bCondition = true;
+			Compiler.InputsSignature = Signature;
 			bOk = Compiler.Run();
 		}
 		if (!bExpression)

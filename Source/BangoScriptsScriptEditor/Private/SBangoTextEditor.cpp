@@ -82,6 +82,11 @@ void SBangoTextEditor::Construct(const FArguments& InArgs)
 	bInlineScriptEditor = InArgs._InlineScriptEditor;
 	bCompileAsYouType = InArgs._CompileAsYouType;
 	Condition = InArgs._Condition;
+	InputsSignature = InArgs._InputsSignature;
+	if (InputsSignature.IsValid())
+	{
+		Marshaller->SetGivenInputs(BangoTextEditor::GivenInputs(*InputsSignature));
+	}
 	SelfActor = InArgs._SelfActor;
 	bCompileDirty = bCompileAsYouType; // the text it starts with is compiled on the first tick
 	if (bInlineScriptEditor)
@@ -1026,14 +1031,21 @@ void SBangoTextEditor::AcceptCompletion()
 	TextBox->InsertTextAtCursor(Insert);
 }
 
+void SBangoTextEditor::SetInputsSignature(const TSharedPtr<const FBangoInputsSignature>& InSignature)
+{
+	InputsSignature = InSignature;
+	Marshaller->SetGivenInputs(InSignature.IsValid() ? BangoTextEditor::GivenInputs(*InSignature) : TArray<FBangoVisibleName>());
+	bCompileDirty = bCompileAsYouType;
+}
+
 void SBangoTextEditor::CompileForErrors()
 {
 	bCompileDirty = false;
 	FBangoProgram Program;
 	FBangoCompileError Error;
 	const bool bCompiled = Condition.Get(false)
-		? Bango::CompileCondition(Metadata.GetFullText(), TEXT("script"), FBangoModule::Get().GetCommands(), Program, Error)
-		: Bango::CompileSource(Metadata.GetFullText(), TEXT("script"), FBangoModule::Get().GetCommands(), Program, Error);
+		? Bango::CompileCondition(Metadata.GetFullText(), TEXT("script"), FBangoModule::Get().GetCommands(), Program, Error, InputsSignature.Get())
+		: Bango::CompileSource(Metadata.GetFullText(), TEXT("script"), FBangoModule::Get().GetCommands(), Program, Error, InputsSignature.Get());
 	if (bCompiled)
 	{
 		if (!bErrorFromOutside)

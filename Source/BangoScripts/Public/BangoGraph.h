@@ -178,6 +178,13 @@ struct BANGOSCRIPTS_API FBangoGraphDocument
 	/** In file order. */
 	TArray<FBangoGraph> Functions;
 
+	/**
+	 * An inline script's inputs given by its inputs signature (FBangoInlineScript::UseInputsSignature), each one's
+	 * Type and Name: the main graph's parameters, as for its node layouts and variable lists. Set by the editor; not
+	 * read from the text, written, or compared.
+	 */
+	TArray<FBangoGraphDecl> GivenInputs;
+
 	bool operator==(const FBangoGraphDocument& Other) const;
 	bool operator!=(const FBangoGraphDocument& Other) const { return !(*this == Other); }
 };

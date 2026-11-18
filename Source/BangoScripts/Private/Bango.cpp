@@ -2,6 +2,7 @@
 
 #include "BangoBuiltinCommands.h"
 #include "BangoCompiler.h"
+#include "BangoInlineScript.h"
 #include "BangoLog.h"
 
 #define LOCTEXT_NAMESPACE "FBangoModule"
@@ -16,9 +17,22 @@ void FBangoModule::StartupModule()
 	Bango::RegisterBuiltinCommands(Commands);
 }
 
-bool FBangoModule::GetInlineProgram(const FString& Source, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError)
+bool FBangoModule::GetInlineProgram(const FBangoInlineScript& Script, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError)
 {
-	const FString Key = Name + TEXT("\n") + Source;
+	FString SignatureError;
+	const TSharedPtr<const FBangoInputsSignature> Signature = Script.FindInputsSignature(SignatureError);
+	if (Script.HasInputsSignature() && !Signature.IsValid())
+	{
+		OutError = FString::Printf(TEXT("%s: %s"), *Name, *SignatureError);
+		return false;
+	}
+	return GetInlineProgram(Script.Source, Signature.Get(), Name, OutProgram, OutError);
+}
+
+bool FBangoModule::GetInlineProgram(const FString& Source, const FBangoInputsSignature* Signature, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError)
+{
+	// The signature is part of what it was compiled as: the same text with other inputs is another program.
+	const FString Key = Name + TEXT("\n") + (Signature ? Signature->Label + TEXT(": ") + Signature->ToInputsText() : FString()) + TEXT("\n") + Source;
 	if (const TSharedPtr<const FBangoProgram>* Found = InlinePrograms.Find(Key))
 	{
 		OutProgram = *Found;
@@ -26,7 +40,7 @@ bool FBangoModule::GetInlineProgram(const FString& Source, const FString& Name, 
 	}
 	TSharedPtr<FBangoProgram> Compiled = MakeShared<FBangoProgram>();
 	FBangoCompileError Error;
-	if (!Bango::CompileSource(Source, Name, Commands, *Compiled, Error))
+	if (!Bango::CompileSource(Source, Name, Commands, *Compiled, Error, Signature))
 	{
 		OutError = Error.ToString(); // not kept: the text is probably being fixed
 		return false;

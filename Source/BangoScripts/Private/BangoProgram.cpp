@@ -191,3 +191,23 @@ namespace Bango
 		return Result;
 	}
 }
+
+FString FBangoInputsSignature::ToInputsText() const
+{
+	TArray<FString> Parts;
+	for (const FBangoScriptParamInfo& Param : Params)
+	{
+		Parts.Add(Param.Type.ToString() + TEXT(" ") + Param.Name);
+	}
+	return FString::Join(Parts, TEXT(", "));
+}
+
+FString FBangoInputsSignature::GetNames() const
+{
+	TArray<FString> Parts;
+	for (const FBangoScriptParamInfo& Param : Params)
+	{
+		Parts.Add(Param.Name);
+	}
+	return FString::Join(Parts, TEXT(", "));
+}

@@ -17,6 +17,8 @@
 #include "BangoTextMetadata.h"
 #include "BangoCompletion.h"
 
+struct FBangoInputsSignature;
+
 class AActor;
 
 class FBangoSyntaxMarshaller;
@@ -70,6 +72,12 @@ public:
 		SLATE_ATTRIBUTE(bool, Condition)
 
 		/**
+		 * The inline script's inputs signature (FBangoInlineScript::UseInputsSignature), or null: its inputs are the
+		 * script's parameters when it's compiled as you type, and autocomplete and colouring know them.
+		 */
+		SLATE_ARGUMENT(TSharedPtr<const FBangoInputsSignature>, InputsSignature)
+
+		/**
 		 * The actor `self` would be in this script (an inline script's actor), or null. While this is the script being
 		 * edited, lines are drawn from it to the actors the script refers to, in the level viewports (BangoScriptReferences).
 		 */
@@ -116,6 +124,9 @@ public:
 	 * compiling as you type finds an error of its own. bFocus: puts the keyboard focus in the text (so the message shows).
 	 */
 	void ShowError(const FBangoCompileError& Error, bool bFocus);
+
+	/** Changes the InputsSignature argument (the script editor opens one script after another). */
+	void SetInputsSignature(const TSharedPtr<const FBangoInputsSignature>& InSignature);
 
 	/** Puts the cursor at a line and column (both from 0) of the whole text, scrolling it into view. */
 	void GoTo(const FTextLocation& Location);
@@ -258,6 +269,7 @@ private:
 	TSharedRef<SWidget> MakeErrorPopup();
 	bool bCompileAsYouType = false;
 	TAttribute<bool> Condition;
+	TSharedPtr<const FBangoInputsSignature> InputsSignature;
 	TAttribute<AActor*> SelfActor;
 	/** The text changed since it was last compiled; it's compiled once typing has stopped for the preference's delay. */
 	bool bCompileDirty = false;

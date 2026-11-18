@@ -157,6 +157,12 @@ struct BANGOSCRIPTS_API FBangoNodeLayoutContext
 	 */
 	TMap<int64, FString> ReturnTypes;
 
+	/**
+	 * An inline script's given inputs (FBangoGraphDocument::GivenInputs): listed first on the main graph's Script
+	 * Start node, read-only, each with its Comment as its description.
+	 */
+	TArray<FBangoGraphDecl> GivenInputs;
+
 	const FBangoCommandSignature* FindFunction(const FString& Name) const;
 };
 

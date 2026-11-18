@@ -1,6 +1,7 @@
 #include "BangoInlineScriptTarget.h"
 
 #include "BangoInlineScript.h"
+#include "BangoProgram.h"
 #include "GameFramework/Actor.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Docking/TabManager.h"
@@ -62,6 +63,42 @@ FBangoInlineScriptTarget::FBangoInlineScriptTarget(UObject* InOwner, const FStri
 	, PropertyLabel(InPropertyLabel)
 	, bCondition(InStructHandle.IsValid() && InStructHandle->HasMetaData(TEXT("BangoCondition")))
 {
+}
+
+TSharedPtr<const FBangoInputsSignature> FBangoInlineScriptTarget::GetInputsSignature(FString& OutError) const
+{
+	const FBangoInlineScript* Script = Resolve(Owner.Get(), PropertyPath);
+	return Script ? Script->FindInputsSignature(OutError) : nullptr;
+}
+
+TSharedPtr<const FBangoInputsSignature> FBangoInlineScriptTarget::GetInputsSignature(const TSharedRef<IPropertyHandle>& StructHandle, FString& OutError)
+{
+	TArray<void*> RawData;
+	StructHandle->AccessRawData(RawData);
+	TSharedPtr<const FBangoInputsSignature> Found;
+	FString FoundError;
+	bool bFirst = true;
+	for (const void* Data : RawData)
+	{
+		if (!Data)
+		{
+			continue;
+		}
+		FString Error;
+		const TSharedPtr<const FBangoInputsSignature> Signature = static_cast<const FBangoInlineScript*>(Data)->FindInputsSignature(Error);
+		if (bFirst)
+		{
+			Found = Signature;
+			FoundError = Error;
+			bFirst = false;
+		}
+		else if (Signature != Found || Error != FoundError)
+		{
+			return nullptr; // several objects, with different signatures
+		}
+	}
+	OutError = FoundError;
+	return Found;
 }
 
 FString FBangoInlineScriptTarget::GetKey() const

@@ -14,6 +14,8 @@
 #include "Widgets/Views/SListView.h"
 #include "Animation/CurveSequence.h"
 
+struct FBangoInputsSignature;
+
 class FUICommandList;
 class SBox;
 class SButton;
@@ -130,6 +132,14 @@ private:
 	};
 	TArray<TSharedPtr<FInputEntry>> InputItems;
 	TSharedPtr<SListView<TSharedPtr<FInputEntry>>> InputList;
+	/**
+	 * In the main graph of an inline script with an inputs signature: the inputs its owner gives it, listed above
+	 * InputItems (which it then can't have), read-only. Param holds each one's type and name; GivenTooltips, what it is.
+	 */
+	TArray<TSharedPtr<FInputEntry>> GivenInputItems;
+	TArray<FString> GivenTooltips;
+	TSharedPtr<SListView<TSharedPtr<FInputEntry>>> GivenInputList;
+	TSharedRef<ITableRow> OnGenerateGivenInputRow(TSharedPtr<FInputEntry> Item, const TSharedRef<STableViewBase>& Owner);
 	/** The entry text InputItems were read from (and in which graph), so they're only made again when it changes. */
 	FString InputsText;
 	int32 InputsGraph = INDEX_NONE;
@@ -526,7 +536,14 @@ private:
 
 	/** The open script is a condition (an inline script property with `meta = (BangoCondition)`): it's compiled as one. */
 	bool IsCondition() const;
-	/** Compiles Text as the open script is compiled: as a condition (IsCondition) or as a script. */
+	/**
+	 * The open inline script's inputs signature (FBangoInlineScript::UseInputsSignature), or null if it has none, or,
+	 * with OutError, if it isn't registered.
+	 */
+	TSharedPtr<const FBangoInputsSignature> GetInputsSignature(FString& OutError) const;
+	/** Puts the open script's given inputs (its inputs signature's) in Document, for its layouts and variable lists. */
+	void AddGivenInputs(FBangoGraphDocument& Document) const;
+	/** Compiles Text as the open script is compiled: as a condition (IsCondition) or as a script, with its inputs signature. */
 	bool CompileOpenScriptText(const FString& Text, const FString& FileName, FBangoProgram& OutProgram, FBangoCompileError& OutError) const;
 	/**
 	 * For a condition written as a single expression, which has no graph: the message where the graph would be, with a
