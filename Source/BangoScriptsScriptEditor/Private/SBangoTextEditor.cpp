@@ -3,6 +3,8 @@
 
 #include "SBangoTextEditor.h"
 
+#include "BangoCallChecks.h"
+
 #include "InputCoreTypes.h"
 #include "Framework/Text/TextLayout.h"
 #include "Styling/AppStyle.h"
@@ -869,7 +871,7 @@ void SBangoTextEditor::UpdateCompletion(bool bMayOpen)
 			CloseCompletion();
 			return;
 		}
-		GatherCompletionItems(Cursor.GetLineIndex());
+		GatherCompletionItems(Cursor.GetLineIndex(), Line, WordStart);
 	}
 
 	const FString Prefix = Line.Mid(WordStart, Cursor.GetOffset() - WordStart);
@@ -914,8 +916,37 @@ void SBangoTextEditor::UpdateCompletion(bool bMayOpen)
 	}
 }
 
-void SBangoTextEditor::GatherCompletionItems(int32 Line)
+void SBangoTextEditor::GatherCompletionItems(int32 Line, const FString& LineText, int32 WordStart)
 {
+	// After `target call `: the target's Blueprint functions, if it's known here (self, or an @name in the open level).
+	FString CallTarget;
+	if (FBangoCompletion::FindCallTarget(LineText, WordStart, CallTarget))
+	{
+		CompletionItems.Reset();
+		TArray<FBangoCallableFunction> Functions;
+		FString TargetLabel;
+		if (BangoCallChecks::GetTargetFunctions(CallTarget, SelfActor.Get(nullptr), Functions, TargetLabel))
+		{
+			for (const FBangoCallableFunction& Function : Functions)
+			{
+				FBangoCompletionItem& Item = CompletionItems.AddDefaulted_GetRef();
+				Item.Name = Function.Name;
+				Item.Kind = EBangoCompletionKind::Function;
+				Item.Detail = Function.Signature;
+				Item.Description = Function.Description.IsEmpty() ? TargetLabel : Function.Description;
+				Item.bCallable = true;
+			}
+			CompletionItems.Sort([](const FBangoCompletionItem& A, const FBangoCompletionItem& B) { return A.Name.Compare(B.Name, ESearchCase::IgnoreCase) < 0; });
+		}
+		CompletionItemPtrs.Reset();
+		for (const FBangoCompletionItem& Item : CompletionItems)
+		{
+			CompletionItemPtrs.Add(MakeShared<FBangoCompletionItem>(Item));
+		}
+		MeasureCompletionNames();
+		return;
+	}
+
 	// The registered commands, asked for each time the list opens (game modules may add commands after this widget is made).
 	TArray<FBangoCompletionItem> Commands;
 	const FBangoCommandTable& Table = FBangoModule::Get().GetCommands();
@@ -1043,9 +1074,11 @@ void SBangoTextEditor::CompileForErrors()
 	bCompileDirty = false;
 	FBangoProgram Program;
 	FBangoCompileError Error;
-	const bool bCompiled = Condition.Get(false)
+	bool bCompiled = Condition.Get(false)
 		? Bango::CompileCondition(Metadata.GetFullText(), TEXT("script"), FBangoModule::Get().GetCommands(), Program, Error, InputsSignature.Get())
 		: Bango::CompileSource(Metadata.GetFullText(), TEXT("script"), FBangoModule::Get().GetCommands(), Program, Error, InputsSignature.Get());
+	// Its `call`s whose targets are known here (self, or an @name in the open level) are checked against their functions.
+	bCompiled = bCompiled && BangoCallChecks::CheckCalls(Program, SelfActor.Get(nullptr), TEXT("script"), Error);
 	if (bCompiled)
 	{
 		if (!bErrorFromOutside)

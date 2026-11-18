@@ -234,6 +234,43 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 			{
 				OutFailures.Add(TEXT("variables (F, given inputs): got ") + Describe(Vars));
 			}
+			// A call node whose target the editor knows (FindCallTarget): its fields are the function's parameters.
+			{
+				FBangoNodeLayoutContext CallContext = GivenContext;
+				CallContext.FindCallTarget = [](const FString& TargetEntity, TArray<FBangoCallableFunction>& OutFunctions, FString& OutLabel)
+				{
+					if (TargetEntity != TEXT("light"))
+					{
+						return false;
+					}
+					FBangoCallableFunction SetLevel;
+					SetLevel.Name = TEXT("SetLevel");
+					SetLevel.ParamNames = { TEXT("Level"), TEXT("Fade") };
+					SetLevel.ParamTypes = { FBangoType::Double(), FBangoType::Bool() };
+					SetLevel.Signature = TEXT("SetLevel(float Level, bool Fade)");
+					OutFunctions = { SetLevel };
+					OutLabel = TEXT("@light (BP_Light)");
+					return true;
+				};
+				struct FKnownCallCase { const TCHAR* Text; const TCHAR* Expected; };
+				const FKnownCallCase KnownCalls[] = {
+					{ TEXT("@light call SetLevel(2, true)"), TEXT("call SetLevel (Command) | Target <entity>: `@light` | Level <float>: `2` | Fade <bool>: `true`") },
+					{ TEXT("@light call SetLevel(2)"), TEXT("call SetLevel (Command) | Target <entity>: `@light` | Level <float>: `2` | Fade <bool>: - !! @light (BP_Light)'s 'SetLevel' takes 2 argument(s), but 1 were given: SetLevel(float Level, bool Fade)") },
+					{ TEXT("@light call SetLevl()"), TEXT("call SetLevl (Command) | Target <entity>: `@light` !! @light (BP_Light) has no Bango function named 'SetLevl' (a Blueprint function in the category 'Bango').") },
+					{ TEXT("@other call SetLevl(1)"), TEXT("call SetLevl (Command) | Target <entity>: `@other` | Value 1 <any>: `1`?") },
+				};
+				for (const FKnownCallCase& Known : KnownCalls)
+				{
+					FBangoGraphNode CallNode;
+					CallNode.Kind = EBangoGraphNodeKind::Call;
+					CallNode.Text = Known.Text;
+					const FString Got = BangoDescribeLayout(Bango::GetNodeLayout(CallNode, false, CallContext));
+					if (Got != Known.Expected)
+					{
+						OutFailures.Add(FString::Printf(TEXT("known call `%s`:\n  expected: %s\n  got:      %s"), Known.Text, Known.Expected, *Got));
+					}
+				}
+			}
 			// Listed first on Script Start, read-only.
 			FBangoGraphNode StartNode;
 			StartNode.Kind = EBangoGraphNodeKind::Entry;

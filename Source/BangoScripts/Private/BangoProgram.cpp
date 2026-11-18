@@ -214,3 +214,28 @@ FString FBangoInputsSignature::GetNames() const
 	}
 	return FString::Join(Parts, TEXT(", "));
 }
+
+bool Bango::CheckReflectedCall(const FBangoReflectedCallSite& Site, const TArray<FBangoCallableFunction>& Functions, const FString& TargetLabel, FString& OutError)
+{
+	const FBangoCallableFunction* Found = Functions.FindByPredicate([&Site](const FBangoCallableFunction& Function) { return Function.Name.Equals(Site.Name, ESearchCase::CaseSensitive); });
+	if (!Found)
+	{
+		OutError = FString::Printf(TEXT("%s has no Bango function named '%s' (a Blueprint function in the category 'Bango')."), *TargetLabel, *Site.Name);
+		if (const FBangoCallableFunction* Similar = Functions.FindByPredicate([&Site](const FBangoCallableFunction& Function) { return Function.Name.Equals(Site.Name, ESearchCase::IgnoreCase); }))
+		{
+			OutError += FString::Printf(TEXT(" Did you mean '%s'? Names are case-sensitive."), *Similar->Name);
+		}
+		return false;
+	}
+	if (Site.NumArgs != Found->ParamNames.Num())
+	{
+		OutError = FString::Printf(TEXT("%s's '%s' takes %d argument(s), but %d were given: %s"), *TargetLabel, *Site.Name, Found->ParamNames.Num(), Site.NumArgs, *Found->Signature);
+		return false;
+	}
+	if (Site.bResultUsed && !Found->bHasResult)
+	{
+		OutError = FString::Printf(TEXT("%s's '%s' doesn't return a value a script can use, so it can't be used here: %s"), *TargetLabel, *Site.Name, *Found->Signature);
+		return false;
+	}
+	return true;
+}

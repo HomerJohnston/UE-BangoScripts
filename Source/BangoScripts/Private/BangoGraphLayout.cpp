@@ -407,10 +407,37 @@ namespace BangoGraphLayoutPrivate
 			Target.InsertSuffix = TEXT(" ");
 			Out.Fields.Add(Target);
 			const TArray<TPair<int32, int32>> Args = Tok.Split(NameTok + 2, CloseTok, EBangoTokenKind::Comma, /*bEmptyIsNone*/ true);
-			for (int32 i = 0; i < Args.Num(); ++i)
+
+			// The editor may know the target (self, or an @name in the open level): then its fields are the function's parameters.
+			const FBangoLiteralExpr* TargetLiteral = Call->Target ? Call->Target->As<FBangoLiteralExpr>() : nullptr;
+			TArray<FBangoCallableFunction> Functions;
+			FString TargetLabel;
+			const FBangoCallableFunction* Function = nullptr;
+			if (TargetLiteral && TargetLiteral->LiteralKind == EBangoLiteralKind::Entity && Context.FindCallTarget
+				&& Context.FindCallTarget(TargetLiteral->StringValue, Functions, TargetLabel))
 			{
-				FBangoNodeField Field = Tok.Field(FString::Printf(TEXT("Value %d"), i + 1), TEXT("any"), Args[i].Key, Args[i].Value);
-				Field.bOptional = true;
+				Function = Functions.FindByPredicate([Call](const FBangoCallableFunction& F) { return F.Name.Equals(Call->Name, ESearchCase::CaseSensitive); });
+				FBangoReflectedCallSite Site;
+				Site.Name = Call->Name;
+				Site.NumArgs = Args.Num();
+				FString Problem;
+				if (!Bango::CheckReflectedCall(Site, Functions, TargetLabel, Problem))
+				{
+					Out.Error = Problem;
+				}
+				if (Function)
+				{
+					Out.Description = Function->Description.IsEmpty() ? Function->Signature : Function->Description + TEXT("\n") + Function->Signature;
+				}
+			}
+			const int32 NumParams = Function ? Function->ParamNames.Num() : 0;
+			for (int32 i = 0; i < FMath::Max(Args.Num(), NumParams); ++i)
+			{
+				const bool bParam = i < NumParams;
+				const FString Label = bParam ? Function->ParamNames[i] : FString::Printf(TEXT("Value %d"), i + 1);
+				const FString Hint = bParam ? Function->ParamTypes[i].ToString() : FString(TEXT("any"));
+				FBangoNodeField Field = i < Args.Num() ? Tok.Field(Label, Hint, Args[i].Key, Args[i].Value) : Tok.Field(Label, Hint, CloseTok, CloseTok);
+				Field.bOptional = !bParam; // a known function's parameters are all needed; an extra value can be cleared
 				SetArgumentEdits(Tok, Field, Args, i, NameTok);
 				Out.Fields.Add(Field);
 			}

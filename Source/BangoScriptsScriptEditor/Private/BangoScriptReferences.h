@@ -37,4 +37,10 @@ namespace BangoScriptReferences
 	 * an actor, a component's actor, or null.
 	 */
 	AActor* GetSelfActor(UObject* Owner);
+
+	/**
+	 * The actor with this Bango ID name in the level being edited (the editor's world), or null: none has it, or more
+	 * than one does.
+	 */
+	AActor* FindLevelActor(const FString& Name);
 }

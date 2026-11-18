@@ -63,6 +63,13 @@ public:
 	static void GatherItems(const FBangoScriptNames& Names, int32 LineIndex, const TArray<FBangoCompletionItem>& CommandItems,
 		TArray<FBangoCompletionItem>& OutItems);
 
+	/**
+	 * Whether the word starting at WordStart is a `call`'s function name (`@light call Tu|`). Then OutTargetEntity is
+	 * the target's Bango ID name if it's written as one (`@light`, `self`, `player`), or empty (a variable, a call...),
+	 * and the list should hold the target's Blueprint functions, not the usual names.
+	 */
+	static bool FindCallTarget(const FString& Line, int32 WordStart, FString& OutTargetEntity);
+
 	/** The items starting with Prefix, ignoring case, in their order. */
 	static void Filter(const TArray<FBangoCompletionItem>& Items, const FString& Prefix, TArray<int32>& OutIndices);
 };

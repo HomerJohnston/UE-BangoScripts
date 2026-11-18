@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "BangoTypes.h"
+#include "BangoProgram.h"
 
 class UClass;
 class UFunction;
@@ -18,21 +19,6 @@ class FProperty;
  */
 namespace Bango
 {
-	/** A Bango-callable function, for the editor's lists. */
-	struct FBangoCallableFunction
-	{
-		FString Name;
-		TArray<FString> ParamNames;
-		TArray<FBangoType> ParamTypes;
-		/** False if it returns nothing (or more than one value, which a script can't use). */
-		bool bHasResult = false;
-		FBangoType ResultType;
-		/** Its tooltip, in editor builds. */
-		FString Description;
-		/** "SetBrightness(float Brightness, bool Fade)" */
-		FString Signature;
-	};
-
 	/** The Bango type of a parameter or result. False if Bango has no such type (an array, or another struct or object). */
 	BANGOSCRIPTS_API bool BangoTypeOfProperty(const FProperty* Property, FBangoType& OutType);
 

@@ -11,6 +11,7 @@
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
 #include "Engine/World.h"
+#include "Editor.h"
 #include "GameFramework/Actor.h"
 #include "HAL/PlatformTime.h"
 #include "SceneInterface.h"
@@ -331,6 +332,31 @@ namespace BangoScriptReferences
 				break;
 			}
 		}
+	}
+
+	AActor* FindLevelActor(const FString& Name)
+	{
+		UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+		if (!World || Name.IsEmpty())
+		{
+			return nullptr;
+		}
+		AActor* Found = nullptr;
+		for (TObjectIterator<UBangoIDActorComponent> It; It; ++It)
+		{
+			const UBangoIDActorComponent* Component = *It;
+			if (!IsValid(Component) || Component->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject) || Component->GetWorld() != World
+				|| !Component->BangoName.ToString().Equals(Name, ESearchCase::CaseSensitive) || !IsValid(Component->GetOwner()))
+			{
+				continue;
+			}
+			if (Found && Found != Component->GetOwner())
+			{
+				return nullptr; // the name is used twice: which one a script gets isn't known here
+			}
+			Found = Component->GetOwner();
+		}
+		return Found;
 	}
 
 	AActor* GetSelfActor(UObject* Owner)

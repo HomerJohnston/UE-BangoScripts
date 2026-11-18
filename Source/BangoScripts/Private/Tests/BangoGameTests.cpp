@@ -454,16 +454,16 @@ bool FBangoCallTest::RunTest(const FString& Parameters)
 	FString GetTwoError;
 	TestTrue(TEXT("call: two results, unused"), Bango::CallBangoCallableOn(Object, Target, nullptr, TEXT("GetTwo"), {}, false, Result, GetTwoError));
 
-	TArray<Bango::FBangoCallableFunction> Callable;
+	TArray<FBangoCallableFunction> Callable;
 	Bango::GetBangoCallableFunctions(UBangoCallTestObject::StaticClass(), Callable);
 	TArray<FString> Names;
-	for (const Bango::FBangoCallableFunction& Function : Callable)
+	for (const FBangoCallableFunction& Function : Callable)
 	{
 		Names.Add(Function.Name);
 	}
 	Names.Sort();
 	TestEqual(TEXT("call: the callable functions"), FString::Join(Names, TEXT(" ")), FString(TEXT("Describe GetCount GetTwo TakeArray TurnOn")));
-	const Bango::FBangoCallableFunction* DescribeFunction = Callable.FindByPredicate([](const Bango::FBangoCallableFunction& F) { return F.Name == TEXT("Describe"); });
+	const FBangoCallableFunction* DescribeFunction = Callable.FindByPredicate([](const FBangoCallableFunction& F) { return F.Name == TEXT("Describe"); });
 	TestTrue(TEXT("call: a callable function's signature"), DescribeFunction && DescribeFunction->bHasResult && DescribeFunction->ResultType == FBangoType::String()
 		&& DescribeFunction->Signature == TEXT("Describe(string Label, vector3 Where, int Times) -> string"));
 	return true;

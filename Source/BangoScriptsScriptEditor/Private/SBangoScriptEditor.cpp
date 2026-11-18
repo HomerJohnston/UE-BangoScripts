@@ -3,6 +3,7 @@
 #include "BangoScriptAsset.h"
 #include "BangoInlineScriptTarget.h"
 #include "BangoScriptReferences.h"
+#include "BangoCallChecks.h"
 #include "BangoScriptSync.h"
 
 #include "Bango.h"
@@ -2708,6 +2709,7 @@ void SBangoScriptEditor::ShowDocument(const FBangoGraphDocument& Document)
 	FBangoGraphDocument WithGivenInputs = Document;
 	AddGivenInputs(WithGivenInputs);
 	LayoutContext = MakeShared<FBangoNodeLayoutContext>(Bango::MakeNodeLayoutContext(WithGivenInputs, &FBangoModule::Get().GetCommands()));
+	SetUpCallTargets(*LayoutContext);
 	EdGraphs.Add(TStrongObjectPtr<UEdGraph>(BangoScriptEditor::CreateEdGraph(Document.Main, LayoutContext)));
 	BangoScriptEditor::SetLocNamespace(EdGraphs[0].Get(), Document.bHasLocNamespace, Document.LocNamespace);
 	BangoScriptEditor::SetUsesGraphEditor(EdGraphs[0].Get(), Document.bUsesGraphEditor);
@@ -4764,6 +4766,7 @@ EActiveTimerReturnType SBangoScriptEditor::OnPoll(double CurrentTime, float Delt
 	if (LayoutContext.IsValid() && !Bango::LayoutContextsMatch(Fresh, *LayoutContext))
 	{
 		*LayoutContext = Fresh;
+		SetUpCallTargets(*LayoutContext);
 		for (int32 i = 1; i < GraphItems.Num() && i - 1 < Current.Functions.Num(); ++i)
 		{
 			GraphItems[i]->Label = Current.Functions[i - 1].Name;
@@ -5174,9 +5177,26 @@ bool SBangoScriptEditor::CompileOpenScriptText(const FString& Text, const FStrin
 		OutError.Message = SignatureError;
 		return false;
 	}
-	return IsCondition()
+	const bool bCompiled = IsCondition()
 		? Bango::CompileCondition(Text, FileName, FBangoModule::Get().GetCommands(), OutProgram, OutError, Signature.Get())
 		: Bango::CompileSource(Text, FileName, FBangoModule::Get().GetCommands(), OutProgram, OutError, Signature.Get());
+	// Its `call`s whose targets are known here (self, or an @name in the open level) are checked against their functions.
+	return bCompiled && BangoCallChecks::CheckCalls(OutProgram, GetSelfActorForChecks(), FileName, OutError);
+}
+
+const AActor* SBangoScriptEditor::GetSelfActorForChecks() const
+{
+	return InlineTarget.IsValid() ? BangoScriptReferences::GetSelfActor(InlineTarget->GetOwner()) : nullptr;
+}
+
+void SBangoScriptEditor::SetUpCallTargets(FBangoNodeLayoutContext& Context) const
+{
+	TWeakPtr<const SBangoScriptEditor> Weak = SharedThis(this);
+	BangoCallChecks::SetUpLayoutContext(Context, [Weak]() -> const AActor*
+	{
+		const TSharedPtr<const SBangoScriptEditor> Editor = Weak.Pin();
+		return Editor.IsValid() ? Editor->GetSelfActorForChecks() : nullptr;
+	});
 }
 
 void SBangoScriptEditor::ShowConditionExpressionMessage()

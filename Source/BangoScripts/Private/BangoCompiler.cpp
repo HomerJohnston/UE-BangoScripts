@@ -2984,6 +2984,17 @@ namespace BangoCompilerPrivate
 			}
 			CurrentLoc = Call.Loc;
 			Emit(EBangoOp::CallReflected, AddName(Call.Name), Call.Args.Num(), bValueNeeded ? 1 : 0);
+			if (!bInferring) // an array's elements are compiled twice; this is the time that's kept
+			{
+				FBangoReflectedCallSite& Site = Program.ReflectedCalls.AddDefaulted_GetRef();
+				const FBangoLiteralExpr* TargetLiteral = Call.Target->As<FBangoLiteralExpr>();
+				Site.TargetEntity = TargetLiteral && TargetLiteral->LiteralKind == EBangoLiteralKind::Entity ? TargetLiteral->StringValue : FString();
+				Site.Name = Call.Name;
+				Site.NumArgs = Call.Args.Num();
+				Site.bResultUsed = bValueNeeded;
+				Site.Line = Call.NameLoc.Line;
+				Site.Column = Call.NameLoc.Column;
+			}
 			OutType = bValueNeeded ? FExprType::MakeUnknown() : FExprType::MakeVoid();
 			return true;
 		}

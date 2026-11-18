@@ -206,6 +206,45 @@ struct FBangoGlobalDecl
 	FBangoValue Default;
 };
 
+/** A `target call Name(args)` as the compiler saw it (FBangoProgram::ReflectedCalls), for the editor's checks. */
+struct FBangoReflectedCallSite
+{
+	/** The target's Bango ID name, if it's written as one (`@light`, or `self` / `player`'s names); else empty. */
+	FString TargetEntity;
+	FString Name;
+	int32 NumArgs = 0;
+	/** Its result is used (so the function must return one). */
+	bool bResultUsed = false;
+	/** Where its name is. */
+	int32 Line = 0;
+	int32 Column = 0;
+};
+
+/** A Blueprint function `call` can reach (Bango::GetBangoCallableFunctions), for the editor. */
+struct FBangoCallableFunction
+{
+	FString Name;
+	TArray<FString> ParamNames;
+	TArray<FBangoType> ParamTypes;
+	/** False if it returns nothing (or more than one value, which a script can't use). */
+	bool bHasResult = false;
+	FBangoType ResultType;
+	/** Its tooltip, in editor builds. */
+	FString Description;
+	/** "SetBrightness(float Brightness, bool Fade) -> string" */
+	FString Signature;
+};
+
+namespace Bango
+{
+	/**
+	 * Checks a `call` against its target's Bango functions (Functions, from GetBangoCallableFunctions), as the editor
+	 * does when it knows the target's class: TargetLabel names it ("@light (BP_Light)"). False, with OutError, if
+	 * there's no such function, the argument count is wrong, or its result is used but it returns none.
+	 */
+	BANGOSCRIPTS_API bool CheckReflectedCall(const FBangoReflectedCallSite& Site, const TArray<FBangoCallableFunction>& Functions, const FString& TargetLabel, FString& OutError);
+}
+
 struct FBangoProgram
 {
 	FString FileName;
@@ -222,6 +261,8 @@ struct FBangoProgram
 
 	/** Every global the script declares. They are declared when an instance starts, before any code runs. */
 	TArray<FBangoGlobalDecl> Globals;
+	/** Every `target call Name(args)` in it, in order, for the editor's checks. */
+	TArray<FBangoReflectedCallSite> ReflectedCalls;
 
 	/** The script's parameters, in order. They occupy the first slots of Functions[0]. Empty if there is no inputs line. */
 	TArray<FBangoScriptParamInfo> Params;

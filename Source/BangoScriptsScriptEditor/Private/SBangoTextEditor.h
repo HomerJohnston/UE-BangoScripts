@@ -188,7 +188,8 @@ private:
 	/** Opens the list for the word before the cursor (only if bMayOpen), filters it, or closes it. */
 	void UpdateCompletion(bool bMayOpen);
 	/** Everything the line can use: its graph's names, the file's globals and functions, the commands and built-ins. */
-	void GatherCompletionItems(int32 Line);
+	/** Fills the list for the word starting at WordStart on LineText (line Line): the usual names, or a `call`'s functions. */
+	void GatherCompletionItems(int32 Line, const FString& LineText, int32 WordStart);
 	void CloseCompletion();
 	void MoveCompletionSelection(int32 Delta);
 	/** Replaces the word with the selected entry's name (and '(' for a call). */

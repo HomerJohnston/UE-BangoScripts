@@ -1179,6 +1179,46 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 					: Got == -1 && Outcome.Contains(Case.ErrorOrCalls);
 				Expect(bOk, *FString::Printf(TEXT("call: %s (got %d: %s; calls: %s)"), Case.Name, Got, *Outcome, *FString::Join(Calls, TEXT(" | "))));
 			}
+			// The compiler keeps each call's site (FBangoProgram::ReflectedCalls), which the editor checks when it knows the target.
+			{
+				FBangoProgram SiteProgram;
+				FBangoCompileError SiteError;
+				const bool bCompiled = Bango::CompileSource(TEXT("entity _e = @x;\n@light call TurnOn(1);\nint[] _a = [@x call A(), 2];\nself call B();\n_e call C(1, 2);"),
+					TEXT("sites"), Commands, SiteProgram, SiteError);
+				FString Sites;
+				for (const FBangoReflectedCallSite& Site : SiteProgram.ReflectedCalls)
+				{
+					Sites += FString::Printf(TEXT("%s.%s/%d%s@%d:%d "), *Site.TargetEntity, *Site.Name, Site.NumArgs, Site.bResultUsed ? TEXT("+result") : TEXT(""), Site.Line, Site.Column);
+				}
+				const FString WantSites = FString::Printf(TEXT("light.TurnOn/1@2:13 x.A/0+result@3:21 %s.B/0@4:11 .C/2@5:9 "), *Bango::GetSelfEntityName());
+				Expect(bCompiled && Sites == WantSites, *FString::Printf(TEXT("call: sites: %s (want %s) %s"), *Sites, *WantSites, *SiteError.ToString()));
+
+				FBangoCallableFunction TurnOn;
+				TurnOn.Name = TEXT("TurnOn");
+				TurnOn.ParamNames = { TEXT("Brightness") };
+				TurnOn.ParamTypes = { FBangoType::Double() };
+				TurnOn.Signature = TEXT("TurnOn(float Brightness)");
+				const TArray<FBangoCallableFunction> Functions = { TurnOn };
+				struct FCheckCase { const TCHAR* What; const TCHAR* Name; int32 NumArgs; bool bResultUsed; const TCHAR* ErrorContains; };
+				const FCheckCase CheckCases[] = {
+					{ TEXT("fits"), TEXT("TurnOn"), 1, false, nullptr },
+					{ TEXT("no such function"), TEXT("TurnOff"), 0, false, TEXT("@light (BP_Light) has no Bango function named 'TurnOff'") },
+					{ TEXT("the wrong case"), TEXT("turnOn"), 1, false, TEXT("Did you mean 'TurnOn'?") },
+					{ TEXT("the wrong count"), TEXT("TurnOn"), 2, false, TEXT("takes 1 argument(s), but 2 were given: TurnOn(float Brightness)") },
+					{ TEXT("no result"), TEXT("TurnOn"), 1, true, TEXT("doesn't return a value a script can use") },
+				};
+				for (const FCheckCase& Case : CheckCases)
+				{
+					FBangoReflectedCallSite Site;
+					Site.Name = Case.Name;
+					Site.NumArgs = Case.NumArgs;
+					Site.bResultUsed = Case.bResultUsed;
+					FString CheckError;
+					const bool bOk = Bango::CheckReflectedCall(Site, Functions, TEXT("@light (BP_Light)"), CheckError);
+					Expect(Case.ErrorContains ? !bOk && CheckError.Contains(Case.ErrorContains) : bOk, *FString::Printf(TEXT("call: check: %s: %s"), Case.What, *CheckError));
+				}
+			}
+
 			Context.CallReflected = nullptr;
 			{
 				TSharedPtr<FBangoProgram> NoHostProgram = MakeShared<FBangoProgram>();

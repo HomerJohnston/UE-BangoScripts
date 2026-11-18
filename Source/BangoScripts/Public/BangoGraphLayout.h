@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "BangoCommand.h"
 #include "BangoGraph.h"
+#include "BangoProgram.h"
 
 /**
  * How the graph editor shows a node: a title and a list of typed fields, each one a piece of the node's text.
@@ -162,6 +163,13 @@ struct BANGOSCRIPTS_API FBangoNodeLayoutContext
 	 * Start node, read-only, each with its Comment as its description.
 	 */
 	TArray<FBangoGraphDecl> GivenInputs;
+
+	/**
+	 * Set by the editor: for a `call` node whose target is written as a Bango ID (`@light`, or `self` / `player`'s
+	 * names), that target's Bango functions and how to name it ("@light (BP_Light)"), if it knows the target. Then the
+	 * node's fields are the function's parameters, and a call that doesn't fit gets an error. Not compared.
+	 */
+	TFunction<bool(const FString& TargetEntity, TArray<FBangoCallableFunction>& OutFunctions, FString& OutLabel)> FindCallTarget;
 
 	const FBangoCommandSignature* FindFunction(const FString& Name) const;
 };

@@ -15,6 +15,7 @@
 #include "Animation/CurveSequence.h"
 
 struct FBangoInputsSignature;
+class AActor;
 
 class FUICommandList;
 class SBox;
@@ -541,6 +542,10 @@ private:
 	 * with OutError, if it isn't registered.
 	 */
 	TSharedPtr<const FBangoInputsSignature> GetInputsSignature(FString& OutError) const;
+	/** The actor `self` is while editing the open script (an inline script's actor), or null. */
+	const AActor* GetSelfActorForChecks() const;
+	/** Lets Context's call nodes show their targets' Blueprint functions (BangoCallChecks). */
+	void SetUpCallTargets(FBangoNodeLayoutContext& Context) const;
 	/** Puts the open script's given inputs (its inputs signature's) in Document, for its layouts and variable lists. */
 	void AddGivenInputs(FBangoGraphDocument& Document) const;
 	/** Compiles Text as the open script is compiled: as a condition (IsCondition) or as a script, with its inputs signature. */

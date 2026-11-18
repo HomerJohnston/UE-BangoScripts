@@ -3,6 +3,8 @@
 
 #include "BangoCompletion.h"
 
+#include "BangoTypes.h"
+
 namespace BangoCompletionPrivate
 {
 	static bool IsDigit(TCHAR C)      { return C >= TEXT('0') && C <= TEXT('9'); }
@@ -287,4 +289,46 @@ void FBangoCompletion::Filter(const TArray<FBangoCompletionItem>& Items, const F
 			OutIndices.Add(I);
 		}
 	}
+}
+
+bool FBangoCompletion::FindCallTarget(const FString& Line, int32 WordStart, FString& OutTargetEntity)
+{
+	OutTargetEntity.Reset();
+	auto IsNameChar = [](TCHAR C) { return (C >= TEXT('a') && C <= TEXT('z')) || (C >= TEXT('A') && C <= TEXT('Z')) || (C >= TEXT('0') && C <= TEXT('9')) || C == TEXT('_'); };
+	auto IsSpace = [](TCHAR C) { return C == TEXT(' ') || C == TEXT('\t'); };
+	int32 i = FMath::Min(WordStart, Line.Len()) - 1;
+	while (i >= 0 && IsSpace(Line[i]))
+	{
+		--i;
+	}
+	// `call`, as a word of its own.
+	if (i < 3 || Line.Mid(i - 3, 4) != TEXT("call") || (i - 4 >= 0 && IsNameChar(Line[i - 4])) || i + 1 == WordStart)
+	{
+		return false;
+	}
+	i -= 4;
+	while (i >= 0 && IsSpace(Line[i]))
+	{
+		--i;
+	}
+	// The target: `@name`, `self` or `player` is known by name; anything else is only known when it runs.
+	const int32 End = i + 1;
+	while (i >= 0 && IsNameChar(Line[i]))
+	{
+		--i;
+	}
+	const FString Word = Line.Mid(i + 1, End - (i + 1));
+	if (i >= 0 && Line[i] == TEXT('@') && !Word.IsEmpty())
+	{
+		OutTargetEntity = Word;
+	}
+	else if (Word == TEXT("self"))
+	{
+		OutTargetEntity = Bango::GetSelfEntityName();
+	}
+	else if (Word == TEXT("player"))
+	{
+		OutTargetEntity = Bango::GetPlayerEntityName();
+	}
+	return true;
 }
