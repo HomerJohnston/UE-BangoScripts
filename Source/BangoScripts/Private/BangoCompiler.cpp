@@ -3284,6 +3284,19 @@ namespace Bango
 		}
 	}
 
+	bool ConditionExpressionToScript(const FString& Source, FString& OutScript)
+	{
+		int32 ExprLine = 0;
+		int32 ExprBegin = 0;
+		int32 ExprEnd = 0;
+		if (!FindConditionExpression(Source, ExprLine, ExprBegin, ExprEnd))
+		{
+			return false;
+		}
+		OutScript = Source.Left(ExprBegin) + TEXT("return ") + Source.Mid(ExprBegin, ExprEnd - ExprBegin) + TEXT(";") + Source.Mid(ExprEnd, Source.Len() - ExprEnd);
+		return true;
+	}
+
 	bool CompileCondition(const FString& Source, const FString& FileName, const IBangoCommandLookup& Commands, FBangoProgram& OutProgram, FBangoCompileError& OutError)
 	{
 		// A single expression is compiled as `return <expression>;`.

@@ -28,4 +28,11 @@ namespace Bango
 	 * See UBangoScriptSubsystem::EvaluateBoolCondition.
 	 */
 	BANGOSCRIPTS_API bool CompileCondition(const FString& Source, const FString& FileName, const IBangoCommandLookup& Commands, FBangoProgram& OutProgram, FBangoCompileError& OutError);
+
+	/**
+	 * If Source is a condition written as a single expression (as CompileCondition reads it), OutScript is it written as
+	 * a script: the expression as `return <expression>;`, with everything around it (#set lines, comments) kept. That's
+	 * what CompileCondition compiles, and what the graph editor can show. False, and OutScript untouched, otherwise.
+	 */
+	BANGOSCRIPTS_API bool ConditionExpressionToScript(const FString& Source, FString& OutScript);
 }

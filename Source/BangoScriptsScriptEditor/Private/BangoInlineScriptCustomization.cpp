@@ -157,6 +157,8 @@ public:
 								.Text(FText::FromString(Shown))
 								.InlineScriptEditor(true) // no metadata shown, and read-only while the script has some
 								.CompileAsYouType(true)
+								// A condition (`meta = (BangoCondition)`): compiled as one, so `_count > 3` is fine.
+								.Condition(InStructHandle->HasMetaData(TEXT("BangoCondition")))
 								// self: the actor whose details show this script (lines to what it refers to, in the viewports)
 								.SelfActor_Lambda([this]() { return BangoScriptReferences::GetSelfActor(SelfOwner.Get()); })
 								.IsReadOnly_Lambda([this]() { return IsLocked(); })

@@ -2526,6 +2526,16 @@ void SBangoScriptEditor::LoadScript(const FString& Script)
 		OpenFileTime = OpenPath.IsEmpty() ? FDateTime::MinValue() : IFileManager::Get().GetTimeStamp(*OpenPath);
 	}
 
+	// A condition written as one expression (`_count > 3`) is fine as it is, but has no graph to show.
+	FString AsScript;
+	if (IsCondition() && Bango::ConditionExpressionToScript(Source, AsScript))
+	{
+		SetScriptText(Source);
+		SetTextPaneOpen(true, false);
+		ShowConditionExpressionMessage();
+		return;
+	}
+
 	FBangoGraphDocument Document;
 	FBangoCompileError Error;
 	if (!Bango::BuildGraph(Source, GetScriptFileLabel(), Document, Error))
@@ -3660,6 +3670,7 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeTextPane()
 		.Padding(FMargin(4.0f, BangoScriptEditorPrivate::ScriptTextTopPadding))
 		.VScrollBar(TextVScrollBar) // its scroll position is read back for the line numbers
 		.CompileAsYouType(true)
+		.Condition_Lambda([this]() { return IsCondition(); })
 		// self, for an inline script opened from its Edit button: the actor it's on (lines to what it refers to, in the viewports)
 		.SelfActor_Lambda([this]() { return InlineTarget.IsValid() ? BangoScriptReferences::GetSelfActor(InlineTarget->GetOwner()) : nullptr; })
 		.Text(FText::FromString(TextShown))
@@ -3888,6 +3899,12 @@ bool SBangoScriptEditor::ApplyScriptText()
 	FBangoGraphDocument Document;
 	if (!Bango::BuildGraph(Text, GetScriptFileLabel(), Document, Error))
 	{
+		FString AsScript;
+		if (IsCondition() && Bango::ConditionExpressionToScript(Text, AsScript))
+		{
+			// Not a mistake: a condition can be one expression. It just has no graph.
+			Error.Message = TEXT("This condition is a single expression, which works as it is (Save keeps it so), but has no graph. To edit it in the graph, write it as 'return <expression>;' (the button in the graph does that).");
+		}
 		SetTextError(Error, true);
 		if (Error.Line > 0)
 		{
@@ -4833,7 +4850,7 @@ void SBangoScriptEditor::CompileQuietly(FString* OutError)
 	CompiledDocument = Document;
 	FBangoProgram Program;
 	FBangoCompileError CompileError;
-	if (!Bango::CompileSource(Text, GetScriptFileLabel(), FBangoModule::Get().GetCommands(), Program, CompileError))
+	if (!CompileOpenScriptText(Text, GetScriptFileLabel(), Program, CompileError))
 	{
 		CompileStatus = ECompileStatus::Error;
 		if (OutError)
@@ -4905,7 +4922,7 @@ FReply SBangoScriptEditor::OnCompileClicked()
 	FBangoProgram Program;
 	FBangoCompileError CompileError;
 	const FString FileName = GetScriptFileLabel();
-	if (Bango::CompileSource(Text, FileName, FBangoModule::Get().GetCommands(), Program, CompileError))
+	if (CompileOpenScriptText(Text, FileName, Program, CompileError))
 	{
 		CompileStatus = NumWarnings == 0 ? ECompileStatus::Good : ECompileStatus::Warning;
 		if (NumWarnings == 0)
@@ -4948,6 +4965,57 @@ FReply SBangoScriptEditor::OnCompileClicked()
 	}
 	Notify(FText::FromString(CompileError.Message), false);
 	return FReply::Handled();
+}
+
+bool SBangoScriptEditor::IsCondition() const
+{
+	return InlineTarget.IsValid() && InlineTarget->IsCondition();
+}
+
+bool SBangoScriptEditor::CompileOpenScriptText(const FString& Text, const FString& FileName, FBangoProgram& OutProgram, FBangoCompileError& OutError) const
+{
+	return IsCondition()
+		? Bango::CompileCondition(Text, FileName, FBangoModule::Get().GetCommands(), OutProgram, OutError)
+		: Bango::CompileSource(Text, FileName, FBangoModule::Get().GetCommands(), OutProgram, OutError);
+}
+
+void SBangoScriptEditor::ShowConditionExpressionMessage()
+{
+	GraphEditor.Reset();
+	GraphHost->SetContent(
+		SNew(SBorder)
+		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+		.Padding(16.0f)
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("ConditionExpression", "This condition is a single expression, so it has no graph to show. It works as it is: edit it in the script text pane (the Source Editor tab on the left).\n\nTo edit it in the graph, write it as a script: 'return <expression>;'."))
+				.AutoWrapText(true)
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.HAlign(HAlign_Left)
+			.Padding(0.0f, 12.0f, 0.0f, 0.0f)
+			[
+				SNew(SButton)
+				.Text(LOCTEXT("ConditionToScript", "Write as 'return ...;'"))
+				.ToolTipText(LOCTEXT("ConditionToScriptTooltip", "Writes the expression as 'return <expression>;', which means the same, and shows it in the graph, as a Return node. It's an unsaved change: Save keeps it."))
+				.OnClicked_Lambda([this]()
+				{
+					FString AsScript;
+					if (TextBox.IsValid() && Bango::ConditionExpressionToScript(TextBox->GetText().ToString(), AsScript))
+					{
+						TextBox->SetText(FText::FromString(AsScript));
+						bTextEdited = true;
+						ApplyScriptText();
+					}
+					return FReply::Handled();
+				})
+			]
+		]);
 }
 
 bool SBangoScriptEditor::IsReadFromFile() const
@@ -5007,6 +5075,12 @@ bool SBangoScriptEditor::Save()
 		bTextEdited = false;
 		bDirty = false;
 		ReloadKeepingView();
+		FString AsScript;
+		if (IsCondition() && Bango::ConditionExpressionToScript(Typed, AsScript))
+		{
+			Notify(FText::Format(LOCTEXT("SavedConditionExpression", "Saved {0}: a condition written as a single expression."), FText::FromString(GetScriptFileLabel())), true);
+			return true;
+		}
 		Notify(FText::Format(LOCTEXT("SavedUnreadable", "Saved {0}, but its text doesn't read as a script, so it can't be shown as a graph (or run) until it's fixed: {1}"),
 			FText::FromString(GetScriptFileLabel()), FText::FromString(ReadError)), false);
 		return true;

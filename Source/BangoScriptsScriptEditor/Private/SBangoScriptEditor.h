@@ -523,6 +523,16 @@ private:
 	FReply OnReloadClicked();
 	/** The open script's text is a .bango file (a linked asset), so the toolbar has Reload rather than Revert. */
 	bool IsReadFromFile() const;
+
+	/** The open script is a condition (an inline script property with `meta = (BangoCondition)`): it's compiled as one. */
+	bool IsCondition() const;
+	/** Compiles Text as the open script is compiled: as a condition (IsCondition) or as a script. */
+	bool CompileOpenScriptText(const FString& Text, const FString& FileName, FBangoProgram& OutProgram, FBangoCompileError& OutError) const;
+	/**
+	 * For a condition written as a single expression, which has no graph: the message where the graph would be, with a
+	 * button that writes it as `return <expression>;` (in the text pane, applied: an unsaved change).
+	 */
+	void ShowConditionExpressionMessage();
 	/** The toolbar: Reload, Compile (with its status icon) and Save, then the Debug dropdown, styled like an asset editor's. */
 	TSharedRef<SWidget> MakeToolbar();
 	FReply OnCompileClicked();

@@ -64,6 +64,12 @@ public:
 		SLATE_ARGUMENT(bool, CompileAsYouType)
 
 		/**
+		 * The text is a condition (an inline script property with `meta = (BangoCondition)`): compiled as you type as
+		 * one (Bango::CompileCondition), so it may be a single expression, and must return true or false.
+		 */
+		SLATE_ATTRIBUTE(bool, Condition)
+
+		/**
 		 * The actor `self` would be in this script (an inline script's actor), or null. While this is the script being
 		 * edited, lines are drawn from it to the actors the script refers to, in the level viewports (BangoScriptReferences).
 		 */
@@ -251,6 +257,7 @@ private:
 	bool bErrorFromOutside = false;
 	TSharedRef<SWidget> MakeErrorPopup();
 	bool bCompileAsYouType = false;
+	TAttribute<bool> Condition;
 	TAttribute<AActor*> SelfActor;
 	/** The text changed since it was last compiled; it's compiled once typing has stopped for the preference's delay. */
 	bool bCompileDirty = false;

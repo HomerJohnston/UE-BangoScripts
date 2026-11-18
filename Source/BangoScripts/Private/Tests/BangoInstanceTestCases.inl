@@ -1000,6 +1000,33 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			}
 		}
 
+		// A single-expression condition written as a script (the graph editor's "Write as 'return ...;'").
+		{
+			struct FToScriptCase { const TCHAR* Source; const TCHAR* Want; };
+			const FToScriptCase ToScriptCases[] = {
+				{ TEXT("true"), TEXT("return true;") },
+				{ TEXT("globalVar1 && globalVar2"), TEXT("return globalVar1 && globalVar2;") },
+				{ TEXT("#set inputs (int _count)\n// enough?\n_count >= 3   // three\n"), TEXT("#set inputs (int _count)\n// enough?\nreturn _count >= 3;   // three\n") },
+				{ TEXT("return true;"), nullptr },             // already a script
+				{ TEXT("Talk(\"x\");\nreturn true;"), nullptr },
+			};
+			for (const FToScriptCase& Case : ToScriptCases)
+			{
+				FString AsScript = TEXT("(untouched)");
+				const bool bConverted = Bango::ConditionExpressionToScript(Case.Source, AsScript);
+				Expect(Case.Want ? (bConverted && AsScript == Case.Want) : (!bConverted && AsScript == TEXT("(untouched)")),
+					*FString::Printf(TEXT("condition to script: %s (got %s)"), Case.Source, bConverted ? *AsScript : TEXT("not converted")));
+				// What it gives compiles as a condition, as the expression did.
+				if (bConverted)
+				{
+					FBangoProgram ConvertedProgram;
+					FBangoCompileError ConvertedError;
+					Expect(Bango::CompileCondition(AsScript, TEXT("cond"), Commands, ConvertedProgram, ConvertedError) && !AsScript.Contains(TEXT("return return")),
+						*FString::Printf(TEXT("condition to script compiles: %s %s"), *AsScript, *ConvertedError.ToString()));
+				}
+			}
+		}
+
 		// A call in the middle of a calculation can't be switched while it's under way, so the switch waits until the
 		// statement it's in has finished.
 		{

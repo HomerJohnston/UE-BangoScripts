@@ -36,6 +36,12 @@ public:
 	UObject* GetOwner() const { return Owner.Get(); }
 
 	/**
+	 * The property is a condition (`meta = (BangoCondition)` on it): its script answers true or false, and the editor
+	 * compiles it as one (Bango::CompileCondition), so it may be a single expression, like `_count > 3`.
+	 */
+	bool IsCondition() const { return bCondition; }
+
+	/**
 	 * Finds the FBangoInlineScript at Path in Owner: property names separated by '.', an array's element as
 	 * `Name[Index]` (after the array's own name, as the details panel writes it), into structs and objects held by
 	 * the object. Null if anything along the way isn't there. OutTopProperty: the object's own property it's in.
@@ -49,6 +55,7 @@ private:
 	TWeakPtr<IPropertyHandle> StructHandle;
 	FString OwnerLabel;
 	FText PropertyLabel;
+	bool bCondition = false;
 };
 
 /**

@@ -60,6 +60,7 @@ FBangoInlineScriptTarget::FBangoInlineScriptTarget(UObject* InOwner, const FStri
 	, StructHandle(InStructHandle)
 	, OwnerLabel(BangoInlineScriptTargetPrivate::LabelOf(InOwner))
 	, PropertyLabel(InPropertyLabel)
+	, bCondition(InStructHandle.IsValid() && InStructHandle->HasMetaData(TEXT("BangoCondition")))
 {
 }
 
