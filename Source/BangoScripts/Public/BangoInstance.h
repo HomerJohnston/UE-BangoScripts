@@ -106,6 +106,13 @@ struct FBangoExecContext
 	 * instance's id. Unset where scripts can't be started (then a spawn stops the script with an error).
 	 */
 	TFunction<bool(const FBangoInstance& Parent, int32 BlockIP, int64& OutId, FString& OutError)> SpawnBlock;
+
+	/**
+	 * Runs `Target call Name(Args)` (spec section 4): the Blueprint function Name of Target's actor, at once. With
+	 * bWantResult, OutResult is what it returned (an error if it returns nothing). False, with OutError, if it can't be
+	 * called. Unset where actors can't be called (then a call stops the script with an error).
+	 */
+	TFunction<bool(const FBangoValue& Target, const FString& Name, const TArray<FBangoValue>& Args, bool bWantResult, FBangoValue& OutResult, FString& OutError)> CallReflected;
 };
 
 /** One function call in progress, for the debugger (FBangoInstance::GetCallStack). */
@@ -305,6 +312,8 @@ private:
 
 	// Calls
 	bool CallCommand(int32 NameIndex, int32 ArgCount, bool bHasTarget, const FBangoExecContext& Context);
+	/** `target call Name(args)`: hands it to Context.CallReflected. */
+	bool CallReflected(int32 NameIndex, int32 ArgCount, bool bWantResult, const FBangoExecContext& Context);
 	bool FinishCommand(EBangoCommandResult Result);
 
 	TSharedPtr<const FBangoProgram> Program;

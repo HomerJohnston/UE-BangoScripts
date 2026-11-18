@@ -49,6 +49,7 @@ enum class EBangoOp : uint8
 	// ---- Calls ----
 	CallFunction,       // A = function, B = argument count.  args... -> [result]
 	CallCommand,        // A = name (command), B = argument count, C = 1 if a target comes first.  [target], args... -> [result]
+	CallReflected,      // A = name (a Blueprint function), B = argument count, C = 1 if its result is used.  target, args... -> [result]
 	Return,             // ends a void function
 	ReturnValue,        // value -> (ends a function, the value goes to the caller)
 	Halt,               // ends the script instance

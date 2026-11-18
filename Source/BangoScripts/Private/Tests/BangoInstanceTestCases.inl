@@ -1120,6 +1120,81 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			}
 		}
 
+		// `target call Name(args)`: handed to the host (Context.CallReflected), which calls the Blueprint function.
+		{
+			TArray<FString> Calls;
+			Context.CallReflected = [&Calls](const FBangoValue& Target, const FString& Name, const TArray<FBangoValue>& Args, bool bWantResult, FBangoValue& OutResult, FString& OutError)
+			{
+				FString Call = Target.GetEntityName() + TEXT(" ") + Name + TEXT("(");
+				for (int32 i = 0; i < Args.Num(); ++i)
+				{
+					Call += (i > 0 ? TEXT(", ") : TEXT("")) + (Args[i].IsNil() ? FString(TEXT("nil")) : Args[i].ToDisplayString());
+				}
+				Calls.Add(Call + (bWantResult ? TEXT(") +result") : TEXT(")")));
+				if (Name == TEXT("Broken"))
+				{
+					OutError = TEXT("'call Broken': it broke.");
+					return false;
+				}
+				OutResult = FBangoValue::MakeInt(5);
+				return true;
+			};
+			struct FCallCase { const TCHAR* Name; const TCHAR* Source; int32 Expected; const TCHAR* ErrorOrCalls; };
+			const FCallCase CallCases[] = {
+				{ TEXT("arguments and a result"), TEXT("@lamp call TurnOn(2, \"x\", nil);\nint _n = @lamp call GetCount() + 1;\nreturn _n == 6;"), 1,
+					TEXT("lamp TurnOn(2, x, nil) | lamp GetCount() +result") },
+				{ TEXT("its result is checked when stored"), TEXT("bool _b = @lamp call GetCount();\nreturn true;"), -1, TEXT("Can't store") },
+				{ TEXT("an error stops it"), TEXT("@lamp call Broken();\nreturn true;"), -1, TEXT("'call Broken': it broke.") },
+				{ TEXT("a nil target"), TEXT("nil call TurnOn();\nreturn true;"), -1, TEXT("'call TurnOn': the target is nil.") },
+			};
+			for (const FCallCase& Case : CallCases)
+			{
+				Calls.Reset();
+				TSharedPtr<FBangoProgram> CallProgram = MakeShared<FBangoProgram>();
+				FBangoCompileError CallError;
+				FString Outcome;
+				int32 Got = -1;
+				if (!Bango::CompileCondition(Case.Source, TEXT("call"), Commands, *CallProgram, CallError))
+				{
+					Outcome = CallError.ToString();
+				}
+				else
+				{
+					FBangoGlobalStore CallGlobals;
+					Context.Globals = &CallGlobals;
+					FBangoInstance Instance;
+					FBangoRuntimeError StartError;
+					if (Instance.Start(CallProgram, Commands, CallGlobals, 1, StartError))
+					{
+						const EBangoConditionResult Result = Instance.FinishCondition(Instance.Resume(Context), Outcome);
+						Got = Result == EBangoConditionResult::True ? 1 : Result == EBangoConditionResult::False ? 0 : -1;
+					}
+					else
+					{
+						Outcome = StartError.ToString();
+					}
+				}
+				const bool bOk = Case.Expected >= 0
+					? Got == Case.Expected && FString::Join(Calls, TEXT(" | ")) == Case.ErrorOrCalls
+					: Got == -1 && Outcome.Contains(Case.ErrorOrCalls);
+				Expect(bOk, *FString::Printf(TEXT("call: %s (got %d: %s; calls: %s)"), Case.Name, Got, *Outcome, *FString::Join(Calls, TEXT(" | "))));
+			}
+			Context.CallReflected = nullptr;
+			{
+				TSharedPtr<FBangoProgram> NoHostProgram = MakeShared<FBangoProgram>();
+				FBangoCompileError NoHostError;
+				FString Outcome;
+				FBangoGlobalStore NoHostGlobals;
+				Context.Globals = &NoHostGlobals;
+				FBangoInstance Instance;
+				FBangoRuntimeError StartError;
+				const bool bRan = Bango::CompileCondition(TEXT("@lamp call TurnOn();\nreturn true;"), TEXT("call"), Commands, *NoHostProgram, NoHostError)
+					&& Instance.Start(NoHostProgram, Commands, NoHostGlobals, 1, StartError)
+					&& Instance.FinishCondition(Instance.Resume(Context), Outcome) == EBangoConditionResult::Error;
+				Expect(bRan && Outcome.Contains(TEXT("Blueprint functions can't be called here")), *(FString(TEXT("call: without a host: ")) + Outcome));
+			}
+		}
+
 		// A single-expression condition written as a script (the graph editor's "Write as 'return ...;'").
 		{
 			struct FToScriptCase { const TCHAR* Source; const TCHAR* Want; };

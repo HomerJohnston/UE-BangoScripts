@@ -7,9 +7,11 @@
 #include "BangoBlueprintLibrary.h"
 #include "BangoBuiltinCommands.h"
 #include "BangoCompiler.h"
+#include "BangoCallTestObject.h"
 #include "BangoConditions.h"
 #include "BangoInlineScript.h"
 #include "BangoInputsSignature.h"
+#include "BangoReflectedCall.h"
 #include "BangoInstance.h"
 #include "BangoLocalization.h"
 #include "BangoScriptAsset.h"
@@ -404,6 +406,66 @@ bool FBangoModuleTest::RunTest(const FString& Parameters)
 	OfClass.Source = TEXT("Sleep(_a + _b);");
 	OfClass.UseInputsSignature(Asset, TEXT("BangoTests.Asset"));
 	TestTrue(TEXT("signature: an instance uses its class's"), Module.GetInlineProgram(OfClass, TEXT("Test (inline script)"), InlineProgram, Error) && InlineProgram->Params.Num() == 2);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoCallTest, "Bango.Game.Call",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FBangoCallTest::RunTest(const FString& Parameters)
+{
+	// `target call Name(args)`: Bango::CallBangoCallableOn, what CallBangoCallable does once it has found the actor.
+	UBangoCallTestObject* Object = NewObject<UBangoCallTestObject>();
+	const FString Target = TEXT("@lamp (BangoCallTestObject)");
+	FBangoValue Result;
+	FString Error;
+
+	TestTrue(TEXT("call: arguments"), Bango::CallBangoCallableOn(Object, Target, nullptr, TEXT("TurnOn"),
+		{ FBangoValue::MakeInt(2), FBangoValue::MakeBool(true) }, false, Result, Error));
+	TestTrue(TEXT("call: arguments arrived"), FMath::IsNearlyEqual(Object->LastBrightness, 2.0f) && Object->bLastFade);
+	TestTrue(TEXT("call: a result"), Bango::CallBangoCallableOn(Object, Target, nullptr, TEXT("GetCount"), {}, true, Result, Error)
+		&& Result.GetType() == FBangoType::Int() && Result.GetInt() == 5);
+	TestTrue(TEXT("call: a name, a vector, an int, and a string result; under 'Bango|'"), Bango::CallBangoCallableOn(Object, Target, nullptr, TEXT("Describe"),
+		{ FBangoValue::MakeString(TEXT("hi")), FBangoValue::MakeVector3(1, 2, 3), FBangoValue::MakeInt(4) }, true, Result, Error)
+		&& Result.GetType() == FBangoType::String() && Result.GetString() == TEXT("hi 1,2,3 x4"));
+	if (!Error.IsEmpty())
+	{
+		AddError(Error);
+	}
+
+	struct FBadCall { const TCHAR* What; const TCHAR* Name; TArray<FBangoValue> Args; bool bWantResult; const TCHAR* ErrorContains; };
+	const FBadCall BadCalls[] = {
+		{ TEXT("not there"), TEXT("TurnOff"), {}, false, TEXT("@lamp (BangoCallTestObject) has no Blueprint function named 'TurnOff'") },
+		{ TEXT("the wrong case"), TEXT("turnOn"), {}, false, TEXT("Did you mean 'TurnOn'? Names are case-sensitive.") },
+		{ TEXT("not in the Bango category"), TEXT("NotForBango"), {}, false, TEXT("isn't in the Bango category") },
+		{ TEXT("the wrong count"), TEXT("TurnOn"), { FBangoValue::MakeInt(1) }, false, TEXT("it takes 2 argument(s), but 1 were given: TurnOn(float Brightness, bool Fade)") },
+		{ TEXT("the wrong type"), TEXT("TurnOn"), { FBangoValue::MakeString(TEXT("x")), FBangoValue::MakeBool(true) }, false, TEXT("'Brightness' takes: float. This is: string.") },
+		{ TEXT("nil for a number"), TEXT("TurnOn"), { FBangoValue::MakeNil(FBangoType::Double()), FBangoValue::MakeBool(true) }, false, TEXT("'Brightness' (float) can't be nil.") },
+		{ TEXT("no result"), TEXT("TurnOn"), { FBangoValue::MakeInt(1), FBangoValue::MakeBool(false) }, true, TEXT("it doesn't return a value") },
+		{ TEXT("two results"), TEXT("GetTwo"), {}, true, TEXT("it returns 2 values") },
+		{ TEXT("a type Bango doesn't have"), TEXT("TakeArray"), { FBangoValue::MakeInt(1) }, false, TEXT("which Bango has no type for") },
+	};
+	for (const FBadCall& Bad : BadCalls)
+	{
+		FString BadError;
+		TestFalse(FString::Printf(TEXT("call: %s"), Bad.What), Bango::CallBangoCallableOn(Object, Target, nullptr, Bad.Name, Bad.Args, Bad.bWantResult, Result, BadError));
+		TestTrue(FString::Printf(TEXT("call: %s: the error (%s)"), Bad.What, *BadError), BadError.Contains(Bad.ErrorContains, ESearchCase::CaseSensitive));
+	}
+	FString GetTwoError;
+	TestTrue(TEXT("call: two results, unused"), Bango::CallBangoCallableOn(Object, Target, nullptr, TEXT("GetTwo"), {}, false, Result, GetTwoError));
+
+	TArray<Bango::FBangoCallableFunction> Callable;
+	Bango::GetBangoCallableFunctions(UBangoCallTestObject::StaticClass(), Callable);
+	TArray<FString> Names;
+	for (const Bango::FBangoCallableFunction& Function : Callable)
+	{
+		Names.Add(Function.Name);
+	}
+	Names.Sort();
+	TestEqual(TEXT("call: the callable functions"), FString::Join(Names, TEXT(" ")), FString(TEXT("Describe GetCount GetTwo TakeArray TurnOn")));
+	const Bango::FBangoCallableFunction* DescribeFunction = Callable.FindByPredicate([](const Bango::FBangoCallableFunction& F) { return F.Name == TEXT("Describe"); });
+	TestTrue(TEXT("call: a callable function's signature"), DescribeFunction && DescribeFunction->bHasResult && DescribeFunction->ResultType == FBangoType::String()
+		&& DescribeFunction->Signature == TEXT("Describe(string Label, vector3 Where, int Times) -> string"));
 	return true;
 }
 

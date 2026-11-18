@@ -186,6 +186,7 @@ void FBangoCompletion::GetKeywordItems(TArray<FBangoCompletionItem>& OutItems, b
 		{ TEXT("goto"),     TEXT("jump"),        TEXT("goto Name; jumps to a label."), false },
 		{ TEXT("global"),   TEXT("declaration"), TEXT("global int stage; declares a global, at the top of the file."), false },
 		{ TEXT("scriptVar"), TEXT("declaration"), TEXT("scriptVar int _count = 0; declares a script variable with a fixed starting value, at the top of the script or function."), false },
+		{ TEXT("call"),     TEXT("call"),        TEXT("@light call TurnOn(); calls a Blueprint function of an actor: one in the category 'Bango', named exactly as written."), false },
 		{ TEXT("function"), TEXT("declaration"), TEXT("function int AddScore(int _amount) { ... } defines a function, at the top level."), false },
 		{ TEXT("bool"),     TEXT("type"),        TEXT("true or false."), false },
 		{ TEXT("int"),      TEXT("type"),        TEXT("A whole number."), false },

@@ -83,6 +83,8 @@ namespace BangoProgramPrivate
 			return FString::Printf(TEXT("%s %d"), Program.Functions.IsValidIndex(I.A) ? *Program.Functions[I.A].Name : TEXT("<bad function>"), I.B);
 		case EBangoOp::CallCommand:
 			return FString::Printf(TEXT("%s %d%s"), Program.Names.IsValidIndex(I.A) ? *Program.Names[I.A] : TEXT("<bad name>"), I.B, I.C ? TEXT(" +target") : TEXT(""));
+		case EBangoOp::CallReflected:
+			return FString::Printf(TEXT("%s %d%s"), Program.Names.IsValidIndex(I.A) ? *Program.Names[I.A] : TEXT("<bad name>"), I.B, I.C ? TEXT(" +result") : TEXT(""));
 		case EBangoOp::ArrayModify:
 			return FString::Printf(TEXT("%s %s%s"), *DescribePlace(Program, Function, I.A), ArrayModifyName(I.B), I.C ? TEXT(" +result") : TEXT(""));
 		case EBangoOp::ForEachNext:
@@ -131,6 +133,7 @@ namespace Bango
 		case EBangoOp::JumpIfTrueOrPop:    return TEXT("JumpIfTrueOrPop");
 		case EBangoOp::CallFunction:       return TEXT("CallFunction");
 		case EBangoOp::CallCommand:        return TEXT("CallCommand");
+		case EBangoOp::CallReflected:      return TEXT("CallReflected");
 		case EBangoOp::Return:             return TEXT("Return");
 		case EBangoOp::ReturnValue:        return TEXT("ReturnValue");
 		case EBangoOp::Halt:               return TEXT("Halt");

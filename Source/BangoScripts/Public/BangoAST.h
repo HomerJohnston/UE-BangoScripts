@@ -208,6 +208,13 @@ struct FBangoCallExpr : FBangoExpr
 	FString Name;
 	FBangoSourceLocation NameLoc;
 	TArray<FBangoExprPtr> Args;
+	/**
+	 * `target call Name(args)`: Name is a Blueprint function of the target's actor, found and called by reflection
+	 * when it runs (spec section 4, call), not a command. Always has a target.
+	 */
+	bool bReflect = false;
+	/** For a reflection call: where `call` is. */
+	FBangoSourceLocation CallLoc;
 };
 
 /** A vector's part: `_pos.x`, `_path[2].y`, `_who GetPos().z`. */

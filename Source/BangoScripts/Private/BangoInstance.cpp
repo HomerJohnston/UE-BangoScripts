@@ -1122,6 +1122,45 @@ bool FBangoInstance::BinaryOp(EBangoOp Op)
 	return true;
 }
 
+bool FBangoInstance::CallReflected(int32 NameIndex, int32 ArgCount, bool bWantResult, const FBangoExecContext& Context)
+{
+	if (!Program->Names.IsValidIndex(NameIndex) || ArgCount < 0)
+	{
+		return RuntimeFail(TEXT("Internal error: bad call."));
+	}
+	TArray<FBangoValue> Args;
+	Args.SetNum(ArgCount);
+	for (int32 i = ArgCount - 1; i >= 0; --i)
+	{
+		Args[i] = PopValue();
+	}
+	const FBangoValue Target = PopValue();
+	if (Status == EBangoInstanceStatus::Failed)
+	{
+		return false;
+	}
+	const FString& Name = Program->Names[NameIndex];
+	if (Target.IsNil())
+	{
+		return RuntimeFail(FString::Printf(TEXT("'call %s': the target is nil."), *Name));
+	}
+	if (!Context.CallReflected)
+	{
+		return RuntimeFail(FString::Printf(TEXT("'call %s': Blueprint functions can't be called here."), *Name));
+	}
+	FBangoValue Result;
+	FString CallError;
+	if (!Context.CallReflected(Target, Name, Args, bWantResult, Result, CallError))
+	{
+		return RuntimeFail(CallError);
+	}
+	if (bWantResult)
+	{
+		Stack.Add(MoveTemp(Result));
+	}
+	return true;
+}
+
 bool FBangoInstance::CallCommand(int32 NameIndex, int32 ArgCount, bool bHasTarget, const FBangoExecContext& Context)
 {
 	const FBangoCommand* Command = BoundCommands.IsValidIndex(NameIndex) ? BoundCommands[NameIndex] : nullptr;
@@ -1678,6 +1717,10 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 
 		case EBangoOp::CallCommand:
 			CallCommand(I.A, I.B, I.C != 0, Context);
+			break;
+
+		case EBangoOp::CallReflected:
+			CallReflected(I.A, I.B, I.C != 0, Context);
 			break;
 
 		case EBangoOp::Return:

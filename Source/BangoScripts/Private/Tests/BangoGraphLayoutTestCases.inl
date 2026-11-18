@@ -52,6 +52,9 @@ struct FBangoLayoutTestCase
 static const FBangoLayoutTestCase GBangoLayoutTestCases[] =
 {
 	// ---- Commands ----
+	// `target call Name(args)`: a Blueprint function, so its arguments are just values.
+	{ EBangoGraphNodeKind::Call, false, TEXT("@light call SetLevel(2, true)"), TEXT("call SetLevel (Command) | Target <entity>: `@light` | Value 1 <any>: `2`? | Value 2 <any>: `true`?") },
+	{ EBangoGraphNodeKind::Call, false, TEXT("_lamp call TurnOn()"), TEXT("call TurnOn (Command) | Target <entity>: `_lamp`") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("Sleep(1.0)"), TEXT("Sleep (Command) | seconds <float>: `1.0`?") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("Sleep( 1.0 )"), TEXT("Sleep (Command) | seconds <float>: `1.0`?") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("Talk(\"{0} of {1}\", _a, Random(1.0, 2.0))"), TEXT("Talk (Command) | text <string>: `\"{0} of {1}\"` | {0} <any>: `_a`? | {1} <any>: `Random(1.0, 2.0)`?") },

@@ -327,6 +327,20 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 	{ TEXT("a local's computed value"), TEXT("int _a = 1;\nint _x = _a + 1;"), TEXT("*"), nullptr, nullptr },
 	{ TEXT("forEach variable shadows"), TEXT("int _x = 1;\nint[] _a = [];\nforEach (_x in _a)\n{\n};"), nullptr, TEXT("(3:1)"), TEXT("already declared") },
 	{ TEXT("loop variable after its loop"), TEXT("for (int _i = 0; _i < 2; _i++)\n{\n\tTalk(\"x\");\n};\n_i = 2;"), nullptr, TEXT("(5:1)"), TEXT("'_i' is the variable of the loop on line 1") },
+	// `target call Name(args)`: the Blueprint function is found when it runs; its result's type is known then.
+	{ TEXT("call: a statement and a result"), TEXT("@light call TurnOn(2, \"x\", nil);\nint _n = @light call GetCount();"),
+		TEXT("function <main>:\n")
+		TEXT("  0 PushConst @light\n")
+		TEXT("  1 PushConst 2\n")
+		TEXT("  2 PushConst \"x\"\n")
+		TEXT("  3 PushNil entity\n")
+		TEXT("  4 CallReflected TurnOn 3\n")
+		TEXT("  5 PushConst @light\n")
+		TEXT("  6 CallReflected GetCount 0 +result\n")
+		TEXT("  7 StorePlace _n\n")
+		TEXT("  8 Halt\n"),
+		nullptr, nullptr },
+	{ TEXT("call: the target must be an entity"), TEXT("5 call TurnOn();"), nullptr, TEXT("(1:1)"), TEXT("The target of 'call TurnOn'") },
 	{ TEXT("global with a default"), TEXT("global int a = 1;\nglobal string[] b = [\"x\"];\nglobal entity c = @john;\nglobal bool d = nil;"), TEXT("*"), nullptr, nullptr },
 	{ TEXT("global with a computed default"), TEXT("global int a = 1 + 2;"), nullptr, TEXT("(1:18)"), TEXT("A global's default must be a fixed value") },
 	{ TEXT("global default of the wrong type"), TEXT("global int a = \"x\";"), nullptr, TEXT("(1:16)"), TEXT("must be an int") },

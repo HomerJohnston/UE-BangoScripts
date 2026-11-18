@@ -389,6 +389,34 @@ namespace BangoGraphLayoutPrivate
 
 		const int32 TargetBegin = 0;
 
+		if (Call->bReflect)
+		{
+			// `target call Name(args)`: a Blueprint function, only known when it runs, so its arguments are just values.
+			const int32 CallTok = NameTok - 1;
+			if (CallTok <= TargetBegin || !Tok.Is(CallTok, EBangoTokenKind::KwCall))
+			{
+				return false;
+			}
+			Out.Style = EBangoNodeStyle::Command;
+			Out.Title = FString::Printf(TEXT("call %s"), *Call->Name);
+			Out.CategoryName = TEXT("Blueprint");
+			Out.Description = FString::Printf(TEXT("Calls the Blueprint function '%s' of the target's actor when it runs. It must be in the category 'Bango', named exactly '%s'."),
+				*Call->Name, *Call->Name);
+			FBangoNodeField Target = Tok.Field(TEXT("Target"), TEXT("entity"), TargetBegin, CallTok);
+			Target.OuterEnd = Tok.StartOf(CallTok); // with the space before 'call'
+			Target.InsertSuffix = TEXT(" ");
+			Out.Fields.Add(Target);
+			const TArray<TPair<int32, int32>> Args = Tok.Split(NameTok + 2, CloseTok, EBangoTokenKind::Comma, /*bEmptyIsNone*/ true);
+			for (int32 i = 0; i < Args.Num(); ++i)
+			{
+				FBangoNodeField Field = Tok.Field(FString::Printf(TEXT("Value %d"), i + 1), TEXT("any"), Args[i].Key, Args[i].Value);
+				Field.bOptional = true;
+				SetArgumentEdits(Tok, Field, Args, i, NameTok);
+				Out.Fields.Add(Field);
+			}
+			return true;
+		}
+
 		FCallee Callee;
 		if (!FindCallee(Call->Name, Context, Callee))
 		{

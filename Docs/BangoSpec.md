@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.65)
+# Bango Language Spec (draft v0.66)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.66:** **`target call Name(args)`** calls a Blueprint function of an actor: `@light call TurnOn();`, `float _b = @light call GetBrightness();`. The function must be in the category **Bango** (or under it, like `Bango|Lights`), named exactly as written (case-sensitive, so a name with spaces or other characters can't be called), and its parameters and result must be types Bango has. It's found when the script runs, so a missing function, a wrong argument count or type, or a result of the wrong type stops the script with an error naming the actor and its class. `call` is a keyword and needs a target. Packaged games don't check the category (Unreal keeps categories only in the editor). The graph shows a `call` as its own node (section 7, Calling Blueprint functions).
 
 **Changes in v0.65:** **inputs signatures**: a C++ class can give its inline scripts their inputs, so a designer doesn't write an `#inputs` line. The class registers a named list of inputs in its constructor, for its templates (`Bango::RegisterInputsSignature(this, "Activation", { { "entity _trigger", "The trigger itself." }, ... })`), and points a property at it (`ActivatedScript.UseInputsSignature(this, "Activation")`). The script reads `_trigger` and the others as parameters, can't have an `#inputs` line, and its owner passes their values in order. Input names should start with `_` (one that doesn't is reported, but works). The editor knows them: autocomplete (with their descriptions), colouring, errors as you type, the SCRIPT INPUTS list and the Script Start node (section 15, Inputs signatures). `Bango::RegisterCondition` and `FBangoModule::GetInlineProgram` take the `FBangoInlineScript` instead of its text. The keyword list no longer has `inputs` (it stopped being one in v0.64).
 
@@ -380,7 +382,7 @@ WriteScreen(ToString(NSLOCTEXT("Shared.UI", "Continue", "Continue")));
 - **Names are case-sensitive**: `john` and `John` are different names. This covers variables, globals, functions, labels, commands, keywords, type names and Bango ID names (`@john` and `@John` are different actors).
 - Calling a command or function with the wrong capitalisation is a compile error that suggests the right name: *"Unknown command or function 'writeScreen'. Did you mean 'WriteScreen'? Names are case-sensitive."*
 - A name is letters, digits and `_`, and doesn't start with a digit.
-- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn switch case default break continue return label goto function global scriptVar player self true false nil bool int float string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
+- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn switch case default break continue return label goto function global scriptVar call player self true false nil bool int float string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
 
 ### Locals and script variables
 A graph (the main script, or a function) has two kinds of variables of its own, besides its parameters and loop variables. Both only exist inside the running script instance.
@@ -675,6 +677,29 @@ _t = Random(3.0, 5.0);
 - A latent command keeps its pending state (e.g. Sleep's remaining seconds) as Bango values, so a script paused on it can be saved and loaded.
 - A command that fails stops the script with the command's name and reason, e.g. `RandomInt: Min (5) is greater than Max (1).`
 - If a script calls a command that isn't registered or has no implementation in the running game, the script fails when it's spawned, not when it reaches the call.
+
+### Calling Blueprint functions (`call`)
+`target call Name(args)` calls a Blueprint function of the target's actor, by reflection, without a C++ command for it:
+
+```
+@light call TurnOn();
+@light call SetBrightness(0.4, true);
+self call Reset();
+float _b = @light call GetBrightness();
+if (@door call IsLocked()) { ... }
+```
+
+- **Which functions:** any function the actor's class (or a parent) can call from Blueprint, a Blueprint function or a `BlueprintCallable` C++ one, that is:
+  - in the category **`Bango`**, or under it (`Bango|Lights`). A function in another category can't be called: give the class a function in the Bango category that calls it. Unreal keeps function categories only in the editor, so **a packaged game doesn't check this**: a script calling anything else fails while it's made and tested in the editor.
+  - **named exactly as written**, case-sensitive. A name with spaces or other characters Bango names can't have (`Toggle Light`) can't be called; the error says so, and suggests the right name when only the capitalisation (or such characters) differs.
+  - not latent (it can't wait).
+- **`call` is a keyword**, and needs a target: `call TurnOn();` is a compile error. The target is an entity (`@id`, a variable, `self`, `player`); it must name an actor when the line runs. `call` and the name must be on the target's line.
+- **Arguments** go in order, one for each of the function's inputs, converted when it runs: `bool`; `int` (an integer, a byte or an enum); `float` (an int or a float, for a float or double); `string` (for a string or a name); `text` (or a string, for a text); `vector3` / `vector2` (for an `FVector` / `FVector2D`); and `entity` for an actor (of the parameter's class; `nil` for none). The wrong number of arguments, or one that doesn't fit, stops the script with the function's signature.
+- **Its result**, where one is needed, is the function's return value, or its only output (a Blueprint function's outputs). It's converted back the same way: an actor becomes its Bango ID (or `player`), `nil` for none; an actor without one is an error. Its type is only known when it runs, like an undeclared global's (section 4): it's checked where it's used, so `bool _b = @light call GetCount();` stops the script. A function that returns nothing, or more than one value, can't be used where a value is needed; on a line of its own its result is ignored.
+- The compiler only checks the syntax and the argument expressions: the function itself is found **when the line runs**, since a script doesn't know its target's class. A missing function, a wrong argument, or a function outside the Bango category stops the script with an error naming the actor and its class: *"'call TurnOff': @light (BP_Light) has no Blueprint function named 'TurnOff'."*
+- It runs at once, like a command that doesn't wait.
+- In the graph, a `call` is its own node, titled `call Name`, with the Target and one field per argument (Value 1, Value 2, ...).
+- *Coming next:* the editor checks a `call` whose target is an `@id` it can find in the open level, and offers that actor's Bango functions in autocomplete.
 
 ### Text formatting
 Strings and texts use the same placeholders, Unreal's: `{0}`, `{1}`, ..., with a backtick escaping the next character (`` `{ `` is a literal `{`, ``` `` ``` a backtick). `%` is just a character.
@@ -1496,7 +1521,7 @@ Scripts become assets: a **Bango Script** asset (`UBangoScriptAsset`, a `.uasset
 An **`FBangoInlineScript`** (a struct, usable in C++ and Blueprint) holds a script in a property of any class: `UPROPERTY(EditAnywhere) FBangoInlineScript OnTriggerActivation;`. It's for small scripts that belong to one thing, usually a line or two: `Sleep(4); player AddItem("Pistol"); WriteScreen("You got a pistol!");`. It can start with a `#inputs (...)` line, whose values its spawner passes, in order.
 
 - **In the details panel**, it's a box to type the script in, with the script text pane's colours and autocomplete. It grows with the script up to about ten lines, then scrolls. What's typed is applied when the box loses focus, as one undoable change (for every selected object). With several objects selected whose scripts differ, it says **Multiple Values** and can't be typed in.
-- The **Edit** button (an icon over the box's top-right corner, 75% opaque, with a background only while hovered) opens the full graph editor on the script, in a **window of its own**, titled with the object and the property ("Door 1: On Opened", with a `*` while it has unsaved changes). **Save** there writes the property, as one undoable change; closing the window asks about unsaved changes. While the window is open, the property's box can't be typed in: it's darkened, with **Editor open. Click Edit to focus it.** over it in yellow, and the Edit button brings the window to the front instead. Each property has at most one window. Edit needs a single selected object.
+- The **Edit** button (an icon over the box's top-right corner, 75% opaque, or 5% while the box has keyboard focus so it doesn't hide the text being typed, unless it's hovered; with a background only while hovered) opens the full graph editor on the script, in a **window of its own**, titled with the object and the property ("Door 1: On Opened", with a `*` while it has unsaved changes). **Save** there writes the property, as one undoable change; closing the window asks about unsaved changes. While the window is open, the property's box can't be typed in: it's darkened, with **Editor open. Click Edit to focus it.** over it in yellow, and the Edit button brings the window to the front instead. Each property has at most one window. Edit needs a single selected object.
 - A change made to the property elsewhere while its window is open (undo, paste, Reset to Default) is treated as an outside change to a file: with no unsaved changes, the window reloads it; otherwise a bar offers Reload or Keep Mine, and Save asks before overwriting it.
 - Saving from the graph editor writes the script in the saved layout, as for any script: compact unless it has `#USES_GRAPH_EDITOR`, in full (with section headings and node metadata) if it does (section 12). Inline scripts have no `.bango` file to link.
 - **A script with node metadata isn't typed in its box**: it's laid out for the graph, so it's edited in the window. The box shows it without its metadata, read-only, with a note centred at its bottom (clear of its scrollbars): **Has graph layout**, whose tooltip says to click Edit for the full editor, or right-click > Make Editable Inline to remove the layout. Clicking the box makes the note flash yellow twice, so it's seen (selecting and copying text still work). **Make Editable Inline**, on the box's right-click menu, asks first (*"This action will remove all node metadata. The graph representation of this script will lose all layout information. Proceed?"*, Yes / Cancel), then writes the script compact (no metadata, no section headings, no `#USES_GRAPH_EDITOR` line), as one undoable change, and the box can be typed in. A script that doesn't read only has those taken off, line by line. It's also offered for a script with only the `#USES_GRAPH_EDITOR` line.

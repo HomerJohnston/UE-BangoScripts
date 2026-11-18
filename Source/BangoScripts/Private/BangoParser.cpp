@@ -1918,6 +1918,28 @@ namespace BangoParserPrivate
 					MemberExpr->MemberLoc = PartToken.Loc;
 					Expr = MoveTemp(MemberExpr);
 				}
+				else if (Check(EBangoTokenKind::KwCall) && Cur().Loc.Line == Previous().Loc.Line)
+				{
+					// `Target call Name(args)`: a Blueprint function on the target's actor.
+					const FBangoSourceLocation TargetLoc = Expr->Loc;
+					const FBangoSourceLocation CallLoc = Advance().Loc;
+					if (!Check(EBangoTokenKind::Identifier) || Ahead(1).Kind != EBangoTokenKind::LParen || Cur().Loc.Line != CallLoc.Line)
+					{
+						Fail(Check(EBangoTokenKind::EndOfFile) ? CallLoc : Cur().Loc,
+							TEXT("After 'call', write the Blueprint function's name and its arguments: @light call TurnOn();"));
+						return nullptr;
+					}
+					TUniquePtr<FBangoCallExpr> Call = ParseCall();
+					if (!Call)
+					{
+						return nullptr;
+					}
+					Call->Loc = TargetLoc;
+					Call->Target = MoveTemp(Expr);
+					Call->bReflect = true;
+					Call->CallLoc = CallLoc;
+					Expr = MoveTemp(Call);
+				}
 				else if (Check(EBangoTokenKind::Identifier) && Ahead(1).Kind == EBangoTokenKind::LParen
 					&& Cur().Loc.Line == Previous().Loc.Line)
 				{
@@ -2129,6 +2151,11 @@ namespace BangoParserPrivate
 				break;
 			}
 
+			if (Token.Kind == EBangoTokenKind::KwCall)
+			{
+				Fail(Token.Loc, TEXT("'call' needs a target in front of it, the actor whose Blueprint function it calls: @light call TurnOn(); (or self call TurnOn();)"));
+				return nullptr;
+			}
 			if (IsTypeKeyword(Token.Kind) || Token.Kind == EBangoTokenKind::KwGlobal || Token.Kind == EBangoTokenKind::KwScriptVar)
 			{
 				Fail(Token.Loc, TEXT("A declaration must be a statement on its own line, like 'int _x = 5;'."));

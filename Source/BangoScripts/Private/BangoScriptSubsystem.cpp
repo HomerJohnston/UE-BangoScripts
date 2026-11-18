@@ -7,6 +7,7 @@
 #include "BangoCompiler.h"
 #include "BangoGlobalsSubsystem.h"
 #include "BangoInputsSignature.h"
+#include "BangoReflectedCall.h"
 #include "BangoIDActorComponent.h"
 #include "BangoLevelStartScript.h"
 #include "EngineUtils.h"
@@ -155,6 +156,10 @@ bool UBangoScriptSubsystem::MakeContext(float DeltaSeconds, FBangoExecContext& O
 	OutContext.SpawnBlock = [this](const FBangoInstance& Parent, int32 BlockIP, int64& OutId, FString& OutError)
 	{
 		return StartSpawnBlock(Parent, BlockIP, OutId, OutError);
+	};
+	OutContext.CallReflected = [this](const FBangoValue& Target, const FString& Name, const TArray<FBangoValue>& Args, bool bWantResult, FBangoValue& OutResult, FString& OutError)
+	{
+		return Bango::CallBangoCallable(this, Target, Name, Args, bWantResult, OutResult, OutError);
 	};
 	return true;
 }

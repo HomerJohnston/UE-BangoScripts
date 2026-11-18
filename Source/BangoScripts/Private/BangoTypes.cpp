@@ -835,7 +835,7 @@ namespace Bango
 			TEXT("break"), TEXT("continue"), TEXT("return"), TEXT("label"), TEXT("goto"),
 			TEXT("function"), TEXT("global"), TEXT("scriptVar"), TEXT("true"), TEXT("false"), TEXT("nil"),
 			TEXT("bool"), TEXT("int"), TEXT("float"), TEXT("string"), TEXT("entity"), TEXT("void"),
-			TEXT("text"), TEXT("vector2"), TEXT("vector3"), TEXT("IsNil"), TEXT("player"), TEXT("self"),
+			TEXT("text"), TEXT("vector2"), TEXT("vector3"), TEXT("IsNil"), TEXT("call"), TEXT("player"), TEXT("self"),
 			TEXT("LOCTEXT"), TEXT("NSLOCTEXT"), TEXT("NOTELOCTEXT"), TEXT("NSNOTELOCTEXT"), TEXT("INVTEXT"),
 		};
 		for (const TCHAR* Word : Words)

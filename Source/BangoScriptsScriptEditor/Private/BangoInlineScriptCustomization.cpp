@@ -33,10 +33,11 @@ namespace BangoInlineScriptCustomizationPrivate
 	/** While the script's window is open: the box is darkened by this much, and the note over it is this colour. */
 	constexpr float LockedDim = 0.75f;
 	const FLinearColor LockedNoteColor(1.0f, 0.85f, 0.0f);
-	/** The Edit button over the box's top-right corner is this opaque. */
+	/** The Edit button over the box's top-right corner is this opaque, and this opaque while the box is being typed in (unless it's hovered). */
 	constexpr float EditButtonOpacity = 0.75f;
+	constexpr float EditButtonTypingOpacity = 0.10f;
 	/** Its space from the box's top and right edges, and how much further left it sits while the box's scrollbar is shown. */
-	constexpr float EditButtonTop = 3.0f;
+	constexpr float EditButtonTop = 4.0f;
 	constexpr float EditButtonRight = 2.0f;
 	constexpr float EditButtonScrollBarGap = 12.0f;
 	/** The Has graph layout note: how far up from the box's bottom it always sits (more over a scrollbar). */
@@ -232,7 +233,7 @@ public:
 					.Padding(TAttribute<FMargin>::CreateLambda([this]()
 					{
 						const bool bScrollBar = TextBox.IsValid() && TextBox->IsVerticalScrollBarShown();
-						return FMargin(2.0f, EditButtonTop, EditButtonRight + (bScrollBar ? EditButtonScrollBarGap : 0.0f), 2.0f);
+						return FMargin(2.0f, EditButtonTop, EditButtonRight + (bScrollBar ? EditButtonScrollBarGap : 0.0f), 0.0f);
 					}))
 					[
 						SAssignNew(EditButton, SButton)
@@ -276,6 +277,16 @@ public:
 	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override
 	{
 		SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+
+		// The Edit button sits over the text, so it almost disappears while the box has keyboard focus (it comes back
+		// when hovered, to be clicked).
+		if (EditButton.IsValid())
+		{
+			const bool bTyping = TextBox.IsValid() && (TextBox->HasKeyboardFocus() || TextBox->HasFocusedDescendants());
+			EditButton->SetRenderOpacity(bTyping && !EditButton->IsHovered()
+				? BangoInlineScriptCustomizationPrivate::EditButtonTypingOpacity : BangoInlineScriptCustomizationPrivate::EditButtonOpacity);
+		}
+
 		if (!SourceHandle.IsValid() || !SourceHandle->IsValidHandle() || !TextBox.IsValid() || TextBox->HasAnyUserFocusOrFocusedDescendants())
 		{
 			return;

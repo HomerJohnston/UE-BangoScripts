@@ -363,7 +363,7 @@ namespace Bango
 		case EBangoExprKind::Call:
 		{
 			const FBangoCallExpr& E = *Expr.As<FBangoCallExpr>();
-			FString Result = TEXT("(call ");
+			FString Result = E.bReflect ? TEXT("(reflect ") : TEXT("(call ");
 			if (E.Target)
 			{
 				Result += DumpExpr(*E.Target);

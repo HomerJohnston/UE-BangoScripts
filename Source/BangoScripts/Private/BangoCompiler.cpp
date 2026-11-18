@@ -48,7 +48,7 @@ namespace BangoCompilerPrivate
 			switch (Kind)
 			{
 			case ETypeKind::Known:      return Article(Type);
-			case ETypeKind::Unknown:    return TEXT("an undeclared global");
+			case ETypeKind::Unknown:    return TEXT("a value whose type is only known when it runs (an undeclared global, or a 'call')");
 			case ETypeKind::Nil:        return TEXT("nil");
 			case ETypeKind::EmptyArray: return TEXT("an empty array");
 			default:                    return TEXT("nothing (the call doesn't return a value)");
@@ -2953,8 +2953,47 @@ namespace BangoCompilerPrivate
 			return bUnknown ? FExprType::MakeUnknown() : FExprType::MakeKnown(FBangoType::Int());
 		}
 
+		/**
+		 * `target call Name(args)`: a Blueprint function on the target's actor, found and called when it runs. Its
+		 * arguments are converted to the function's parameters then, and its result's type is only known then too.
+		 */
+		bool CompileReflectedCall(const FBangoCallExpr& Call, bool bValueNeeded, FExprType& OutType)
+		{
+			const FBangoType EntityType = FBangoType::Entity();
+			FExprType TargetType;
+			if (!CompileExpr(*Call.Target, &EntityType, TargetType)
+				|| !CanAssign(EntityType, TargetType, Call.Target->Loc, FString::Printf(TEXT("The target of 'call %s'"), *Call.Name)))
+			{
+				return false;
+			}
+			EmitConvertIfNeeded(EntityType, TargetType);
+			for (const FBangoExprPtr& Arg : Call.Args)
+			{
+				// A plain nil fills an actor parameter with none.
+				const FBangoLiteralExpr* Literal = Arg->As<FBangoLiteralExpr>();
+				if (Literal && Literal->LiteralKind == EBangoLiteralKind::Nil)
+				{
+					Emit(EBangoOp::PushNil, AddType(FBangoType::Entity()));
+					continue;
+				}
+				FExprType ArgType;
+				if (!CompileExpr(*Arg, nullptr, ArgType) || !CheckUsableValue(ArgType, Arg->Loc, TEXT("as an argument here")))
+				{
+					return false;
+				}
+			}
+			CurrentLoc = Call.Loc;
+			Emit(EBangoOp::CallReflected, AddName(Call.Name), Call.Args.Num(), bValueNeeded ? 1 : 0);
+			OutType = bValueNeeded ? FExprType::MakeUnknown() : FExprType::MakeVoid();
+			return true;
+		}
+
 		bool CompileCall(const FBangoCallExpr& Call, bool bValueNeeded, FExprType& OutType)
 		{
+			if (Call.bReflect)
+			{
+				return CompileReflectedCall(Call, bValueNeeded, OutType);
+			}
 			if (Bango::IsBuiltinCommandName(Call.Name))
 			{
 				return CompileBuiltin(Call, bValueNeeded, OutType);
