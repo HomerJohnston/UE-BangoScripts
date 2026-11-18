@@ -1008,4 +1008,301 @@ namespace Bango
 		return MakeStringLiteral(TypedTextToString(Typed));
 	}
 
+
+	// ---- Globals declared below the top of the file (HoistLateGlobals) ----
+
+	namespace HoistPrivate
+	{
+		/** Every global declaration in Block (and its blocks), from index From on. */
+		static void CollectGlobalDecls(const FBangoBlock& Block, int32 From, TArray<const FBangoVarDeclStmt*>& Out)
+		{
+			for (int32 i = From; i < Block.Num(); ++i)
+			{
+				const FBangoStmt& Stmt = *Block[i];
+				if (const FBangoVarDeclStmt* Decl = Stmt.As<FBangoVarDeclStmt>())
+				{
+					if (Decl->bGlobal)
+					{
+						Out.Add(Decl);
+					}
+				}
+				else if (const FBangoIfStmt* If = Stmt.As<FBangoIfStmt>())
+				{
+					CollectGlobalDecls(If->Then, 0, Out);
+					CollectGlobalDecls(If->Else, 0, Out);
+				}
+				else if (const FBangoWhileStmt* While = Stmt.As<FBangoWhileStmt>())
+				{
+					CollectGlobalDecls(While->Body, 0, Out);
+				}
+				else if (const FBangoForStmt* For = Stmt.As<FBangoForStmt>())
+				{
+					CollectGlobalDecls(For->Body, 0, Out);
+				}
+				else if (const FBangoForEachStmt* ForEach = Stmt.As<FBangoForEachStmt>())
+				{
+					CollectGlobalDecls(ForEach->Body, 0, Out);
+				}
+				else if (const FBangoSequenceStmt* Sequence = Stmt.As<FBangoSequenceStmt>())
+				{
+					for (const FBangoBlock& SequenceBlock : Sequence->Blocks)
+					{
+						CollectGlobalDecls(SequenceBlock, 0, Out);
+					}
+				}
+				else if (const FBangoSpawnStmt* Spawn = Stmt.As<FBangoSpawnStmt>())
+				{
+					CollectGlobalDecls(Spawn->Body, 0, Out);
+				}
+				else if (const FBangoSwitchStmt* Switch = Stmt.As<FBangoSwitchStmt>())
+				{
+					for (const FBangoSwitchCase& Case : Switch->Cases)
+					{
+						CollectGlobalDecls(Case.Body, 0, Out);
+					}
+					CollectGlobalDecls(Switch->Default, 0, Out);
+				}
+			}
+		}
+
+		/** Where the statement starting at Start ends: just after its ';' (not one in a string). INDEX_NONE if there's none on the line. */
+		static int32 FindStatementEnd(const FString& Line, int32 Start)
+		{
+			bool bInString = false;
+			for (int32 i = Start; i < Line.Len(); ++i)
+			{
+				const TCHAR C = Line[i];
+				if (bInString)
+				{
+					if (C == TEXT('\\'))
+					{
+						++i;
+					}
+					else if (C == TEXT('"'))
+					{
+						bInString = false;
+					}
+				}
+				else if (C == TEXT('"'))
+				{
+					bInString = true;
+				}
+				else if (C == TEXT(';'))
+				{
+					return i + 1;
+				}
+				else if (C == TEXT('/') && i + 1 < Line.Len() && Line[i + 1] == TEXT('/'))
+				{
+					return INDEX_NONE;
+				}
+			}
+			return INDEX_NONE;
+		}
+
+		/** Where the value starts in `global type name = value;` (just after the '='), or INDEX_NONE. */
+		static int32 FindInitStart(const FString& Line, int32 Start, int32 End, const FString& Name)
+		{
+			// The name comes right after the type, so its first appearance from Start is the one being declared.
+			for (int32 At = Start; At + Name.Len() <= End; ++At)
+			{
+				if (Line.Mid(At, Name.Len()) == Name)
+				{
+					for (int32 Eq = At + Name.Len(); Eq < End; ++Eq)
+					{
+						if (Line[Eq] == TEXT('='))
+						{
+							return Eq + 1;
+						}
+					}
+					return INDEX_NONE;
+				}
+			}
+			return INDEX_NONE;
+		}
+	}
+
+	bool HoistLateGlobals(const FString& Source, FString& OutSource, FBangoCompileError& OutError)
+	{
+		using namespace HoistPrivate;
+		OutSource = Source;
+		FBangoScript Script;
+		FBangoCompileError ParseError;
+		if (!ParseScript(Source, TEXT("text"), Script, ParseError))
+		{
+			return true; // nothing to do here: reading the text reports the error
+		}
+
+		// The globals already at the top: the main graph's leading global declarations (after its inputs line, and any
+		// reroutes among them), before its script variables and code.
+		const FBangoBlock& Top = Script.TopLevel;
+		TBangoNameMap<FBangoType> TopGlobals;
+		int32 FirstLate = 0;
+		int32 AnchorLine = 0; // the moved declarations go after the last top global, or above what comes first after them
+		bool bAfterAnchor = true;
+		while (FirstLate < Top.Num())
+		{
+			const FBangoStmt& Stmt = *Top[FirstLate];
+			const FBangoVarDeclStmt* Decl = Stmt.As<FBangoVarDeclStmt>();
+			if (Decl && Decl->bGlobal)
+			{
+				TopGlobals.Add(Decl->Name, Decl->Type);
+				AnchorLine = Decl->Loc.Line;
+			}
+			else if (Stmt.Kind != EBangoStmtKind::Params && Stmt.Kind != EBangoStmtKind::Reroute)
+			{
+				break;
+			}
+			++FirstLate;
+		}
+		TArray<const FBangoVarDeclStmt*> Late;
+		CollectGlobalDecls(Top, FirstLate, Late);
+		for (const TUniquePtr<FBangoFunction>& Function : Script.Functions)
+		{
+			CollectGlobalDecls(Function->Body, 0, Late);
+		}
+		if (Late.Num() == 0)
+		{
+			return true;
+		}
+
+		// The lines, each without its line break (kept apart, so the text keeps its own).
+		TArray<FString> Lines;
+		TArray<FString> Breaks;
+		{
+			int32 Start = 0;
+			for (int32 i = 0; i <= Source.Len(); ++i)
+			{
+				if (i == Source.Len() || Source[i] == TEXT('\n'))
+				{
+					FString Line = Source.Mid(Start, i - Start);
+					FString Break = i < Source.Len() ? FString(TEXT("\n")) : FString();
+					if (Line.Len() > 0 && Line[Line.Len() - 1] == TEXT('\r'))
+					{
+						Line = Line.Left(Line.Len() - 1);
+						Break = FString(TEXT("\r")) + Break;
+					}
+					Lines.Add(Line);
+					Breaks.Add(Break);
+					Start = i + 1;
+				}
+			}
+		}
+
+		if (AnchorLine == 0)
+		{
+			// No globals at the top yet: above the first thing after the inputs line (a script variable, code, or a function).
+			int32 FirstLine = FirstLate < Top.Num() ? Top[FirstLate]->Loc.Line : MAX_int32;
+			for (const TUniquePtr<FBangoFunction>& Function : Script.Functions)
+			{
+				FirstLine = FMath::Min(FirstLine, Function->Loc.Line);
+			}
+			AnchorLine = FirstLine == MAX_int32 ? Lines.Num() : FirstLine;
+			bAfterAnchor = false;
+		}
+		int32 AnchorIndex = AnchorLine - 1;
+		if (!bAfterAnchor)
+		{
+			// Above that line's comment lines too, so they stay its comment bubble. (Comment lines that run up to the top of
+			// the file are its description: then the declarations go just above the line.)
+			int32 Above = AnchorIndex;
+			while (Above > 0 && Lines.IsValidIndex(Above - 1))
+			{
+				const FString Prev = Lines[Above - 1].TrimStartAndEnd();
+				if (!Prev.StartsWith(TEXT("//"), ESearchCase::CaseSensitive) || Prev.StartsWith(TEXT("//@"), ESearchCase::CaseSensitive) || Prev.StartsWith(TEXT("//~"), ESearchCase::CaseSensitive) || Bango::IsSectionHeadingComment(Prev.Mid(2, Prev.Len() - 2)))
+				{
+					break;
+				}
+				--Above;
+			}
+			if (Above > 0)
+			{
+				AnchorIndex = Above;
+			}
+		}
+		int32 InsertIndex = bAfterAnchor ? AnchorIndex + 1 : AnchorIndex;
+		InsertIndex = InsertIndex < 0 ? 0 : (InsertIndex > Lines.Num() ? Lines.Num() : InsertIndex);
+
+		TArray<bool> Keep;
+		Keep.Init(true, Lines.Num());
+		TArray<FString> Inserted; // the moved declarations, in order, at InsertIndex
+		bool bChanged = false;
+		for (const FBangoVarDeclStmt* Decl : Late)
+		{
+			const int32 LineIndex = Decl->Loc.Line - 1;
+			if (!Lines.IsValidIndex(LineIndex))
+			{
+				continue;
+			}
+			if (const FBangoType* Existing = TopGlobals.Find(Decl->Name))
+			{
+				if (*Existing != Decl->Type)
+				{
+					OutError.Line = Decl->Loc.Line;
+					OutError.Column = Decl->Loc.Column;
+					OutError.Message = FString::Printf(TEXT("Global '%s' is declared as %s here, but as %s elsewhere in this script."), *Decl->Name, *Decl->Type.ToString(), *Existing->ToString());
+					return false;
+				}
+			}
+
+			const FString& Line = Lines[LineIndex];
+			const int32 Start = Decl->Loc.Column - 1;
+			const int32 End = FindStatementEnd(Line, Start);
+			if (End == INDEX_NONE)
+			{
+				continue; // not a one-line statement: leave it to the error the text gets anyway
+			}
+			const FString Before = Line.Left(Start);
+			const FString After = Line.Mid(End, Line.Len() - End);
+			if (Decl->Init.IsValid() && Decl->Init->Kind != EBangoExprKind::Empty)
+			{
+				// Split: its value is set where it was, as an assignment.
+				const int32 InitStart = FindInitStart(Line, Start, End, Decl->Name);
+				if (InitStart == INDEX_NONE)
+				{
+					continue;
+				}
+				const FString Value = Line.Mid(InitStart, End - 1 - InitStart).TrimStartAndEnd();
+				Lines[LineIndex] = Before + Decl->Name + TEXT(" = ") + Value + TEXT(";") + After;
+			}
+			else
+			{
+				Keep[LineIndex] = !Before.TrimStartAndEnd().IsEmpty() || !After.TrimStartAndEnd().IsEmpty();
+				if (Keep[LineIndex])
+				{
+					Lines[LineIndex] = Before + After;
+				}
+			}
+			if (!TopGlobals.Find(Decl->Name))
+			{
+				TopGlobals.Add(Decl->Name, Decl->Type);
+				Inserted.Add(FString::Printf(TEXT("global %s %s;"), *Decl->Type.ToString(), *Decl->Name));
+			}
+			bChanged = true;
+		}
+		if (!bChanged)
+		{
+			return true;
+		}
+
+		FString Out;
+		for (int32 i = 0; i <= Lines.Num(); ++i)
+		{
+			if (i == InsertIndex)
+			{
+				for (const FString& Declaration : Inserted)
+				{
+					Out += Declaration;
+					Out += TEXT("\n");
+				}
+			}
+			if (i < Lines.Num() && Keep[i])
+			{
+				Out += Lines[i];
+				Out += Breaks[i];
+			}
+		}
+		OutSource = Out;
+		return true;
+	}
+
 }

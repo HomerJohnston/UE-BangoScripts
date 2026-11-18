@@ -6,7 +6,7 @@ struct FBangoProgram;
 
 /**
  * A condition registered with Bango::RegisterCondition: a script, or one expression, that answers true or false,
- * compiled once and kept until it's unregistered. Check it with UBangoScriptSubsystem::EvaluateBoolCondition.
+ * compiled once and kept until it's unregistered. Check it with UBangoScriptSubsystem::EvaluateCondition.
  */
 struct BANGOSCRIPTS_API FBangoConditionHandle
 {

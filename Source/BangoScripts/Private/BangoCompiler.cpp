@@ -679,9 +679,10 @@ namespace BangoCompilerPrivate
 			CurrentStmt = &Decl;
 			if (Decl.bGlobal)
 			{
-				return Fail(Decl.Loc, bInFunction
-					? FString::Printf(TEXT("Globals are declared at the top of the file, not in a function: move 'global %s %s;' up there, after the #set lines."), *Decl.Type.ToString(), *Decl.Name)
-					: FString::Printf(TEXT("Globals are declared at the top of the file, after the #set lines and before everything else: move 'global %s %s;' up there."), *Decl.Type.ToString(), *Decl.Name));
+				// What's left here if it moves: its value, as an assignment (a value up there would only be a default).
+				const FString Left = Decl.Init.IsValid() ? FString::Printf(TEXT(", and set it here with '%s = ...;'"), *Decl.Name) : FString();
+				return Fail(Decl.Loc, FString::Printf(TEXT("Globals are declared at the top of the file, after the #set lines and before everything else%s: move 'global %s %s;' up there%s. (The script editor's Apply does that for you.)"),
+					bInFunction ? TEXT(", not in a function") : TEXT(""), *Decl.Type.ToString(), *Decl.Name, *Left));
 			}
 			return Fail(Decl.Loc, FString::Printf(TEXT("scriptVar declarations go at the top of their %s, before its code: move 'scriptVar %s %s;' up there. Or drop 'scriptVar' to declare a local here, which exists from here to the end of its block."),
 				bInFunction ? TEXT("function") : TEXT("script"), *Decl.Type.ToString(), *Decl.Name));
@@ -830,9 +831,12 @@ namespace BangoCompilerPrivate
 					{
 						return Fail(Decl->Loc, FString::Printf(TEXT("Global declarations come before the script's scriptVars: move 'global %s %s;' above them."), *Decl->Type.ToString(), *Decl->Name));
 					}
-					if (Decl->Init.IsValid())
+					// A value is a default (used only if the global doesn't exist yet), so it's fixed, like a scriptVar's.
+					if (Decl->Init.IsValid() && !IsFixedValue(*Decl->Init))
 					{
-						return Fail(Decl->Init->Loc, FString::Printf(TEXT("A global declaration can't have a value, since it would reset the global every time the script starts. Declare it here, and set it in the code (%s = ...;)."), *Decl->Name));
+						CurrentStmt = Decl;
+						return Fail(Decl->Init->Loc, FString::Printf(TEXT("A global's default must be a fixed value: a number, a string, true, false, nil, a Bango ID like @john, a text, or an array of those. It's only used if the global doesn't exist yet. To set it to something worked out, declare it here ('global %s %s;') and set it in the code ('%s = ...;')."),
+							*Decl->Type.ToString(), *Decl->Name, *Decl->Name));
 					}
 					if (const int32* Line = GlobalLines.Find(Decl->Name))
 					{
@@ -919,6 +923,15 @@ namespace BangoCompilerPrivate
 				Global.Name = Decl.Name;
 				Global.Type = Decl.Type;
 				Global.Line = Stmt.Loc.Line;
+				if (Decl.Init.IsValid())
+				{
+					CurrentStmt = &Stmt;
+					if (!EvaluateConstant(*Decl.Init, Decl.Type, Decl.Name, Global.Default))
+					{
+						return false;
+					}
+					Global.bHasDefault = true;
+				}
 				Program.Globals.Add(Global);
 				return true;
 			}
@@ -1069,6 +1082,10 @@ namespace BangoCompilerPrivate
 			{
 				for (const FBangoParam& Param : Ast->Params)
 				{
+					if (!CheckNotAGlobal(Param.Name, Param.Loc))
+					{
+						return false;
+					}
 					FLocalVar Var;
 					Var.Name = Param.Name;
 					Var.Type = Param.Type;
@@ -1415,11 +1432,25 @@ namespace BangoCompilerPrivate
 			return nullptr;
 		}
 
+		/** A local, parameter or loop variable can't have the name of a global this file declares: which would it mean? */
+		bool CheckNotAGlobal(const FString& Name, const FBangoSourceLocation& Loc)
+		{
+			if (DeclaredGlobals.Find(Name))
+			{
+				return Fail(Loc, FString::Printf(TEXT("'%s' is a global this file declares, so it can't also be a local, a parameter or a loop's variable here. Rename one of them."), *Name));
+			}
+			return true;
+		}
+
 		bool DeclareLocal(const FString& Name, const FBangoType& Type, const FBangoSourceLocation& Loc, int32& OutSlot)
 		{
 			if (FindLocal(Name))
 			{
 				return Fail(Loc, FString::Printf(TEXT("'%s' is already declared (as a local, a parameter or a loop's variable). Use a different name."), *Name));
+			}
+			if (!CheckNotAGlobal(Name, Loc))
+			{
+				return false;
 			}
 			FLocalVar Var;
 			Var.Name = Name;
@@ -1570,19 +1601,9 @@ namespace BangoCompilerPrivate
 		{
 			if (Decl.bGlobal)
 			{
-				// Globals are declared when the instance starts, and never have a value (CheckDeclarations).
-				if (!Decl.Init)
-				{
-					Emit(EBangoOp::Nop);
-					return true;
-				}
-				FExprType ValueType;
-				if (!CompileExpr(*Decl.Init, &Decl.Type, ValueType)
-					|| !CanAssign(Decl.Type, ValueType, Decl.Init->Loc, FString::Printf(TEXT("Global '%s'"), *Decl.Name)))
-				{
-					return false;
-				}
-				Emit(EBangoOp::StorePlace, AddPlace(EBangoPlaceKind::Global, AddName(Decl.Name), 0));
+				// Globals are declared when the instance starts, which gives one its default if it doesn't exist yet
+				// (FBangoGlobalDecl, checked in CollectGlobals). The line itself does nothing.
+				Emit(EBangoOp::Nop);
 				return true;
 			}
 

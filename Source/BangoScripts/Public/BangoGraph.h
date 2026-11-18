@@ -121,7 +121,10 @@ struct BANGOSCRIPTS_API FBangoGraphDecl
 	/** As written: `int`, `string[]`. */
 	FString Type;
 	FString Name;
-	/** Script variables only: the starting value as written (a fixed value, like `0`, `"hi"` or `[1, 2]`). Globals never have one. */
+	/**
+	 * The value as written (a fixed value, like `0`, `"hi"` or `[1, 2]`): a script variable's starting value, or a
+	 * global's default (given only if the global doesn't exist yet).
+	 */
 	bool bHasValue = false;
 	FString Value;
 	/** From `//` lines above the declaration. Lines are separated by '\n'. */
@@ -251,7 +254,7 @@ namespace Bango
 	 * near the node before them. The global and scriptVar declarations at the top of the file and of each
 	 * function become Globals and ScriptVars (any //@ metadata on them is dropped); locals are Local nodes.
 	 * Fails with a syntax error, if the `//~` lines of disconnected nodes can't be read, if a global or
-	 * scriptVar declaration isn't at the top of its graph, or if a global declaration has a value.
+	 * scriptVar declaration isn't at the top of its graph.
 	 */
 	BANGOSCRIPTS_API bool BuildGraph(const FString& Source, const FString& FileName, FBangoGraphDocument& OutDocument, FBangoCompileError& OutError);
 

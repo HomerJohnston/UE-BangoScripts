@@ -143,22 +143,23 @@ public:
 	 * Runs a condition registered with Bango::RegisterCondition and gives its answer. It runs straight away, to the end,
 	 * in this world, with its globals and actors; Args fill its #set inputs line, if it has one.
 	 *
-	 * Returns true, with the answer in bOutResult, if it ran and returned true or false. Returns false, with the error in
-	 * OutError (and bOutResult false), if the handle isn't registered, its arguments don't fit, it stops with an error, it
-	 * reaches its end without returning, or it calls a command that waits (like Sleep): a condition must answer at once.
-	 * The error isn't shown or logged here, so a caller checking often can say so once (Bango::ReportError shows one).
+	 * Gives True or False if it returned that. Gives Unset, with the reason in OutError, if it read a global that doesn't
+	 * exist or is nil: something not set up yet, which a caller usually treats as false without reporting it. Gives Error,
+	 * with the error in OutError, if the handle isn't registered, its arguments don't fit, it stops with any other error,
+	 * it reaches its end without returning, or it calls a command that waits (like Sleep): a condition must answer at once.
+	 * Nothing is shown or logged here, so a caller checking often can say so once (Bango::ReportError shows one).
 	 *
 	 * Conditions aren't running scripts: they're not listed by the debugger, saved, or reloaded.
 	 */
-	bool EvaluateBoolCondition(FBangoConditionHandle Condition, bool& bOutResult, FString& OutError,
+	EBangoConditionResult EvaluateCondition(FBangoConditionHandle Condition, FString& OutError,
 		const TArray<FBangoValue>& Args = TArray<FBangoValue>());
 
 	/**
-	 * Compiles and runs a condition given as text (see Bango::CompileCondition), as the other EvaluateBoolCondition does.
-	 * Name is what errors show in place of a file name. It's compiled on every call and nothing is kept, so for a condition
-	 * checked often, register it once with Bango::RegisterCondition instead.
+	 * Compiles and runs a condition given as text (see Bango::CompileCondition), as the other EvaluateCondition does
+	 * (Error if it doesn't compile). Name is what errors show in place of a file name. It's compiled on every call and
+	 * nothing is kept, so for a condition checked often, register it once with Bango::RegisterCondition instead.
 	 */
-	bool EvaluateBoolCondition(const FString& Source, bool& bOutResult, FString& OutError,
+	EBangoConditionResult EvaluateCondition(const FString& Source, FString& OutError,
 		const TArray<FBangoValue>& Args = TArray<FBangoValue>(), const FString& Name = TEXT("Condition"));
 
 	/**
@@ -279,8 +280,8 @@ private:
 	/** The last compile error reported for each changed script, so each error is reported once. */
 	TMap<FString, FString> ReloadErrors;
 
-	/** Runs a compiled condition (EvaluateBoolCondition). */
-	bool RunCondition(const TSharedPtr<const FBangoProgram>& Program, const TArray<FBangoValue>& Args, bool& bOutResult, FString& OutError);
+	/** Runs a compiled condition (EvaluateCondition). */
+	EBangoConditionResult RunCondition(const TSharedPtr<const FBangoProgram>& Program, const TArray<FBangoValue>& Args, FString& OutError);
 
 	/** Editor builds: scripts that stopped with an error, newest last, for the debugger (at most MaxEndedScripts). */
 	TArray<FBangoScriptDebugInfo> EndedScripts;

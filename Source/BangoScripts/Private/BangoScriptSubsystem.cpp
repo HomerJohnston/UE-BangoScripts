@@ -422,6 +422,10 @@ bool UBangoScriptSubsystem::ResumeScript(FRunningScript& Script, float DeltaSeco
 		return false;
 	}
 	Script.Instance.Resume(Context);
+	for (const FString& Warning : Script.Instance.TakeWarnings())
+	{
+		Bango::ReportNote(Warning, FColor::Yellow, /*bWarning*/ true); // from switching to a reloaded version
+	}
 	ReportReload(Script);
 	if (Script.Instance.GetStatus() == EBangoInstanceStatus::Failed)
 	{
@@ -665,7 +669,12 @@ FBangoScriptHandle UBangoScriptSubsystem::StartScript(const TSharedPtr<const FBa
 #endif
 	const int32 Id = AllocateId();
 	FBangoRuntimeError StartError;
-	if (!Script->Instance.Start(Program, Module.GetCommands(), Globals->GetStore(), Id, StartError, Args))
+	const bool bStarted = Script->Instance.Start(Program, Module.GetCommands(), Globals->GetStore(), Id, StartError, Args);
+	for (const FString& Warning : Script->Instance.TakeWarnings())
+	{
+		Bango::ReportNote(Warning, FColor::Yellow, /*bWarning*/ true); // a global's default that wasn't used
+	}
+	if (!bStarted)
 	{
 		Report(StartError.ToString());
 		return FBangoScriptHandle();
@@ -686,33 +695,30 @@ FBangoScriptHandle UBangoScriptSubsystem::StartScript(const TSharedPtr<const FBa
 	return Handle;
 }
 
-bool UBangoScriptSubsystem::EvaluateBoolCondition(FBangoConditionHandle Condition, bool& bOutResult, FString& OutError, const TArray<FBangoValue>& Args)
+EBangoConditionResult UBangoScriptSubsystem::EvaluateCondition(FBangoConditionHandle Condition, FString& OutError, const TArray<FBangoValue>& Args)
 {
-	bOutResult = false;
 	const TSharedPtr<const FBangoProgram> Program = Bango::FindCondition(Condition);
 	if (!Program.IsValid())
 	{
 		OutError = FString::Printf(TEXT("Condition %lld isn't registered (or has been unregistered)."), Condition.Id);
-		return false;
+		return EBangoConditionResult::Error;
 	}
-	return RunCondition(Program, Args, bOutResult, OutError);
+	return RunCondition(Program, Args, OutError);
 }
 
-bool UBangoScriptSubsystem::EvaluateBoolCondition(const FString& Source, bool& bOutResult, FString& OutError,
+EBangoConditionResult UBangoScriptSubsystem::EvaluateCondition(const FString& Source, FString& OutError,
 	const TArray<FBangoValue>& Args, const FString& Name)
 {
-	bOutResult = false;
 	TSharedPtr<const FBangoProgram> Program;
 	if (!Bango::CompileConditionProgram(Source, Name, Program, OutError))
 	{
-		return false;
+		return EBangoConditionResult::Error;
 	}
-	return RunCondition(Program, Args, bOutResult, OutError);
+	return RunCondition(Program, Args, OutError);
 }
 
-bool UBangoScriptSubsystem::RunCondition(const TSharedPtr<const FBangoProgram>& Program, const TArray<FBangoValue>& Args, bool& bOutResult, FString& OutError)
+EBangoConditionResult UBangoScriptSubsystem::RunCondition(const TSharedPtr<const FBangoProgram>& Program, const TArray<FBangoValue>& Args, FString& OutError)
 {
-	bOutResult = false;
 	FBangoModule& Module = FBangoModule::Get();
 	const FString& ConditionName = Program->FileName;
 	UBangoGlobalsSubsystem* Globals = UBangoGlobalsSubsystem::Get(this);
@@ -720,7 +726,7 @@ bool UBangoScriptSubsystem::RunCondition(const TSharedPtr<const FBangoProgram>& 
 	if (!Globals || !MakeContext(0.0f, Context))
 	{
 		OutError = FString::Printf(TEXT("Can't check '%s': there is no game instance for global variables."), *ConditionName);
-		return false;
+		return EBangoConditionResult::Error;
 	}
 
 	FBangoInstance Instance;
@@ -728,33 +734,13 @@ bool UBangoScriptSubsystem::RunCondition(const TSharedPtr<const FBangoProgram>& 
 	if (!Instance.Start(Program, Module.GetCommands(), Globals->GetStore(), AllocateId(), StartError, Args))
 	{
 		OutError = StartError.ToString();
-		return false;
+		return EBangoConditionResult::Error;
 	}
-	switch (Instance.Resume(Context))
+	for (const FString& Warning : Instance.TakeWarnings())
 	{
-	case EBangoInstanceStatus::Finished:
-		break;
-	case EBangoInstanceStatus::Waiting:
-	{
-		const FString Command = Instance.GetWaitingCommandName();
-		const FBangoDebugLoc Where = Instance.GetCurrentLocation();
-		Instance.Terminate();
-		OutError = FString::Printf(TEXT("%s(%d:%d): A condition must give its answer straight away, but it called '%s', which waits."),
-			*ConditionName, Where.Line, Where.Column, *Command);
-		return false;
+		Bango::ReportNote(Warning, FColor::Yellow, true);
 	}
-	default:
-		OutError = Instance.GetError().ToString();
-		return false;
-	}
-	const FBangoValue& Result = Instance.GetResult();
-	if (Result.IsNil() || !(Result.GetType() == FBangoType::Bool()))
-	{
-		OutError = FString::Printf(TEXT("%s: the condition didn't return true or false."), *ConditionName);
-		return false;
-	}
-	bOutResult = Result.GetBool();
-	return true;
+	return Instance.FinishCondition(Instance.Resume(Context), OutError);
 }
 
 void UBangoScriptSubsystem::Terminate(FBangoScriptHandle Handle, bool bAndChildren)

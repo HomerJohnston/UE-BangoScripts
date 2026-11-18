@@ -25,7 +25,7 @@ namespace Bango
 	 * of them. Or Source is a single expression, like `foundThings >= 10 && !IsNull(@door)`, on one line (with any
 	 * #set lines and comments around it), which is compiled as `return <expression>;` (errors still point into the
 	 * expression as written). Everything else is as for any script: #set inputs, globals, locals, functions.
-	 * See UBangoScriptSubsystem::EvaluateBoolCondition.
+	 * See UBangoScriptSubsystem::EvaluateCondition.
 	 */
 	BANGOSCRIPTS_API bool CompileCondition(const FString& Source, const FString& FileName, const IBangoCommandLookup& Commands, FBangoProgram& OutProgram, FBangoCompileError& OutError);
 

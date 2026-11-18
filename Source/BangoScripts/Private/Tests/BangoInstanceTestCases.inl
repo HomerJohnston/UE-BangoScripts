@@ -466,7 +466,10 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 	{ TEXT("missing return"), TEXT("function int F(bool _b)\n{\n\tif (_b)\n\t{\n\t\treturn 1;\n\t};\n};\nTalk(\"{0}\", F(false));"), TEXT(""), TEXT("in F()"), TEXT("reached its end without returning") },
 	{ TEXT("command fails"), TEXT("Talk(\"before\");\nFail();"), TEXT("before"), TEXT("(2:1)"), TEXT("Fail: boom") },
 	{ TEXT("names without underscores"), TEXT("global int _shared;\nint count = 2;\nint[] list = [1, 2];\n_shared = count;\nforEach (item in list)\n{\n\tcount += item;\n};\nTalk(\"{0} {1}\", count, _shared);"), TEXT("5 2"), nullptr, nullptr },
-	{ TEXT("a local hides a global of the same name"), TEXT("global int same;\nint same = 7;\nTalk(\"{0}\", same);"), TEXT("7"), nullptr, nullptr },
+	{ TEXT("a local hides a global this file doesn't declare"), TEXT("int score = 3;\nTalk(\"{0}\", score);"), TEXT("3"), nullptr, nullptr },
+	{ TEXT("global default: given when the global doesn't exist"), TEXT("global int fresh = 4;\nglobal int[] list = [1, 2];\nTalk(\"{0} {1}\", fresh, Count(list));"), TEXT("4 2"), nullptr, nullptr },
+	{ TEXT("global default: one that exists keeps its value"), TEXT("global int score = 1;\nTalk(\"{0}\", score);"), TEXT("7"), nullptr, nullptr },
+	{ TEXT("global default: nil"), TEXT("global int unsetYet = nil;\nTalk(\"{0}\", IsNil(unsetYet));"), TEXT("true"), nullptr, nullptr },
 	{ TEXT("an undeclared name without underscore is a global read"), TEXT("Talk(\"{0}\", cuont);"), TEXT(""), TEXT("(1:13)"), TEXT("Global 'cuont' doesn't exist") },
 	{ TEXT("string placeholders: {n}, backtick escapes, and what's left as it is"), TEXT("Talk(\"`{0`} is {0}, `` and {Name}, 100% and {1\", 5);"), TEXT("{0} is 5, ` and {Name}, 100% and {1"), nullptr, nullptr },
 	{ TEXT("IsNull on nil and missing actors"), TEXT("entity _e;\nentity[] _a = [@john];\nTalk(\"{0} {1} {2}\", IsNull(@john), IsNull(@ghost), IsNull(_e));\nTalk(\"{0} {1} {2}\", IsNull(_a[0]), IsNull(_a[5]), IsNull(nobody));\n_e = @player;\nTalk(\"{0}\", IsNull(_e));"), TEXT("false true true|false true true|false"), nullptr, nullptr },
@@ -830,6 +833,33 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 		};
 		auto LastLog = [&Log]() { return Log.Num() > 0 ? Log.Last() : FString(); };
 
+		// Global defaults across scripts: one declared without a value first leaves the global nil, and a later default
+		// isn't used, with a warning (once).
+		{
+			FReloadRun Run;
+			BangoMakeRuntimeTestGlobals(Run.Globals);
+			Context.Globals = &Run.Globals;
+			FBangoRuntimeError StartError;
+			FBangoInstance First;
+			Expect(First.Start(Compile(TEXT("global int stage;")), Commands, Run.Globals, 1, StartError), TEXT("global defaults: a value-less declaration starts"));
+			FBangoInstance Second;
+			Expect(Second.Start(Compile(TEXT("global int stage = 1;")), Commands, Run.Globals, 2, StartError), TEXT("global defaults: the one with a default starts"));
+			const FBangoValue* Stage = Run.Globals.Find(TEXT("stage"));
+			Expect(Stage && Stage->IsNil(), TEXT("global defaults: the default isn't used, as the global exists"));
+			const TArray<FString> Warned = Second.TakeWarnings();
+			Expect(Warned.Num() == 1 && Warned[0].Contains(TEXT("already exists, holding nil")), TEXT("global defaults: it's warned about"));
+			FBangoInstance Third;
+			Third.Start(Compile(TEXT("global int stage = 1;")), Commands, Run.Globals, 3, StartError);
+			Expect(Third.TakeWarnings().Num() == 0, TEXT("global defaults: once per global"));
+			// Set to a value, a later default changes nothing, and there's no warning.
+			FString SetError;
+			Run.Globals.Set(TEXT("stage"), FBangoValue::MakeInt(5), SetError);
+			FBangoInstance Fourth;
+			Fourth.Start(Compile(TEXT("global int stage = 1;")), Commands, Run.Globals, 4, StartError);
+			Stage = Run.Globals.Find(TEXT("stage"));
+			Expect(Stage && !Stage->IsNil() && Stage->GetInt() == 5 && Fourth.TakeWarnings().Num() == 0, TEXT("global defaults: a global with a value keeps it"));
+		}
+
 		// A moving platform: the math in the loop changes while it runs, and a local is added.
 		const TCHAR* PlatformV1 =
 			TEXT("scriptVar float _x = 0;\nscriptVar float _speed = 1;\n")
@@ -950,7 +980,7 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			{
 				const TCHAR* Name;
 				const TCHAR* Source;
-				int32 Expected;              // 1 true, 0 false, -1 an error
+				int32 Expected;              // 1 true, 0 false, 2 unset, -1 an error
 				const TCHAR* ErrorLocation;  // for errors: like "(1:5)"
 				const TCHAR* ErrorContains;
 			};
@@ -966,7 +996,14 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				{ TEXT("an error points into the expression as written"), TEXT("lots == missing_cmd()"), -1, TEXT("(1:9)"), TEXT("missing_cmd") },
 				{ TEXT("return with no value"), TEXT("return;"), -1, TEXT("(1:1)"), TEXT("A condition must return true or false") },
 				{ TEXT("reaching the end"), TEXT("int _n = 1;\nif (_n > 5)\n{\n\treturn true;\n};"), -1, nullptr, TEXT("reached its end without returning true or false") },
-				{ TEXT("a runtime error points into the expression as written"), TEXT("lots == \"lots\" && nothere > 1"), -1, TEXT("(1:19)"), TEXT("nothere") },
+				{ TEXT("an unset global points into the expression as written"), TEXT("lots == \"lots\" && nothere > 1"), 2, TEXT("(1:19)"), TEXT("nothere") },
+				{ TEXT("unset: a global that's nil"), TEXT("global int empty;\nreturn empty > 1;"), 2, TEXT("(2:8)"), TEXT("'empty' is nil") },
+				{ TEXT("unset: indexing a global that's nil"), TEXT("global int[] list;\nreturn list[0] > 1;"), 2, nullptr, TEXT("'list' is nil, so it can't be indexed") },
+				{ TEXT("IsNil of a global that doesn't exist is true"), TEXT("IsNil(nothere)"), 1, nullptr, nullptr },
+				{ TEXT("&& stops at false"), TEXT("false && nothere > 1"), 0, nullptr, nullptr },
+				{ TEXT("|| stops at true"), TEXT("flag || nothere > 1"), 1, nullptr, nullptr },
+				{ TEXT("an unset global behind || is still read"), TEXT("!flag || nothere > 1"), 2, nullptr, TEXT("nothere") },
+				{ TEXT("past the end of a local array is an error, not unset"), TEXT("int[] _a = [1];\nreturn _a[3] > 0;"), -1, nullptr, TEXT("past the end") },
 			};
 			for (const FConditionCase& Case : Cases)
 			{
@@ -986,16 +1023,19 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 					Context.Globals = &ConditionGlobals;
 					FBangoInstance Instance;
 					FBangoRuntimeError StartError;
-					if (Instance.Start(Condition, Commands, ConditionGlobals, 1, StartError) && Instance.Resume(Context) == EBangoInstanceStatus::Finished
-						&& Instance.GetResult().GetType() == FBangoType::Bool())
+					if (!Instance.Start(Condition, Commands, ConditionGlobals, 1, StartError))
 					{
-						Got = Instance.GetResult().GetBool() ? 1 : 0;
+						Outcome = StartError.ToString();
 					}
-					Outcome = Instance.GetStatus() == EBangoInstanceStatus::Failed ? Instance.GetError().ToString() : StartError.ToString();
+					else
+					{
+						const EBangoConditionResult Result = Instance.FinishCondition(Instance.Resume(Context), Outcome);
+						Got = Result == EBangoConditionResult::True ? 1 : Result == EBangoConditionResult::False ? 0 : Result == EBangoConditionResult::Unset ? 2 : -1;
+					}
 				}
-				const bool bOk = Case.Expected >= 0
+				const bool bOk = Case.Expected == 0 || Case.Expected == 1
 					? Got == Case.Expected
-					: Got == -1 && Outcome.Contains(Case.ErrorContains) && (!Case.ErrorLocation || Outcome.Contains(Case.ErrorLocation));
+					: Got == Case.Expected && Outcome.Contains(Case.ErrorContains) && (!Case.ErrorLocation || Outcome.Contains(Case.ErrorLocation));
 				Expect(bOk, *FString::Printf(TEXT("condition: %s (got %d: %s)"), Case.Name, Got, *Outcome));
 			}
 		}

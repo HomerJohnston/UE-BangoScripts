@@ -212,7 +212,7 @@ namespace BangoGraphWriterPrivate
 				AddComment(Decl.Comment, Indent, -1);
 				FString Code = bGlobal ? FString(TEXT("global ")) : FString(TEXT("scriptVar "));
 				Code += Decl.Type + TEXT(" ") + Decl.Name;
-				if (Decl.bHasValue && !bGlobal)
+				if (Decl.bHasValue) // a script variable's starting value, or a global's default
 				{
 					Code += TEXT(" = ") + Decl.Value;
 				}

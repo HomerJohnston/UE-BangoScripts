@@ -381,8 +381,8 @@ private:
 	void DeclareGlobal(const FString& Name, const FString& Type);
 	void DeleteDecl(bool bGlobal, int32 Index);
 	void SetDeclType(bool bGlobal, int32 Index, const FString& Type);
-	/** Sets a local's starting value from what was typed in its box (empty: none, so nil). */
-	void SetDeclValue(int32 Index, const FString& Typed);
+	/** Sets a local's starting value, or a global's default, from what was typed in its box (empty: none). */
+	void SetDeclValue(bool bGlobal, int32 Index, const FString& Typed);
 	void MoveDecl(bool bGlobal, int32 From, int32 To);
 	/** Why NewName can't be the name of declaration Index, or empty if it can. */
 	FString CheckDeclName(bool bGlobal, int32 Index, const FString& NewName) const;

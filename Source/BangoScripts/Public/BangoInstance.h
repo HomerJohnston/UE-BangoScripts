@@ -31,6 +31,25 @@ enum class EBangoInstanceStatus : uint8
 	Terminated,
 };
 
+/** What checking a condition gave (UBangoScriptSubsystem::EvaluateCondition). */
+enum class EBangoConditionResult : uint8
+{
+	/** It returned true. */
+	True,
+	/** It returned false. */
+	False,
+	/**
+	 * It couldn't answer yet: it read a global that doesn't exist or is nil (`gold > 3` before anything has set gold).
+	 * Usually not a mistake, so a caller can treat it as false without reporting it. (IsNil(gold) gives true instead.)
+	 */
+	Unset,
+	/**
+	 * It's broken: it didn't compile, its arguments don't fit, it stopped with any other error, it reached its end
+	 * without returning true or false, or it called a command that waits (a condition must answer at once).
+	 */
+	Error,
+};
+
 /** A runtime error, pointing at the line and graph node that caused it. */
 struct BANGOSCRIPTS_API FBangoRuntimeError
 {
@@ -41,6 +60,11 @@ struct BANGOSCRIPTS_API FBangoRuntimeError
 	/** Empty for the top level. */
 	FString FunctionName;
 	FString Message;
+	/**
+	 * It stopped because it read a global that doesn't exist or is nil (gold + 1 with no gold yet): something not
+	 * set up yet, not a mistake in the script. A condition reports this as Unset (EBangoConditionResult).
+	 */
+	bool bUnsetGlobal = false;
 
 	/** "Quest/Intro.bango(12:5) [node 7] in Nag(): '_x' is nil." */
 	FString ToString() const;
@@ -173,6 +197,12 @@ public:
 	/** Once a condition (Bango::CompileCondition) has finished: the bool it returned. Nil otherwise. */
 	const FBangoValue& GetResult() const { return ConditionResult; }
 
+	/**
+	 * A condition's answer, from what its Resume gave: True or False, or Unset or Error with the message in OutError.
+	 * Stops it if it's waiting (a condition must answer at once). The message isn't shown or logged here.
+	 */
+	EBangoConditionResult FinishCondition(EBangoInstanceStatus ResumeStatus, FString& OutError);
+
 	/** For the debugger: the calls in progress, the main graph first and the innermost (where it is) last. */
 	void GetCallStack(TArray<FBangoCallFrameInfo>& OutFrames) const;
 
@@ -223,7 +253,18 @@ public:
 	/** The outcome of the last reload, once known (Reloaded or KeptOld), and a message about it. Clears it, so each is reported once. */
 	EBangoReloadResult TakeReloadResult(FString& OutMessage);
 
+	/** Warnings since the last call (a global's default that was skipped, ...), for the caller to log. Clears them. */
+	TArray<FString> TakeWarnings() { TArray<FString> Taken = MoveTemp(Warnings); Warnings.Reset(); return Taken; }
+
 private:
+	/**
+	 * Declares InProgram's globals (Start, and switching to a new version): a global that doesn't exist yet is
+	 * created, and given its default if it has one. One that exists keeps its value; if it holds nil while this
+	 * declaration has a default, that's warned about (once per global). False, with OutError and OutLine, on a type clash.
+	 */
+	bool DeclareGlobals(const FBangoProgram& InProgram, FBangoGlobalStore& Globals, FString& OutError, int32& OutLine);
+	TArray<FString> Warnings;
+
 	bool BindCommands(const FBangoCommandTable& Commands, FString& OutError);
 	static bool BindCommandsFor(const FBangoProgram& InProgram, const FBangoCommandTable& Commands, TArray<const FBangoCommand*>& OutBound, FString& OutError);
 
@@ -236,6 +277,8 @@ private:
 	bool CheckArguments(TConstArrayView<FBangoValue> Args, TArray<FBangoValue>& OutValues);
 	bool Execute(const FBangoExecContext& Context);
 	bool RuntimeFail(const FString& Message);
+	/** RuntimeFail for reading a global that doesn't exist or is nil (FBangoRuntimeError::bUnsetGlobal). */
+	bool UnsetGlobalFail(const FString& Message);
 	/** Why `self` can't be used here (the owner's Problem, or that there's no owner). */
 	FString GetSelfProblem() const;
 	/**

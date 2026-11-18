@@ -589,7 +589,7 @@ namespace BangoGraphPrivate
 		/**
 		 * Reads the global and scriptVar declarations at Block[Start...] (the top of a graph) into the file's Globals
 		 * and the graph's ScriptVars, and returns the index of the first statement after them (a local's declaration
-		 * is a node). A global with a value fails: the graph has nowhere to keep it, and it doesn't compile.
+		 * is a node). A global's value is its default (FBangoGraphDecl::Value).
 		 */
 		int32 ReadDecls(int32 Graph, const FBangoBlock& Block, int32 Start, TArray<FTarget>& Targets)
 		{
@@ -605,12 +605,6 @@ namespace BangoGraphPrivate
 				if (Decl->bGlobal && (Graph >= 0 || Doc.Main.ScriptVars.Num() > 0))
 				{
 					break; // BuildNode fails on it
-				}
-				if (Decl->bGlobal && Decl->Init.IsValid())
-				{
-					Fail(Decl->Loc.Line, FString::Printf(TEXT("The global declaration of '%s' has a value, which isn't allowed (it would reset the global every time the script starts). Remove the value in the text (set it in the code instead), then open the script again."), *Decl->Name));
-					bFailed = true;
-					return Block.Num();
 				}
 				FBangoGraphDecl Out;
 				Out.Type = Decl->Type.ToString();

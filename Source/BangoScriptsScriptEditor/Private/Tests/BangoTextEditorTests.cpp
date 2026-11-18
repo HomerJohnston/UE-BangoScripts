@@ -572,7 +572,7 @@ bool FBangoCompletionTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("'whi' is the keyword while"), Shown.Num() == 1 && Items[Shown[0]].Name.Equals(TEXT("while"), ESearchCase::CaseSensitive));
 	TArray<FBangoCompletionItem> Values;
 	FBangoCompletion::GetKeywordItems(Values, /*bValuesOnly*/ true);
-	TestEqual(TEXT("Keywords for a node's field: true, false and nil"), Values.Num(), 3);
+	TestEqual(TEXT("Keywords for a node's field: true, false, nil, player and self"), Values.Num(), 5);
 
 	// The local count hides the global count; the function is listed with its signature.
 	const FBangoCompletionItem* Count = Items.FindByPredicate([](const FBangoCompletionItem& Item) { return Item.Name.Equals(TEXT("count"), ESearchCase::CaseSensitive); });

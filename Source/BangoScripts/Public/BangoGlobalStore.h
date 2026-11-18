@@ -32,6 +32,13 @@ public:
 	/** Removes all globals, e.g. when starting a new game. */
 	void ResetAll();
 
+	/**
+	 * A script's default for Name (`global int stage = 1;`) was skipped while the global held nil: another
+	 * declaration, without a value, created it first. True the first time for each global (so it's warned about
+	 * once), until ResetAll or loading.
+	 */
+	bool NoteSkippedDefault(const FString& Name);
+
 	/** Saves or loads every global. Loading replaces the current globals. */
 	void Serialize(FArchive& Ar);
 
@@ -39,4 +46,5 @@ public:
 
 private:
 	TBangoNameMap<FBangoValue> Globals;
+	TBangoNameMap<bool> WarnedSkippedDefaults;
 };

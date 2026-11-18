@@ -171,16 +171,14 @@ bool FBangoInstance::Start(const TSharedPtr<const FBangoProgram>& InProgram, con
 		return false;
 	}
 
-	for (const FBangoGlobalDecl& Global : Program->Globals)
+	int32 GlobalLine = 0;
+	if (!DeclareGlobals(*Program, Globals, Message, GlobalLine))
 	{
-		if (!Globals.Declare(Global.Name, Global.Type, Message))
-		{
-			Error.Line = Global.Line;
-			Error.Column = 1;
-			Error.Message = Message;
-			OutError = Error;
-			return false;
-		}
+		Error.Line = GlobalLine;
+		Error.Column = 1;
+		Error.Message = Message;
+		OutError = Error;
+		return false;
 	}
 
 	FBangoFrame Main;
@@ -310,6 +308,43 @@ FString FBangoInstance::GetSelfProblem() const
 		: Owner.Problem;
 }
 
+bool FBangoInstance::DeclareGlobals(const FBangoProgram& InProgram, FBangoGlobalStore& Globals, FString& OutError, int32& OutLine)
+{
+	for (const FBangoGlobalDecl& Global : InProgram.Globals)
+	{
+		const bool bExisted = Globals.Find(Global.Name) != nullptr;
+		if (!Globals.Declare(Global.Name, Global.Type, OutError))
+		{
+			OutLine = Global.Line;
+			return false;
+		}
+		if (!Global.bHasDefault)
+		{
+			continue;
+		}
+		if (!bExisted)
+		{
+			FBangoValue Default;
+			if (!ResolveSelf(Global.Default, Default) || !Globals.Set(Global.Name, Default, OutError))
+			{
+				OutLine = Global.Line;
+				if (OutError.IsEmpty())
+				{
+					OutError = FString::Printf(TEXT("Global '%s''s default can't be given: %s"), *Global.Name, *GetSelfProblem());
+				}
+				return false;
+			}
+		}
+		else if (Globals.Find(Global.Name)->IsNil() && Globals.NoteSkippedDefault(Global.Name))
+		{
+			// Another script declared it without a value first, so this default never applies: almost always a mistake.
+			Warnings.Add(FString::Printf(TEXT("%s(%d): global '%s' already exists, holding nil, so its default here isn't used. A script that declared it without a value started first: give that declaration the same default, or set it in a level start script."),
+				*InProgram.FileName, Global.Line, *Global.Name));
+		}
+	}
+	return true;
+}
+
 bool FBangoInstance::ResolveSelf(const FBangoValue& Value, FBangoValue& OutValue) const
 {
 	if (Value.IsNil() || Value.GetType().Base != EBangoBaseType::Entity)
@@ -344,6 +379,48 @@ bool FBangoInstance::ResolveSelf(const FBangoValue& Value, FBangoValue& OutValue
 	return true;
 }
 
+EBangoConditionResult FBangoInstance::FinishCondition(EBangoInstanceStatus ResumeStatus, FString& OutError)
+{
+	const FString ConditionName = Program.IsValid() ? Program->FileName : FString();
+	switch (ResumeStatus)
+	{
+	case EBangoInstanceStatus::Finished:
+		break;
+	case EBangoInstanceStatus::Waiting:
+	{
+		const FString Command = GetWaitingCommandName();
+		const FBangoDebugLoc Where = GetCurrentLocation();
+		Terminate();
+		OutError = FString::Printf(TEXT("%s(%d:%d): A condition must give its answer straight away, but it called '%s', which waits."),
+			*ConditionName, Where.Line, Where.Column, *Command);
+		return EBangoConditionResult::Error;
+	}
+	case EBangoInstanceStatus::Failed:
+		OutError = Error.ToString();
+		return Error.bUnsetGlobal ? EBangoConditionResult::Unset : EBangoConditionResult::Error;
+	default:
+		OutError = FString::Printf(TEXT("%s: the condition didn't finish."), *ConditionName);
+		return EBangoConditionResult::Error;
+	}
+	if (ConditionResult.IsNil() || !(ConditionResult.GetType() == FBangoType::Bool()))
+	{
+		OutError = FString::Printf(TEXT("%s: the condition didn't return true or false."), *ConditionName);
+		return EBangoConditionResult::Error;
+	}
+	return ConditionResult.GetBool() ? EBangoConditionResult::True : EBangoConditionResult::False;
+}
+
+bool FBangoInstance::UnsetGlobalFail(const FString& Message)
+{
+	const bool bFirst = Status != EBangoInstanceStatus::Failed;
+	RuntimeFail(Message);
+	if (bFirst)
+	{
+		Error.bUnsetGlobal = true;
+	}
+	return false;
+}
+
 bool FBangoInstance::RuntimeFail(const FString& Message)
 {
 	if (Status == EBangoInstanceStatus::Failed)
@@ -353,6 +430,7 @@ bool FBangoInstance::RuntimeFail(const FString& Message)
 	Status = EBangoInstanceStatus::Failed;
 	Error.FileName = Program.IsValid() ? Program->FileName : FString();
 	Error.Message = Message;
+	Error.bUnsetGlobal = false;
 	Error.Line = 0;
 	Error.Column = 0;
 	Error.NodeID = -1;
@@ -580,7 +658,7 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 			{
 				return RuntimeFail(FString::Printf(TEXT("Global '%s' doesn't exist. There is an actor with the Bango ID '%s': write @%s to use it."), *RootName, *RootName, *RootName));
 			}
-			return RuntimeFail(FString::Printf(TEXT("Global '%s' doesn't exist. No script or Blueprint has declared it."), *RootName));
+			return UnsetGlobalFail(FString::Printf(TEXT("Global '%s' doesn't exist. No script or Blueprint has declared it."), *RootName));
 		}
 	}
 
@@ -589,6 +667,10 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 	{
 		if (Current->IsNil())
 		{
+			if (Place.Kind == EBangoPlaceKind::Global && Path == RootName)
+			{
+				return UnsetGlobalFail(FString::Printf(TEXT("Global '%s' is nil, so it can't be indexed."), *Path));
+			}
 			return RuntimeFail(FString::Printf(TEXT("'%s' is nil, so it can't be indexed."), *Path));
 		}
 		if (!Current->GetType().IsArray())
@@ -619,7 +701,7 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 		}
 		if (Place.Kind == EBangoPlaceKind::Global && Indexes.Num() == 0)
 		{
-			return RuntimeFail(FString::Printf(TEXT("Global '%s' is nil. Give it a value before reading it, or check it with IsNil(%s)."), *Path, *Path));
+			return UnsetGlobalFail(FString::Printf(TEXT("Global '%s' is nil. Give it a value before reading it, or check it with IsNil(%s)."), *Path, *Path));
 		}
 		return RuntimeFail(FString::Printf(TEXT("'%s' is nil. Give it a value before reading it, or check it with IsNil(%s)."), *Path, *Path));
 	}
@@ -1847,12 +1929,12 @@ bool FBangoInstance::TryReload(FBangoGlobalStore& Globals)
 	}
 
 	// The new version's globals, as when an instance starts (a global that already exists keeps its value).
-	for (const FBangoGlobalDecl& Global : ReloadProgram->Globals)
 	{
 		FString Message;
-		if (!Globals.Declare(Global.Name, Global.Type, Message))
+		int32 GlobalLine = 0;
+		if (!DeclareGlobals(*ReloadProgram, Globals, Message, GlobalLine))
 		{
-			FinishReload(EBangoReloadResult::KeptOld, FString::Printf(TEXT("The new version's global '%s' doesn't fit: %s"), *Global.Name, *Message));
+			FinishReload(EBangoReloadResult::KeptOld, FString::Printf(TEXT("The new version's global on line %d doesn't fit: %s"), GlobalLine, *Message));
 			return false;
 		}
 	}

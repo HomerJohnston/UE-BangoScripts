@@ -70,6 +70,17 @@ bool FBangoGlobalStore::IsDefined(const FString& Name) const
 void FBangoGlobalStore::ResetAll()
 {
 	Globals.Reset();
+	WarnedSkippedDefaults.Reset();
+}
+
+bool FBangoGlobalStore::NoteSkippedDefault(const FString& Name)
+{
+	if (WarnedSkippedDefaults.Find(Name))
+	{
+		return false;
+	}
+	WarnedSkippedDefaults.Add(Name, true);
+	return true;
 }
 
 void FBangoGlobalStore::Serialize(FArchive& Ar)
@@ -103,6 +114,7 @@ void FBangoGlobalStore::Serialize(FArchive& Ar)
 		}
 
 		Globals.Reset();
+		WarnedSkippedDefaults.Reset();
 		for (int32 i = 0; i < Count && !Ar.IsError(); ++i)
 		{
 			FString Name;

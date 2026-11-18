@@ -163,6 +163,13 @@ struct FBangoGlobalDecl
 	FString Name;
 	FBangoType Type;
 	int32 Line = 0;
+	/**
+	 * `global int stage = 1;`: a default, given to the global when an instance starts, but only if the global doesn't
+	 * exist yet (no script has declared it, nothing has set it, and no save has brought it back). A fixed value,
+	 * already converted to Type; it may be nil.
+	 */
+	bool bHasDefault = false;
+	FBangoValue Default;
 };
 
 struct FBangoProgram

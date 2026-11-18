@@ -2024,9 +2024,9 @@ void SBangoScriptEditor::SetDeclType(bool bGlobal, int32 Index, const FString& T
 	ApplyDecls(bGlobal, Decls, bGlobal ? LOCTEXT("SetGlobalTypeTransaction", "Change Bango Global Type") : LOCTEXT("SetScriptVarTypeTransaction", "Change Bango Script Variable Type"));
 }
 
-void SBangoScriptEditor::SetDeclValue(int32 Index, const FString& Typed)
+void SBangoScriptEditor::SetDeclValue(bool bGlobal, int32 Index, const FString& Typed)
 {
-	TArray<FBangoGraphDecl> Decls = GetDecls(false);
+	TArray<FBangoGraphDecl> Decls = GetDecls(bGlobal);
 	if (!Decls.IsValidIndex(Index))
 	{
 		return;
@@ -2048,14 +2048,15 @@ void SBangoScriptEditor::SetDeclValue(int32 Index, const FString& Typed)
 	FString Problem;
 	if (bHasValue && !Bango::CheckDeclValue(Decl.Type, Value, Problem))
 	{
-		Notify(FText::Format(LOCTEXT("LocalValueFailed", "Couldn't set {0}'s starting value: {1}"), FText::FromString(Decl.Name), FText::FromString(Problem)), false);
+		Notify(FText::Format(bGlobal ? LOCTEXT("GlobalValueFailed", "Couldn't set {0}'s default: {1}") : LOCTEXT("LocalValueFailed", "Couldn't set {0}'s starting value: {1}"),
+			FText::FromString(Decl.Name), FText::FromString(Problem)), false);
 		DeclsShown.Reset(); // the box goes back to what's declared
 		UpdateVariablesNow();
 		return;
 	}
 	Decl.bHasValue = bHasValue;
 	Decl.Value = bHasValue ? Value : FString();
-	ApplyDecls(false, Decls, LOCTEXT("SetScriptVarValueTransaction", "Change Bango Script Variable Value"));
+	ApplyDecls(bGlobal, Decls, bGlobal ? LOCTEXT("SetGlobalValueTransaction", "Change Bango Global Default") : LOCTEXT("SetScriptVarValueTransaction", "Change Bango Script Variable Value"));
 }
 
 void SBangoScriptEditor::MoveDecl(bool bGlobal, int32 From, int32 To)
@@ -2105,6 +2106,32 @@ FString SBangoScriptEditor::CheckDeclName(bool bGlobal, int32 Index, const FStri
 				return FString::Printf(TEXT("%s is already a %s of this graph."), *NewName,
 					Variable->Kind == FBangoGraphVariable::EKind::Param ? TEXT("parameter")
 					: Variable->Kind == FBangoGraphVariable::EKind::Loop ? TEXT("loop's variable") : TEXT("local, declared by a node"));
+			}
+		}
+		for (const FBangoGraphDecl& Global : GetDecls(true))
+		{
+			if (Global.Name.Equals(NewName, ESearchCase::CaseSensitive))
+			{
+				return FString::Printf(TEXT("%s is a global this script declares, so a local can't have its name."), *NewName);
+			}
+		}
+	}
+	else
+	{
+		// The file's locals, parameters and loop variables can't share a global's name (any graph's: a global is seen in all).
+		for (int32 g = 0; g < EdGraphs.Num(); ++g)
+		{
+			const UBangoEdGraphNode* GraphEntry = BangoScriptEditor::FindEntryNode(EdGraphs[g].Get());
+			if (!GraphEntry)
+			{
+				continue;
+			}
+			TArray<FBangoEntryParam> GraphParams;
+			Bango::ReadEntryParams(GraphEntry->Text, g > 0, GraphParams);
+			if (GraphEntry->ScriptVars.ContainsByPredicate([&NewName](const FBangoEdDecl& Decl) { return Decl.Name.Equals(NewName, ESearchCase::CaseSensitive); })
+				|| GraphParams.ContainsByPredicate([&NewName](const FBangoEntryParam& Param) { return Param.Name.Equals(NewName, ESearchCase::CaseSensitive); }))
+			{
+				return FString::Printf(TEXT("%s is already a script variable or parameter, so a global can't have its name."), *NewName);
 			}
 		}
 	}
@@ -2270,9 +2297,8 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateDeclRow(TSharedPtr<FDeclEntr
 		return Row;
 	}
 
-	// A local's starting value, typed like a node's field (a string without quotes). Globals have none.
+	// A local's starting value, or a global's default, typed like a node's field (a string without quotes).
 	TSharedRef<SWidget> ValueBox = SNullWidget::NullWidget;
-	if (!bGlobal)
 	{
 		FBangoNodeField Field;
 		Field.bHasValue = true;
@@ -2282,14 +2308,16 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateDeclRow(TSharedPtr<FDeclEntr
 		Field.Text = Entry.Decl.Value;
 		ValueBox = SNew(SEditableTextBox)
 			.Text(FText::FromString(Bango::GetFieldEditText(Field)))
-			.HintText(LOCTEXT("LocalNilHint", "nil"))
-			.ToolTipText(LOCTEXT("LocalValueTooltip", "The value it starts with, each time the graph starts. A fixed value only (a number, a string, true, false, nil, a Bango ID, a text, or an array of those); empty starts it as nil. Set anything else in the code."))
+			.HintText(bGlobal ? LOCTEXT("GlobalNoDefaultHint", "none") : LOCTEXT("LocalNilHint", "nil"))
+			.ToolTipText(bGlobal
+				? LOCTEXT("GlobalValueTooltip", "Its default: given to the global only if it doesn't exist yet (no script has declared it), when this script starts. A fixed value only (a number, a string, true, false, nil, a Bango ID, a text, or an array of those); empty gives none, so a new global starts as nil. To set it every time, do it in the code.")
+				: LOCTEXT("LocalValueTooltip", "The value it starts with, each time the graph starts. A fixed value only (a number, a string, true, false, nil, a Bango ID, a text, or an array of those); empty starts it as nil. Set anything else in the code."))
 			.Font(FCoreStyle::GetDefaultFontStyle("Mono", 9))
 			.SelectAllTextWhenFocused(true)
 			.RevertTextOnEscape(true)
-			.OnTextCommitted_Lambda([this, Index](const FText& NewText, ETextCommit::Type CommitType)
+			.OnTextCommitted_Lambda([this, bGlobal, Index](const FText& NewText, ETextCommit::Type CommitType)
 			{
-				SetDeclValue(Index, NewText.ToString());
+				SetDeclValue(bGlobal, Index, NewText.ToString());
 			});
 	}
 
@@ -2383,7 +2411,7 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateDeclRow(TSharedPtr<FDeclEntr
 			.VAlign(VAlign_Center)
 			[
 				SNew(SBox)
-				.WidthOverride(bGlobal ? 0.0f : 96.0f)
+				.WidthOverride(96.0f)
 				[
 					ValueBox
 				]
@@ -3894,11 +3922,33 @@ bool SBangoScriptEditor::ApplyScriptText()
 	{
 		return false;
 	}
-	const FString Text = TextBox->GetText().ToString();
+	const FString Typed = TextBox->GetText().ToString();
 	FBangoCompileError Error;
+	// Globals go at the top of the file: one declared anywhere else is moved up there (its value, if it has one, is set
+	// where it was, as an assignment).
+	FString Text;
+	if (!Bango::HoistLateGlobals(Typed, Text, Error))
+	{
+		SetTextError(Error, true);
+		if (Error.Line > 0)
+		{
+			TextBox->GoTo(FTextLocation(Error.Line - 1, FMath::Max(Error.Column - 1, 0)));
+		}
+		return false;
+	}
 	FBangoGraphDocument Document;
 	if (!Bango::BuildGraph(Text, GetScriptFileLabel(), Document, Error))
 	{
+		if (Text != Typed)
+		{
+			// The error's line in the text as typed (moving the globals shifted the lines).
+			FBangoGraphDocument Unused;
+			FBangoCompileError TypedError;
+			if (!Bango::BuildGraph(Typed, GetScriptFileLabel(), Unused, TypedError) && !TypedError.Message.Contains(TEXT("Globals are declared at the top")))
+			{
+				Error = TypedError;
+			}
+		}
 		FString AsScript;
 		if (IsCondition() && Bango::ConditionExpressionToScript(Text, AsScript))
 		{

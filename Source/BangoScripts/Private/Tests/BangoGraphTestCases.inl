@@ -825,6 +825,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				TEXT("// the gold\n")
 				TEXT("global int gold;\n")
 				TEXT("global string[] names;\n")
+				TEXT("global int stage = 1;\n")
 				TEXT("\n")
 				TEXT("// ============ SCRIPT VARS =====================\n")
 				TEXT("\n")
@@ -858,8 +859,9 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			Expect(bDeclBuilt, FString(TEXT("declarations: build: ")) + Error.ToString());
 			if (bDeclBuilt)
 			{
-				Expect(DeclDoc.Globals.Num() == 2 && DeclDoc.Globals[0].Name == FString(TEXT("gold")) && DeclDoc.Globals[0].Comment == FString(TEXT("the gold"))
-					&& DeclDoc.Globals[1].Type == FString(TEXT("string[]")), TEXT("declarations: globals, with their comments"));
+				Expect(DeclDoc.Globals.Num() == 3 && DeclDoc.Globals[0].Name == FString(TEXT("gold")) && DeclDoc.Globals[0].Comment == FString(TEXT("the gold"))
+					&& DeclDoc.Globals[1].Type == FString(TEXT("string[]")) && !DeclDoc.Globals[1].bHasValue
+					&& DeclDoc.Globals[2].bHasValue && DeclDoc.Globals[2].Value == FString(TEXT("1")), TEXT("declarations: globals, with their comments and defaults"));
 				Expect(DeclDoc.Main.ScriptVars.Num() == 3 && DeclDoc.Main.ScriptVars[0].Value == FString(TEXT("0")) && DeclDoc.Main.ScriptVars[0].Comment == FString(TEXT("how many"))
 					&& DeclDoc.Main.ScriptVars[1].Value == FString(TEXT("LOCTEXT(\"k\", \"a = b\")")) && DeclDoc.Main.ScriptVars[2].Value == FString(TEXT("[0, -1, 2.5]")),
 					TEXT("declarations: the main graph's script variables and their values"));
@@ -874,7 +876,6 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			{
 				TEXT("Talk(\"x\");\nscriptVar int _late;\n"),
 				TEXT("if (true)\n{\n\tscriptVar int _inner;\n}\n"),
-				TEXT("global int gold = 1;\n"),
 				TEXT("int _x;\nglobal int gold;\n"),
 				TEXT("function void F()\n{\n\tglobal int g;\n}\n"),
 				TEXT("Talk(\"a\");\n//~ scriptVar int _gone;\n"),
@@ -1197,5 +1198,50 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		Commented.Main.Nodes[0].Comment = TEXT("Hello");
 		Expect(Bango::WriteGraphText(Commented, Text, WriteError) && Text.StartsWith(TEXT("// ============ SCRIPT INPUTS ===================\n\n// Hello\n#set inputs ()\n"), ESearchCase::CaseSensitive),
 			FString(TEXT("entry comment without inputs: ")) + Text);
+	}
+
+	// ---- Globals declared below the top of the file (HoistLateGlobals, the text pane's Apply) ----
+	{
+		struct FHoistCase { const TCHAR* Name; const TCHAR* Source; const TCHAR* Want; const TCHAR* Error; };
+		const FHoistCase HoistCases[] = {
+			{ TEXT("split: its value stays as an assignment"),
+				TEXT("global int gold;\nTalk(\"x\");\nglobal bool open = IsNil(gold);\n"),
+				TEXT("global int gold;\nglobal bool open;\nTalk(\"x\");\nopen = IsNil(gold);\n"), nullptr },
+			{ TEXT("a fixed value is split too (up there it would only be a default)"),
+				TEXT("Talk(\"x\");\nglobal int stage = 2;\n"),
+				TEXT("global int stage;\nTalk(\"x\");\nstage = 2;\n"), nullptr },
+			{ TEXT("no value: just moved"),
+				TEXT("#set inputs (int _a)\nTalk(\"x\");\nif (true)\n{\n\tglobal int seen;\n\tseen = 1;\n}\n"),
+				TEXT("#set inputs (int _a)\nglobal int seen;\nTalk(\"x\");\nif (true)\n{\n\tseen = 1;\n}\n"), nullptr },
+			{ TEXT("above the script variables, and the first line's comment"),
+				TEXT("#set inputs ()\n// the count\nscriptVar int _n = 0;\nglobal bool open = true;\n"),
+				TEXT("#set inputs ()\nglobal bool open;\n// the count\nscriptVar int _n = 0;\nopen = true;\n"), nullptr },
+			{ TEXT("in a function"),
+				TEXT("Talk(\"x\");\nfunction void F()\n{\n\tglobal string who = \"a;b\";\n}\n"),
+				TEXT("global string who;\nTalk(\"x\");\nfunction void F()\n{\n\twho = \"a;b\";\n}\n"), nullptr },
+			{ TEXT("already declared at the top, same type: only the assignment stays"),
+				TEXT("global int gold;\nTalk(\"x\");\nglobal int gold = 5;\n"),
+				TEXT("global int gold;\nTalk(\"x\");\ngold = 5;\n"), nullptr },
+			{ TEXT("already declared at the top, another type: an error"),
+				TEXT("global int gold;\nTalk(\"x\");\nglobal bool gold = true;\n"), nullptr, TEXT("declared as bool here, but as int") },
+			{ TEXT("nothing to move"),
+				TEXT("global int gold = 1;\nTalk(\"x\");\n"), TEXT("global int gold = 1;\nTalk(\"x\");\n"), nullptr },
+		};
+		for (const FHoistCase& Case : HoistCases)
+		{
+			FString Hoisted;
+			FBangoCompileError HoistError;
+			const bool bOk = Bango::HoistLateGlobals(Case.Source, Hoisted, HoistError);
+			if (Case.Error)
+			{
+				Expect(!bOk && HoistError.Message.Contains(Case.Error), FString(TEXT("hoist globals: ")) + Case.Name + TEXT(": ") + HoistError.Message);
+				continue;
+			}
+			Expect(bOk && Hoisted == Case.Want, FString(TEXT("hoist globals: ")) + Case.Name + TEXT(":\n") + Hoisted);
+			// What it gives compiles, as Apply then reads it.
+			FBangoGraphDocument HoistedDoc;
+			FBangoCompileError BuildError;
+			Expect(Bango::BuildGraph(Hoisted, TEXT("hoisted.bango"), HoistedDoc, BuildError), FString(TEXT("hoist globals: builds: ")) + Case.Name + TEXT(": ") + BuildError.ToString());
+		}
 	}
 }

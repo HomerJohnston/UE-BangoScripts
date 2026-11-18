@@ -18,10 +18,10 @@
 
 namespace BangoGameTestsPrivate
 {
-	/** A script asset for a test, in memory only: /Temp/BangoTests/<Name>, with Source as its text. */
+	/** A script asset for a test, in memory only: /BangoScripts/BangoTests/<Name>, with Source as its text. */
 	UBangoScriptAsset* MakeTestScript(const TCHAR* Name, const TCHAR* Source)
 	{
-		const FString PackageName = FString(TEXT("/Temp/BangoTests/")) + Name;
+		const FString PackageName = FString(TEXT("/BangoScripts/BangoTests/")) + Name;
 		UPackage* Package = CreatePackage(*PackageName);
 		Package->SetFlags(RF_Transient);
 		UBangoScriptAsset* Asset = FindObject<UBangoScriptAsset>(Package, Name);
@@ -265,7 +265,7 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 		{ TEXT("int _x;\n_x = Floor(1e300);"), TEXT("too large to convert") },
 		{ TEXT("int _x;\n_x = Abs(-2147483647 - 1);"), TEXT("has no positive int") },
 		{ TEXT("int _x;\n_x = Clamp(5, 10, 1);"), TEXT("Min (10) is greater than Max (1)") },
-		{ TEXT("string _text = \"{2}\";\nLog(_text, 1);"), TEXT("uses {2}") },   // a literal text is checked when compiling instead
+		{ TEXT("string _text = \"{2}\";\nWriteLog(_text, 1);"), TEXT("uses {2}") },   // a literal text is checked when compiling instead
 		{ TEXT("text _t;\n_t = ToText(\"{2}\");\n_t = FormatText(_t, 1);"), TEXT("uses {2}") },
 		{ TEXT("text _t;\n_t = ToText(\"{Name}\");\n_t = FormatText(_t);"), TEXT("uses {Name}") },
 		{ TEXT("text _s;\ntext _t;\n_t = FormatText(_s);"), TEXT("'_s' is nil") },
@@ -296,21 +296,21 @@ bool FBangoModuleTest::RunTest(const FString& Parameters)
 	FBangoModule& Module = FBangoModule::Get();
 	TestNotNull(TEXT("module has built-in commands"), Module.GetCommands().FindCommandImpl(TEXT("WriteScreen")));
 
-	// A script asset made for the test (in memory, under /Temp), found by its path.
+	// A script asset made for the test (in memory, under the plugin's content root, since /Temp isn't a valid script path root), found by its path.
 	UBangoScriptAsset* Asset = BangoGameTestsPrivate::MakeTestScript(TEXT("Hello"), TEXT("#set inputs (string _name = \"you\")\nWriteScreen(_name);"));
 	TSharedPtr<const FBangoProgram> Program;
 	FString DisplayPath;
 	FString Error;
-	const bool bCompiled = Module.GetScriptCache().GetProgram(TEXT("/Temp/BangoTests/Hello"), Module.GetCommands(), Program, DisplayPath, Error);
+	const bool bCompiled = Module.GetScriptCache().GetProgram(TEXT("/BangoScripts/BangoTests/Hello"), Module.GetCommands(), Program, DisplayPath, Error);
 	TestTrue(TEXT("script asset loads and compiles"), bCompiled);
 	if (!bCompiled)
 	{
 		AddError(Error);
 	}
-	TestEqual(TEXT("display path"), DisplayPath, FString(TEXT("/Temp/BangoTests/Hello.bango")));
+	TestEqual(TEXT("display path"), DisplayPath, FString(TEXT("/BangoScripts/BangoTests/Hello.bango")));
 
 	TSharedPtr<const FBangoProgram> Again;
-	Module.GetScriptCache().GetProgram(TEXT("\\Temp\\BangoTests\\Hello.bango"), Module.GetCommands(), Again, DisplayPath, Error);
+	Module.GetScriptCache().GetProgram(TEXT("\\BangoScripts\\BangoTests\\Hello.bango"), Module.GetCommands(), Again, DisplayPath, Error);
 	TestTrue(TEXT("second load comes from the cache"), Again.IsValid() && Again == Program);
 
 	// Changing the asset's text (as the editor does) compiles it again.
@@ -321,13 +321,13 @@ bool FBangoModuleTest::RunTest(const FString& Parameters)
 	Asset->Source = TEXT("#set inputs (string _name = \"you\")\nWriteScreen(_name);");
 
 	TArray<FBangoScriptParamInfo> Params;
-	TestTrue(TEXT("GetScriptParams succeeds"), Module.GetScriptParams(TEXT("/Temp/BangoTests/Hello"), Params, Error));
+	TestTrue(TEXT("GetScriptParams succeeds"), Module.GetScriptParams(TEXT("/BangoScripts/BangoTests/Hello"), Params, Error));
 	TestEqual(TEXT("GetScriptParams matches the script"), Params.Num(), 1);
 
 	FBangoValue Entity;
 	TestTrue(TEXT("null actor becomes nil"), Bango::ActorToEntity(nullptr, Entity, Error) && Entity.IsNil() && Entity.GetType() == FBangoType::Entity());
 
-	TestFalse(TEXT("missing script fails"), Module.GetScriptCache().GetProgram(TEXT("/Temp/BangoTests/DoesNotExist"), Module.GetCommands(), Program, DisplayPath, Error));
+	TestFalse(TEXT("missing script fails"), Module.GetScriptCache().GetProgram(TEXT("/BangoScripts/BangoTests/DoesNotExist"), Module.GetCommands(), Program, DisplayPath, Error));
 	TestTrue(TEXT("missing script error"), Error.Contains(TEXT("not found"), ESearchCase::CaseSensitive));
 
 	// Inline scripts: compiled once per text (and name), with their parameters; an error isn't kept.
@@ -352,7 +352,7 @@ bool FBangoBlueprintArgsTest::RunTest(const FString& Parameters)
 	TArray<FBangoScriptParamInfo> Params;
 	FString Error;
 	BangoGameTestsPrivate::MakeTestScript(TEXT("Greet"), TEXT("#set inputs (string _name, int _times = 3, float _delay = 0.5, entity _who = nil)\nSleep(_delay);"));
-	TestTrue(TEXT("Greet has parameters"), FBangoModule::Get().GetScriptParams(TEXT("/Temp/BangoTests/Greet"), Params, Error) && Params.Num() == 4);
+	TestTrue(TEXT("Greet has parameters"), FBangoModule::Get().GetScriptParams(TEXT("/BangoScripts/BangoTests/Greet"), Params, Error) && Params.Num() == 4);
 	if (Params.Num() != 4)
 	{
 		AddError(Error);
