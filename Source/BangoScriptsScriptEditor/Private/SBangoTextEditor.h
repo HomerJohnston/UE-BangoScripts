@@ -185,8 +185,11 @@ private:
 	void UpdateGutterHighlight(int32 Line);
 
 	// Autocomplete (FBangoCompletion)
-	/** Opens the list for the word before the cursor (only if bMayOpen), filters it, or closes it. */
-	void UpdateCompletion(bool bMayOpen);
+	/**
+	 * Opens the list for the word before the cursor (only if bMayOpen), filters it, or closes it. Right after
+	 * `target call `, with nothing typed, it opens (only if bMayOpenForCall) with all the target's functions.
+	 */
+	void UpdateCompletion(bool bMayOpen, bool bMayOpenForCall);
 	/** Everything the line can use: its graph's names, the file's globals and functions, the commands and built-ins. */
 	/** Fills the list for the word starting at WordStart on LineText (line Line): the usual names, or a `call`'s functions. */
 	void GatherCompletionItems(int32 Line, const FString& LineText, int32 WordStart);
@@ -194,6 +197,18 @@ private:
 	void MoveCompletionSelection(int32 Delta);
 	/** Replaces the word with the selected entry's name (and '(' for a call). */
 	void AcceptCompletion();
+
+	/**
+	 * Drops the ghost `)`s that aren't open any more (the cursor left their line or went before them, or they were
+	 * typed) and shows the rest.
+	 */
+	void UpdateGhostParens();
+
+	/**
+	 * With ghost `)`s shown and only blanks after the cursor (not in a string or a comment): types the innermost one, or
+	 * all of them with bAll, then Then, as one undoable edit. False, typing nothing, otherwise.
+	 */
+	bool TypeGhostParens(bool bAll, const TCHAR* Then);
 	TSharedPtr<FBangoCompletionItem> GetSelectedCompletion() const;
 	/** Where the list goes: under the word being typed (FBangoSyntaxMarshaller::SetProbe), or above it near the bottom. */
 	/** Where the word being completed is, in this widget's space (false if the list isn't open or it isn't painted yet). */
@@ -288,8 +303,16 @@ private:
 	bool bCompletionDirty = false;
 	/** A name's character was typed since the last update, so the list may open. */
 	bool bTypedNameChar = false;
+	/** A space or tab was typed since the last update, so the list may open after `target call ` (UpdateCompletion). */
+	bool bTypedBlank = false;
 	/** Tab put in an entry: the tab character that follows it isn't typed. */
 	bool bSwallowTab = false;
+	/**
+	 * The `(`s autocomplete left open on GhostLine (their columns, outermost first), shown as faint `)`s at the line's
+	 * end. Tab types the innermost, `;` all of them and the `;`; they go when typed, or when the cursor leaves the line.
+	 */
+	int32 GhostLine = INDEX_NONE;
+	TArray<int32> GhostParens;
 	/** The popup's width: at least this, wider when the name column needs it (CompletionNameWidth), up to the max. */
 	static constexpr float CompletionWidth = 460.0f;
 	static constexpr float CompletionMaxWidth = 720.0f;

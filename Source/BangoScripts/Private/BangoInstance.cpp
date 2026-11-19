@@ -245,14 +245,8 @@ bool FBangoInstance::CheckArguments(TConstArrayView<FBangoValue> Args, TArray<FB
 		return false;
 	};
 
-	if (Params.Num() == 0 && Args.Num() > 0)
-	{
-		return ArgFail(FString::Printf(TEXT("This script takes no arguments (it has no parameters), but %d were passed."), Args.Num()));
-	}
-	if (Args.Num() > Params.Num())
-	{
-		return ArgFail(FString::Printf(TEXT("Too many arguments: this script takes at most %d, but %d were passed."), Params.Num(), Args.Num()));
-	}
+	// Values past the script's last input are left unused: a script declares the inputs it wants, in order, and may
+	// stop before the end of what its caller passes (or declare none).
 	const int32 Required = Program->GetNumRequiredParams();
 	if (Args.Num() < Required)
 	{

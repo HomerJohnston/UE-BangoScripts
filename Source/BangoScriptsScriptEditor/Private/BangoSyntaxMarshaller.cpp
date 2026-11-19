@@ -65,15 +65,18 @@ namespace BangoSyntaxMarshallerPrivate
 		{
 		}
 
+		/** Its characters are the one before an empty range: it records that one's right edge, with no width. */
+		bool bAfterChar = false;
+
 		virtual int32 OnPaint(const FPaintArgs& Args, const FTextLayout::FLineView& Line, const FVector2D Offset, const float Width,
 			const FTextBlockStyle& DefaultStyle, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect,
 			FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
 		{
 			// The same position the bracket boxes are drawn at, in the text widget's space, then in desktop space.
 			const float InverseScale = Inverse(AllottedGeometry.Scale);
-			const FVector2D Location(Line.Offset.X + Offset.X, Line.Offset.Y + Offset.Y);
+			const FVector2D Location(Line.Offset.X + Offset.X + (bAfterChar ? Width : 0.0f), Line.Offset.Y + Offset.Y);
 			const FVector2D LocalTopLeft = TransformPoint(InverseScale, Location);
-			const FVector2D LocalSize = TransformVector(InverseScale, FVector2D(Width, FMath::Max(Line.Size.Y, Line.TextHeight)));
+			const FVector2D LocalSize = TransformVector(InverseScale, FVector2D(bAfterChar ? 0.0f : Width, FMath::Max(Line.Size.Y, Line.TextHeight)));
 			const FVector2D AbsoluteTopLeft = AllottedGeometry.LocalToAbsolute(LocalTopLeft);
 			Probe->AbsolutePosition = AbsoluteTopLeft;
 			Probe->AbsoluteSize = FVector2D(AllottedGeometry.LocalToAbsolute(LocalTopLeft + LocalSize)) - AbsoluteTopLeft;
@@ -115,6 +118,44 @@ namespace BangoSyntaxMarshallerPrivate
 		}
 	};
 
+	/**
+	 * Draws faint text just after its characters (the line's last one): the `)`s autocomplete left open
+	 * (FBangoSyntaxMarshaller::SetGhostParens). Not part of the text; nothing after it on the line, so it covers nothing.
+	 */
+	class FBangoGhostTextHighlighter : public ISlateLineHighlighter
+	{
+	public:
+		FString Text;
+		FSlateFontInfo Font;
+		FLinearColor Color = FLinearColor::White;
+
+		virtual int32 OnPaint(const FPaintArgs& Args, const FTextLayout::FLineView& Line, const FVector2D Offset, const float Width,
+			const FTextBlockStyle& DefaultStyle, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect,
+			FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
+		{
+			if (Text.IsEmpty())
+			{
+				return LayerId;
+			}
+			// Where the next character would go, at the text's top (the line may be taller than its text).
+			const float InverseScale = Inverse(AllottedGeometry.Scale);
+			const float LineHeight = FMath::Max(Line.Size.Y, Line.TextHeight);
+			const FVector2D Location(Line.Offset.X + Offset.X + Width, Line.Offset.Y + Offset.Y + FMath::Max(0.0f, Line.Size.Y - Line.TextHeight));
+			FSlateDrawElement::MakeText(
+				OutDrawElements,
+				++LayerId,
+				AllottedGeometry.ToPaintGeometry(
+					TransformVector(InverseScale, FVector2D(LineHeight * Text.Len(), LineHeight)),
+					FSlateLayoutTransform(TransformPoint(InverseScale, Location))),
+				Text,
+				Font,
+				bParentEnabled ? ESlateDrawEffect::None : ESlateDrawEffect::DisabledEffect,
+				Color * InWidgetStyle.GetColorAndOpacityTint());
+			return LayerId;
+		}
+	};
+
+	static constexpr int32 GhostZOrder = -5;
 	static constexpr int32 ProbeZOrder = -7;
 	static constexpr int32 ErrorZOrder = -6;
 
@@ -245,6 +286,50 @@ FBangoSyntaxMarshaller::FBangoSyntaxMarshaller(TSharedRef<const FBangoSyntaxStyl
 	UnmatchedHighlighter = MakeShared<FBangoBracketHighlighter>(FLinearColor(0.9f, 0.1f, 0.1f, 0.45f));
 	ProbeHighlighter = MakeShared<FBangoProbeHighlighter>(Probe);
 	ErrorHighlighter = MakeShared<FBangoErrorHighlighter>();
+
+	const TSharedRef<FBangoGhostTextHighlighter> Ghost = MakeShared<FBangoGhostTextHighlighter>();
+	const FTextBlockStyle& TextStyle = Style->GetDefaultStyle();
+	Ghost->Font = TextStyle.Font;
+	Ghost->Color = TextStyle.ColorAndOpacity.GetSpecifiedColor().CopyWithNewOpacity(0.35f);
+	GhostHighlighter = Ghost;
+}
+
+void FBangoSyntaxMarshaller::SetGhostParens(int32 Line, int32 Count)
+{
+	if (Count <= 0)
+	{
+		Line = INDEX_NONE;
+	}
+	if (Line == GhostLine && Count == GhostCount)
+	{
+		return;
+	}
+	GhostLine = Line;
+	GhostCount = Count;
+	UpdateGhostHighlight();
+}
+
+void FBangoSyntaxMarshaller::UpdateGhostHighlight()
+{
+	if (LastLayout == nullptr)
+	{
+		return;
+	}
+	RemoveHighlights(GhostHighlights);
+	if (GhostLine < 0 || GhostLine >= LastLayout->GetLineModels().Num() || !CachedLines.IsValidIndex(GhostLine))
+	{
+		return;
+	}
+	// On the line's last character, drawn after it. (It always has one: the `(` it's for.)
+	const int32 LineLen = CachedLines[GhostLine].Len();
+	if (LineLen == 0)
+	{
+		return;
+	}
+	StaticCastSharedPtr<BangoSyntaxMarshallerPrivate::FBangoGhostTextHighlighter>(GhostHighlighter)->Text = FString::ChrN(GhostCount, TEXT(')'));
+	FTextLineHighlight Highlight(GhostLine, FTextRange(LineLen - 1, LineLen), BangoSyntaxMarshallerPrivate::GhostZOrder, GhostHighlighter.ToSharedRef());
+	LastLayout->AddLineHighlight(Highlight);
+	GhostHighlights.Add(Highlight);
 }
 
 void FBangoSyntaxMarshaller::SetProbe(int32 Line, int32 BeginColumn, int32 EndColumn)
@@ -273,9 +358,13 @@ void FBangoSyntaxMarshaller::UpdateProbeHighlight()
 		return;
 	}
 	RemoveHighlights(ProbeHighlights);
-	if (ProbeLine >= 0 && ProbeLine < LastLayout->GetLineModels().Num() && !ProbeRange.IsEmpty())
+	// Nothing typed yet (`@light call |`): the character before, whose right edge is where the word starts.
+	const bool bEmpty = ProbeRange.IsEmpty();
+	if (ProbeLine >= 0 && ProbeLine < LastLayout->GetLineModels().Num() && (!bEmpty || ProbeRange.BeginIndex > 0))
 	{
-		FTextLineHighlight Highlight(ProbeLine, ProbeRange, BangoSyntaxMarshallerPrivate::ProbeZOrder, ProbeHighlighter.ToSharedRef());
+		StaticCastSharedPtr<BangoSyntaxMarshallerPrivate::FBangoProbeHighlighter>(ProbeHighlighter)->bAfterChar = bEmpty;
+		const FTextRange Range = bEmpty ? FTextRange(ProbeRange.BeginIndex - 1, ProbeRange.BeginIndex) : ProbeRange;
+		FTextLineHighlight Highlight(ProbeLine, Range, BangoSyntaxMarshallerPrivate::ProbeZOrder, ProbeHighlighter.ToSharedRef());
 		LastLayout->AddLineHighlight(Highlight);
 		ProbeHighlights.Add(Highlight);
 	}
@@ -592,6 +681,8 @@ void FBangoSyntaxMarshaller::SetText(const FString& SourceString, FTextLayout& T
 	UpdateProbeHighlight();
 	ErrorHighlights.Reset();
 	UpdateErrorHighlight();
+	GhostHighlights.Reset();
+	UpdateGhostHighlight();
 }
 
 void FBangoSyntaxMarshaller::GetText(FString& TargetString, const FTextLayout& SourceTextLayout)

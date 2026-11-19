@@ -1340,8 +1340,9 @@ static void BangoRunArgumentTests(TArray<FString>& OutFailures)
 
 		{ TEXT("too few"), TEXT("#inputs (int _a, int _b)\nTalk(\"x\");"), { FBangoValue::MakeInt(1) }, nullptr, TEXT("Missing argument 2 ('_b', an int). This script needs at least 2 argument(s), but 1 were passed.") },
 		{ TEXT("none for required"), Greet, {}, nullptr, TEXT("Missing argument 1 ('_who', an entity)") },
-		{ TEXT("too many"), TEXT("#inputs (int _a)\nTalk(\"x\");"), { FBangoValue::MakeInt(1), FBangoValue::MakeInt(2) }, nullptr, TEXT("Too many arguments: this script takes at most 1, but 2 were passed.") },
-		{ TEXT("arguments to a script without inputs"), TEXT("Talk(\"x\");"), { FBangoValue::MakeInt(1) }, nullptr, TEXT("takes no arguments") },
+		{ TEXT("extra values are left unused"), TEXT("#inputs (int _a)\nTalk(\"{0}\", _a);"), { FBangoValue::MakeInt(1), FBangoValue::MakeString(TEXT("unused")) }, TEXT("1"), nullptr },
+		{ TEXT("a script without inputs leaves them all unused"), TEXT("Talk(\"x\");"), { FBangoValue::MakeInt(1) }, TEXT("x"), nullptr },
+		{ TEXT("extra values aren't checked"), TEXT("#inputs (int _a = 4)\nTalk(\"{0}\", _a);"), { FBangoValue::MakeInt(2), FBangoValue::MakeEntity(TEXT("nobody")), FBangoValue::MakeNil(FBangoType::Bool()) }, TEXT("2"), nullptr },
 		{ TEXT("wrong type"), TEXT("#inputs (int _a, string _b)\nTalk(\"x\");"), { FBangoValue::MakeInt(1), FBangoValue::MakeInt(2) }, nullptr, TEXT("Argument 2 ('_b') must be a string, but it is an int.") },
 		{ TEXT("float for an int"), TEXT("#inputs (int _a)\nTalk(\"x\");"), { FBangoValue::MakeDouble(1.5) }, nullptr, TEXT("Argument 1 ('_a') must be an int, but it is a float.") },
 		{ TEXT("argument error points at the inputs line"), Greet, { FBangoValue::MakeString(TEXT("oops")), FBangoValue::MakeString(TEXT("hi")) }, nullptr, TEXT("test.bango(1:1) [node 0]: Argument 1 ('_who') must be an entity") },

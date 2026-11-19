@@ -33,8 +33,23 @@ struct FBangoCompletionItem
 	/** Shown under the list for the selected entry: a command's one-line description. */
 	FString Description;
 
-	/** Commands, functions and built-ins: accepting one types `Name(`. */
+	/** Commands, functions and built-ins: accepting one types `Name(` (FBangoCompletion::MakeInsert). */
 	bool bCallable = false;
+
+	/** A callable that takes no arguments at all: accepting it types `Name()`. */
+	bool bNoArgs = false;
+};
+
+/** What accepting an autocomplete entry types in place of the word (FBangoCompletion::MakeInsert). */
+struct FBangoCompletionInsert
+{
+	FString Text;
+
+	/**
+	 * Text ends in a `(` left open for the arguments, with nothing after it on the line: the editor shows a faint `)`
+	 * at the line's end until it's closed (Tab types it, `;` types it and the `;`).
+	 */
+	bool bOpenParen = false;
 };
 
 class FBangoCompletion
@@ -66,9 +81,26 @@ public:
 	/**
 	 * Whether the word starting at WordStart is a `call`'s function name (`@light call Tu|`). Then OutTargetEntity is
 	 * the target's Bango ID name if it's written as one (`@light`, `self`, `player`), or empty (a variable, a call...),
-	 * and the list should hold the target's Blueprint functions, not the usual names.
+	 * and the list should hold the target's Blueprint functions, not the usual names. WordStart may be the cursor,
+	 * with nothing typed yet (`@light call |`): the list opens there too.
 	 */
 	static bool FindCallTarget(const FString& Line, int32 WordStart, FString& OutTargetEntity);
+
+	/**
+	 * What accepting Item for the word that ends at WordEnd of Line types. A name that isn't callable, or one with a
+	 * `(` straight after it already: the name. One with no arguments: `Name()`. One with arguments: `Name(`, with
+	 * bOpenParen when the rest of the line is blank.
+	 */
+	static FBangoCompletionInsert MakeInsert(const FBangoCompletionItem& Item, const FString& Line, int32 WordEnd);
+
+	/**
+	 * Of the `(` columns in InOutOpenColumns (left open by MakeInsert, in order), keeps those still open on Line: still a
+	 * `(` there, before CursorColumn, and not closed by a `)` later on the line. Brackets in strings and comments don't count.
+	 */
+	static void KeepOpenParens(const FString& Line, int32 CursorColumn, TArray<int32>& InOutOpenColumns);
+
+	/** Whether Column of Line is inside a string or a comment (or its end, for one left open). */
+	static bool IsInStringOrComment(const FString& Line, int32 Column);
 
 	/** The items starting with Prefix, ignoring case, in their order. */
 	static void Filter(const TArray<FBangoCompletionItem>& Items, const FString& Prefix, TArray<int32>& OutIndices);

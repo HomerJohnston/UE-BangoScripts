@@ -63,6 +63,12 @@ public:
 	void ClearError();
 	const FBangoTextProbe& GetProbe() const { return *Probe; }
 
+	/**
+	 * Shows Count faint `)`s after the end of Line: the brackets autocomplete left open, not yet typed. Count 0 (or
+	 * Line INDEX_NONE) hides them. They stay until changed, through relayouts, at the end of whatever the line holds.
+	 */
+	void SetGhostParens(int32 Line, int32 Count);
+
 	/** The text's locals, parameters, globals and graphs, as of the last layout. */
 	const FBangoScriptNames& GetScriptNames() const { return ScriptNames; }
 
@@ -101,6 +107,9 @@ private:
 	/** Puts the error's underline on the layout, replacing the one there. */
 	void UpdateErrorHighlight();
 
+	/** Puts the ghost `)`s on the layout, replacing the ones there. */
+	void UpdateGhostHighlight();
+
 	/** Takes Highlights off the layout (those on lines it still has) and empties the list. */
 	void RemoveHighlights(TArray<FTextLineHighlight>& Highlights);
 
@@ -134,6 +143,11 @@ private:
 	int32 ErrorLine = INDEX_NONE;
 	int32 ErrorColumn = 0;
 	TArray<FTextLineHighlight> ErrorHighlights;
+
+	TSharedPtr<ISlateLineHighlighter> GhostHighlighter;
+	int32 GhostLine = INDEX_NONE;
+	int32 GhostCount = 0;
+	TArray<FTextLineHighlight> GhostHighlights;
 
 	int32 TabSize = 4;
 	bool bMetadataIsError = false;

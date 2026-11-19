@@ -443,6 +443,17 @@ bool SBangoTextEditor::HandleIsTypedCharValid(const TCHAR Character)
 	{
 		bTypedNameChar = true;
 	}
+	// So may a blank after `target call ` (the list of the target's functions, before any of a name is typed).
+	if (Character == TEXT(' ') || Character == TEXT('\t'))
+	{
+		bTypedBlank = true;
+	}
+
+	// A ';' at the end of a call autocomplete left open types its faint `)`s first (all of them, for calls in calls).
+	if (Character == TEXT(';') && TypeGhostParens(true, TEXT(";")))
+	{
+		return false;
+	}
 
 	// A '}' typed on a line that's only indentation takes one tab off first, so it lines up with its block's start.
 	if (Character != TEXT('}') || !TextBox.IsValid() || TextBox->IsTextReadOnly() || TextBox->AnyTextSelected())
@@ -478,7 +489,7 @@ void SBangoTextEditor::HandleCursorMoved(const FTextLocation& Location)
 
 	UpdateGutterHighlight(Location.GetLineIndex());
 	ReportCursorNodes(false);
-	bCompletionDirty = true;
+	bCompletionDirty = true; // and the ghost `)`s
 }
 
 void SBangoTextEditor::SetGraphSyncEnabled(bool bEnabled)
@@ -697,8 +708,13 @@ FReply SBangoTextEditor::HandleKeyDown(const FGeometry& Geometry, const FKeyEven
 	// Tab indents (Bango uses one tab per block level) instead of moving focus
 	// to the next widget. Handling the key down stops Slate's focus navigation;
 	// the tab character itself is typed by the key-char event that follows.
+	// At the end of a call autocomplete left open, it types the faint `)` instead.
 	if (KeyEvent.GetKey() == EKeys::Tab && !KeyEvent.IsControlDown() && !KeyEvent.IsAltDown() && !KeyEvent.IsShiftDown())
 	{
+		if (TypeGhostParens(false, TEXT("")))
+		{
+			bSwallowTab = true;
+		}
 		return FReply::Handled();
 	}
 
@@ -780,8 +796,10 @@ void SBangoTextEditor::Tick(const FGeometry& AllottedGeometry, const double InCu
 	if (bCompletionDirty)
 	{
 		bCompletionDirty = false;
-		UpdateCompletion(bTypedNameChar);
+		UpdateCompletion(bTypedNameChar, bTypedBlank);
 		bTypedNameChar = false;
+		bTypedBlank = false;
+		UpdateGhostParens();
 	}
 
 	// The script being typed in is the one whose @names are ringed in the level viewports (BangoScriptReferences). It
@@ -838,7 +856,7 @@ void SBangoTextEditor::Tick(const FGeometry& AllottedGeometry, const double InCu
 	}
 }
 
-void SBangoTextEditor::UpdateCompletion(bool bMayOpen)
+void SBangoTextEditor::UpdateCompletion(bool bMayOpen, bool bMayOpenForCall)
 {
 	if (!TextBox.IsValid() || !TextBox->HasKeyboardFocus() || TextBox->IsTextReadOnly() || TextBox->AnyTextSelected())
 	{
@@ -858,8 +876,18 @@ void SBangoTextEditor::UpdateCompletion(bool bMayOpen)
 	int32 WordStart = INDEX_NONE;
 	if (!FBangoCompletion::FindWordBeforeCursor(Line, Cursor.GetOffset(), WordStart))
 	{
-		CloseCompletion();
-		return;
+		// Nothing typed yet after `target call `: the list of the target's functions, opened by typing the blank.
+		FString CallTarget;
+		const int32 Column = Cursor.GetOffset();
+		const bool bAfterCall = Column > 0 && (Line[Column - 1] == TEXT(' ') || Line[Column - 1] == TEXT('\t'))
+			&& FBangoCompletion::FindCallTarget(Line, Column, CallTarget) && !FBangoCompletion::IsInStringOrComment(Line, Column);
+		if (!bAfterCall)
+		{
+			CloseCompletion();
+			return;
+		}
+		WordStart = Column;
+		bMayOpen = bMayOpenForCall;
 	}
 
 	// Opens only when a name's character is typed; once open, it follows the word as it's typed or deleted.
@@ -935,6 +963,7 @@ void SBangoTextEditor::GatherCompletionItems(int32 Line, const FString& LineText
 				Item.Detail = Function.Signature;
 				Item.Description = Function.Description.IsEmpty() ? TargetLabel : Function.Description;
 				Item.bCallable = true;
+				Item.bNoArgs = Function.ParamNames.IsEmpty();
 			}
 			CompletionItems.Sort([](const FBangoCompletionItem& A, const FBangoCompletionItem& B) { return A.Name.Compare(B.Name, ESearchCase::IgnoreCase) < 0; });
 		}
@@ -962,6 +991,7 @@ void SBangoTextEditor::GatherCompletionItems(int32 Line, const FString& LineText
 		{
 			Item.Detail = Signature->ToString();
 			Item.Description = Signature->CommandDescription;
+			Item.bNoArgs = Signature->Params.IsEmpty() && !Signature->bVariadic;
 		}
 		Commands.Add(Item);
 	}
@@ -1042,24 +1072,88 @@ void SBangoTextEditor::AcceptCompletion()
 		return;
 	}
 
-	// The word typed so far is replaced by the whole name; commands and functions get their '(' too (unless one's there).
+	// The word typed so far is replaced by the whole name; commands and functions get their brackets too (unless a '('
+	// is there): `Name()` with no arguments, else `Name(` with a faint `)` to come.
 	const FTextLocation Cursor = TextBox->GetCursorLocation();
 	const TArray<FString>& Lines = Metadata.GetLines();
 	const FString Line = Lines.IsValidIndex(CompletionLine) ? Lines[CompletionLine] : FString();
-	FString Insert = Item->Name;
-	if (Item->bCallable && !(Cursor.GetOffset() < Line.Len() && Line[Cursor.GetOffset()] == TEXT('(')))
-	{
-		Insert += TEXT("(");
-	}
+	const FBangoCompletionInsert Insert = FBangoCompletion::MakeInsert(*Item, Line, Cursor.GetOffset());
 
 	const int32 WordLine = CompletionLine;
 	const int32 WordStart = CompletionStart;
 	CloseCompletion();
 
+	{
+		SMultiLineEditableText::FScopedEditableTextTransaction Transaction(TextBox);
+		TextBox->SelectText(FTextLocation(WordLine, WordStart), FTextLocation(WordLine, Cursor.GetOffset()));
+		TextBox->DeleteSelectedText();
+		TextBox->InsertTextAtCursor(Insert.Text);
+	}
+
+	if (Insert.bOpenParen)
+	{
+		// Inside another left open on this line (a call as an argument), both are shown.
+		if (GhostLine != WordLine)
+		{
+			GhostParens.Reset();
+			GhostLine = WordLine;
+		}
+		GhostParens.Add(WordStart + Insert.Text.Len() - 1);
+		Marshaller->SetGhostParens(GhostLine, GhostParens.Num());
+	}
+}
+
+void SBangoTextEditor::UpdateGhostParens()
+{
+	if (GhostParens.IsEmpty())
+	{
+		return;
+	}
+	const FTextLocation Cursor = TextBox.IsValid() ? TextBox->GetCursorLocation() : FTextLocation();
+	const TArray<FString>& Lines = Metadata.GetLines();
+	if (!TextBox.IsValid() || Cursor.GetLineIndex() != GhostLine || !Lines.IsValidIndex(GhostLine))
+	{
+		GhostParens.Reset();
+	}
+	else
+	{
+		FBangoCompletion::KeepOpenParens(Lines[GhostLine], Cursor.GetOffset(), GhostParens);
+	}
+	Marshaller->SetGhostParens(GhostLine, GhostParens.Num());
+	if (GhostParens.IsEmpty())
+	{
+		GhostLine = INDEX_NONE;
+	}
+}
+
+bool SBangoTextEditor::TypeGhostParens(bool bAll, const TCHAR* Then)
+{
+	UpdateGhostParens();
+	if (GhostParens.IsEmpty() || !TextBox.IsValid() || TextBox->IsTextReadOnly() || TextBox->AnyTextSelected())
+	{
+		return false;
+	}
+	// Only at the end of the line (where they're shown), and not in a string or a comment.
+	const FTextLocation Cursor = TextBox->GetCursorLocation();
+	const FString& Line = Metadata.GetLines()[GhostLine];
+	for (int32 I = Cursor.GetOffset(); I < Line.Len(); ++I)
+	{
+		if (Line[I] != TEXT(' ') && Line[I] != TEXT('\t'))
+		{
+			return false;
+		}
+	}
+	if (FBangoCompletion::IsInStringOrComment(Line, Cursor.GetOffset()))
+	{
+		return false;
+	}
+
+	const int32 Count = bAll ? GhostParens.Num() : 1;
+	GhostParens.SetNum(GhostParens.Num() - Count);
+	Marshaller->SetGhostParens(GhostLine, GhostParens.Num());
 	SMultiLineEditableText::FScopedEditableTextTransaction Transaction(TextBox);
-	TextBox->SelectText(FTextLocation(WordLine, WordStart), FTextLocation(WordLine, Cursor.GetOffset()));
-	TextBox->DeleteSelectedText();
-	TextBox->InsertTextAtCursor(Insert);
+	TextBox->InsertTextAtCursor(FString::ChrN(Count, TEXT(')')) + Then);
+	return true;
 }
 
 void SBangoTextEditor::SetInputsSignature(const TSharedPtr<const FBangoInputsSignature>& InSignature)

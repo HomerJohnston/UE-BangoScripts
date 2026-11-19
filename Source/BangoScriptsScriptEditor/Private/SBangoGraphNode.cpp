@@ -1513,6 +1513,7 @@ void SBangoGraphNode::GatherCompletionItems()
 			Item.Detail = Function.ToString();
 			Item.Kind = EBangoCompletionKind::Function;
 			Item.bCallable = true;
+			Item.bNoArgs = Function.Params.IsEmpty() && !Function.bVariadic;
 			AddItem(Item);
 		}
 		if (Context->Commands)
@@ -1529,6 +1530,7 @@ void SBangoGraphNode::GatherCompletionItems()
 				{
 					Item.Detail = Signature->ToString();
 					Item.Description = Signature->CommandDescription;
+					Item.bNoArgs = Signature->Params.IsEmpty() && !Signature->bVariadic;
 				}
 				AddItem(Item);
 			}
@@ -1590,12 +1592,9 @@ void SBangoGraphNode::AcceptCompletion(int32 FieldIndex)
 	const FBangoCompletionItem& Item = CompletionItems[CompletionShown[CompletionSelected]];
 	const FString Typed = Box->GetText().ToString();
 	const int32 CursorColumn = FMath::Clamp(CompletionCursor, CompletionWordStart, Typed.Len());
-	// The word typed so far becomes the whole name; commands and functions get their ( too, unless one's there.
-	FString Insert = Item.Name;
-	if (Item.bCallable && !(CursorColumn < Typed.Len() && Typed[CursorColumn] == TEXT('(')))
-	{
-		Insert += TEXT("(");
-	}
+	// The word typed so far becomes the whole name; commands and functions get their ( too, unless one's there, and
+	// their ) if they take no arguments.
+	const FString Insert = FBangoCompletion::MakeInsert(Item, Typed, CursorColumn).Text;
 	const FString NewText = Typed.Left(CompletionWordStart) + Insert + Typed.Mid(CursorColumn);
 	const int32 NewCursor = CompletionWordStart + Insert.Len();
 	CloseCompletion();

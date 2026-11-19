@@ -161,6 +161,7 @@ void FBangoCompletion::GetBuiltinItems(TArray<FBangoCompletionItem>& OutItems)
 	OutItems.Add(MakeItem(TEXT("Push"), EBangoCompletionKind::Builtin, TEXT("array Push(value)"), TEXT("Adds a value at the end of the array."), true));
 	OutItems.Add(MakeItem(TEXT("InsertAt"), EBangoCompletionKind::Builtin, TEXT("array InsertAt(value, int Index)"), TEXT("Inserts a value at an index and moves later elements up."), true));
 	OutItems.Add(MakeItem(TEXT("Pop"), EBangoCompletionKind::Builtin, TEXT("array Pop() -> element"), TEXT("Removes and returns the last element."), true));
+	OutItems.Last().bNoArgs = true;
 	OutItems.Add(MakeItem(TEXT("RemoveAt"), EBangoCompletionKind::Builtin, TEXT("array RemoveAt(int Index) -> element"), TEXT("Removes and returns an element, and moves later elements down."), true));
 }
 
@@ -232,7 +233,12 @@ void FBangoCompletion::GatherItems(const FBangoScriptNames& Names, int32 LineInd
 		{
 		case EBangoSyntaxKind::Parameter: Item.Kind = EBangoCompletionKind::Parameter; break;
 		case EBangoSyntaxKind::Global:    Item.Kind = EBangoCompletionKind::Global; break;
-		case EBangoSyntaxKind::Function:  Item.Kind = EBangoCompletionKind::Function; Item.bCallable = true; break;
+		case EBangoSyntaxKind::Function:
+			// Its "type" is its signature, `int AddScore(int amount)`, which ends in `()` when it has no parameters.
+			Item.Kind = EBangoCompletionKind::Function;
+			Item.bCallable = true;
+			Item.bNoArgs = Name.Type.EndsWith(TEXT("()"));
+			break;
 		default:                          Item.Kind = EBangoCompletionKind::Local; break;
 		}
 		OutItems.Add(Item);
@@ -276,6 +282,138 @@ void FBangoCompletion::GatherItems(const FBangoScriptNames& Names, int32 LineInd
 		Sorted.Insert(Item, At);
 	}
 	OutItems = MoveTemp(Sorted);
+}
+
+FBangoCompletionInsert FBangoCompletion::MakeInsert(const FBangoCompletionItem& Item, const FString& Line, int32 WordEnd)
+{
+	FBangoCompletionInsert Insert;
+	Insert.Text = Item.Name;
+	WordEnd = FMath::Clamp(WordEnd, 0, Line.Len());
+	if (!Item.bCallable || (WordEnd < Line.Len() && Line[WordEnd] == TEXT('(')))
+	{
+		return Insert;
+	}
+	bool bRestBlank = true;
+	for (int32 I = WordEnd; I < Line.Len(); ++I)
+	{
+		if (Line[I] != TEXT(' ') && Line[I] != TEXT('\t'))
+		{
+			bRestBlank = false;
+			break;
+		}
+	}
+	if (Item.bNoArgs)
+	{
+		Insert.Text += TEXT("()");
+	}
+	else
+	{
+		Insert.Text += TEXT("(");
+		Insert.bOpenParen = bRestBlank;
+	}
+	return Insert;
+}
+
+namespace BangoCompletionPrivate
+{
+	static bool IsStringOrCommentKind(EBangoSyntaxKind Kind)
+	{
+		switch (Kind)
+		{
+		case EBangoSyntaxKind::String:
+		case EBangoSyntaxKind::StringEscape:
+		case EBangoSyntaxKind::Placeholder:
+		case EBangoSyntaxKind::LocKey:
+		case EBangoSyntaxKind::LocNotes:
+		case EBangoSyntaxKind::Comment:
+		case EBangoSyntaxKind::Metadata:
+			return true;
+		default:
+			return false;
+		}
+	}
+
+	/** Calls Visit(Column, Char) for each bracket on Line that's code (not in a string or a comment), in order. */
+	template <typename FVisit>
+	static void ForEachCodeBracket(const FString& Line, FVisit&& Visit)
+	{
+		TArray<FBangoSyntaxToken> Tokens;
+		FBangoLineTokenizer::TokenizeLine(FStringView(Line), Tokens);
+		for (const FBangoSyntaxToken& Token : Tokens)
+		{
+			if (Token.Kind != EBangoSyntaxKind::Punctuation && Token.Kind != EBangoSyntaxKind::Structure)
+			{
+				continue;
+			}
+			for (int32 I = Token.Start; I < Token.Start + Token.Len && I < Line.Len(); ++I)
+			{
+				const TCHAR C = Line[I];
+				if (C == TEXT('(') || C == TEXT(')') || C == TEXT('[') || C == TEXT(']') || C == TEXT('{') || C == TEXT('}'))
+				{
+					Visit(I, C);
+				}
+			}
+		}
+	}
+}
+
+void FBangoCompletion::KeepOpenParens(const FString& Line, int32 CursorColumn, TArray<int32>& InOutOpenColumns)
+{
+	using namespace BangoCompletionPrivate;
+
+	struct FBracket { int32 Column; TCHAR Char; };
+	TArray<FBracket> Brackets;
+	ForEachCodeBracket(Line, [&Brackets](int32 Column, TCHAR C) { Brackets.Add({ Column, C }); });
+
+	InOutOpenColumns.RemoveAll([&](int32 Open)
+	{
+		if (Open >= CursorColumn)
+		{
+			return true;
+		}
+		const int32 Index = Brackets.IndexOfByPredicate([Open](const FBracket& B) { return B.Column == Open; });
+		if (Index == INDEX_NONE || Brackets[Index].Char != TEXT('('))
+		{
+			return true; // not a `(` any more
+		}
+		int32 Depth = 0;
+		for (int32 I = Index; I < Brackets.Num(); ++I)
+		{
+			const TCHAR C = Brackets[I].Char;
+			if (C == TEXT('(') || C == TEXT('['))
+			{
+				++Depth;
+			}
+			else if (C == TEXT(')') || C == TEXT(']'))
+			{
+				if (--Depth == 0)
+				{
+					return true; // closed
+				}
+			}
+		}
+		return false;
+	});
+}
+
+bool FBangoCompletion::IsInStringOrComment(const FString& Line, int32 Column)
+{
+	using namespace BangoCompletionPrivate;
+
+	// What a character typed there would be: the text before it, and one more name character.
+	Column = FMath::Clamp(Column, 0, Line.Len());
+	const FString Probe = Line.Left(Column) + TEXT("_");
+	TArray<FBangoSyntaxToken> Tokens;
+	FBangoLineTokenizer::TokenizeLine(FStringView(Probe), Tokens);
+	for (const FBangoSyntaxToken& Token : Tokens)
+	{
+		if (Token.Start <= Column && Column < Token.Start + Token.Len)
+		{
+			// A string not closed yet is an error token.
+			return IsStringOrCommentKind(Token.Kind) || (Token.Kind == EBangoSyntaxKind::Error && Probe[Token.Start] == TEXT('"'));
+		}
+	}
+	return false;
 }
 
 void FBangoCompletion::Filter(const TArray<FBangoCompletionItem>& Items, const FString& Prefix, TArray<int32>& OutIndices)
