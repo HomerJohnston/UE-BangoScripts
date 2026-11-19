@@ -61,6 +61,10 @@ enum class EBangoOp : uint8
 	ForEachNext,        // A = slot holding the array copy (A + 1 holds the int position), B = loop variable slot, C = target when done
 	SpawnBlock,         // A = target: starts another instance at A with a copy of this frame's slots (a spawn block); this one carries on. B = 1: push the new instance's id
 
+	// ---- waitUntil (Program.WaitSets) ----
+	WaitCheck,          // A = wait set. Its condition follows: while it's worked out, a global that's unset makes it false, and it can't wait
+	WaitResult,         // A = wait set, B = its WaitCheck.  bool -> : true carries on; false pauses until one of the set's globals changes (every frame, if it polls), then runs from B again
+
 	Count               // not an op
 };
 
@@ -220,6 +224,39 @@ struct FBangoReflectedCallSite
 	int32 Column = 0;
 };
 
+/** What can change some code's answer (Bango::FindDependencies): for waitUntil, and for watched conditions. */
+struct FBangoDependencies
+{
+	/** The globals it reads, itself or in the script's functions it calls (sorted). */
+	TArray<FString> Globals;
+	/** The main graph's inputs (#inputs, or an inputs signature) it reads, by name, in their order. */
+	TArray<FString> Inputs;
+	/**
+	 * Empty if only those can change its answer; else why it must be checked again from time to time anyway
+	 * ("it calls IsAlive"): it calls a command or a Blueprint function (`call`).
+	 */
+	FString PollReason;
+};
+
+/**
+ * One `waitUntil (condition);` (WaitCheck and WaitResult): what can change its condition's answer while the script waits.
+ * Locals can't change then (a spawn copies them), so only globals, and whatever commands look at.
+ */
+struct FBangoWaitSet
+{
+	/** The globals its condition reads, itself or in the script's functions it calls: a change to one rechecks it. */
+	TArray<FString> Globals;
+	/** Empty if only those globals can change its answer; else why it's rechecked every frame ("it calls IsAlive"). */
+	FString PollReason;
+	/** Where its condition's code is: Functions[Function].Code, from CondBegin to before CondEnd. */
+	int32 Function = 0;
+	int32 CondBegin = 0;
+	int32 CondEnd = 0;
+	/** Where the waitUntil is. */
+	int32 Line = 0;
+	int32 Column = 0;
+};
+
 /** A Blueprint function `call` can reach (Bango::GetBangoCallableFunctions), for the editor. */
 struct FBangoCallableFunction
 {
@@ -263,6 +300,10 @@ struct FBangoProgram
 	TArray<FBangoGlobalDecl> Globals;
 	/** Every `target call Name(args)` in it, in order, for the editor's checks. */
 	TArray<FBangoReflectedCallSite> ReflectedCalls;
+	/** Every `waitUntil`, in the order compiled: what its WaitCheck and WaitResult refer to. */
+	TArray<FBangoWaitSet> WaitSets;
+	/** For a program compiled as a condition: what can change its answer (the whole program). Empty otherwise. */
+	FBangoDependencies ConditionDependencies;
 
 	/** The script's parameters, in order. They occupy the first slots of Functions[0]. Empty if there is no inputs line. */
 	TArray<FBangoScriptParamInfo> Params;
@@ -289,4 +330,10 @@ namespace Bango
 
 	/** Readable listing of a compiled program, for tests and debugging. */
 	BANGOSCRIPTS_API FString Disassemble(const FBangoProgram& Program);
+
+	/**
+	 * What the code of Program.Functions[Function] from Begin to before End reads and calls, following calls into the
+	 * script's functions (FBangoDependencies). Inputs are counted only in the main graph (Function 0).
+	 */
+	BANGOSCRIPTS_API FBangoDependencies FindDependencies(const FBangoProgram& Program, int32 Function, int32 Begin, int32 End);
 }

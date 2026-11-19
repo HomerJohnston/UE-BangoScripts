@@ -19,7 +19,7 @@ namespace Bango
 		const FBangoInputsSignature* Signature = nullptr);
 
 	/**
-	 * Parses and compiles in one step. With a Signature (an inline script's, FBangoInlineScript::UseInputsSignature),
+	 * Parses and compiles in one step. With a Signature (an inline script's, FBangoInlineScriptBase::UseInputsSignature),
 	 * its inputs are the script's parameters, and an #inputs line is an error.
 	 */
 	BANGOSCRIPTS_API bool CompileSource(const FString& Source, const FString& FileName, const IBangoCommandLookup& Commands, FBangoProgram& OutProgram, FBangoCompileError& OutError,

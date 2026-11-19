@@ -1132,6 +1132,7 @@ namespace BangoGraphLayoutPrivate
 
 		case EBangoGraphNodeKind::If:
 		case EBangoGraphNodeKind::While:
+		case EBangoGraphNodeKind::WaitUntil:
 		{
 			FBangoNodeField Condition = WholeText(TEXT("Condition"), TEXT("bool"), Node.Text, false);
 			Condition.bHideLabel = true; // the node's one row needs no name

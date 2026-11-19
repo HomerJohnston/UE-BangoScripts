@@ -21,7 +21,10 @@ enum class EBangoInstanceStatus : uint8
 	None,
 	/** Can run: Resume will run it until it pauses, ends or fails. */
 	Ready,
-	/** Paused on a latent command. Resume polls the command and continues when it finishes. */
+	/**
+	 * Paused on a latent command (Resume polls the command and continues when it finishes), or at a waitUntil whose
+	 * condition was false (Resume checks it again: GetWaitSet, IsWaitDue).
+	 */
 	Waiting,
 	/** Reached the end, or `return;` at the top level. */
 	Finished,
@@ -213,8 +216,18 @@ public:
 	/** For the debugger: the calls in progress, the main graph first and the innermost (where it is) last. */
 	void GetCallStack(TArray<FBangoCallFrameInfo>& OutFrames) const;
 
-	/** For the debugger: the command it's waiting on (like "Sleep"), or empty if it isn't waiting. */
+	/** For the debugger: the command it's waiting on (like "Sleep"), "waitUntil", or empty if it isn't waiting. */
 	FString GetWaitingCommandName() const;
+
+	/** Paused at a waitUntil: what its condition depends on (FBangoProgram::WaitSets). Null otherwise. */
+	const FBangoWaitSet* GetWaitSet() const;
+
+	/**
+	 * Paused at a waitUntil whose answer may have changed, so Resume should check it again: a global it reads has
+	 * changed since it paused (or ever, if it was loaded since), or it calls a command (checked every frame). False if
+	 * it isn't paused at a waitUntil.
+	 */
+	bool IsWaitDue(const FBangoGlobalStore& Globals) const;
 
 	/**
 	 * For the debugger's trail: records the node IDs it runs, in order (each time it moves on to another node), keeping
@@ -284,8 +297,13 @@ private:
 	bool CheckArguments(TConstArrayView<FBangoValue> Args, TArray<FBangoValue>& OutValues);
 	bool Execute(const FBangoExecContext& Context);
 	bool RuntimeFail(const FString& Message);
-	/** RuntimeFail for reading a global that doesn't exist or is nil (FBangoRuntimeError::bUnsetGlobal). */
-	bool UnsetGlobalFail(const FString& Message);
+	/**
+	 * RuntimeFail for reading a global that doesn't exist or is nil (FBangoRuntimeError::bUnsetGlobal). While a
+	 * waitUntil's condition is worked out, it's no failure: the condition is false, and it pauses there (returning false).
+	 */
+	bool UnsetGlobalFail(const FString& Message, const FBangoGlobalStore& Globals);
+	/** Pauses at the waitUntil whose WaitCheck is CheckIP, in the current frame, until Set's globals change. */
+	void PauseAtWait(int32 Set, int32 CheckIP, const FBangoGlobalStore& Globals);
 	/** Why `self` can't be used here (the owner's Problem, or that there's no owner). */
 	FString GetSelfProblem() const;
 	/**
@@ -332,6 +350,23 @@ private:
 	/** The latent command being waited on. */
 	int32 PendingCommandName = -1;
 	FBangoCommandCall PendingCall;
+
+	/** Paused at a waitUntil: its wait set, else -1. Saved. */
+	int32 WaitSet = -1;
+	/** The global store's change stamp when it paused there. Not saved: 0 after loading, so it's checked again. */
+	uint64 WaitStamp = 0;
+	/**
+	 * While a waitUntil's condition is being worked out (WaitCheck to WaitResult): its wait set, and where to go back
+	 * to if a global it reads is unset. Never saved, since a script can't pause then.
+	 */
+	struct FWaitGuard
+	{
+		int32 Set = -1;
+		int32 NumFrames = 0;
+		int32 StackSize = 0;
+		int32 CheckIP = 0;
+	};
+	FWaitGuard WaitGuard;
 
 	/** The instruction being run, for error locations. */
 	int32 CurrentFunction = 0;

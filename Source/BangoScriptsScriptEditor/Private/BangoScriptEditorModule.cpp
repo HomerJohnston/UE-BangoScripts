@@ -61,9 +61,11 @@ public:
 		LevelStartScriptMenu = MakeUnique<FBangoLevelStartScriptMenu>();
 		LevelStartScriptMenu->Startup();
 
-		// Inline scripts (FBangoInlineScript properties): a box to type in, and Edit for a window of their own.
+		// Inline scripts and conditions (FBangoInlineScript, FBangoInlineCondition properties): a box to type in, and Edit for a window of their own.
 		FPropertyEditorModule& PropertyEditor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
 		PropertyEditor.RegisterCustomPropertyTypeLayout(FBangoInlineScript::StaticStruct()->GetFName(),
+			FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FBangoInlineScriptCustomization::MakeInstance));
+		PropertyEditor.RegisterCustomPropertyTypeLayout(FBangoInlineCondition::StaticStruct()->GetFName(),
 			FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FBangoInlineScriptCustomization::MakeInstance));
 		// Bango ID names (FBangoIDName properties): their text box after an '@'.
 		PropertyEditor.RegisterCustomPropertyTypeLayout(FBangoIDName::StaticStruct()->GetFName(),
@@ -109,6 +111,7 @@ public:
 		if (FPropertyEditorModule* PropertyEditor = FModuleManager::GetModulePtr<FPropertyEditorModule>(TEXT("PropertyEditor")))
 		{
 			PropertyEditor->UnregisterCustomPropertyTypeLayout(FBangoInlineScript::StaticStruct()->GetFName());
+			PropertyEditor->UnregisterCustomPropertyTypeLayout(FBangoInlineCondition::StaticStruct()->GetFName());
 			PropertyEditor->UnregisterCustomPropertyTypeLayout(FBangoIDName::StaticStruct()->GetFName());
 		}
 		if (LevelStartScriptMenu.IsValid())

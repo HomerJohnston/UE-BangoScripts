@@ -5,6 +5,7 @@
 #include "BangoConditions.h"
 #include "BangoInstance.h"
 #include "BangoInlineScript.h"
+#include "BangoConditionWatches.h"
 class UBangoScriptAsset;
 
 #include "BangoScriptSubsystem.generated.h"
@@ -57,8 +58,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FBangoScriptFailedEvent, FBangoScri
  * Runs Bango scripts in one game world (spec section 10).
  *
  * Every frame, each running script resumes and runs until it pauses (on Sleep or another latent
- * command), finishes or fails. Scripts pause while the game is paused. Errors are logged and shown
- * on screen, and only stop the script that hit them.
+ * command), finishes or fails. Then each script paused at a waitUntil checks its condition again, if a
+ * global it reads changed (or it calls a command, so it's checked every frame). Scripts pause while the
+ * game is paused. Errors are logged and shown on screen, and only stop the script that hit them.
  */
 UCLASS()
 class BANGOSCRIPTS_API UBangoScriptSubsystem : public UTickableWorldSubsystem
@@ -162,6 +164,38 @@ public:
 	EBangoConditionResult EvaluateCondition(const FString& Source, FString& OutError,
 		const TArray<FBangoValue>& Args = TArray<FBangoValue>(), const FString& Name = TEXT("Condition"));
 
+	// ---- Watching conditions (spec section 10, Watching conditions; BangoConditionWatches.h) ----
+
+	/**
+	 * Makes a group for watching Condition for many things (a trigger's, for each actor that could activate it): see
+	 * StartWatch. Name is what its errors show (the owner's name). OnChanges gets, at the end of each frame where any of
+	 * its watches' answers changed, the list of them: one call per frame. Fails (an invalid handle, and OutError) if
+	 * the condition doesn't compile, or its inputs signature isn't registered. Destroy it when done: it isn't saved, and
+	 * goes when the world does.
+	 */
+	FBangoWatchGroupHandle CreateWatchGroup(const FBangoInlineCondition& Condition, const FString& Name, FBangoWatchChangesFunc OnChanges, FString& OutError);
+
+	/** Stops all its watches; nothing more is reported for it. Safe in its own OnChanges. */
+	void DestroyWatchGroup(FBangoWatchGroupHandle& Group);
+
+	/**
+	 * Sets inputs shared by all the group's watches, by name (like a trigger's _potential and _actual). Watches whose
+	 * condition reads one that's now different are checked at the end of the frame; setting the same values does
+	 * nothing, so it's fine to set them every time. False (OutError) if a name isn't one of the condition's inputs.
+	 */
+	bool SetGroupInputs(FBangoWatchGroupHandle Group, TConstArrayView<FBangoWatchInput> Inputs, FString& OutError);
+
+	/**
+	 * Starts watching the group's condition with its own inputs (like a trigger's _activator), checks it straight away,
+	 * and returns whether it's Satisfied (true; false, Unset and errors aren't). After that, a change is reported to the
+	 * group's OnChanges: it's checked when a global or input it reads changes, or, if it calls a command (or uses
+	 * `call`), also every Poll Interval (the condition's). Errors are shown once, and again only after a true or false.
+	 */
+	bool StartWatch(FBangoWatchGroupHandle Group, TConstArrayView<FBangoWatchInput> Inputs, FBangoWatchHandle& OutWatch);
+
+	/** Stops it: it isn't checked or reported again, even this frame. Safe in OnChanges. */
+	void StopWatch(FBangoWatchHandle& Watch);
+
 	/**
 	 * Stops a script. Does nothing if it has already ended. With bAndChildren, also stops every script it started
 	 * (with Exec or spawn) that's still running, and every script those started, and so on, even if the ones in between
@@ -229,7 +263,7 @@ private:
 		bool bFromSource = false;
 		FString Source;
 		/**
-		 * An inline script's inputs signature (FBangoInlineScript::UseInputsSignature), saved with it so it compiles the
+		 * An inline script's inputs signature (FBangoInlineScriptBase::UseInputsSignature), saved with it so it compiles the
 		 * same when it's restored: its class's path (empty for a global one) and its name (empty for none).
 		 */
 		FString SignatureClass;
@@ -290,6 +324,12 @@ private:
 
 	/** Runs a compiled condition (EvaluateCondition). */
 	EBangoConditionResult RunCondition(const TSharedPtr<const FBangoProgram>& Program, const TArray<FBangoValue>& Args, FString& OutError);
+
+	/** The watch groups, made when the first is (it needs the game instance's globals). Null if there are none. */
+	FBangoWatchRegistry* GetWatches(FString& OutError);
+	TUniquePtr<FBangoWatchRegistry> Watches;
+	/** Each watch group's registered condition, released when it's destroyed. */
+	TMap<int64, FBangoConditionHandle> WatchConditions;
 
 	/** Editor builds: scripts that stopped with an error, newest last, for the debugger (at most MaxEndedScripts). */
 	TArray<FBangoScriptDebugInfo> EndedScripts;

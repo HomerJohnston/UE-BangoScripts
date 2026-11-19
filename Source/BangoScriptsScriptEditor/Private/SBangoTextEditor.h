@@ -66,13 +66,13 @@ public:
 		SLATE_ARGUMENT(bool, CompileAsYouType)
 
 		/**
-		 * The text is a condition (an inline script property with `meta = (BangoCondition)`): compiled as you type as
+		 * The text is a condition (an FBangoInlineCondition property): compiled as you type as
 		 * one (Bango::CompileCondition), so it may be a single expression, and must return true or false.
 		 */
 		SLATE_ATTRIBUTE(bool, Condition)
 
 		/**
-		 * The inline script's inputs signature (FBangoInlineScript::UseInputsSignature), or null: its inputs are the
+		 * The inline script's inputs signature (FBangoInlineScriptBase::UseInputsSignature), or null: its inputs are the
 		 * script's parameters when it's compiled as you type, and autocomplete and colouring know them.
 		 */
 		SLATE_ARGUMENT(TSharedPtr<const FBangoInputsSignature>, InputsSignature)

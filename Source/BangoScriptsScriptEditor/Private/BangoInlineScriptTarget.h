@@ -6,11 +6,11 @@
 class IPropertyHandle;
 class SWindow;
 class FProperty;
-struct FBangoInlineScript;
+struct FBangoInlineScriptBase;
 struct FBangoInputsSignature;
 
 /**
- * One FBangoInlineScript property of one object (spec section 15), for the graph editor to read and write: the
+ * One inline script property (FBangoInlineScript or FBangoInlineCondition) of one object (spec section 15), for the graph editor to read and write: the
  * object, and the property's path in it as the details panel names it ("OnOpened", "Steps.Steps[2].Script").
  *
  * Writing goes through the details panel's property handle while it's still showing the property (so a Blueprint's
@@ -37,13 +37,16 @@ public:
 	UObject* GetOwner() const { return Owner.Get(); }
 
 	/**
-	 * The property is a condition (`meta = (BangoCondition)` on it): its script answers true or false, and the editor
+	 * The property is a condition (an FBangoInlineCondition): its script answers true or false, and the editor
 	 * compiles it as one (Bango::CompileCondition), so it may be a single expression, like `_count > 3`.
 	 */
 	bool IsCondition() const { return bCondition; }
 
+	/** Whether StructHandle is an FBangoInlineCondition property. */
+	static bool IsConditionProperty(const TSharedPtr<IPropertyHandle>& StructHandle);
+
 	/**
-	 * The script's inputs signature (FBangoInlineScript::UseInputsSignature), or null if it has none, or, with
+	 * The script's inputs signature (FBangoInlineScriptBase::UseInputsSignature), or null if it has none, or, with
 	 * OutError, if it isn't registered.
 	 */
 	TSharedPtr<const FBangoInputsSignature> GetInputsSignature(FString& OutError) const;
@@ -55,11 +58,11 @@ public:
 	static TSharedPtr<const FBangoInputsSignature> GetInputsSignature(const TSharedRef<IPropertyHandle>& StructHandle, FString& OutError);
 
 	/**
-	 * Finds the FBangoInlineScript at Path in Owner: property names separated by '.', an array's element as
+	 * Finds the inline script or condition at Path in Owner: property names separated by '.', an array's element as
 	 * `Name[Index]` (after the array's own name, as the details panel writes it), into structs and objects held by
 	 * the object. Null if anything along the way isn't there. OutTopProperty: the object's own property it's in.
 	 */
-	static FBangoInlineScript* Resolve(UObject* Owner, const FString& Path, FProperty** OutTopProperty = nullptr);
+	static FBangoInlineScriptBase* Resolve(UObject* Owner, const FString& Path, FProperty** OutTopProperty = nullptr);
 
 private:
 	TWeakObjectPtr<UObject> Owner;

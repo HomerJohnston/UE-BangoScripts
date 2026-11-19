@@ -8,6 +8,10 @@
 /**
  * Gives its actor a friendly name that Bango scripts can use, written with an '@': `@john Speak("Hello.");`
  *
+ * Or, added by Bango to an actor spawned while playing the first time it becomes an entity, it holds that actor's
+ * Automatic ID instead (AutomaticID; spec section 4, Bango IDs), so a save system that saves and respawns actors with
+ * their components keeps the actor's ID.
+ *
  * On BeginPlay the name is registered with UBangoActorRegistry, or earlier, when the world begins play, if the level
  * has a start script (UBangoLevelStartScript), so the start script can use it. Any problem (an empty, invalid or
  * duplicate name) is shown on screen as an error, once, and the name is not registered.
@@ -27,11 +31,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Bango")
 	FBangoIDName BangoName;
 
-	/** True if BangoName was registered successfully. */
+	/**
+	 * An Automatic ID ('$' and 32 hex digits), given by Bango to an actor spawned while playing, with no BangoName,
+	 * the first time it became an entity. Not shown to people (they see the actor's name). Saved with the component
+	 * (and by save systems that save SaveGame properties).
+	 */
+	UPROPERTY(VisibleInstanceOnly, AdvancedDisplay, SaveGame, Category = "Bango")
+	FString AutomaticID;
+
+	/** True if its BangoName or its AutomaticID was registered successfully. */
 	UFUNCTION(BlueprintPure, Category = "Bango")
 	bool IsRegistered() const { return bRegistered; }
 
-	/** Registers BangoName, if that hasn't been tried since it last began play. BeginPlay calls it. */
+	/** Registers BangoName and AutomaticID, if that hasn't been tried since it last began play. BeginPlay calls it. */
 	void RegisterName();
 
 protected:
@@ -40,6 +52,8 @@ protected:
 
 private:
 	bool bRegistered = false;
+	/** What was registered, to unregister at EndPlay. */
+	TArray<FString> RegisteredNames;
 	/** RegisterName has run (and reported any problem), so it isn't tried again until EndPlay. */
 	bool bTriedRegistering = false;
 };

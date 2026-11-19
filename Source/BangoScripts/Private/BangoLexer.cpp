@@ -21,6 +21,7 @@ namespace BangoLexerPrivate
 		{ TEXT("in"), EBangoTokenKind::KwIn },
 		{ TEXT("sequence"), EBangoTokenKind::KwSequence },
 		{ TEXT("spawn"), EBangoTokenKind::KwSpawn },
+		{ TEXT("waitUntil"), EBangoTokenKind::KwWaitUntil },
 		{ TEXT("switch"), EBangoTokenKind::KwSwitch },
 		{ TEXT("case"), EBangoTokenKind::KwCase },
 		{ TEXT("default"), EBangoTokenKind::KwDefault },

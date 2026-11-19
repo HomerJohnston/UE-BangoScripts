@@ -12,6 +12,8 @@
  *   A different type is a conflict: the caller fails, and the existing global is kept.
  * - Find() returns nullptr for a global that was never created. Scripts treat that the same as nil.
  * - Set() requires the global to exist, and the value to fit its type.
+ * - Each change is stamped (GetChangeStamp), so a script waiting on globals (`waitUntil`) can tell whether any of
+ *   them has changed since it last looked.
  */
 class BANGOSCRIPTS_API FBangoGlobalStore
 {
@@ -22,9 +24,20 @@ public:
 
 	/**
 	 * For changing a global in place (array element writes, Push, ...). The caller must keep the value's type:
-	 * use FBangoValue's own array operations, which check element types.
+	 * use FBangoValue's own array operations, which check element types. Counts as a change to the global, even if
+	 * the caller ends up not changing it.
 	 */
 	FBangoValue* FindMutable(const FString& Name);
+
+	/**
+	 * The stamp of the latest change to any global: it goes up by one with each change. A change is creating a
+	 * global, setting it to a different value, finding it to change in place, and ResetAll or loading (which change
+	 * every global). Stamps aren't saved.
+	 */
+	uint64 GetChangeStamp() const { return ChangeStamp; }
+
+	/** The stamp of the latest change to Name (0 if it hasn't changed since the store was made). */
+	uint64 GetChangeStamp(const FString& Name) const;
 
 	/** False if the global was never created, or holds nil. Never reports an error. */
 	bool IsDefined(const FString& Name) const;
@@ -45,6 +58,15 @@ public:
 	int32 Num() const { return Globals.Num(); }
 
 private:
+	/** Stamps Name as changed. */
+	void NoteChanged(const FString& Name) { ChangeStamps.FindOrAdd(Name) = ++ChangeStamp; }
+	/** Stamps every global as changed (ResetAll, loading). */
+	void NoteAllChanged() { AllChangedStamp = ++ChangeStamp; ChangeStamps.Reset(); }
+
 	TBangoNameMap<FBangoValue> Globals;
 	TBangoNameMap<bool> WarnedSkippedDefaults;
+	uint64 ChangeStamp = 0;
+	/** Each global's latest change since AllChangedStamp (ones changed only before it aren't kept). */
+	TBangoNameMap<uint64> ChangeStamps;
+	uint64 AllChangedStamp = 0;
 };

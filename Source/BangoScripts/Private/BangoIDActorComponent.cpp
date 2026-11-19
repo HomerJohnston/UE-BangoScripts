@@ -23,9 +23,9 @@ void UBangoIDActorComponent::RegisterName()
 	}
 	bTriedRegistering = true;
 
-	const FString OwnerName = GetOwner() ? GetOwner()->GetName() : TEXT("<none>");
+	const FString OwnerName = GetOwner() ? GetOwner()->GetActorNameOrLabel() : TEXT("<none>");
 
-	if (BangoName.IsEmpty())
+	if (BangoName.IsEmpty() && AutomaticID.IsEmpty())
 	{
 		Bango::ReportError(FString::Printf(TEXT("Actor '%s' has a Bango ID component with no name."), *OwnerName));
 		return;
@@ -34,30 +34,39 @@ void UBangoIDActorComponent::RegisterName()
 	UBangoActorRegistry* Registry = UBangoActorRegistry::Get(this);
 	if (!Registry)
 	{
-		Bango::ReportError(FString::Printf(TEXT("Actor '%s': no Bango actor registry in this world, so '%s' was not registered."), *OwnerName, *BangoName));
+		Bango::ReportError(FString::Printf(TEXT("Actor '%s': no Bango actor registry in this world, so its Bango ID was not registered."), *OwnerName));
 		return;
 	}
 
-	FString Error;
-	if (!Registry->Register(BangoName, GetOwner(), Error))
+	// The automatic ID first, so a name given as well (which shouldn't happen) is the one scripts get from now on.
+	for (const FString& Name : { AutomaticID, BangoName.ToString() })
 	{
-		Bango::ReportError(Error);
-		return;
+		if (Name.IsEmpty())
+		{
+			continue;
+		}
+		FString Error;
+		if (!Registry->Register(Name, GetOwner(), Error))
+		{
+			Bango::ReportError(Error);
+			continue;
+		}
+		RegisteredNames.Add(Name);
+		bRegistered = true;
 	}
-
-	bRegistered = true;
 }
 
 void UBangoIDActorComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	if (bRegistered)
+	if (UBangoActorRegistry* Registry = UBangoActorRegistry::Get(this))
 	{
-		if (UBangoActorRegistry* Registry = UBangoActorRegistry::Get(this))
+		for (const FString& Name : RegisteredNames)
 		{
-			Registry->Unregister(BangoName, GetOwner());
+			Registry->Unregister(Name, GetOwner());
 		}
-		bRegistered = false;
 	}
+	RegisteredNames.Reset();
+	bRegistered = false;
 	bTriedRegistering = false;
 
 	Super::EndPlay(EndPlayReason);

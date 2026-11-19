@@ -45,7 +45,7 @@ enum class EBangoSyntaxKind : uint8
 	DisabledMarker,     // the slash-star and star-slash around disabled nodes
 	Structure,          // { }
 	Operator,
-	Punctuation,        // ( ) [ ] , ; .
+	Punctuation,        // ( ) [ ] , ; . :
 	Error,
 
 	// Meaning layer: set from the whole file, never by the tokenizer

@@ -184,9 +184,7 @@ namespace BangoReflectedCallPrivate
 		AActor* Actor = Registry ? Registry->FindActor(Entity.GetEntityName()) : nullptr;
 		if (!Actor)
 		{
-			OutError = Bango::IsPlayerEntityName(Entity.GetEntityName())
-				? FString(TEXT("There's no player pawn right now (no local player, or it isn't possessing a pawn)."))
-				: FString::Printf(TEXT("No actor is registered with the Bango ID name '%s'."), *Entity.GetEntityName());
+			OutError = Bango::DescribeMissingEntity(Entity.GetEntityName());
 		}
 		return Actor;
 	}
@@ -393,20 +391,13 @@ namespace BangoReflectedCallPrivate
 				OutValue = FBangoValue::MakeNil(FBangoType::Entity());
 				return true;
 			}
-			const UBangoIDActorComponent* Id = Actor->FindComponentByClass<UBangoIDActorComponent>();
-			if (Id && Id->IsRegistered())
+			FString EntityError;
+			if (!Bango::ActorToEntity(Actor, OutValue, EntityError))
 			{
-				OutValue = FBangoValue::MakeEntity(Id->BangoName.ToString());
-				return true;
+				OutError = FString::Printf(TEXT("it returned the actor %s, which a script can't use: %s"), *Actor->GetActorNameOrLabel(), *EntityError);
+				return false;
 			}
-			const UBangoActorRegistry* Registry = UBangoActorRegistry::Get(WorldContext);
-			if (Registry && Registry->FindActor(Bango::GetPlayerEntityName()) == Actor)
-			{
-				OutValue = FBangoValue::MakeEntity(Bango::GetPlayerEntityName());
-				return true;
-			}
-			OutError = FString::Printf(TEXT("it returned the actor %s, which has no Bango ID, so a script can't use it."), *Actor->GetName());
-			return false;
+			return true;
 		}
 		OutError = FString::Printf(TEXT("it returns a %s, which Bango has no type for."), *Property->GetCPPType());
 		return false;

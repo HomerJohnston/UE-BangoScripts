@@ -18,6 +18,12 @@
 #include "BangoScriptCache.h"
 #include "BangoScriptSubsystem.h"
 #include "UObject/Package.h"
+#include "BangoIDActorComponent.h"
+#include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
+#include "GameFramework/WorldSettings.h"
 
 // Run from the editor: Tools > Session Frontend > Automation, filter "Bango".
 
@@ -378,7 +384,8 @@ bool FBangoModuleTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("signature: one that isn't registered"), Module.GetInlineProgram(Unregistered, TEXT("Test (inline script)"), InlineProgram, Error));
 	TestTrue(TEXT("signature: one that isn't registered: the error"), Error.Contains(TEXT("none is registered by that name"), ESearchCase::CaseSensitive));
 
-	FBangoInlineScript Condition = Signed;
+	FBangoInlineCondition Condition;
+	Condition.UseInputsSignature(nullptr, Signed.GetInputsSignatureName());
 	Condition.Source = TEXT("_damage > 3 && IsNil(_who)");
 	FString ConditionError;
 	FBangoConditionHandle ConditionHandle = Bango::RegisterCondition(Condition, TEXT("Test condition"), ConditionError);
@@ -515,6 +522,100 @@ bool FBangoBlueprintArgsTest::RunTest(const FString& Parameters)
 	// Arrays.
 	FBangoBlueprintArgs WithArray = UBangoBlueprintLibrary::AddBangoArgIntArray(UBangoBlueprintLibrary::MakeBangoArgs(), { 1, 2 });
 	TestTrue(TEXT("int array"), WithArray.Values.Num() == 1 && WithArray.Values[0].ToDebugString() == TEXT("[1, 2]"));
+	return true;
+}
+
+// Entity IDs for actors without a Bango ID name (spec section 4, Bango IDs), in a game world that has begun play.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoEntityIDsTest, "Bango.Game.EntityIDs",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FBangoEntityIDsTest::RunTest(const FString& Parameters)
+{
+	// The kinds, which can't clash, and how they're shown.
+	TestTrue(TEXT("kinds"), Bango::GetEntityIDKind(TEXT("john")) == Bango::EBangoEntityIDKind::Named
+		&& Bango::GetEntityIDKind(Bango::GetPlayerEntityName()) == Bango::EBangoEntityIDKind::Keyword
+		&& Bango::GetEntityIDKind(TEXT("%/Game/Maps/Farm.Farm:PersistentLevel.Door_3")) == Bango::EBangoEntityIDKind::Level
+		&& Bango::GetEntityIDKind(TEXT("$0123456789ABCDEF0123456789abcdef")) == Bango::EBangoEntityIDKind::Automatic
+		&& Bango::GetEntityIDKind(TEXT("$12")) == Bango::EBangoEntityIDKind::Invalid
+		&& Bango::GetEntityIDKind(TEXT("#nope")) == Bango::EBangoEntityIDKind::Invalid);
+	TestEqual(TEXT("a Level ID never seen shows its object name"), Bango::GetEntityDisplayName(TEXT("%/Game/Maps/Farm.Farm:PersistentLevel.Door_3")), FString(TEXT("Door_3")));
+	TestEqual(TEXT("a named one shows as it is"), FBangoValue::MakeEntity(TEXT("john")).ToDisplayString(), FString(TEXT("john")));
+
+	UGameInstance* GameInstance = NewObject<UGameInstance>(GEngine);
+	GameInstance->AddToRoot();
+	GameInstance->InitializeStandalone();
+	UWorld* World = GameInstance->GetWorld();
+	if (!TestNotNull(TEXT("game world"), World))
+	{
+		GameInstance->RemoveFromRoot();
+		return false;
+	}
+	World->InitializeActorsForPlay(FURL());
+	World->BeginPlay();
+	World->GetWorldSettings()->NotifyBeginPlay();
+	UBangoActorRegistry* Registry = UBangoActorRegistry::Get(World);
+	TestNotNull(TEXT("registry"), Registry);
+
+	if (Registry)
+	{
+		FString Error;
+		FBangoValue Entity;
+
+		// Spawned, with no Bango ID: an Automatic ID, kept on a Bango ID component added to it; the same one each time.
+		AActor* Spawned = World->SpawnActor<AActor>();
+		TestTrue(TEXT("a spawned actor becomes an entity"), Bango::ActorToEntity(Spawned, Entity, Error));
+		const FString AutoID = Entity.IsNil() ? FString() : Entity.GetEntityName();
+		const UBangoIDActorComponent* Added = Spawned->FindComponentByClass<UBangoIDActorComponent>();
+		TestTrue(TEXT("an Automatic ID, on an added component"), Bango::GetEntityIDKind(AutoID) == Bango::EBangoEntityIDKind::Automatic
+			&& Added && Added->AutomaticID == AutoID && Added->BangoName.IsEmpty());
+		TestTrue(TEXT("it finds the actor"), Registry->FindActor(AutoID) == Spawned);
+		TestEqual(TEXT("the same ID again"), Registry->GetOrMakeEntityID(Spawned, Error), AutoID);
+		TestEqual(TEXT("shown as the actor's name"), Entity.ToDisplayString(), Spawned->GetActorNameOrLabel());
+		TestTrue(TEXT("no duplicate component"), Spawned->GetComponents().Num() == 1);
+
+		// Named: as before.
+		AActor* Named = World->SpawnActor<AActor>();
+		UBangoIDActorComponent* NameComponent = NewObject<UBangoIDActorComponent>(Named);
+		NameComponent->BangoName = TEXT("entityTestJohn");
+		NameComponent->RegisterComponent();
+		TestTrue(TEXT("a named actor is its name"), Bango::ActorToEntity(Named, Entity, Error) && Entity.GetEntityName() == TEXT("entityTestJohn"));
+
+		// Placed in a level (there when its level started): its path, found by the path too.
+		AActor* Placed = World->SpawnActor<AActor>();
+		Placed->bNetStartup = true;
+		const FString LevelID = Registry->GetOrMakeEntityID(Placed, Error);
+		TestEqual(TEXT("a placed actor's Level ID"), LevelID, Bango::MakeLevelEntityID(Placed->GetPathName()));
+		AActor* PlacedLater = World->SpawnActor<AActor>();
+		PlacedLater->bNetStartup = true;
+		TestTrue(TEXT("a Level ID made elsewhere (a save) finds its actor by its path"),
+			Registry->FindActor(Bango::MakeLevelEntityID(PlacedLater->GetPathName())) == PlacedLater);
+		TestNull(TEXT("no component added to a placed actor"), Placed->FindComponentByClass<UBangoIDActorComponent>());
+
+		// A Bango ID name given after it had an Automatic ID: an error, both find it, and the name is used from now on.
+		AddExpectedError(TEXT("after scripts had already used it without one"), EAutomationExpectedErrorFlags::Contains, 1);
+		UBangoIDActorComponent* LateName = NewObject<UBangoIDActorComponent>(Spawned);
+		LateName->BangoName = TEXT("entityTestLate");
+		LateName->RegisterComponent();
+		TestEqual(TEXT("the name takes over"), Registry->GetOrMakeEntityID(Spawned, Error), FString(TEXT("entityTestLate")));
+		TestTrue(TEXT("the old ID still finds it"), Registry->FindActor(AutoID) == Spawned);
+
+		// Gone: not found, and errors say which actor it was.
+		const FString SpawnedLabel = Spawned->GetActorNameOrLabel();
+		Spawned->Destroy();
+		TestNull(TEXT("a destroyed actor isn't found"), Registry->FindActor(AutoID));
+		TestTrue(TEXT("the error names it"), Bango::DescribeMissingEntity(AutoID).Contains(SpawnedLabel));
+
+		// self, for a spawned owner with no Bango ID.
+		AActor* Owner = World->SpawnActor<AActor>();
+		const FBangoScriptOwner ScriptOwner = UBangoScriptSubsystem::GetScriptOwner(Owner);
+		TestTrue(TEXT("any actor can be self"), ScriptOwner.Problem.IsEmpty() && Registry->FindActor(ScriptOwner.BangoName) == Owner);
+	}
+
+	World->EndPlay(EEndPlayReason::Quit);
+	GEngine->DestroyWorldContext(World);
+	World->DestroyWorld(false);
+	GameInstance->Shutdown();
+	GameInstance->RemoveFromRoot();
 	return true;
 }
 

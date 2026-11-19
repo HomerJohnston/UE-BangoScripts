@@ -100,6 +100,8 @@ bool FBangoLineTokenizerTest::RunTest(const FString& Parameters)
 	Check(TEXT("vector3 _p = [1, 2, 3];"), TEXT("Type[vector3] Global[_p]"));
 	Check(TEXT("bool _b = !_c != false;"), TEXT("Operator[!] Global[_c] Operator[!=] Constant[false]"));
 	Check(TEXT(""), TEXT(""));
+	Check(TEXT("\tcase 1, 2:"), TEXT("Keyword[case] Number[1] Punctuation[,] Number[2] Punctuation[:]"));
+	Check(TEXT("\tdefault:"), TEXT("Keyword[default] Punctuation[:]"));
 
 	// Disabled nodes: the markers, then code as usual but marked disabled; markers in strings and comments don't count.
 	Check(TEXT("/* Log(\"b\"); */    //@2(4, 0)"), TEXT("DisabledMarker[/*] Call-[Log] Punctuation-[(] String-[\"b\"] Punctuation-[)] Punctuation-[;] DisabledMarker[*/] Metadata[//@2(4, 0)]"));

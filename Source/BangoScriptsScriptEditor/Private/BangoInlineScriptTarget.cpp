@@ -61,13 +61,13 @@ FBangoInlineScriptTarget::FBangoInlineScriptTarget(UObject* InOwner, const FStri
 	, StructHandle(InStructHandle)
 	, OwnerLabel(BangoInlineScriptTargetPrivate::LabelOf(InOwner))
 	, PropertyLabel(InPropertyLabel)
-	, bCondition(InStructHandle.IsValid() && InStructHandle->HasMetaData(TEXT("BangoCondition")))
+	, bCondition(IsConditionProperty(InStructHandle))
 {
 }
 
 TSharedPtr<const FBangoInputsSignature> FBangoInlineScriptTarget::GetInputsSignature(FString& OutError) const
 {
-	const FBangoInlineScript* Script = Resolve(Owner.Get(), PropertyPath);
+	const FBangoInlineScriptBase* Script = Resolve(Owner.Get(), PropertyPath);
 	return Script ? Script->FindInputsSignature(OutError) : nullptr;
 }
 
@@ -85,7 +85,7 @@ TSharedPtr<const FBangoInputsSignature> FBangoInlineScriptTarget::GetInputsSigna
 			continue;
 		}
 		FString Error;
-		const TSharedPtr<const FBangoInputsSignature> Signature = static_cast<const FBangoInlineScript*>(Data)->FindInputsSignature(Error);
+		const TSharedPtr<const FBangoInputsSignature> Signature = static_cast<const FBangoInlineScriptBase*>(Data)->FindInputsSignature(Error);
 		if (bFirst)
 		{
 			Found = Signature;
@@ -120,7 +120,7 @@ FText FBangoInlineScriptTarget::GetDisplayName() const
 
 bool FBangoInlineScriptTarget::Read(FString& OutSource) const
 {
-	const FBangoInlineScript* Script = Resolve(Owner.Get(), PropertyPath);
+	const FBangoInlineScriptBase* Script = Resolve(Owner.Get(), PropertyPath);
 	if (!Script)
 	{
 		return false;
@@ -133,7 +133,7 @@ bool FBangoInlineScriptTarget::Write(const FString& Source, FString& OutError)
 {
 	UObject* Object = Owner.Get();
 	FProperty* TopProperty = nullptr;
-	FBangoInlineScript* Script = Resolve(Object, PropertyPath, &TopProperty);
+	FBangoInlineScriptBase* Script = Resolve(Object, PropertyPath, &TopProperty);
 	if (!Script)
 	{
 		OutError = FText::Format(LOCTEXT("WriteGone", "Couldn't save {0}: it isn't there any more (was its object deleted?)."), GetDisplayName()).ToString();
@@ -144,7 +144,7 @@ bool FBangoInlineScriptTarget::Write(const FString& Source, FString& OutError)
 	// default on to its instances, as typing in the panel does.
 	if (const TSharedPtr<IPropertyHandle> Handle = StructHandle.Pin())
 	{
-		const TSharedPtr<IPropertyHandle> SourceHandle = Handle->IsValidHandle() ? Handle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FBangoInlineScript, Source)) : nullptr;
+		const TSharedPtr<IPropertyHandle> SourceHandle = Handle->IsValidHandle() ? Handle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FBangoInlineScriptBase, Source)) : nullptr;
 		TArray<UObject*> Outers;
 		if (SourceHandle.IsValid() && SourceHandle->IsValidHandle())
 		{
@@ -167,7 +167,7 @@ bool FBangoInlineScriptTarget::Write(const FString& Source, FString& OutError)
 	return true;
 }
 
-FBangoInlineScript* FBangoInlineScriptTarget::Resolve(UObject* Owner, const FString& Path, FProperty** OutTopProperty)
+FBangoInlineScriptBase* FBangoInlineScriptTarget::Resolve(UObject* Owner, const FString& Path, FProperty** OutTopProperty)
 {
 	using namespace BangoInlineScriptTargetPrivate;
 	if (OutTopProperty)
@@ -262,7 +262,14 @@ FBangoInlineScript* FBangoInlineScriptTarget::Resolve(UObject* Owner, const FStr
 	}
 
 	const FStructProperty* Found = CastField<FStructProperty>(Current);
-	return Found && Found->Struct == FBangoInlineScript::StaticStruct() ? static_cast<FBangoInlineScript*>(Value) : nullptr;
+	const bool bInline = Found && (Found->Struct == FBangoInlineScript::StaticStruct() || Found->Struct == FBangoInlineCondition::StaticStruct());
+	return bInline ? static_cast<FBangoInlineScriptBase*>(Value) : nullptr;
+}
+
+bool FBangoInlineScriptTarget::IsConditionProperty(const TSharedPtr<IPropertyHandle>& StructHandle)
+{
+	const FStructProperty* Property = StructHandle.IsValid() ? CastField<FStructProperty>(StructHandle->GetProperty()) : nullptr;
+	return Property && Property->Struct == FBangoInlineCondition::StaticStruct();
 }
 
 // ---------------------------------------------------------------------------

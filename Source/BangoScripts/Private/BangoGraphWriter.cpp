@@ -579,6 +579,9 @@ namespace BangoGraphWriterPrivate
 			case EBangoGraphNodeKind::Goto:
 				AddCode(Indent, Detached, FString(TEXT("goto ")) + Text + TEXT(";"), &Node);
 				return true;
+			case EBangoGraphNodeKind::WaitUntil:
+				AddCode(Indent, Detached, FString(TEXT("waitUntil (")) + Text + TEXT(");"), &Node);
+				return true;
 			case EBangoGraphNodeKind::Reroute:
 				AddCode(Indent, Detached, FString(), &Node); // only the //@ comment
 				return true;

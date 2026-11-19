@@ -635,11 +635,11 @@ FString FBangoValue::ToDebugString() const
 	case EBangoBaseType::Double: return FString::SanitizeFloat(DoubleValue);
 	case EBangoBaseType::String: return FString::Printf(TEXT("\"%s\""), *StringValue.ReplaceCharWithEscapedChar());
 	case EBangoBaseType::Entity:
-		if (const TCHAR* Keyword = Bango::GetEntityKeyword(StringValue))
+		if (Bango::GetEntityIDKind(StringValue) == Bango::EBangoEntityIDKind::Named)
 		{
-			return Keyword;
+			return FString::Printf(TEXT("@%s"), *StringValue);
 		}
-		return FString::Printf(TEXT("@%s"), *StringValue);
+		return Bango::GetEntityDisplayName(StringValue); // player, self, or an actor without a Bango ID name
 	case EBangoBaseType::Text:   return FString::Printf(TEXT("text(\"%s\")"), *TextValue.ToString().ReplaceCharWithEscapedChar());
 	case EBangoBaseType::Vector2:
 	case EBangoBaseType::Vector3:
@@ -676,11 +676,7 @@ FString FBangoValue::ToDisplayString() const
 	case EBangoBaseType::String:
 		return StringValue;
 	case EBangoBaseType::Entity:
-		if (const TCHAR* Keyword = Bango::GetEntityKeyword(StringValue))
-		{
-			return Keyword;
-		}
-		return StringValue;
+		return Bango::GetEntityDisplayName(StringValue);
 	case EBangoBaseType::Text:
 		return TextValue.ToString();
 	default:
@@ -831,7 +827,7 @@ namespace Bango
 	{
 		static const TCHAR* Words[] =
 		{
-			TEXT("if"), TEXT("else"), TEXT("while"), TEXT("for"), TEXT("forEach"), TEXT("in"), TEXT("sequence"), TEXT("spawn"), TEXT("switch"), TEXT("case"), TEXT("default"),
+			TEXT("if"), TEXT("else"), TEXT("while"), TEXT("for"), TEXT("forEach"), TEXT("in"), TEXT("sequence"), TEXT("spawn"), TEXT("waitUntil"), TEXT("switch"), TEXT("case"), TEXT("default"),
 			TEXT("break"), TEXT("continue"), TEXT("return"), TEXT("label"), TEXT("goto"),
 			TEXT("function"), TEXT("global"), TEXT("scriptVar"), TEXT("true"), TEXT("false"), TEXT("nil"),
 			TEXT("bool"), TEXT("int"), TEXT("float"), TEXT("string"), TEXT("entity"), TEXT("void"),
@@ -861,6 +857,121 @@ namespace Bango
 	bool IsValidBangoIDName(const FString& Name)
 	{
 		return IsValidIdentifier(Name);
+	}
+
+	EBangoEntityIDKind GetEntityIDKind(const FString& Name)
+	{
+		if (Name.IsEmpty())
+		{
+			return EBangoEntityIDKind::Invalid;
+		}
+		switch (Name[0])
+		{
+		case TEXT('#'):
+			return GetEntityKeyword(Name) ? EBangoEntityIDKind::Keyword : EBangoEntityIDKind::Invalid;
+		case TEXT('%'):
+			return Name.Len() > 1 ? EBangoEntityIDKind::Level : EBangoEntityIDKind::Invalid;
+		case TEXT('$'):
+		{
+			if (Name.Len() != 33)
+			{
+				return EBangoEntityIDKind::Invalid;
+			}
+			for (int32 i = 1; i < Name.Len(); ++i)
+			{
+				const TCHAR C = Name[i];
+				const bool bHex = (C >= TEXT('0') && C <= TEXT('9')) || (C >= TEXT('A') && C <= TEXT('F')) || (C >= TEXT('a') && C <= TEXT('f'));
+				if (!bHex)
+				{
+					return EBangoEntityIDKind::Invalid;
+				}
+			}
+			return EBangoEntityIDKind::Automatic;
+		}
+		default:
+			return IsValidBangoIDName(Name) ? EBangoEntityIDKind::Named : EBangoEntityIDKind::Invalid;
+		}
+	}
+
+	FString MakeLevelEntityID(const FString& ActorPath)
+	{
+		return FString(TEXT("%")) + ActorPath;
+	}
+
+	FString MakeAutomaticEntityID(const FString& GuidDigits)
+	{
+		return FString(TEXT("$")) + GuidDigits;
+	}
+
+	FString GetLevelEntityPath(const FString& Name)
+	{
+		return GetEntityIDKind(Name) == EBangoEntityIDKind::Level ? Name.Mid(1) : FString();
+	}
+
+	namespace EntityNamesPrivate
+	{
+		TMap<FString, FString>& GetDisplayNames()
+		{
+			static TMap<FString, FString> DisplayNames;
+			return DisplayNames;
+		}
+	}
+
+	void SetEntityDisplayName(const FString& Name, const FString& DisplayName)
+	{
+		const EBangoEntityIDKind Kind = GetEntityIDKind(Name);
+		if ((Kind == EBangoEntityIDKind::Level || Kind == EBangoEntityIDKind::Automatic) && !DisplayName.IsEmpty())
+		{
+			EntityNamesPrivate::GetDisplayNames().Add(Name, DisplayName);
+		}
+	}
+
+	FString GetEntityDisplayName(const FString& Name)
+	{
+		if (const TCHAR* Keyword = GetEntityKeyword(Name))
+		{
+			return Keyword;
+		}
+		const EBangoEntityIDKind Kind = GetEntityIDKind(Name);
+		if (Kind != EBangoEntityIDKind::Level && Kind != EBangoEntityIDKind::Automatic)
+		{
+			return Name;
+		}
+		if (const FString* Known = EntityNamesPrivate::GetDisplayNames().Find(Name))
+		{
+			return *Known;
+		}
+		if (Kind == EBangoEntityIDKind::Level)
+		{
+			// The path's last part, after its last '.' or ':': the actor's object name.
+			int32 Cut = INDEX_NONE;
+			for (int32 i = Name.Len() - 1; i > 0; --i)
+			{
+				if (Name[i] == TEXT('.') || Name[i] == TEXT(':'))
+				{
+					Cut = i;
+					break;
+				}
+			}
+			return Cut != INDEX_NONE ? Name.Mid(Cut + 1) : Name.Mid(1);
+		}
+		return TEXT("an actor that's no longer here");
+	}
+
+	FString DescribeMissingEntity(const FString& Name)
+	{
+		if (IsPlayerEntityName(Name))
+		{
+			return TEXT("There's no player pawn right now (no local player, or it isn't possessing a pawn).");
+		}
+		switch (GetEntityIDKind(Name))
+		{
+		case EBangoEntityIDKind::Level:
+		case EBangoEntityIDKind::Automatic:
+			return FString::Printf(TEXT("The actor '%s' isn't in the level any more (it was destroyed, or its level isn't loaded)."), *GetEntityDisplayName(Name));
+		default:
+			return FString::Printf(TEXT("No actor is registered with the Bango ID name '%s'. Check the name on the actor's Bango ID component, and that the actor is in the level."), *Name);
+		}
 	}
 
 	int32 CountTextFormatValues(const FString& Pattern, FString* OutNamedPlaceholder)

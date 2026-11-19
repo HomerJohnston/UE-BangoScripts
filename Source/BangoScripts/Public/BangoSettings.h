@@ -26,6 +26,14 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Limits", meta = (ClampMin = "1000"))
 	int32 MaxInstructionsPerFrame = 1000000;
 
+	/**
+	 * How often a watched condition (FBangoInlineCondition, UBangoScriptSubsystem::CreateWatchGroup) is checked, in
+	 * seconds, when its answer can change without a global or input changing (it calls a command, or uses `call`), and
+	 * its own Poll Interval isn't set. 0: every frame.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "Scripts", meta = (ClampMin = "0", Units = "s"))
+	float DefaultConditionPollInterval = 0.5f;
+
 	/** Deepest allowed nesting of script function calls. */
 	UPROPERTY(Config, EditAnywhere, Category = "Limits", meta = (ClampMin = "8"))
 	int32 MaxCallDepth = 200;

@@ -275,6 +275,7 @@ enum class EBangoStmtKind : uint8
 	Goto,
 	Params,
 	Reroute,
+	WaitUntil,
 };
 
 struct FBangoStmt
@@ -502,6 +503,18 @@ struct FBangoReturnStmt : FBangoStmt
 
 	/** Null for `return;` */
 	FBangoExprPtr Value;
+};
+
+/**
+ * `waitUntil (Condition);`: carries on at once if Condition is true, else pauses the script until it is. Rechecked when
+ * a global it reads changes, or every frame if it calls a command (the compiler's FBangoWaitSet says which).
+ */
+struct FBangoWaitUntilStmt : FBangoStmt
+{
+	static constexpr EBangoStmtKind StaticKind = EBangoStmtKind::WaitUntil;
+	FBangoWaitUntilStmt() : FBangoStmt(StaticKind) {}
+
+	FBangoExprPtr Condition;
 };
 
 struct FBangoLabelStmt : FBangoStmt

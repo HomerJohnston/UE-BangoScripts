@@ -260,6 +260,56 @@ namespace Bango
 	BANGOSCRIPTS_API bool IsValidBangoIDName(const FString& Name);
 
 	/**
+	 * What an entity value's name is (spec section 4, Bango IDs). Each kind starts differently, so they can't clash:
+	 * - Named: a Bango ID component's name (`@john`), an identifier;
+	 * - Keyword: `player` or `self` (GetEntityKeyword), starting with '#';
+	 * - Level: an actor placed in a level, with no Bango ID name: '%' and its path in the level, without Play in
+	 *   Editor's prefix, so it's the same each time the level is played (MakeLevelEntityID);
+	 * - Automatic: an actor spawned while playing, with no Bango ID name: '$' and a random GUID's 32 hex digits, kept
+	 *   on a Bango ID component Bango adds to it, so a save system that saves its components keeps it too.
+	 * Only Named ones can be written in a script. People are shown the others as the actor's name (GetEntityDisplayName).
+	 */
+	enum class EBangoEntityIDKind : uint8
+	{
+		Named,
+		Keyword,
+		Level,
+		Automatic,
+		/** Not any of those: an empty name, or one no ID could have. */
+		Invalid,
+	};
+	BANGOSCRIPTS_API EBangoEntityIDKind GetEntityIDKind(const FString& Name);
+
+	/** The Level ID for an actor at this path name (UObject::GetPathName), with any Play in Editor prefix already taken off. */
+	BANGOSCRIPTS_API FString MakeLevelEntityID(const FString& ActorPath);
+
+	/** The Automatic ID for a GUID, given as its 32 hex digits. */
+	BANGOSCRIPTS_API FString MakeAutomaticEntityID(const FString& GuidDigits);
+
+	/** A Level ID's actor path (without the '%'), or empty for any other name. */
+	BANGOSCRIPTS_API FString GetLevelEntityPath(const FString& Name);
+
+	/**
+	 * Remembers how to show a Level or Automatic ID to people: its actor's name, as the level editor's Outliner shows
+	 * it (its label). Kept after the actor is gone, so a script holding the ID can still say which actor it was.
+	 */
+	BANGOSCRIPTS_API void SetEntityDisplayName(const FString& Name, const FString& DisplayName);
+
+	/**
+	 * How to show an entity's name to people (in Format, WriteLog, errors and the debugger): a Named one as it is;
+	 * `player` and `self` as those words; a Level or Automatic one as its actor's name (SetEntityDisplayName). A Level
+	 * one never named that way shows the last part of its path (the actor's object name); an Automatic one, "an
+	 * actor that's no longer here".
+	 */
+	BANGOSCRIPTS_API FString GetEntityDisplayName(const FString& Name);
+
+	/**
+	 * Why an entity's actor can't be found, for errors: no actor with that Bango ID name, no player pawn right now, or
+	 * the actor being gone (destroyed, or not in the level).
+	 */
+	BANGOSCRIPTS_API FString DescribeMissingEntity(const FString& Name);
+
+	/**
 	 * Replaces {0}, {1}, ... in Text with Args[0], Args[1], ... (as ToDisplayString), with FText::Format's rules: a
 	 * backtick makes the next character literal (`{ is a brace, `` a backtick), and {Name} or a '{' with no '}' is
 	 * copied as it is. A {n} with no matching argument is an error.

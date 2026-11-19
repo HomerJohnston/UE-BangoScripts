@@ -535,10 +535,10 @@ private:
 	/** The open script's text is a .bango file (a linked asset), so the toolbar has Reload rather than Revert. */
 	bool IsReadFromFile() const;
 
-	/** The open script is a condition (an inline script property with `meta = (BangoCondition)`): it's compiled as one. */
+	/** The open script is a condition (an FBangoInlineCondition property): it's compiled as one. */
 	bool IsCondition() const;
 	/**
-	 * The open inline script's inputs signature (FBangoInlineScript::UseInputsSignature), or null if it has none, or,
+	 * The open inline script's inputs signature (FBangoInlineScriptBase::UseInputsSignature), or null if it has none, or,
 	 * with OutError, if it isn't registered.
 	 */
 	TSharedPtr<const FBangoInputsSignature> GetInputsSignature(FString& OutError) const;

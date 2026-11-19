@@ -69,6 +69,12 @@ void UBangoScriptSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UBangoScriptSubsystem::Deinitialize()
 {
+	Watches.Reset();
+	for (TPair<int64, FBangoConditionHandle>& Pair : WatchConditions)
+	{
+		Bango::UnregisterCondition(Pair.Value);
+	}
+	WatchConditions.Reset();
 	TerminateAll();
 	EntityResolver.Reset();
 	Super::Deinitialize();
@@ -283,18 +289,23 @@ FBangoScriptOwner UBangoScriptSubsystem::GetScriptOwner(const UObject* Owner)
 			: FString::Printf(TEXT("this script's owner, '%s', isn't an actor, and self is always an actor. Pass the actor it belongs to as the Owner instead."), *Owner->GetName());
 		return Result;
 	}
-	const UBangoIDActorComponent* ID = Actor->FindComponentByClass<UBangoIDActorComponent>();
-	if (!ID)
+	// Any actor can be self: its Bango ID name, or else the ID it's given as an entity (spec section 4, Bango IDs).
+	UBangoActorRegistry* Registry = UBangoActorRegistry::Get(Actor);
+	FString Error;
+	const FString ID = Registry ? Registry->GetOrMakeEntityID(Actor, Error) : FString();
+	if (!ID.IsEmpty()) // the player pawn without a Bango ID name: self is `player`
 	{
-		Result.Problem = FString::Printf(TEXT("this script's owner, '%s', has no Bango ID component. self is the owner's Bango ID, so add one and give it a name."), *Actor->GetName());
+		Result.BangoName = ID;
 	}
-	else if (ID->BangoName.IsEmpty())
+	else if (const UBangoIDActorComponent* Component = Actor->FindComponentByClass<UBangoIDActorComponent>(); Component && !Component->BangoName.IsEmpty())
 	{
-		Result.Problem = FString::Printf(TEXT("this script's owner, '%s', has a Bango ID component with no name. self is the owner's Bango ID, so give it one."), *Actor->GetName());
+		Result.BangoName = Component->BangoName.ToString(); // not in a game world (yet): its name, as written
 	}
 	else
 	{
-		Result.BangoName = ID->BangoName.ToString();
+		Result.Problem = !Error.IsEmpty()
+			? FString::Printf(TEXT("this script's owner can't be self: %s"), *Error)
+			: FString::Printf(TEXT("this script's owner, '%s', isn't in a game world, and has no Bango ID name, so it can't be self."), *Actor->GetActorNameOrLabel());
 	}
 	return Result;
 }
@@ -757,6 +768,87 @@ EBangoConditionResult UBangoScriptSubsystem::EvaluateCondition(const FString& So
 	return RunCondition(Program, Args, OutError);
 }
 
+FBangoWatchRegistry* UBangoScriptSubsystem::GetWatches(FString& OutError)
+{
+	if (!Watches.IsValid())
+	{
+		UBangoGlobalsSubsystem* Globals = UBangoGlobalsSubsystem::Get(this);
+		if (!Globals)
+		{
+			OutError = TEXT("Conditions can't be watched: there is no game instance for global variables.");
+			return nullptr;
+		}
+		Watches = MakeUnique<FBangoWatchRegistry>(Globals->GetStore(),
+			[this](const TSharedPtr<const FBangoProgram>& Program, const TArray<FBangoValue>& Args, FString& OutCheckError)
+			{
+				return RunCondition(Program, Args, OutCheckError);
+			},
+			[](const FString& Name, const FString& Error)
+			{
+				Bango::ReportError(Error.StartsWith(Name, ESearchCase::CaseSensitive) ? Error : FString::Printf(TEXT("%s: %s"), *Name, *Error));
+			});
+	}
+	return Watches.Get();
+}
+
+FBangoWatchGroupHandle UBangoScriptSubsystem::CreateWatchGroup(const FBangoInlineCondition& Condition, const FString& Name, FBangoWatchChangesFunc OnChanges, FString& OutError)
+{
+	FBangoWatchRegistry* Registry = GetWatches(OutError);
+	if (!Registry)
+	{
+		return FBangoWatchGroupHandle();
+	}
+	FBangoConditionHandle Registered = Bango::RegisterCondition(Condition, Name, OutError);
+	const TSharedPtr<const FBangoProgram> Program = Bango::FindCondition(Registered);
+	if (!Program.IsValid())
+	{
+		Bango::UnregisterCondition(Registered);
+		return FBangoWatchGroupHandle();
+	}
+	const FBangoWatchGroupHandle Group = Registry->CreateGroup(Program, Condition.GetPollInterval(), Name, MoveTemp(OnChanges));
+	WatchConditions.Add(Group.Id, Registered);
+	return Group;
+}
+
+void UBangoScriptSubsystem::DestroyWatchGroup(FBangoWatchGroupHandle& Group)
+{
+	if (FBangoConditionHandle* Registered = WatchConditions.Find(Group.Id))
+	{
+		Bango::UnregisterCondition(*Registered);
+		WatchConditions.Remove(Group.Id);
+	}
+	if (Watches.IsValid())
+	{
+		Watches->DestroyGroup(Group);
+	}
+	Group = FBangoWatchGroupHandle();
+}
+
+bool UBangoScriptSubsystem::SetGroupInputs(FBangoWatchGroupHandle Group, TConstArrayView<FBangoWatchInput> Inputs, FString& OutError)
+{
+	if (!Watches.IsValid())
+	{
+		OutError = TEXT("The watch group doesn't exist (any more).");
+		return false;
+	}
+	return Watches->SetGroupInputs(Group, Inputs, OutError);
+}
+
+bool UBangoScriptSubsystem::StartWatch(FBangoWatchGroupHandle Group, TConstArrayView<FBangoWatchInput> Inputs, FBangoWatchHandle& OutWatch)
+{
+	OutWatch = FBangoWatchHandle();
+	return Watches.IsValid() && Watches->StartWatch(Group, Inputs, OutWatch);
+}
+
+void UBangoScriptSubsystem::StopWatch(FBangoWatchHandle& Watch)
+{
+	if (Watches.IsValid())
+	{
+		Watches->StopWatch(Watch);
+	}
+	Watch = FBangoWatchHandle();
+}
+
 EBangoConditionResult UBangoScriptSubsystem::RunCondition(const TSharedPtr<const FBangoProgram>& Program, const TArray<FBangoValue>& Args, FString& OutError)
 {
 	FBangoModule& Module = FBangoModule::Get();
@@ -842,10 +934,31 @@ void UBangoScriptSubsystem::Tick(float DeltaTime)
 	{
 		// Hold a reference: the map may change while this script runs.
 		TSharedPtr<FRunningScript> Script = Scripts.FindRef(Id);
-		if (Script.IsValid() && Script->Instance.IsRunning())
+		if (Script.IsValid() && Script->Instance.IsRunning() && !Script->Instance.GetWaitSet())
 		{
 			ResumeScript(*Script, DeltaTime);
 		}
+	}
+
+	// Then the scripts paused at a waitUntil whose answer may have changed, this frame or since they last checked: once
+	// each, after the others have run, so globals set one after another are checked together. What these scripts
+	// change is seen by the ones after them here, and the others next frame.
+	if (UBangoGlobalsSubsystem* GlobalsSubsystem = UBangoGlobalsSubsystem::Get(this))
+	{
+		for (const int64 Id : Ids)
+		{
+			TSharedPtr<FRunningScript> Script = Scripts.FindRef(Id);
+			if (Script.IsValid() && Script->Instance.IsWaitDue(GlobalsSubsystem->GetStore()))
+			{
+				ResumeScript(*Script, DeltaTime);
+			}
+		}
+	}
+
+	// Then watched conditions whose answer may have changed (CreateWatchGroup).
+	if (Watches.IsValid())
+	{
+		Watches->Update(GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0);
 	}
 
 	bool bRemoved = false;

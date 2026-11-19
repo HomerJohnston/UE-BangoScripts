@@ -89,6 +89,10 @@ namespace BangoProgramPrivate
 			return FString::Printf(TEXT("%s %s%s"), *DescribePlace(Program, Function, I.A), ArrayModifyName(I.B), I.C ? TEXT(" +result") : TEXT(""));
 		case EBangoOp::ForEachNext:
 			return FString::Printf(TEXT("%s %s -> %d"), *DescribeSlot(Function, I.A), *DescribeSlot(Function, I.B), I.C);
+		case EBangoOp::WaitCheck:
+			return FString::Printf(TEXT("#%d"), I.A);
+		case EBangoOp::WaitResult:
+			return FString::Printf(TEXT("#%d -> %d"), I.A, I.B);
 		default:
 			return FString();
 		}
@@ -142,8 +146,82 @@ namespace Bango
 		case EBangoOp::ArrayCount:         return TEXT("ArrayCount");
 		case EBangoOp::ArrayModify:        return TEXT("ArrayModify");
 		case EBangoOp::ForEachNext:        return TEXT("ForEachNext");
+		case EBangoOp::WaitCheck:          return TEXT("WaitCheck");
+		case EBangoOp::WaitResult:         return TEXT("WaitResult");
 		default:                           return TEXT("?");
 		}
+	}
+
+	FBangoDependencies FindDependencies(const FBangoProgram& Program, int32 Function, int32 Begin, int32 End)
+	{
+		FBangoDependencies Result;
+		TSet<int32> Visited;
+		Visited.Add(Function);
+		auto Scan = [&](auto&& Self, int32 FunctionIndex, int32 From, int32 To) -> void
+		{
+			if (!Program.Functions.IsValidIndex(FunctionIndex))
+			{
+				return;
+			}
+			const FBangoFunctionCode& Code = Program.Functions[FunctionIndex];
+			for (int32 i = FMath::Max(From, 0); i < To && i < Code.Code.Num(); ++i)
+			{
+				const FBangoInstruction& I = Code.Code[i];
+				switch (I.Op)
+				{
+				case EBangoOp::LoadPlace:
+				case EBangoOp::IsNilPlace:
+				case EBangoOp::ArrayModify:
+					if (Code.Places.IsValidIndex(I.A))
+					{
+						const FBangoPlace& Place = Code.Places[I.A];
+						if (Place.Kind == EBangoPlaceKind::Global && Program.Names.IsValidIndex(Place.Index))
+						{
+							Result.Globals.AddUnique(Program.Names[Place.Index]);
+						}
+						else if (Place.Kind == EBangoPlaceKind::Local && FunctionIndex == 0 && Place.Index < Code.NumParams && Code.SlotNames.IsValidIndex(Place.Index))
+						{
+							Result.Inputs.AddUnique(Code.SlotNames[Place.Index]);
+						}
+					}
+					break;
+				case EBangoOp::CallFunction:
+					if (Program.Functions.IsValidIndex(I.A) && !Visited.Contains(I.A))
+					{
+						Visited.Add(I.A);
+						Self(Self, I.A, 0, Program.Functions[I.A].Code.Num());
+					}
+					break;
+				case EBangoOp::CallCommand:
+				case EBangoOp::CallReflected:
+					if (Result.PollReason.IsEmpty() && Program.Names.IsValidIndex(I.A))
+					{
+						Result.PollReason = FString::Printf(TEXT("it calls %s"), *Program.Names[I.A]);
+					}
+					break;
+				default:
+					break;
+				}
+			}
+		};
+		Scan(Scan, Function, Begin, End);
+		Result.Globals.Sort();
+
+		// Inputs in their order.
+		if (Program.Functions.IsValidIndex(0))
+		{
+			const FBangoFunctionCode& Main = Program.Functions[0];
+			TArray<FString> Ordered;
+			for (int32 Slot = 0; Slot < Main.NumParams && Slot < Main.SlotNames.Num(); ++Slot)
+			{
+				if (Result.Inputs.Contains(Main.SlotNames[Slot]))
+				{
+					Ordered.Add(Main.SlotNames[Slot]);
+				}
+			}
+			Result.Inputs = MoveTemp(Ordered);
+		}
+		return Result;
 	}
 
 	FString Disassemble(const FBangoProgram& Program)
@@ -172,6 +250,12 @@ namespace Bango
 				Result += FString::Printf(TEXT(" %s %s;"), *Global.Type.ToString(), *Global.Name);
 			}
 			Result += TEXT("\n");
+		}
+		for (int32 i = 0; i < Program.WaitSets.Num(); ++i)
+		{
+			const FBangoWaitSet& Set = Program.WaitSets[i];
+			Result += FString::Printf(TEXT("wait #%d: %s%s\n"), i, Set.Globals.Num() > 0 ? *FString::Join(Set.Globals, TEXT(", ")) : TEXT("(no globals)"),
+				Set.PollReason.IsEmpty() ? TEXT("") : *FString::Printf(TEXT("; polled: %s"), *Set.PollReason));
 		}
 
 		for (const FBangoFunctionCode& Function : Program.Functions)

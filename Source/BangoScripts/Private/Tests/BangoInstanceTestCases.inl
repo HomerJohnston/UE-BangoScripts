@@ -1,6 +1,7 @@
 #pragma once
 
 #include "BangoText.h"
+#include "BangoConditionWatches.h"
 
 // Interpreter test cases, shared by the Unreal automation test (BangoInstanceTests.cpp)
 // and the stand-alone test harness used during development.
@@ -486,7 +487,7 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 	{ TEXT("self with an owner that has no Bango ID"), TEXT("entity _e = self;"), TEXT(""), TEXT("(1:"), TEXT("'self' can't be used here: Door has no Bango ID."), TEXT("!Door has no Bango ID.") },
 	{ TEXT("self as a default with no owner"), TEXT("#inputs (entity _who = self)\nTalk(\"x\");"), TEXT(""), TEXT("(1:1)"), TEXT("The default for '_who' is self, but this script has no owner"), nullptr },
 	{ TEXT("a script with no owner that doesn't use self runs"), TEXT("Talk(\"fine\");"), TEXT("fine"), nullptr, nullptr, nullptr },
-	{ TEXT("unregistered entity"), TEXT("@ghost Speak(\"boo\");"), TEXT(""), TEXT("(1:1)"), TEXT("no actor is registered with the Bango ID name 'ghost'") },
+	{ TEXT("unregistered entity"), TEXT("@ghost Speak(\"boo\");"), TEXT(""), TEXT("(1:1)"), TEXT("Speak: No actor is registered with the Bango ID name 'ghost'") },
 	{ TEXT("Bango ID written without @"), TEXT("john Speak(\"hi\");"), TEXT(""), TEXT("(1:1)"), TEXT("Global 'john' doesn't exist. There is an actor with the Bango ID 'john': write @john to use it.") },
 	{ TEXT("missing global that isn't a Bango ID"), TEXT("ghost Speak(\"hi\");"), TEXT(""), TEXT("(1:1)"), TEXT("Global 'ghost' doesn't exist. No script or Blueprint has declared it.") },
 	{ TEXT("undeclared global of the wrong type"), TEXT("int _x;\n_x = lots + 1;"), TEXT(""), TEXT("(2:11)"), TEXT("'+' needs two numbers or two strings, but got a string and an int") },
@@ -1304,6 +1305,332 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			FString ReloadError;
 			Expect(!Run.Instance.RequestReload(Unknown, Commands, ReloadError) && ReloadError.Contains(TEXT("'Nothing'")) && !Run.Instance.IsReloadPending(),
 				TEXT("reload: refused if a command isn't registered"));
+		}
+
+		// ---- waitUntil ----
+		auto Set = [](FBangoGlobalStore& Store, const TCHAR* Name, const FBangoValue& Value)
+		{
+			FString SetError;
+			Store.Set(Name, Value, SetError);
+		};
+		// Waits until a global it reads changes, then checks again.
+		{
+			FReloadRun Run;
+			Expect(StartRun(Run, Compile(TEXT("Talk(\"a\");\nwaitUntil (score > 10);\nTalk(\"b\");"))) && Log.Num() == 1, TEXT("waitUntil: pauses while false"));
+			const FBangoWaitSet* WaitSet = Run.Instance.GetWaitSet();
+			Expect(WaitSet && WaitSet->Globals.Num() == 1 && WaitSet->Globals[0] == TEXT("score") && WaitSet->PollReason.IsEmpty(), TEXT("waitUntil: its set is the global it reads"));
+			Expect(Run.Instance.GetWaitingCommandName() == TEXT("waitUntil") && Run.Instance.GetCurrentLocation().Line == 2, TEXT("waitUntil: the debugger shows it, on its line"));
+			Expect(!Run.Instance.IsWaitDue(Run.Globals), TEXT("waitUntil: not due until something changes"));
+			Set(Run.Globals, TEXT("ratio"), FBangoValue::MakeDouble(2.0));
+			Expect(!Run.Instance.IsWaitDue(Run.Globals), TEXT("waitUntil: another global changing doesn't make it due"));
+			Set(Run.Globals, TEXT("score"), FBangoValue::MakeInt(7));
+			Expect(!Run.Instance.IsWaitDue(Run.Globals), TEXT("waitUntil: setting the same value isn't a change"));
+			Set(Run.Globals, TEXT("score"), FBangoValue::MakeInt(8));
+			Expect(Run.Instance.IsWaitDue(Run.Globals), TEXT("waitUntil: a change makes it due"));
+			Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting && Log.Num() == 1 && !Run.Instance.IsWaitDue(Run.Globals),
+				TEXT("waitUntil: still false, it waits again"));
+			Set(Run.Globals, TEXT("score"), FBangoValue::MakeInt(11));
+			Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && LastLog() == TEXT("b"), TEXT("waitUntil: true, it carries on"));
+		}
+		// Already true: carries on without pausing.
+		{
+			FReloadRun Run;
+			BangoMakeRuntimeTestGlobals(Run.Globals);
+			Context.Globals = &Run.Globals;
+			Log.Reset();
+			FBangoRuntimeError StartError;
+			Run.Instance.Start(Compile(TEXT("waitUntil (score == 7);\nTalk(\"b\");")), Commands, Run.Globals, 1, StartError);
+			Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && LastLog() == TEXT("b"), TEXT("waitUntil: already true, no pause"));
+		}
+		// A global that isn't set up yet (missing or nil) is false, not an error, in the condition and in functions it calls.
+		{
+			FReloadRun Run;
+			Expect(StartRun(Run, Compile(TEXT("function bool Ready()\n{\n\treturn later > 1;\n};\nwaitUntil (missing > 3 || Ready());\nTalk(\"b\");"))),
+				TEXT("waitUntil: an unset global waits"));
+			Expect(Run.Instance.GetError().Message.IsEmpty(), TEXT("waitUntil: an unset global isn't an error"));
+			FString DeclareError;
+			Run.Globals.Declare(TEXT("missing"), FBangoType::Int(), DeclareError);
+			Expect(Run.Instance.IsWaitDue(Run.Globals), TEXT("waitUntil: creating the global makes it due"));
+			Set(Run.Globals, TEXT("missing"), FBangoValue::MakeInt(1));
+			Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting, TEXT("waitUntil: unset in a function it calls, it waits (backing out of the call)"));
+			Run.Globals.Declare(TEXT("later"), FBangoType::Int(), DeclareError);
+			Set(Run.Globals, TEXT("later"), FBangoValue::MakeInt(2));
+			Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && LastLog() == TEXT("b"), TEXT("waitUntil: the function's global set, it carries on"));
+		}
+		// A command in the condition: checked every frame.
+		{
+			FReloadRun Run;
+			Expect(StartRun(Run, Compile(TEXT("waitUntil (!IsNull(@ghost) || score > 100);"))), TEXT("waitUntil polled: waits"));
+			const FBangoWaitSet* WaitSet = Run.Instance.GetWaitSet();
+			Expect(WaitSet && WaitSet->PollReason.Contains(TEXT("IsNull")) && Run.Instance.IsWaitDue(Run.Globals), TEXT("waitUntil polled: always due"));
+			Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting && Run.Instance.IsWaitDue(Run.Globals), TEXT("waitUntil polled: still due after a check"));
+		}
+		// The condition can't wait.
+		{
+			FReloadRun Run;
+			StartRun(Run, Compile(TEXT("waitUntil (AskChoice(\"a\", \"b\") == 1);")));
+			Expect(Run.Instance.GetStatus() == EBangoInstanceStatus::Failed && Run.Instance.GetError().Message.Contains(TEXT("must answer at once, but 'AskChoice' waits")),
+				TEXT("waitUntil: a command that waits, in its condition, is an error"));
+		}
+		// Changing an array global in place (Push) is a change.
+		{
+			FReloadRun Run;
+			FString DeclareError;
+			Run.Globals.Declare(TEXT("found"), FBangoType::ArrayOf(EBangoBaseType::Int), DeclareError);
+			Set(Run.Globals, TEXT("found"), FBangoValue::MakeArray(FBangoType::Int(), TArray<FBangoValue>()));
+			Expect(StartRun(Run, Compile(TEXT("global int[] found;\nwaitUntil (Count(found) >= 2);\nTalk(\"b\");"))), TEXT("waitUntil in place: waits"));
+			FBangoInstance Pusher;
+			FBangoRuntimeError PushError;
+			Pusher.Start(Compile(TEXT("global int[] found;\nfound Push(1);")), Commands, Run.Globals, 2, PushError);
+			Pusher.Resume(Context);
+			Expect(Run.Instance.IsWaitDue(Run.Globals) && Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting, TEXT("waitUntil in place: one Push makes it due, still false"));
+			Pusher.Start(Compile(TEXT("global int[] found;\nfound Push(2);")), Commands, Run.Globals, 3, PushError);
+			Pusher.Resume(Context);
+			Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished, TEXT("waitUntil in place: the second Push, it carries on"));
+		}
+		// Saved and loaded while waiting: checked again straight away.
+		{
+			FReloadRun Run;
+			TSharedPtr<FBangoProgram> WaitProgram = Compile(TEXT("waitUntil (score > 10);\nTalk(\"b\");"));
+			StartRun(Run, WaitProgram);
+			TArray<uint8> Bytes;
+			{
+				FMemoryWriter Writer(Bytes);
+				Run.Globals.Serialize(Writer);
+				Run.Instance.Serialize(Writer);
+			}
+			FBangoGlobalStore LoadedGlobals;
+			FBangoInstance Loaded;
+			{
+				FMemoryReader Reader(Bytes);
+				LoadedGlobals.Serialize(Reader);
+				Loaded.Serialize(Reader);
+			}
+			FString BindError;
+			Expect(Loaded.Bind(WaitProgram, Commands, BindError) && Loaded.GetWaitSet() && Loaded.IsWaitDue(LoadedGlobals), TEXT("waitUntil save/load: due after loading"));
+			Context.Globals = &LoadedGlobals;
+			Expect(Loaded.Resume(Context) == EBangoInstanceStatus::Waiting && !Loaded.IsWaitDue(LoadedGlobals), TEXT("waitUntil save/load: still false, waits"));
+			Set(LoadedGlobals, TEXT("score"), FBangoValue::MakeInt(20));
+			Expect(Loaded.Resume(Context) == EBangoInstanceStatus::Finished && LastLog() == TEXT("b"), TEXT("waitUntil save/load: carries on"));
+		}
+		// Hot reload while waiting: it switches there, and checks the new condition.
+		{
+			FReloadRun Run;
+			Expect(StartRun(Run, Compile(TEXT("waitUntil (score > 100);    //@1(0, 0)\nTalk(\"v1\");    //@2(0, 2)"))), TEXT("waitUntil reload: waits"));
+			FString ReloadError;
+			Expect(Run.Instance.RequestReload(Compile(TEXT("waitUntil (score > 5);    //@1(0, 0)\nTalk(\"v2\");    //@2(0, 2)")), Commands, ReloadError)
+				&& Run.Instance.IsWaitDue(Run.Globals), TEXT("waitUntil reload: a pending reload makes it due"));
+			Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && LastLog() == TEXT("v2"), TEXT("waitUntil reload: the new condition is true"));
+			FString ReloadMessage;
+			Expect(Run.Instance.TakeReloadResult(ReloadMessage) == EBangoReloadResult::Reloaded, *(FString(TEXT("waitUntil reload: it switched: ")) + ReloadMessage));
+		}
+		// Not in a condition.
+		{
+			FBangoProgram ConditionProgram;
+			FBangoCompileError ConditionError;
+			Expect(!Bango::CompileCondition(TEXT("waitUntil (true);\nreturn true;"), TEXT("c"), Commands, ConditionProgram, ConditionError)
+				&& ConditionError.Message.Contains(TEXT("can't use waitUntil")), TEXT("waitUntil: not in a condition"));
+		}
+		// What a condition depends on: globals (in its functions too), the inputs it reads, and commands.
+		{
+			FBangoProgram ConditionProgram;
+			FBangoCompileError ConditionError;
+			const bool bCompiled = Bango::CompileCondition(TEXT("#inputs (entity _activator, entity[] _actual, entity[] _potential)\nglobal int stage;\nfunction bool Far()\n{\n\treturn range > 2;\n};\nreturn Count(_actual) < 3 && stage == 2 && Far();"),
+				TEXT("c"), Commands, ConditionProgram, ConditionError);
+			const FBangoDependencies& Deps = ConditionProgram.ConditionDependencies;
+			Expect(bCompiled && Deps.Globals == TArray<FString>({ TEXT("range"), TEXT("stage") }) && Deps.Inputs == TArray<FString>({ TEXT("_actual") }) && Deps.PollReason.IsEmpty(),
+				*(FString(TEXT("condition dependencies: globals and inputs ")) + ConditionError.ToString()));
+			FBangoProgram Polled;
+			Expect(Bango::CompileCondition(TEXT("#inputs (entity _activator)\n!IsNull(_activator) && _activator != @ghost"), TEXT("c"), Commands, Polled, ConditionError)
+				&& Polled.ConditionDependencies.Inputs == TArray<FString>({ TEXT("_activator") }) && Polled.ConditionDependencies.PollReason == TEXT("it calls IsNull"),
+				TEXT("condition dependencies: a command makes it polled"));
+			FBangoProgram Script;
+			Expect(Bango::CompileSource(TEXT("Talk(\"a\");"), TEXT("s"), Commands, Script, ConditionError) && Script.ConditionDependencies.PollReason.IsEmpty() && Script.ConditionDependencies.Inputs.IsEmpty(),
+				TEXT("condition dependencies: not worked out for a script"));
+		}
+
+		// ---- Watching conditions (FBangoWatchRegistry) ----
+		{
+			FBangoGlobalStore WatchGlobals;
+			BangoMakeRuntimeTestGlobals(WatchGlobals);
+			Context.Globals = &WatchGlobals;
+			TArray<FString> Reported;
+			FBangoWatchRegistry Registry(WatchGlobals,
+				[&](const TSharedPtr<const FBangoProgram>& CheckProgram, const TArray<FBangoValue>& CheckArgs, FString& OutError)
+				{
+					FBangoInstance Check;
+					FBangoRuntimeError CheckError;
+					if (!Check.Start(CheckProgram, Commands, WatchGlobals, 99, CheckError, CheckArgs))
+					{
+						OutError = CheckError.ToString();
+						return EBangoConditionResult::Error;
+					}
+					return Check.FinishCondition(Check.Resume(Context), OutError);
+				},
+				[&Reported](const FString& GroupName, const FString& WatchError) { Reported.Add(GroupName + TEXT(": ") + WatchError); });
+			auto CompileWatched = [&](const TCHAR* WatchedSource) -> TSharedPtr<const FBangoProgram>
+			{
+				TSharedPtr<FBangoProgram> WatchedProgram = MakeShared<FBangoProgram>();
+				FBangoCompileError WatchedError;
+				if (!Bango::CompileCondition(WatchedSource, TEXT("watched"), Commands, *WatchedProgram, WatchedError))
+				{
+					Expect(false, *(FString(TEXT("watch: condition compiles: ")) + WatchedError.ToString()));
+					return TSharedPtr<const FBangoProgram>();
+				}
+				return WatchedProgram;
+			};
+			auto Entity = [](const TCHAR* Name) { return FBangoValue::MakeEntity(Name); };
+			auto MakeEntities = [](std::initializer_list<const TCHAR*> Names)
+			{
+				TArray<FBangoValue> Elements;
+				for (const TCHAR* Name : Names)
+				{
+					Elements.Add(FBangoValue::MakeEntity(Name));
+				}
+				return FBangoValue::MakeArray(FBangoType::Entity(), Elements);
+			};
+			struct FCall
+			{
+				int64 Group = 0;
+				TArray<FBangoWatchChange> Changes;
+			};
+			TArray<FCall> Calls;
+			auto Recorder = [&Calls](FBangoWatchGroupHandle* Group)
+			{
+				return [&Calls, Group](TConstArrayView<FBangoWatchChange> Changes)
+				{
+					FCall& Call = Calls.AddDefaulted_GetRef();
+					Call.Group = Group->Id;
+					for (const FBangoWatchChange& Change : Changes)
+					{
+						Call.Changes.Add(Change);
+					}
+				};
+			};
+			const TCHAR* Inputs = TEXT("#inputs (entity _activator, entity[] _actual)\n");
+			double Now = 0.0;
+
+			// Globals: checked again only when one it reads changes; only changes reported, together.
+			FBangoWatchGroupHandle Scores;
+			Scores = Registry.CreateGroup(CompileWatched(*(FString(Inputs) + TEXT("score > 10 && _activator != @ghost"))), 0.5f, TEXT("Scores"), Recorder(&Scores));
+			FBangoWatchHandle A, Ghost;
+			Expect(!Registry.StartWatch(Scores, { { TEXT("_activator"), Entity(TEXT("a")) } }, A) && A.IsValid(), TEXT("watch: the first answer at once (false)"));
+			Registry.StartWatch(Scores, { { TEXT("_activator"), Entity(TEXT("ghost")) } }, Ghost);
+			int64 Checks = Registry.GetNumChecks();
+			Registry.Update(Now += 0.1);
+			Expect(Registry.GetNumChecks() == Checks && Calls.Num() == 0, TEXT("watch: nothing changed, nothing checked"));
+			Set(WatchGlobals, TEXT("ratio"), FBangoValue::MakeDouble(3.0));
+			Registry.Update(Now += 0.1);
+			Expect(Registry.GetNumChecks() == Checks, TEXT("watch: a global it doesn't read changing isn't checked"));
+			Set(WatchGlobals, TEXT("score"), FBangoValue::MakeInt(11));
+			Registry.Update(Now += 0.1);
+			Expect(Registry.GetNumChecks() == Checks + 2 && Calls.Num() == 1 && Calls[0].Group == Scores.Id && Calls[0].Changes.Num() == 1
+				&& Calls[0].Changes[0].Watch == A && Calls[0].Changes[0].bSatisfied, TEXT("watch: a global it reads: both checked, the one that changed reported"));
+			Checks = Registry.GetNumChecks();
+			FString InputError;
+			Expect(Registry.SetGroupInputs(Scores, { { TEXT("_actual"), MakeEntities({ TEXT("a") }) } }, InputError), TEXT("watch: group inputs set"));
+			Registry.Update(Now += 0.1);
+			Expect(Registry.GetNumChecks() == Checks, TEXT("watch: an input it doesn't read changing isn't checked"));
+			Expect(!Registry.SetGroupInputs(Scores, { { TEXT("_nope"), Entity(TEXT("a")) } }, InputError) && InputError.Contains(TEXT("no input '_nope'")), TEXT("watch: an unknown group input"));
+			FBangoWatchHandle Bad;
+			Expect(!Registry.StartWatch(Scores, { { TEXT("_who"), Entity(TEXT("a")) } }, Bad) && !Bad.IsValid() && Reported.Num() == 1 && Reported[0].StartsWith(TEXT("Scores: "), ESearchCase::CaseSensitive),
+				TEXT("watch: an unknown watch input is reported"));
+			Reported.Reset();
+			Calls.Reset();
+
+			// Inputs: checked again when one it reads is set to a different value.
+			FBangoWatchGroupHandle Crowd;
+			Crowd = Registry.CreateGroup(CompileWatched(*(FString(Inputs) + TEXT("Count(_actual) < 2"))), 0.5f, TEXT("Crowd"), Recorder(&Crowd));
+			FBangoWatchHandle C;
+			Registry.SetGroupInputs(Crowd, { { TEXT("_actual"), MakeEntities({}) } }, InputError);
+			Expect(Registry.StartWatch(Crowd, { { TEXT("_activator"), Entity(TEXT("c")) } }, C), TEXT("watch: an input-only condition, true at first"));
+			Checks = Registry.GetNumChecks();
+			Registry.SetGroupInputs(Crowd, { { TEXT("_actual"), MakeEntities({ TEXT("a"), TEXT("b") }) } }, InputError);
+			Registry.Update(Now += 0.1);
+			Expect(Registry.GetNumChecks() == Checks + 1 && Calls.Num() == 1 && Calls[0].Group == Crowd.Id && !Calls[0].Changes[0].bSatisfied,
+				TEXT("watch: an input it reads changing: checked, unsatisfied"));
+			Checks = Registry.GetNumChecks();
+			Registry.SetGroupInputs(Crowd, { { TEXT("_actual"), MakeEntities({ TEXT("a"), TEXT("b") }) } }, InputError);
+			Registry.Update(Now += 0.1);
+			Expect(Registry.GetNumChecks() == Checks, TEXT("watch: the same input values again: not checked"));
+			Calls.Reset();
+
+			// Polled: a command in it. Checked every Poll Interval, spread out, whatever changes.
+			FBangoWatchGroupHandle Polled;
+			Polled = Registry.CreateGroup(CompileWatched(TEXT("#inputs (entity _activator)\n!IsNull(_activator)")), 1.0f, TEXT("Polled"), Recorder(&Polled));
+			FBangoWatchHandle P;
+			Expect(Registry.StartWatch(Polled, { { TEXT("_activator"), Entity(TEXT("john")) } }, P), TEXT("watch polled: true at first"));
+			Checks = Registry.GetNumChecks();
+			for (int32 Frame = 0; Frame < 12; ++Frame)
+			{
+				Registry.Update(Now += 0.25); // 3 seconds
+			}
+			const int64 Polls = Registry.GetNumChecks() - Checks;
+			Expect(Polls >= 3 && Polls <= 4 && Calls.Num() == 0, *FString::Printf(TEXT("watch polled: once a second (%d checks in 3 s)"), (int32)Polls));
+			FBangoWatchGroupHandle EveryFrame = Registry.CreateGroup(CompileWatched(TEXT("#inputs (entity _activator)\n!IsNull(_activator)")), 0.0f, TEXT("Every frame"), nullptr);
+			FBangoWatchHandle E;
+			Registry.StartWatch(EveryFrame, { { TEXT("_activator"), Entity(TEXT("john")) } }, E);
+			Registry.StopWatch(P);
+			Checks = Registry.GetNumChecks();
+			Registry.Update(Now += 0.01);
+			Registry.Update(Now += 0.01);
+			Expect(Registry.GetNumChecks() == Checks + 2, TEXT("watch polled: interval 0, every Update"));
+			Registry.DestroyGroup(EveryFrame);
+			Registry.DestroyGroup(Polled);
+
+			// Errors: unsatisfied, shown once until it answers true or false again. Unset is unsatisfied, quietly.
+			FBangoWatchGroupHandle Broken;
+			Broken = Registry.CreateGroup(CompileWatched(TEXT("#inputs (entity _activator)\nscore / zero > 1 || IsNil(later) == false && later > 0")), 0.5f, TEXT("Broken"), Recorder(&Broken));
+			FBangoWatchHandle Br;
+			FString DeclareError;
+			WatchGlobals.Declare(TEXT("zero"), FBangoType::Int(), DeclareError);
+			Set(WatchGlobals, TEXT("zero"), FBangoValue::MakeInt(0));
+			Expect(!Registry.StartWatch(Broken, { { TEXT("_activator"), Entity(TEXT("a")) } }, Br) && Reported.Num() == 1 && Reported[0].Contains(TEXT("Division by zero")),
+				*(FString(TEXT("watch error: reported at the start: ")) + (Reported.Num() > 0 ? Reported[0] : FString())));
+			Set(WatchGlobals, TEXT("score"), FBangoValue::MakeInt(12));
+			Registry.Update(Now += 0.1);
+			Expect(Reported.Num() == 1, TEXT("watch error: not shown again"));
+			Set(WatchGlobals, TEXT("zero"), FBangoValue::MakeInt(100));
+			Registry.Update(Now += 0.1);
+			Set(WatchGlobals, TEXT("zero"), FBangoValue::MakeInt(0));
+			Registry.Update(Now += 0.1);
+			Expect(Reported.Num() == 2, TEXT("watch error: shown again after a false in between"));
+			Registry.DestroyGroup(Broken);
+			Reported.Reset();
+			Calls.Reset();
+
+			// Callbacks can stop watches, start them and destroy groups, their own too.
+			Registry.DestroyGroup(Scores);
+			Registry.DestroyGroup(Crowd);
+			FBangoWatchGroupHandle First, Second;
+			FBangoWatchHandle F1, S1;
+			First = Registry.CreateGroup(CompileWatched(*(FString(Inputs) + TEXT("score > 20"))), 0.5f, TEXT("First"),
+				[&](TConstArrayView<FBangoWatchChange> Changes)
+				{
+					Calls.AddDefaulted_GetRef().Group = First.Id;
+					Registry.StopWatch(S1);
+					Registry.DestroyGroup(First);
+				});
+			Second = Registry.CreateGroup(CompileWatched(*(FString(Inputs) + TEXT("score > 20"))), 0.5f, TEXT("Second"), Recorder(&Second));
+			Registry.StartWatch(First, { { TEXT("_activator"), Entity(TEXT("a")) } }, F1);
+			Registry.StartWatch(Second, { { TEXT("_activator"), Entity(TEXT("a")) } }, S1);
+			FBangoWatchHandle S2;
+			Registry.StartWatch(Second, { { TEXT("_activator"), Entity(TEXT("b")) } }, S2);
+			const int32 GroupsBefore = Registry.GetNumGroups();
+			const int64 FirstId = First.Id;
+			Set(WatchGlobals, TEXT("score"), FBangoValue::MakeInt(25));
+			Registry.Update(Now += 0.1);
+			Expect(Calls.Num() == 2 && Calls[0].Group == FirstId && Calls[1].Group == Second.Id && Calls[1].Changes.Num() == 1 && Calls[1].Changes[0].Watch == S2
+				&& Registry.GetNumGroups() == GroupsBefore - 1 && !Registry.IsWatching(F1), TEXT("watch callbacks: a watch stopped by an earlier callback isn't reported; a group can destroy itself"));
+			Checks = Registry.GetNumChecks();
+			Set(WatchGlobals, TEXT("score"), FBangoValue::MakeInt(5));
+			Registry.Update(Now += 0.1);
+			Expect(Registry.GetNumChecks() == Checks + 1, TEXT("watch callbacks: only what's left is checked"));
+			FBangoWatchGroupHandle Gone;
+			Registry.DestroyGroup(Gone);
+			FBangoWatchHandle GoneWatch;
+			Registry.StopWatch(GoneWatch);
+			Expect(!Registry.StartWatch(First, { { TEXT("_activator"), Entity(TEXT("a")) } }, GoneWatch) && !GoneWatch.IsValid(), TEXT("watch: a destroyed group can't start watches"));
 		}
 	}
 }

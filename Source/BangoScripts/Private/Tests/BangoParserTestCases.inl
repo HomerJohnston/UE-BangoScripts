@@ -371,5 +371,9 @@ static const FBangoParserTestCase GBangoParserTestCases[] =
 	{ TEXT("a run of reroutes on one line"), TEXT("Talk(\"a\");\n//@3(1, 2) @4(2,2)   @5 ( 3 , 2 )\nTalk(\"b\");"), TEXT("(call Talk \"a\") (reroute) (reroute) (reroute) (call Talk \"b\")"), nullptr, nullptr },
 	{ TEXT("a statement line with two nodes"), TEXT("Talk(\"a\"); //@3(1, 2) @4(2, 2)"), nullptr, TEXT("(1:1)"), TEXT("only have one //@ entry") },
 	{ TEXT("a repeated ID in a reroute run"), TEXT("//@3(1, 2) @3(2, 2)"), nullptr, TEXT("(1:12)"), TEXT("Node ID 3 is used more than once") },
+	{ TEXT("waitUntil"), TEXT("waitUntil (stage == 3 && soldierIsDead);\nwaitUntil(IsAlive(@a));"), TEXT("(waitUntil (&& (== stage 3) soldierIsDead)) (waitUntil (call IsAlive @a))"), nullptr, nullptr },
+	{ TEXT("waitUntil needs brackets"), TEXT("waitUntil stage == 3;"), nullptr, TEXT("(1:11)"), TEXT("Expected '(' after 'waitUntil'") },
+	{ TEXT("waitUntil with an empty condition (a compile error)"), TEXT("waitUntil ();"), TEXT("(waitUntil <empty>)"), nullptr, nullptr },
+	{ TEXT("waitUntil ends with ;"), TEXT("waitUntil (a)\nb();"), nullptr, TEXT("(2:1)"), TEXT("Expected ';' at the end of the statement") },
 	{ TEXT("junk after a reroute run"), TEXT("//@3(1, 2) @4(2, 2) x"), nullptr, TEXT("(1:21)"), TEXT("Unexpected text after node metadata") },
 };

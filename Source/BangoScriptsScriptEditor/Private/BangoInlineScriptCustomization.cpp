@@ -9,6 +9,13 @@
 #include "BangoEditorStyle.h"
 #include "BangoInlineScriptTarget.h"
 #include "DetailWidgetRow.h"
+#include "IDetailChildrenBuilder.h"
+#include "DetailLayoutBuilder.h"
+#include "IDetailPropertyRow.h"
+#include "Bango.h"
+#include "BangoCompiler.h"
+#include "BangoSettings.h"
+#include "BangoInputsSignature.h"
 #include "Dialog/SCustomDialog.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
@@ -108,7 +115,7 @@ namespace BangoInlineScriptCustomizationPrivate
 }
 
 /**
- * The details panel's box for one FBangoInlineScript property: its text, typed in and applied when the box loses
+ * The details panel's box for one FBangoInlineScript or FBangoInlineCondition property: its text, typed in and applied when the box loses
  * focus (as one undoable change), kept up to date with changes made elsewhere, and the Edit button over its top-right
  * corner (which shows the window instead once it's open).
  */
@@ -122,7 +129,7 @@ public:
 	{
 		using namespace BangoInlineScriptCustomizationPrivate;
 		StructHandle = InStructHandle;
-		SourceHandle = InStructHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FBangoInlineScript, Source));
+		SourceHandle = InStructHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FBangoInlineScriptBase, Source));
 
 		// The window's key: only for one object (several selected objects, each with its own script, have no window).
 		TArray<UObject*> Outers;
@@ -135,7 +142,7 @@ public:
 
 		ReadValue(Shown, bMultipleValues);
 
-		// Inputs its owner's C++ gives it (FBangoInlineScript::UseInputsSignature): compiled and offered as its parameters.
+		// Inputs its owner's C++ gives it (FBangoInlineScriptBase::UseInputsSignature): compiled and offered as its parameters.
 		FString SignatureError;
 		const TSharedPtr<const FBangoInputsSignature> Signature = FBangoInlineScriptTarget::GetInputsSignature(InStructHandle, SignatureError);
 
@@ -163,8 +170,8 @@ public:
 								.Text(FText::FromString(Shown))
 								.InlineScriptEditor(true) // no metadata shown, and read-only while the script has some
 								.CompileAsYouType(true)
-								// A condition (`meta = (BangoCondition)`): compiled as one, so `_count > 3` is fine.
-								.Condition(InStructHandle->HasMetaData(TEXT("BangoCondition")))
+								// A condition (FBangoInlineCondition): compiled as one, so `_count > 3` is fine.
+								.Condition(FBangoInlineScriptTarget::IsConditionProperty(InStructHandle))
 								.InputsSignature(Signature)
 								// self: the actor whose details show this script (lines to what it refers to, in the viewports)
 								.SelfActor_Lambda([this]() { return BangoScriptReferences::GetSelfActor(SelfOwner.Get()); })
@@ -460,6 +467,134 @@ private:
 		return FReply::Handled();
 	}
 };
+
+namespace BangoInlineScriptCustomizationPrivate
+{
+	/**
+	 * For a condition's rows: what it depends on (FBangoDependencies), compiled again only when its text changes.
+	 * Nothing if it's several objects' with different text, or it doesn't compile (the box shows why).
+	 */
+	class FConditionDependencies
+	{
+	public:
+		FConditionDependencies(const TSharedRef<IPropertyHandle>& InStructHandle)
+			: StructHandle(InStructHandle)
+			, SourceHandle(InStructHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FBangoInlineScriptBase, Source)))
+		{
+		}
+
+		/** The dependencies, or null. bOutEmpty: there's no text (always true). */
+		const FBangoDependencies* Get(bool& bOutEmpty)
+		{
+			bOutEmpty = false;
+			FString Source;
+			if (!SourceHandle.IsValid() || SourceHandle->GetValue(Source) != FPropertyAccess::Success)
+			{
+				return nullptr;
+			}
+			if (Source.TrimStartAndEnd().IsEmpty())
+			{
+				bOutEmpty = true;
+				return nullptr;
+			}
+			if (!bCached || Source != CachedSource)
+			{
+				bCached = true;
+				CachedSource = Source;
+				FString SignatureError;
+				const TSharedPtr<const FBangoInputsSignature> Signature = FBangoInlineScriptTarget::GetInputsSignature(StructHandle, SignatureError);
+				FBangoProgram Program;
+				FBangoCompileError CompileError;
+				bCompiled = Bango::CompileCondition(Source, TEXT("Condition"), FBangoModule::Get().GetCommands(), Program, CompileError, Signature.Get());
+				Dependencies = Program.ConditionDependencies;
+			}
+			return bCompiled ? &Dependencies : nullptr;
+		}
+
+	private:
+		TSharedRef<IPropertyHandle> StructHandle;
+		TSharedPtr<IPropertyHandle> SourceHandle;
+		FString CachedSource;
+		bool bCached = false;
+		bool bCompiled = false;
+		FBangoDependencies Dependencies;
+	};
+}
+
+void FBangoInlineScriptCustomization::CustomizeChildren(TSharedRef<IPropertyHandle> StructHandle, IDetailChildrenBuilder& ChildBuilder, IPropertyTypeCustomizationUtils& Utils)
+{
+	using namespace BangoInlineScriptCustomizationPrivate;
+	if (!FBangoInlineScriptTarget::IsConditionProperty(StructHandle))
+	{
+		return;
+	}
+	const TSharedRef<FConditionDependencies> Info = MakeShared<FConditionDependencies>(StructHandle);
+	const TSharedPtr<IPropertyHandle> PollHandle = StructHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FBangoInlineCondition, PollInterval));
+
+	// When it's checked, if watched (a trigger's Condition is).
+	auto CheckedText = [Info, PollHandle]() -> FText
+	{
+		bool bEmpty = false;
+		const FBangoDependencies* Dependencies = Info->Get(bEmpty);
+		if (bEmpty)
+		{
+			return LOCTEXT("ConditionEmpty", "Empty: always true.");
+		}
+		if (!Dependencies)
+		{
+			return FText::GetEmpty();
+		}
+		if (Dependencies->PollReason.IsEmpty())
+		{
+			return Dependencies->Globals.Num() + Dependencies->Inputs.Num() > 0
+				? LOCTEXT("ConditionOnChange", "Checked again when a global or input it reads changes.")
+				: LOCTEXT("ConditionNever", "Its answer never changes: it reads no globals or inputs.");
+		}
+		float Interval = -1.0f;
+		if (PollHandle.IsValid())
+		{
+			PollHandle->GetValue(Interval);
+		}
+		if (Interval < 0.0f)
+		{
+			Interval = GetDefault<UBangoSettings>()->DefaultConditionPollInterval;
+		}
+		const FText Reason = FText::FromString(Dependencies->PollReason);
+		return Interval <= 0.0f
+			? FText::Format(LOCTEXT("ConditionEveryFrame", "Checked every frame: {0}."), Reason)
+			: FText::Format(LOCTEXT("ConditionPolled", "Checked every {0} s: {1}."), FText::AsNumber(Interval), Reason);
+	};
+	auto IsPolled = [Info]()
+	{
+		bool bEmpty = false;
+		const FBangoDependencies* Dependencies = Info->Get(bEmpty);
+		return Dependencies && !Dependencies->PollReason.IsEmpty();
+	};
+
+	ChildBuilder.AddCustomRow(LOCTEXT("ConditionChecked", "Checked"))
+		.Visibility(TAttribute<EVisibility>::CreateLambda([CheckedText]() { return CheckedText().IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; }))
+		.NameContent()
+		[
+			SNew(STextBlock)
+			.Text(LOCTEXT("ConditionCheckedLabel", "Checked"))
+			.Font(IDetailLayoutBuilder::GetDetailFont())
+		]
+		.ValueContent()
+		.MinDesiredWidth(320.0f)
+		[
+			SNew(STextBlock)
+			.Text_Lambda(CheckedText)
+			.Font(IDetailLayoutBuilder::GetDetailFont())
+			.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			.AutoWrapText(true)
+		];
+	if (PollHandle.IsValid())
+	{
+		ChildBuilder.AddProperty(PollHandle.ToSharedRef())
+			.Visibility(TAttribute<EVisibility>::CreateLambda([IsPolled]() { return IsPolled() ? EVisibility::Visible : EVisibility::Collapsed; }))
+			.ToolTip(LOCTEXT("PollIntervalTip", "How often it's checked when watched, in seconds (0: every frame), since it calls a command or uses `call`, whose answers can change without anything Bango sees changing. Below 0: the project's Default Condition Poll Interval (Project Settings > Plugins > Bango)."));
+	}
+}
 
 TSharedRef<IPropertyTypeCustomization> FBangoInlineScriptCustomization::MakeInstance()
 {

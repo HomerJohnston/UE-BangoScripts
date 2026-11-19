@@ -4,7 +4,7 @@
 
 namespace BangoInstancePrivate
 {
-	constexpr int32 SaveVersion = 1; // raise it when the save format changes: data in another format is refused, not misread
+	constexpr int32 SaveVersion = 2; // 2: waitUntil. Raise it when the save format changes: data in another format is refused, not misread
 
 	static FString TypeText(const FBangoType& Type)
 	{
@@ -404,8 +404,16 @@ EBangoConditionResult FBangoInstance::FinishCondition(EBangoInstanceStatus Resum
 	return ConditionResult.GetBool() ? EBangoConditionResult::True : EBangoConditionResult::False;
 }
 
-bool FBangoInstance::UnsetGlobalFail(const FString& Message)
+bool FBangoInstance::UnsetGlobalFail(const FString& Message, const FBangoGlobalStore& Globals)
 {
+	if (WaitGuard.Set >= 0 && Status == EBangoInstanceStatus::Ready && Frames.Num() >= WaitGuard.NumFrames && Stack.Num() >= WaitGuard.StackSize)
+	{
+		// In a waitUntil's condition: not set up yet, so not true yet. Back out of what it was working out, and wait.
+		Frames.SetNum(WaitGuard.NumFrames);
+		Stack.SetNum(WaitGuard.StackSize);
+		PauseAtWait(WaitGuard.Set, WaitGuard.CheckIP, Globals);
+		return false;
+	}
 	const bool bFirst = Status != EBangoInstanceStatus::Failed;
 	RuntimeFail(Message);
 	if (bFirst)
@@ -457,7 +465,8 @@ FBangoDebugLoc FBangoInstance::GetCurrentLocation() const
 		return FBangoDebugLoc();
 	}
 	const FBangoFunctionCode& Function = Program->Functions[Frame.Function];
-	const int32 IP = Status == EBangoInstanceStatus::Waiting ? Frame.IP - 1 : Frame.IP;
+	// Waiting on a command, it's past the call; at a waitUntil, it's at its WaitCheck.
+	const int32 IP = Status == EBangoInstanceStatus::Waiting && WaitSet < 0 ? Frame.IP - 1 : Frame.IP;
 	return Function.Debug.IsValidIndex(IP) ? Function.Debug[IP] : FBangoDebugLoc();
 }
 
@@ -478,9 +487,10 @@ void FBangoInstance::GetCallStack(TArray<FBangoCallFrameInfo>& OutFrames) const
 		const FBangoFunctionCode& Function = Program->Functions[Frame.Function];
 		FBangoCallFrameInfo Info;
 		Info.FunctionName = Function.Name;
-		// A frame further out has run its call, so its IP is past it; the innermost one is past its latent command while waiting.
+		// A frame further out has run its call, so its IP is past it; the innermost one is past its latent command while
+		// waiting on one (but at its WaitCheck at a waitUntil).
 		const bool bInnermost = k == Frames.Num() - 1;
-		const int32 IP = !bInnermost || Status == EBangoInstanceStatus::Waiting ? Frame.IP - 1 : Frame.IP;
+		const int32 IP = !bInnermost || (Status == EBangoInstanceStatus::Waiting && WaitSet < 0) ? Frame.IP - 1 : Frame.IP;
 		if (Function.Debug.IsValidIndex(IP))
 		{
 			Info.Loc = Function.Debug[IP];
@@ -502,11 +512,59 @@ uint64 FBangoInstance::GetTrail(uint64 After, TArray<int64>& OutNodeIDs) const
 
 FString FBangoInstance::GetWaitingCommandName() const
 {
+	if (GetWaitSet())
+	{
+		return TEXT("waitUntil");
+	}
 	if (Status != EBangoInstanceStatus::Waiting || !Program.IsValid() || !Program->Names.IsValidIndex(PendingCommandName))
 	{
 		return FString();
 	}
 	return Program->Names[PendingCommandName];
+}
+
+const FBangoWaitSet* FBangoInstance::GetWaitSet() const
+{
+	if (Status != EBangoInstanceStatus::Waiting || WaitSet < 0 || !Program.IsValid() || !Program->WaitSets.IsValidIndex(WaitSet))
+	{
+		return nullptr;
+	}
+	return &Program->WaitSets[WaitSet];
+}
+
+bool FBangoInstance::IsWaitDue(const FBangoGlobalStore& Globals) const
+{
+	const FBangoWaitSet* Set = GetWaitSet();
+	if (!Set)
+	{
+		return false;
+	}
+	if (!Set->PollReason.IsEmpty() || WaitStamp == 0 || IsReloadPending())
+	{
+		return true; // polled; loaded since it paused; or a new version to switch to, which it can do here
+	}
+	for (const FString& Name : Set->Globals)
+	{
+		if (Globals.GetChangeStamp(Name) > WaitStamp)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void FBangoInstance::PauseAtWait(int32 Set, int32 CheckIP, const FBangoGlobalStore& Globals)
+{
+	WaitGuard = FWaitGuard();
+	Frames.Last().IP = CheckIP; // when it carries on, it works the condition out again
+	Status = EBangoInstanceStatus::Waiting;
+	WaitSet = Set;
+	WaitStamp = FMath::Max<uint64>(Globals.GetChangeStamp(), 1);
+	if (ReloadProgram.IsValid() && bReloadTried)
+	{
+		// It ran from one pause to the next without reaching a point where the new version fits.
+		FinishReload(EBangoReloadResult::KeptOld, ReloadFailure);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -525,7 +583,13 @@ EBangoInstanceStatus FBangoInstance::Resume(const FBangoExecContext& Context)
 		return Status;
 	}
 
-	if (Status == EBangoInstanceStatus::Waiting)
+	if (Status == EBangoInstanceStatus::Waiting && WaitSet >= 0)
+	{
+		// At a waitUntil: check its condition again (from its WaitCheck). If it's still false, it pauses there again.
+		WaitSet = -1;
+		Status = EBangoInstanceStatus::Ready;
+	}
+	else if (Status == EBangoInstanceStatus::Waiting)
 	{
 		CurrentFunction = Frames.Last().Function;
 		CurrentIP = Frames.Last().IP - 1;
@@ -652,7 +716,7 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 			{
 				return RuntimeFail(FString::Printf(TEXT("Global '%s' doesn't exist. There is an actor with the Bango ID '%s': write @%s to use it."), *RootName, *RootName, *RootName));
 			}
-			return UnsetGlobalFail(FString::Printf(TEXT("Global '%s' doesn't exist. No script or Blueprint has declared it."), *RootName));
+			return UnsetGlobalFail(FString::Printf(TEXT("Global '%s' doesn't exist. No script or Blueprint has declared it."), *RootName), Globals);
 		}
 	}
 
@@ -663,7 +727,7 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 		{
 			if (Place.Kind == EBangoPlaceKind::Global && Path == RootName)
 			{
-				return UnsetGlobalFail(FString::Printf(TEXT("Global '%s' is nil, so it can't be indexed."), *Path));
+				return UnsetGlobalFail(FString::Printf(TEXT("Global '%s' is nil, so it can't be indexed."), *Path), Globals);
 			}
 			return RuntimeFail(FString::Printf(TEXT("'%s' is nil, so it can't be indexed."), *Path));
 		}
@@ -695,7 +759,7 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 		}
 		if (Place.Kind == EBangoPlaceKind::Global && Indexes.Num() == 0)
 		{
-			return UnsetGlobalFail(FString::Printf(TEXT("Global '%s' is nil. Give it a value before reading it, or check it with IsNil(%s)."), *Path, *Path));
+			return UnsetGlobalFail(FString::Printf(TEXT("Global '%s' is nil. Give it a value before reading it, or check it with IsNil(%s)."), *Path, *Path), Globals);
 		}
 		return RuntimeFail(FString::Printf(TEXT("'%s' is nil. Give it a value before reading it, or check it with IsNil(%s)."), *Path, *Path));
 	}
@@ -1203,12 +1267,7 @@ bool FBangoInstance::CallCommand(int32 NameIndex, int32 ArgCount, bool bHasTarge
 			{
 				return true;
 			}
-			if (Bango::IsPlayerEntityName(Value.GetEntityName()))
-			{
-				return RuntimeFail(FString::Printf(TEXT("%s: there's no player pawn right now (no local player, or it isn't possessing a pawn)."), *Signature.Name));
-			}
-			return RuntimeFail(FString::Printf(TEXT("%s: no actor is registered with the Bango ID name '%s'. Check the name on the actor's Bango ID component, and that the actor is in the level."),
-				*Signature.Name, *Value.GetEntityName()));
+			return RuntimeFail(FString::Printf(TEXT("%s: %s"), *Signature.Name, *Bango::DescribeMissingEntity(Value.GetEntityName())));
 		};
 		if (Call.bHasTarget && !CheckEntity(Call.Target))
 		{
@@ -1234,6 +1293,10 @@ bool FBangoInstance::CallCommand(int32 NameIndex, int32 ArgCount, bool bHasTarge
 
 	if (Result == EBangoCommandResult::Pending)
 	{
+		if (WaitGuard.Set >= 0)
+		{
+			return RuntimeFail(FString::Printf(TEXT("A waitUntil's condition must answer at once, but '%s' waits."), *Signature.Name));
+		}
 		if (Signature.bReturnsNumber)
 		{
 			// Its result's type comes from the arguments, which aren't kept while a command is pending.
@@ -1606,6 +1669,36 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 			Frames.Last().IP = I.A;
 			break;
 
+		case EBangoOp::WaitCheck:
+			if (WaitGuard.Set >= 0)
+			{
+				return RuntimeFail(TEXT("A waitUntil can't be used while working out another waitUntil's condition (in a function it calls)."));
+			}
+			WaitGuard.Set = I.A;
+			WaitGuard.NumFrames = Frames.Num();
+			WaitGuard.StackSize = Stack.Num();
+			WaitGuard.CheckIP = IP;
+			break;
+
+		case EBangoOp::WaitResult:
+		{
+			const FBangoValue Condition = PopValue();
+			WaitGuard = FWaitGuard();
+			if (Status == EBangoInstanceStatus::Failed)
+			{
+				return false;
+			}
+			if (!IsScalar(Condition, EBangoBaseType::Bool))
+			{
+				return RuntimeFail(FString::Printf(TEXT("A condition must be a bool, but this is %s."), *ValueTypeText(Condition)));
+			}
+			if (!Condition.GetBool())
+			{
+				PauseAtWait(I.A, I.B, Globals);
+			}
+			break;
+		}
+
 		case EBangoOp::SpawnBlock:
 		{
 			// The block runs as a new instance (which may run straight away, until it first pauses); this one goes on.
@@ -1948,9 +2041,9 @@ bool FBangoInstance::TryReload(FBangoGlobalStore& Globals)
 	{
 		return false;
 	}
-	// Only right after a simple statement, with nothing half worked out on the stack.
+	// Only right after a simple statement, with nothing half worked out on the stack (or in a waitUntil's condition).
 	const FBangoFrame& Top = Frames.Last();
-	if (!Program->Functions.IsValidIndex(Top.Function) || Stack.Num() != Top.StackBase
+	if (WaitGuard.Set >= 0 || !Program->Functions.IsValidIndex(Top.Function) || Stack.Num() != Top.StackBase
 		|| !FindStatementEndingAt(Program->Functions[Top.Function], Top.IP))
 	{
 		return false;
@@ -2162,6 +2255,7 @@ void FBangoInstance::Serialize(FArchive& Ar)
 	Ar << Stack;
 	Ar << PendingCommandName;
 	Ar << PendingCall.LatentState;
+	Ar << WaitSet;
 
 	if (Ar.IsLoading())
 	{
@@ -2170,6 +2264,8 @@ void FBangoInstance::Serialize(FArchive& Ar)
 		PendingCall.Target = FBangoValue();
 		PendingCall.Result = FBangoValue();
 		PendingCall.Error.Reset();
+		WaitStamp = 0;
+		WaitGuard = FWaitGuard();
 		Program.Reset();
 		BoundCommands.Reset();
 	}
@@ -2207,7 +2303,15 @@ bool FBangoInstance::Bind(const TSharedPtr<const FBangoProgram>& InProgram, cons
 		OutError = TEXT("The saved script state is empty.");
 		return false;
 	}
-	if (Status == EBangoInstanceStatus::Waiting)
+	if (Status == EBangoInstanceStatus::Waiting && WaitSet >= 0)
+	{
+		if (!Program->WaitSets.IsValidIndex(WaitSet))
+		{
+			OutError = TEXT("The saved script state doesn't match the script. Was the script changed since the game was saved?");
+			return false;
+		}
+	}
+	else if (Status == EBangoInstanceStatus::Waiting)
 	{
 		const FBangoCommand* Command = BoundCommands.IsValidIndex(PendingCommandName) ? BoundCommands[PendingCommandName] : nullptr;
 		if (!Command || !Command->Poll)

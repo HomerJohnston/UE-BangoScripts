@@ -63,6 +63,8 @@ enum class EBangoGraphNodeKind : uint8
 	Goto,
 	/** A bend in a wire: no text, one input, one output. Written as a line with only its //@ comment. */
 	Reroute,
+	/** `waitUntil (condition);`: pauses until the condition (Text) is true; then Next. */
+	WaitUntil,
 };
 
 struct BANGOSCRIPTS_API FBangoGraphNode
@@ -179,7 +181,7 @@ struct BANGOSCRIPTS_API FBangoGraphDocument
 	TArray<FBangoGraph> Functions;
 
 	/**
-	 * An inline script's inputs given by its inputs signature (FBangoInlineScript::UseInputsSignature), each one's
+	 * An inline script's inputs given by its inputs signature (FBangoInlineScriptBase::UseInputsSignature), each one's
 	 * Type and Name: the main graph's parameters, as for its node layouts and variable lists. Set by the editor; not
 	 * read from the text, written, or compared.
 	 */

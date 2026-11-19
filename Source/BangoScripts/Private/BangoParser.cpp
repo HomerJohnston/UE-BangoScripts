@@ -921,6 +921,7 @@ namespace BangoParserPrivate
 			case EBangoTokenKind::KwBreak:    Advance(); Stmt = MakeUnique<FBangoBreakStmt>(); break;
 			case EBangoTokenKind::KwContinue: Advance(); Stmt = MakeUnique<FBangoContinueStmt>(); break;
 			case EBangoTokenKind::KwReturn:   Stmt = ParseReturn(); break;
+			case EBangoTokenKind::KwWaitUntil: Stmt = ParseWaitUntil(); break;
 			case EBangoTokenKind::KwLabel:    Stmt = ParseLabelOrGoto(true); break;
 			case EBangoTokenKind::KwGoto:     Stmt = ParseLabelOrGoto(false); break;
 			case EBangoTokenKind::Directive:
@@ -961,6 +962,9 @@ namespace BangoParserPrivate
 			case EBangoStmtKind::Label:
 			case EBangoStmtKind::Goto:
 				SetTextSpan(*Stmt, StartTok + 1, SemicolonTok);
+				break;
+			case EBangoStmtKind::WaitUntil:
+				SetTextSpan(*Stmt, StartTok + 2, SemicolonTok - 1); // the condition, without its brackets
 				break;
 			default:
 				SetTextSpan(*Stmt, StartTok, SemicolonTok);
@@ -1189,6 +1193,19 @@ namespace BangoParserPrivate
 				{
 					return nullptr;
 				}
+			}
+			return MoveTemp(Stmt);
+		}
+
+		/** `waitUntil (condition)`, without the ';'. */
+		FBangoStmtPtr ParseWaitUntil()
+		{
+			const FBangoToken& Keyword = Advance();
+			TUniquePtr<FBangoWaitUntilStmt> Stmt = MakeUnique<FBangoWaitUntilStmt>();
+			Stmt->Condition = ParseParenCondition(Keyword.Loc.Line, TEXT("after 'waitUntil'"));
+			if (!Stmt->Condition)
+			{
+				return nullptr;
 			}
 			return MoveTemp(Stmt);
 		}

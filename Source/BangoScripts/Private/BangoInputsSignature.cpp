@@ -91,19 +91,19 @@ namespace Bango
 	}
 }
 
-const UClass* FBangoInlineScript::GetInputsSignatureClass() const
+const UClass* FBangoInlineScriptBase::GetInputsSignatureClass() const
 {
 	return InputsSignatureClass.Get();
 }
 
-void FBangoInlineScript::UseInputsSignature(const UObject* Owner, FName Name)
+void FBangoInlineScriptBase::UseInputsSignature(const UObject* Owner, FName Name)
 {
 	InputsSignatureClass = Owner ? Owner->GetClass() : nullptr;
 	bGlobalInputsSignature = Owner == nullptr;
 	InputsSignatureName = Name;
 }
 
-TSharedPtr<const FBangoInputsSignature> FBangoInlineScript::FindInputsSignature(FString& OutError) const
+TSharedPtr<const FBangoInputsSignature> FBangoInlineScriptBase::FindInputsSignature(FString& OutError) const
 {
 	if (!HasInputsSignature())
 	{

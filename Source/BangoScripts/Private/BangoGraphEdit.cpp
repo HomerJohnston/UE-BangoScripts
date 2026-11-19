@@ -99,6 +99,7 @@ namespace Bango
 		case EBangoGraphNodeKind::Return:  Source = Text.IsEmpty() ? FString(TEXT("return;")) : FString(TEXT("return ")) + Text + TEXT(";"); break;
 		case EBangoGraphNodeKind::Label:   Source = FString(TEXT("label ")) + Text + TEXT(";"); break;
 		case EBangoGraphNodeKind::Goto:    Source = FString(TEXT("goto ")) + Text + TEXT(";"); break;
+		case EBangoGraphNodeKind::WaitUntil: Source = FString(TEXT("waitUntil (")) + Text + TEXT(");"); break;
 		case EBangoGraphNodeKind::Spawn:
 			if (Text.IsEmpty())
 			{

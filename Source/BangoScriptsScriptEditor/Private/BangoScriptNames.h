@@ -51,7 +51,7 @@ public:
 	void Build(const TArray<FString>& Lines, const TArray<TArray<FBangoSyntaxToken>>& LineTokens);
 
 	/**
-	 * An inline script's inputs given by its inputs signature (FBangoInlineScript::UseInputsSignature): the main
+	 * An inline script's inputs given by its inputs signature (FBangoInlineScriptBase::UseInputsSignature): the main
 	 * graph's parameters, as if an #inputs line listed them. Each one's Name, Type and Tooltip. Used by the next Build.
 	 */
 	void SetGivenInputs(const TArray<FBangoVisibleName>& Inputs) { GivenInputs = Inputs; }

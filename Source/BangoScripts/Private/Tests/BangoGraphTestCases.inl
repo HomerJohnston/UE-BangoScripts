@@ -292,6 +292,9 @@ static const TCHAR* const GBangoGraphRoundTripSources[] =
 	TEXT("\n")
 	TEXT("//~ = ;                   //@9(0, 14)\n"),
 
+	// waitUntil: a node with a condition and one way on, in a loop, disabled, and disconnected.
+	TEXT("while (true)    //@1(0, 0)\n{\n\twaitUntil (stage == 3 && Count(found) > 0);    //@2(2, 0)\n\tTalk(\"go\");    //@3(4, 0)\n\t/* waitUntil (false); */    //@4(6, 0)\n}\n//~ waitUntil (ready);    //@5(0, 4)\n"),
+
 	// Disabled nodes, among comments and reroutes, in a function and a disconnected chain.
 	TEXT("// first\n/* Talk(\"b\"); */ //@2(4, 0)\n/*\n// a loop\nwhile (true) //@3(1, 1)\n{\n\t/* break; */ //@4(2, 2)\n\t//@5(3, 3)\n}\n*/\nfunction void F()\n{\n\t/* return; */\n}\n//~ /*\n//~ if (a) //@6(9, 9)\n//~ {\n//~ \t/* /* b(); */ */\n//~ }\n//~ */\n"),
 };
@@ -305,6 +308,16 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			OutFailures.Add(What);
 		}
 	};
+
+	// ---- waitUntil: a Wait Until node, holding its condition ----
+	{
+		FBangoGraphDocument Doc;
+		FBangoCompileError Error;
+		const bool bBuilt = Bango::BuildGraph(TEXT("waitUntil (stage == 3);    //@1(0, 0)\nTalk(\"go\");    //@2(2, 0)"), TEXT("wait.bango"), Doc, Error);
+		const FBangoGraphNode* Wait = bBuilt && Doc.Main.Nodes.Num() > 1 ? &Doc.Main.Nodes[1] : nullptr;
+		Expect(Wait && Wait->Kind == EBangoGraphNodeKind::WaitUntil && Wait->Text == TEXT("stage == 3") && Wait->Next != INDEX_NONE
+			&& Bango::GetGraphNodeKindName(Wait->Kind) == TEXT("Wait Until"), FString(TEXT("waitUntil: a Wait Until node with its condition: ")) + Error.ToString());
+	}
 
 	// ---- Large Script Threshold: below it, written compact (no headings, no metadata) ----
 	{

@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 
 struct FBangoProgram;
-struct FBangoInlineScript;
+struct FBangoInlineCondition;
 struct FBangoInputsSignature;
 
 /**
@@ -23,7 +23,7 @@ struct BANGOSCRIPTS_API FBangoConditionHandle
 namespace Bango
 {
 	/**
-	 * Compiles an inline script as a condition (see Bango::CompileCondition for what its text can be), with its inputs
+	 * Compiles an inline condition (FBangoInlineCondition) as a condition (see Bango::CompileCondition for what its text can be), with its inputs
 	 * signature if it has one, and keeps it until UnregisterCondition, so checking it costs only running it. Name is
 	 * what its errors show in place of a file name. There's no limit on how many are registered. Registering the same
 	 * Name, text and signature again gives the same handle, and the condition is kept until each registration has been
@@ -32,7 +32,7 @@ namespace Bango
 	 * Returns an invalid handle, with the error in OutError, if it doesn't compile or its signature isn't registered.
 	 * Commands it calls must be registered first (built-in commands always are).
 	 */
-	BANGOSCRIPTS_API FBangoConditionHandle RegisterCondition(const FBangoInlineScript& Script, const FString& Name, FString& OutError);
+	BANGOSCRIPTS_API FBangoConditionHandle RegisterCondition(const FBangoInlineCondition& Condition, const FString& Name, FString& OutError);
 
 	/** Releases one registration of a condition, and makes Handle invalid. Does nothing for an invalid or unknown handle. */
 	BANGOSCRIPTS_API void UnregisterCondition(FBangoConditionHandle& Handle);

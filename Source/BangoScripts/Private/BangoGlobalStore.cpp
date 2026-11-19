@@ -27,6 +27,7 @@ bool FBangoGlobalStore::Declare(const FString& Name, const FBangoType& Type, FSt
 	}
 
 	Globals.Add(Name, FBangoValue::MakeNil(Type));
+	NoteChanged(Name);
 	return true;
 }
 
@@ -47,7 +48,11 @@ bool FBangoGlobalStore::Set(const FString& Name, const FBangoValue& Value, FStri
 		return false;
 	}
 
-	*Existing = MoveTemp(Converted);
+	if (!(*Existing == Converted))
+	{
+		*Existing = MoveTemp(Converted);
+		NoteChanged(Name);
+	}
 	return true;
 }
 
@@ -58,7 +63,18 @@ const FBangoValue* FBangoGlobalStore::Find(const FString& Name) const
 
 FBangoValue* FBangoGlobalStore::FindMutable(const FString& Name)
 {
-	return Globals.Find(Name);
+	FBangoValue* Value = Globals.Find(Name);
+	if (Value)
+	{
+		NoteChanged(Name);
+	}
+	return Value;
+}
+
+uint64 FBangoGlobalStore::GetChangeStamp(const FString& Name) const
+{
+	const uint64* Stamp = ChangeStamps.Find(Name);
+	return Stamp ? *Stamp : AllChangedStamp;
 }
 
 bool FBangoGlobalStore::IsDefined(const FString& Name) const
@@ -71,6 +87,7 @@ void FBangoGlobalStore::ResetAll()
 {
 	Globals.Reset();
 	WarnedSkippedDefaults.Reset();
+	NoteAllChanged();
 }
 
 bool FBangoGlobalStore::NoteSkippedDefault(const FString& Name)
@@ -123,5 +140,6 @@ void FBangoGlobalStore::Serialize(FArchive& Ar)
 			Ar << Value;
 			Globals.Add(MoveTemp(Name), MoveTemp(Value));
 		}
+		NoteAllChanged();
 	}
 }

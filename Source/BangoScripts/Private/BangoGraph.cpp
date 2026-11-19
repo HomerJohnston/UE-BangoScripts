@@ -179,6 +179,7 @@ namespace Bango
 		case EBangoGraphNodeKind::Label:    return TEXT("Label");
 		case EBangoGraphNodeKind::Goto:     return TEXT("Go To");
 		case EBangoGraphNodeKind::Reroute:  return TEXT("Reroute");
+		case EBangoGraphNodeKind::WaitUntil: return TEXT("Wait Until");
 		}
 		return TEXT("?");
 	}
@@ -364,6 +365,7 @@ namespace BangoGraphPrivate
 		case EBangoStmtKind::Goto:     return EBangoGraphNodeKind::Goto;
 		case EBangoStmtKind::Params:   return EBangoGraphNodeKind::Entry;
 		case EBangoStmtKind::Reroute:  return EBangoGraphNodeKind::Reroute;
+		case EBangoStmtKind::WaitUntil: return EBangoGraphNodeKind::WaitUntil;
 		}
 		return EBangoGraphNodeKind::Call;
 	}

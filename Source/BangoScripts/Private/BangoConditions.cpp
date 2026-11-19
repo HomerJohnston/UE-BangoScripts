@@ -52,19 +52,19 @@ namespace Bango
 		return true;
 	}
 
-	FBangoConditionHandle RegisterCondition(const FBangoInlineScript& Script, const FString& Name, FString& OutError)
+	FBangoConditionHandle RegisterCondition(const FBangoInlineCondition& Condition, const FString& Name, FString& OutError)
 	{
 		using namespace BangoConditionsPrivate;
 		FBangoConditionHandle Handle;
 		const FString ConditionName = Name.IsEmpty() ? FString(TEXT("Condition")) : Name;
 		FString SignatureError;
-		const TSharedPtr<const FBangoInputsSignature> Signature = Script.FindInputsSignature(SignatureError);
-		if (Script.HasInputsSignature() && !Signature.IsValid())
+		const TSharedPtr<const FBangoInputsSignature> Signature = Condition.FindInputsSignature(SignatureError);
+		if (Condition.HasInputsSignature() && !Signature.IsValid())
 		{
 			OutError = FString::Printf(TEXT("%s: %s"), *ConditionName, *SignatureError);
 			return Handle;
 		}
-		const FString& Source = Script.Source;
+		const FString& Source = Condition.Source;
 		const FString Key = MakeKey(Source, ConditionName, Signature.Get());
 		if (const int64* Existing = GetIdsByKey().Find(Key))
 		{

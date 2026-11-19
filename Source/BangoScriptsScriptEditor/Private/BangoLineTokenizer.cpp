@@ -28,7 +28,7 @@ namespace BangoLineTokenizerPrivate
 		return false;
 	}
 
-	static const TCHAR* const FlowKeywords[]   = { TEXT("if"), TEXT("else"), TEXT("while"), TEXT("for"), TEXT("forEach"), TEXT("in"), TEXT("sequence"), TEXT("spawn"), TEXT("switch"), TEXT("case"), TEXT("default") };
+	static const TCHAR* const FlowKeywords[]   = { TEXT("if"), TEXT("else"), TEXT("while"), TEXT("for"), TEXT("forEach"), TEXT("in"), TEXT("sequence"), TEXT("spawn"), TEXT("waitUntil"), TEXT("switch"), TEXT("case"), TEXT("default") };
 	static const TCHAR* const JumpKeywords[]   = { TEXT("return"), TEXT("break"), TEXT("continue") };
 	static const TCHAR* const LabelKeywords[]  = { TEXT("label"), TEXT("goto") };
 	static const TCHAR* const DeclKeywords[]   = { TEXT("global"), TEXT("scriptVar"), TEXT("function") };
@@ -523,7 +523,7 @@ namespace BangoLineTokenizerPrivate
 				Emit(EBangoSyntaxKind::Punctuation, Pos++, 1);
 				return;
 			}
-			if (C == TEXT('[') || C == TEXT(']') || C == TEXT(';'))
+			if (C == TEXT('[') || C == TEXT(']') || C == TEXT(';') || C == TEXT(':'))
 			{
 				Emit(EBangoSyntaxKind::Punctuation, Pos++, 1);
 				return;

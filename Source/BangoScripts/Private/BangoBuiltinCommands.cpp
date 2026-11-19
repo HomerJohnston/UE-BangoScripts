@@ -76,9 +76,7 @@ namespace BangoBuiltinPrivate
 		AActor* Actor = Registry ? Registry->FindActor(Entity.GetEntityName()) : nullptr;
 		if (!Actor)
 		{
-			Call.Error = Bango::IsPlayerEntityName(Entity.GetEntityName())
-				? FString(TEXT("There's no player pawn right now (no local player, or it isn't possessing a pawn)."))
-				: FString::Printf(TEXT("No actor is registered with the Bango ID name '%s'."), *Entity.GetEntityName());
+			Call.Error = Bango::DescribeMissingEntity(Entity.GetEntityName());
 		}
 		return Actor;
 	}

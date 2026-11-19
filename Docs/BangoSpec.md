@@ -1,8 +1,14 @@
-# Bango Language Spec (draft v0.68)
+# Bango Language Spec (draft v0.71)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.71:** **any actor can be an entity**, with or without a Bango ID component (section 4, Entity IDs). An actor placed in a level gets a **Level ID** from its path in the level, the same every time the level is played, so saved scripts keep it. An actor spawned while playing gets an **Automatic ID** (a random GUID), kept on a Bango ID component Bango adds to it, so a save system that saves components keeps it too. People never see these IDs: errors, `Format`, `WriteLog` and the debugger show the actor's name. Scripts can't write them. `Bango::ActorToEntity` works for every actor in a game world, and so does `self` (an owner without a Bango ID is fine). An actor given a Bango ID name after it already had one of the other IDs is an error, but both find it, and the name is used from then on.
+
+**Changes in v0.70:** **conditions can be watched**: C++ (like a triggers plugin) makes a watch group for a condition, starts a watch for each thing it's checked for (each actor that could activate a trigger), and is told only when one's answer changes: Satisfied (true) or Unsatisfied. Bango checks a watch when it starts, and then only when a global or input it reads changes, or, if it calls a command or uses `call`, also every **Poll Interval** (section 10, Watching conditions). An inline condition is now its own struct, **`FBangoInlineCondition`**, instead of an `FBangoInlineScript` marked `meta = (BangoCondition)` (which is gone): it has the Poll Interval, shown in the details panel only while the condition needs polling, under a line saying when it's checked. A new project setting, **Default Condition Poll Interval** (0.5 s). `FBangoInlineScript` and `FBangoInlineCondition` share `FBangoInlineScriptBase` (section 15). A property that changes from one to the other loses its saved text.
+
+**Changes in v0.69:** **`waitUntil (condition);`** pauses a script until its condition is true, and carries on at once if it already is: `waitUntil (stage == 3 && soldierIsDead);` (section 8). The condition is checked again only when a global it reads changes (in the script's own functions it calls too), at the end of that frame, after the other scripts have run, so globals set one after another are checked together. A condition that calls a command (`IsAlive(@soldier)`) or uses `call` is checked every frame instead. A global that's nil or doesn't exist yet counts as false. It's a **Wait Until** node in the graph. `waitUntil` is a keyword. A condition can't use it. Save data from earlier versions can't be loaded (section 11).
 
 **Changes in v0.68:** autocomplete puts in a command's or function's closing bracket too: one with no arguments goes in as `Name()`. One with arguments goes in as `Name(` with a faint `)` shown at the end of the line until it's typed: **Tab** types it, **`;`** types it and the `;` (for a call inside another, all the faint `)`s), and typing `)` yourself or moving to another line drops it. In script text, the space after `target call ` opens the list of the target's functions before any of a name is typed.
 
@@ -218,6 +224,7 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
 | `forEach (_x in arr)` | exec in → Do, Then |
 | `sequence { ... } { ... }` | exec in → Scope 0, Scope 1, Scope 2, ... (one per block), Then |
 | `spawn { ... }` | exec in → Run, Then |
+| `waitUntil (cond);` | exec in → exec out ("Wait Until", showing the condition) |
 | `switch (value) { case ...: { } default: { } }` | exec in → one output per case (beside a box with its values), Default, Then |
 | `break;` / `continue;` | exec in → exec out |
 | `return [expr];` | exec in → exec out |
@@ -374,7 +381,7 @@ WriteScreen(ToString(NSLOCTEXT("Shared.UI", "Continue", "Continue")));
 
 ### Conversions
 - Strongly typed. The only automatic conversion is **int → float**. It also applies to arrays at the same depth (`int[][]` → `float[][]`), to array literals (`float[] _d = [1, 2.5];`), and to script arguments and parameter defaults. Everything else needs an explicit conversion command, such as `Floor`, `Round` or `Format` (section 7).
-- **Entities are checked before a command runs.** If a command's target or entity-typed argument names an actor that isn't registered (no Bango ID component with that name in the level), the script stops with an error naming the missing Bango ID. The command's code never runs. Storing, comparing and formatting an entity never checks it.
+- **Entities are checked before a command runs.** If a command's target or entity-typed argument names an actor that isn't there (no Bango ID component with that name in the level; or, for an actor without one, it's been destroyed, or its level isn't loaded), the script stops with an error naming it. The command's code never runs. Storing, comparing and formatting an entity never checks it.
 - A name that comes from data (a string) becomes an entity with `ToEntity(name)` (section 7). `Format("{0}", @john)` gives the name back as a string.
 - A string becomes a text with `ToText(string)`; it isn't translated (it's shown as it is in every language), so use it for names and numbers, not for sentences. `ToString(text)` gives the text in the current language.
 
@@ -386,7 +393,7 @@ WriteScreen(ToString(NSLOCTEXT("Shared.UI", "Continue", "Continue")));
 - **Names are case-sensitive**: `john` and `John` are different names. This covers variables, globals, functions, labels, commands, keywords, type names and Bango ID names (`@john` and `@John` are different actors).
 - Calling a command or function with the wrong capitalisation is a compile error that suggests the right name: *"Unknown command or function 'writeScreen'. Did you mean 'WriteScreen'? Names are case-sensitive."*
 - A name is letters, digits and `_`, and doesn't start with a digit.
-- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn switch case default break continue return label goto function global scriptVar call player self true false nil bool int float string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
+- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn waitUntil switch case default break continue return label goto function global scriptVar call player self true false nil bool int float string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
 
 ### Locals and script variables
 A graph (the main script, or a function) has two kinds of variables of its own, besides its parameters and loop variables. Both only exist inside the running script instance.
@@ -465,19 +472,29 @@ global string[] questLog;        // arrays can be global
 - **In the level editor**, each Bango ID's name is drawn over its actor (`@john`), just above its bounds, as screen-facing text. It fades out with distance from the camera (from the **ID Label Fade Distance** setting, 7,500 units, to the **ID Label Hide Distance**, 10,000, beyond which it isn't drawn; not in ortho views). A name scripts couldn't use is drawn in red with why: *no name*, *invalid name*, or *used by another actor*, so problems show up before play. Hidden actors have no label. The viewport's **Show > Bango IDs** flag turns them off and on (on by default). They aren't drawn while playing (PIE) or in asset editors' viewports.
 - **While a script is being edited**, the level editor's viewports draw a small **filled cyan circle** over each actor whose Bango ID the script refers to (its `@name`s; not `player` or `self`). The script is the one in the text editor last typed in: a script editor tab, or an inline script's box in the details panel. The circles sit at the middle of each actor's bounds, with a radius of 0.5% of the view's height and a dark edge. They show while that editor is on screen, and are updated as it's typed in, without compiling. The `@name` under the text cursor gets a **bigger** circle. For an **inline script** (in its box, or opened from its Edit button), **lines** go from `self` (the actor it's on: the object whose details show it, or that component's actor) to each circle, if that actor is in the level; for any other script, or if there's no such actor, there are no lines. Names no actor in the level has are listed in red in the viewport's bottom-left corner (*Not in this level*). The circles fade with distance like the labels (the lines don't fade, as the engine draws canvas lines opaque; a line goes when its circle has faded out). **Show > Bango Script References** turns them off and on (on by default); like the labels, they're not drawn while playing.
 - When the actor is removed, its name is unregistered. Entity values naming it keep the name, and using them afterwards stops the script because the actor can't be found.
+
+### Entity IDs: actors without a Bango ID name
+An entity value is always a name, looked up each time it's used. An actor that becomes an entity without having a Bango ID name (C++ passing it to a script, like a trigger's `_activator`; a `call` returning it; a script's owner, for `self`) is given a name of its own the first time, and keeps it:
+- **Placed in a level** (it was there when its level started): a **Level ID**, its path in the level (without Play in Editor's prefix), like `%/Game/Maps/Farm.Farm:PersistentLevel.BP_Door_3`. It's the same each time the level is played, in the editor or a packaged game, so a saved script that holds it finds the actor again after loading, even before anything else has used it. Nothing is added to the actor.
+- **Spawned while playing:** an **Automatic ID**, `$` and a random GUID's 32 hex digits. It's kept on a **Bango ID component** Bango adds to the actor (its **Automatic ID** property, saved with the component, `SaveGame` included), so a save system that saves actors with their components, and respawns them on load, brings the actor back with its ID: scripts that held it find it again. If it already has a Bango ID component with no name, that component keeps it.
+- The three kinds start differently (a name with a letter or `_`, a Level ID with `%`, an Automatic ID with `$`; `player` and `self` are reserved names starting with `#`), so they can never clash. Only Bango ID names can be written in a script; `ToEntity` takes only those.
+- **People never see these IDs.** `Format`, `WriteLog`, errors and the debugger show the actor's name, as the Outliner shows it (`BP_Zombie_C_3`). After the actor is gone, they still show the name it had. A missing one is reported as *"The actor 'BP_Zombie_C_3' isn't in the level any more (it was destroyed, or its level isn't loaded)."*
+- The same actor always gets the same ID, so `==`, `IsNull` and passing it around work as for `@john`. When it's destroyed, its ID finds nothing, as for a named actor.
+- An actor that already has a Level or Automatic ID and is then given a Bango ID name (which shouldn't happen) is reported as an error, once. Both find it, but from then on it becomes `@name`, so a script holding the old ID has a value that isn't equal to the new one.
+- In C++: `UBangoActorRegistry::GetOrMakeEntityID(Actor, Error)` gives (and makes) it; `Bango::GetEntityIDKind`, `Bango::GetEntityDisplayName` and `Bango::DescribeMissingEntity` tell the kinds apart, show them, and describe a missing one.
 - Loading a save or resetting state doesn't change which names are registered.
 - **`player`** is the **first local player's pawn**: the pawn that the game's first local player controller possesses. It's an entity like `@john` (`player SetPos(200, 500, 900);`, `entity _p = player;`, `if (_e == player)`), and needs no Bango ID component.
   - It's looked up **each time it's used**, like any entity, so it follows the player into a new pawn after a respawn or a change of possession. A value stored from it (`_p = player;`) is still "the player", not the pawn it was then.
   - Using it while there's no player pawn (no local player yet, or it isn't possessing a pawn) stops the script, as a missing actor does: *"there's no player pawn right now (no local player, or it isn't possessing a pawn)."*
   - It's shown as `player` in `WriteLog`, `Format` and the debugger.
   - It's a different value from the pawn's own Bango ID, if it has one: `player == @hero` is false even when `@hero` is the player's pawn.
-  - In C++, `UBangoActorRegistry::FindActor` finds it like a Bango ID name (its reserved name is `Bango::GetPlayerEntityName()`), and `GetPlayerPawn` gives the pawn. `Bango::ActorToEntity` gives `player` for the player's pawn when it has no registered Bango ID, so it can be passed to a script without one.
+  - In C++, `UBangoActorRegistry::FindActor` finds it like a Bango ID name (its reserved name is `Bango::GetPlayerEntityName()`), and `GetPlayerPawn` gives the pawn. `Bango::ActorToEntity` gives `player` for the player's pawn when it has no registered Bango ID name, so it can be passed to a script without one.
   - `@player` is still an ordinary Bango ID name, unrelated to the keyword.
-- **`self`** is the actor the script **belongs to**: its **owner**, given when it's spawned (section 10). It's that actor's **Bango ID**, so with an owner whose Bango ID is `door_1`, `self` is `@door_1`: `self SetPos(...)`, `entity _me = self;`, `if (_e == self)`, `case self:`.
-  - The owner is always an **actor**, and it needs a **Bango ID** component with a name. A component that spawns a script passes its owning actor.
+- **`self`** is the actor the script **belongs to**: its **owner**, given when it's spawned (section 10). It's that actor's entity: its **Bango ID**, so with an owner whose Bango ID is `door_1`, `self` is `@door_1`: `self SetPos(...)`, `entity _me = self;`, `if (_e == self)`, `case self:`. An owner with no Bango ID name is fine: `self` is its Level or Automatic ID (Entity IDs, above), or `player` for the player's pawn.
+  - The owner is always an **actor**. A component that spawns a script passes its owning actor.
   - It's swapped for the owner's Bango ID **as it's used**, so a value stored from it, or passed to another script, is the owner's Bango ID (`@door_1`), not "whoever self is there".
   - A script started with `Exec`, and a `spawn` block's copy, belong to the **same owner** as the script that started them.
-  - Using it in a script that can't (no owner, an owner that isn't an actor, or one with no Bango ID or name) stops the script with an error saying which, like *"'self' can't be used here: this script's owner, 'Door_3', has no Bango ID component..."*. A script that doesn't use `self` runs as usual without an owner.
+  - Using it in a script that can't (no owner, an owner that isn't an actor, or one whose Bango ID name couldn't be registered) stops the script with an error saying which, like *"'self' can't be used here: this script's owner, 'Door_3_Gear', is a component..."*. A script that doesn't use `self` runs as usual without an owner.
   - It can be an input's default (`#inputs (entity _who = self)`); without an owner, the script then doesn't start unless that argument is passed.
   - A condition (`EvaluateCondition`) has no owner, so it can't use `self`.
   - The owner is saved with the running script.
@@ -865,6 +882,27 @@ WriteLog("gate timer started");       // runs at once, while the copy waits
 - The copy counts as the spawning script's child, for `Abort`'s `Children` (section 7).
 - A condition can't spawn. The `//@` metadata goes on the `spawn` line. Disabling a spawn disables its block.
 
+### waitUntil
+`waitUntil (condition);` pauses the script until the condition is true, then carries on. If it's already true, the script carries on straight away, without pausing.
+
+```
+global int stage;
+global bool soldierIsDead;
+
+WriteScreen("Find the soldier.");
+waitUntil (stage == 3 && soldierIsDead);    //@4(0, 2)
+@gate OpenDoor();
+```
+
+- **When it's checked again:** only when something it reads might have changed. While a script waits, its locals, parameters and script variables can't change (a `spawn` has copies of its own), so that's the **globals** the condition reads, and the globals read by the script's functions it calls. When one of them changes (it's set to a different value, changed in place like `found Push(1)`, created, or every global is reset or loaded), the condition is checked once, **at the end of that frame**, after the other scripts have run. A script that sets several globals one after another gets them all checked together, and a global set to the value it already has isn't a change.
+- **Commands:** a condition that calls a command (`waitUntil (IsAlive(@soldier) == false);`) or a Blueprint function (`call`) can change its answer without any global changing, so it's checked **every frame**, at the end of the frame.
+- **Not set up yet:** a global the condition reads that's nil or doesn't exist yet makes the condition false, and the script keeps waiting quietly, as a condition gives Unset (section 10, Conditions). Any other error stops the script, as it would in an `if`.
+- **The condition must answer at once:** a command in it that waits (like a `Sleep`, or a choice) stops the script with an error, and so does a `waitUntil` in a function the condition calls.
+- The condition must be a bool. A condition script (section 10) can't use `waitUntil`: a condition must answer at once.
+- The `//@` metadata goes on its line. In the graph, it's a **Wait Until** node, with the condition as its one row.
+- In the debugger, a script waiting here is shown on the `waitUntil`'s node, waiting on "waitUntil".
+- It's saved like a `Sleep`: after loading, the condition is checked again at the end of the first frame. Hot reload can switch the script to the new version while it waits here (section 11), and the new version's condition is checked straight away.
+
 ### switch
 `switch (value)` is followed by `{`, then its cases, each `case` and its values, a `:` and a block, then an optional `default:` and a block, then `}`:
 
@@ -1009,8 +1047,8 @@ These checks happen when the script is spawned. If any fails, the script doesn't
   UBangoScriptSubsystem::Get(this)->Spawn(OnTriggerActivation, Args, this);   // #inputs (string _type, vector3 _at)
   ```
   The editor's debugger finds running copies of the inline script open in a window by its text (as last saved there).
-- `Bango::RegisterCondition(InlineScript, Name, Error)` and `Bango::UnregisterCondition(Handle)` compile a **condition** (an inline script, with its inputs signature if it has one) once and keep it, and `UBangoScriptSubsystem::EvaluateCondition(Handle, Error, Args)` runs it and gives its answer (True, False, Unset or Error) (see Conditions below).
-- `Bango::ActorToEntity(Actor, Value, Error)` turns an actor into an entity argument: its Bango ID name, or `nil` for a null pointer. An actor with no Bango ID component, or whose Bango ID name isn't registered, is an error.
+- `Bango::RegisterCondition(InlineCondition, Name, Error)` and `Bango::UnregisterCondition(Handle)` compile a **condition** (an `FBangoInlineCondition`, with its inputs signature if it has one) once and keep it, and `UBangoScriptSubsystem::EvaluateCondition(Handle, Error, Args)` runs it and gives its answer (True, False, Unset or Error) (see Conditions below).
+- `Bango::ActorToEntity(Actor, Value, Error)` turns an actor into an entity argument: its Bango ID name, or its Level or Automatic ID (section 4, Entity IDs), made now if it has none; `player` for the player's pawn without a name; `nil` for a null pointer. It fails only for an actor whose Bango ID name couldn't be registered (invalid, or another actor's), or one that isn't in a game world.
 - `FBangoModule::Get().GetScriptParams(ScriptPath, Params, Error)` reads a script's parameters (names, types, whether each has a default, and the default value) without running it.
 
 ### Conditions
@@ -1038,7 +1076,7 @@ A condition is **registered** once, which compiles it, then checked as often as 
 ```cpp
 // When the trigger is set up (BangoConditions.h):
 FString Error;
-FBangoConditionHandle Condition = Bango::RegisterCondition(GateCondition, TEXT("Trigger.Gate"), Error); // an FBangoInlineScript: "foundThings >= 10"
+FBangoConditionHandle Condition = Bango::RegisterCondition(GateCondition, TEXT("Trigger.Gate"), Error); // an FBangoInlineCondition: "foundThings >= 10"
 if (!Condition.IsValid())
 {
 	Bango::ReportError(Error); // it doesn't compile
@@ -1059,21 +1097,59 @@ Bango::UnregisterCondition(Condition); // and Condition is made invalid
 - There's **no limit** on how many are registered. Registering the same text with the same name again gives the **same handle**; it's kept until it has been unregistered as many times as it was registered. Registrations are shared by every world, and last until they're unregistered (or the game ends).
 - `UBangoScriptSubsystem::EvaluateCondition(Source, Error, Args, Name)` checks a condition given as text, without registering it. It's compiled on every call, so it's for conditions checked once in a while.
 - It runs straight away, to the end, in that world: with its globals and its actors' Bango IDs. `Args` fill its `#inputs` line, as for spawning (section 10).
-- **A condition must answer at once:** calling a command that waits (`Sleep`, a dialogue choice) is an error.
+- **A condition must answer at once:** calling a command that waits (`Sleep`, a dialogue choice) is an error, and `waitUntil` in a condition is a compile error.
 - `EvaluateCondition` gives an **`EBangoConditionResult`** (`BangoInstance.h`):
   - **`True`** or **`False`**: what it returned.
   - **`Unset`**: it read a global that **doesn't exist or is `nil`** (`foundThings >= 10` before anything has set `foundThings`, or indexing a `nil` global array), with the message in `Error`. That's usually not a mistake, just something not set up yet, so a caller can treat it as false without reporting it. `IsNil(foundThings)` and `IsNull(...)` don't count: they give `true` for such a global. `&&` and `||` stop as soon as they know the answer, so `IsNil(gold) || gold < 5` never reads a `nil` `gold`.
   - **`Error`**: it's broken, with the error in `Error`: the handle isn't registered (or the text doesn't compile), its arguments don't fit, it stopped with any other error, it didn't return a `bool`, or it waited.
   Nothing is shown or logged by it, so a caller asking often can show each once (`Bango::ReportError`).
 - A condition isn't a running script: it isn't listed in the debugger, saved or reloaded, and it has no handle. Globals it sets stay set.
-- **Conditions in inline script properties:** an `FBangoInlineScript` property that holds a condition is marked `meta = (BangoCondition)`:
+- **Conditions in properties:** a property holding a condition is an **`FBangoInlineCondition`** (section 15):
   ```cpp
-  UPROPERTY(EditAnywhere, Category = "Trigger|Condition", meta = (BangoCondition))
-  FBangoInlineScript Condition;
+  UPROPERTY(EditAnywhere, Category = "Trigger|Condition")
+  FBangoInlineCondition Condition;
   ```
-  The editor then checks it as a condition, not a script: compiling as you type in its box, and in its script editor window (Compile Test, and on Save). So `_count >= 2` or `true` is fine there, and `return 3;` is an error saying a condition must return true or false. Without the tag it's checked as a script. The tag only tells the editor: running it is up to the property's owner (`RegisterCondition` with its text).
+  The editor checks it as a condition, not a script: compiling as you type in its box, and in its script editor window (Compile Test, and on Save). So `_count >= 2` or `true` is fine there, and `return 3;` is an error saying a condition must return true or false. Without the tag it's checked as a script. The tag only tells the editor: running it is up to the property's owner (`RegisterCondition` with its text).
   - In its script editor window, a condition written as **one expression** has no graph: the graph shows a message saying so, with a **Write as 'return ...;'** button that writes it as `return <expression>;` (`Bango::ConditionExpressionToScript`, which keeps the lines around it), which means the same and shows as a Return node. That's an unsaved change. Applying a single expression typed in the text pane says the same, as its error; **Save** saves it as it is.
 - For C++ that compiles it itself: `Bango::CompileCondition`, then `FBangoInstance::FinishCondition(Instance.Resume(Context), Error)` gives the result as above (`FBangoRuntimeError::bUnsetGlobal` marks an error that's Unset). `Bango::GetNumRegisteredConditions()` says how many are registered, for checking that a plugin unregisters its own.
+
+### Watching conditions
+Something that needs a condition's answer for many things, kept up to date (a trigger: for each actor that could activate it), **watches** it instead of checking it over and over. Bango checks each watch when its answer might have changed, and reports only changes. The caller doesn't need to know how: whether Bango checks again because something it reads changed, or polls it.
+
+```cpp
+// Setting up (an FBangoInlineCondition with the inputs signature "Condition": _trigger, _activator, _potential, _actual):
+UBangoScriptSubsystem* Scripts = UBangoScriptSubsystem::Get(this);
+Group = Scripts->CreateWatchGroup(Condition, GetName(), [this](TConstArrayView<FBangoWatchChange> Changes)
+{
+	for (const FBangoWatchChange& Change : Changes)
+	{
+		// Change.Watch is one of ours; Change.bSatisfied is its new answer.
+	}
+}, Error);
+
+// When an actor becomes one to check: its first answer, straight away.
+FBangoValue Entity;
+Bango::ActorToEntity(Actor, Entity, Error);
+FBangoWatchHandle Watch;
+const bool bSatisfied = Scripts->StartWatch(Group, { { TEXT("_activator"), Entity } }, Watch);
+
+// After working out who's where (setting the same values again does nothing):
+Scripts->SetGroupInputs(Group, { { TEXT("_trigger"), Self }, { TEXT("_potential"), Potential }, { TEXT("_actual"), Actual } }, Error);
+
+// When it stops being one: Scripts->StopWatch(Watch);   When done: Scripts->DestroyWatchGroup(Group);
+```
+
+- A **watch group** is one condition, watched for many things, with inputs shared by all its watches (`SetGroupInputs`) and one callback. A **watch** is the condition for one thing, with inputs of its own, given when it starts (they win over the group's). Inputs are given by name, as the condition's `#inputs` line or inputs signature names them: another name is an error. Inputs given neither way are `nil`.
+- **When a watch is checked:** when it starts (`StartWatch` gives its answer), and then, at the end of a frame (after scripts and `waitUntil`s), if since its last check:
+  - a **global** it reads has changed (it, or the script's own functions it calls: as for `waitUntil`, section 8);
+  - one of its group's **inputs** that it reads has been set to a different value (so a condition that doesn't read `_actual` isn't checked when the crowd changes);
+  - or it calls a **command** or uses **`call`**, whose answers can change without anything Bango sees changing, and its **Poll Interval** has passed. A group's watches are polled together, and groups are spread over time so they don't all poll in the same frame.
+  Each is checked at most once per frame.
+- **What's reported:** only `true` is **Satisfied**. `false`, Unset and errors are Unsatisfied. At the end of a frame where any of a group's watches changed answer, its callback gets the list of them, once, in the order they were started. A watch's first answer is what `StartWatch` returned, not reported again. What a callback changes (inputs, globals) is seen the next frame, so there's at most one round of checks per frame. A callback can start and stop watches and destroy groups, its own included; a watch stopped before its group's callback isn't in its list.
+- **Errors** are shown on screen once per watch (as `Bango::ReportError` does, with the group's name), and again only after it has answered `true` or `false` in between.
+- **Poll Interval** is the condition's own (`FBangoInlineCondition::PollInterval`, in seconds; 0: every frame; below 0, the default: the project setting **Default Condition Poll Interval**, 0.5 s). It's only used when the condition needs polling.
+- Groups belong to a world and go with it; nothing is saved. After loading, the caller makes them again, and the first answers bring it up to date.
+- In C++ without a world, `FBangoWatchRegistry` (`BangoConditionWatches.h`) is the same thing, given the global store and how to run a condition. `FBangoProgram::ConditionDependencies` (`Bango::FindDependencies`) says what a compiled condition reads and why it's polled.
 
 ### From Blueprint: the Spawn Bango Script node
 The **Spawn Bango Script** node reads the script's `inputs` line and creates one input pin per parameter:
@@ -1124,9 +1200,9 @@ The **Spawn Bango Script** node reads the script's `inputs` line and creates one
   4. The top level starts running **immediately**, in the same frame, until it first pauses, finishes or fails.
 - `return;` at the top level ends the instance. Returning a value from the top level is a compile error.
 - **Instances belong to a game world.** They stop when their level is unloaded. Globals belong to the game instance and carry over between levels.
-- **Scheduling:** every frame, each running instance resumes in the order it was spawned and runs until it pauses, finishes or fails. Instances pause while the game is paused.
+- **Scheduling:** every frame, each running instance resumes in the order it was spawned and runs until it pauses, finishes or fails. Then each instance paused at a `waitUntil` whose condition might have a different answer (section 8) checks it again, in the same order; what one of them changes is seen by the later ones then, and by the others the next frame. Instances pause while the game is paused.
 - **Infinite-loop guard:** an instance that runs more than **1,000,000** instructions in one frame without pausing stops with an error (e.g. a `while` loop with no `Sleep`). The limit is a project setting.
-- There is **no** `call`. Only `spawn`.
+- A script can't call another script and wait for its result: it can only `spawn` it. (`target call Name(args)` is something else: it calls a Blueprint function on an actor, section 7.)
 
 ### Blueprint API
 | Node | Effect |
@@ -1181,7 +1257,7 @@ while (true)                    //@1(0, 0)
 ```
 
 How a running copy switches:
-- **Where:** the next time it finishes a **simple statement**: an assignment, `++`/`--`, a local's declaration, or a call on a line of its own. That's usually as soon as the command it's waiting on (a `Sleep`) is done. It carries on right after the **same node** (by its NodeID) in the new version, so a node keeps its place however much code around it changes. Moving nodes around in the graph doesn't change their IDs.
+- **Where:** the next time it finishes a **simple statement**: an assignment, `++`/`--`, a local's declaration, or a call on a line of its own. A script paused at a `waitUntil` switches there straight away (in the frame after the save), back at the same `waitUntil` node, and checks the new version's condition. That's usually as soon as the command it's waiting on (a `Sleep`) is done. It carries on right after the **same node** (by its NodeID) in the new version, so a node keeps its place however much code around it changes. Moving nodes around in the graph doesn't change their IDs.
 - **Function calls under way:** each is matched the same way. The function is found by name, and the call goes back to the node it's in, in the new version. That node must be a call on its own line or the value of an assignment (`Step();`, `_r = Step();`); a call in the middle of a calculation (`_r = 1 + Step();`) can't be switched until it's finished.
 - **Variables:** locals, script variables, parameters and loop variables keep their values, matched by name, and a local by its declaring node too (a `for` or `forEach` loop's variable by its loop node), so two locals of the same name in different blocks aren't mixed up; in a compact script, which has no node IDs, a local is matched by name alone. A script variable the new version adds starts with its declared value. A local it adds above where the copy is starts as `nil`, since its declaration hasn't run (it's given its value the next time it does); one it removes is dropped. Globals are shared and keep their values; the new version's global declarations take effect when it switches, as when a script starts.
 - **What can't switch:** if, at that point, the node isn't in the new version (or isn't a simple statement any more), a local, parameter or loop variable has changed type, a function in progress has been removed or has a new parameter, or a loop under way has a new variable, it tries again at each following simple statement. If it pauses again without being able to switch, it gives up and **carries on with the version it had**; the output log (and the screen) says why. Scripts spawned from then on use the new version.
@@ -1193,7 +1269,7 @@ How a running copy switches:
 ### Save and load
 A save stores:
 - Every running instance: script path (or, for a script spawned from text, its name and its whole text), call stack (function, resume point, locals including script parameters), and value stack, so a script paused in the middle of a function or an expression resumes exactly where it was.
-- The pending state of whatever latent command each instance is waiting on.
+- The pending state of whatever latent command each instance is waiting on, or the `waitUntil` it's paused at.
 - All global values.
 
 On load, each saved script is loaded and compiled from its path (or from its saved text), and its saved state is checked against it. If a script was changed so that the saved state no longer fits (or the file is missing), that script isn't restored and an error is shown. Other scripts still load. Beyond that check, loading state into a changed script is **undefined behaviour** (not supported).
@@ -1523,10 +1599,10 @@ Scripts become assets: a **Bango Script** asset (`UBangoScriptAsset`, a `.uasset
 - A linked script shows its file's path under the toolbar, and the editor's existing changed-on-disk handling (section 12) watches the `.bango` file. For an embedded script it watches the asset instead (changed by source control, say).
 
 ### Inline scripts
-An **`FBangoInlineScript`** (a struct, usable in C++ and Blueprint) holds a script in a property of any class: `UPROPERTY(EditAnywhere) FBangoInlineScript OnTriggerActivation;`. It's for small scripts that belong to one thing, usually a line or two: `Sleep(4); player AddItem("Pistol"); WriteScreen("You got a pistol!");`. It can start with a `#inputs (...)` line, whose values its spawner passes, in order.
+An **`FBangoInlineScript`** (a struct, usable in C++ and Blueprint) holds a script in a property of any class: `UPROPERTY(EditAnywhere) FBangoInlineScript OnTriggerActivation;`. An **`FBangoInlineCondition`** holds a condition the same way (section 10, Conditions): its box is checked as a condition, and below it a line says when it's checked if watched (*"Checked again when a global or input it reads changes."*, or *"Checked every 0.5 s: it calls HasItem."*), with its **Poll Interval** shown only while it needs polling. Both are built on `FBangoInlineScriptBase` (its text and inputs signature), which isn't used on its own; what's said here of inline scripts is true of both, except spawning, which is for scripts. It's for small scripts that belong to one thing, usually a line or two: `Sleep(4); player AddItem("Pistol"); WriteScreen("You got a pistol!");`. It can start with a `#inputs (...)` line, whose values its spawner passes, in order.
 
 - **In the details panel**, it's a box to type the script in, with the script text pane's colours and autocomplete. It grows with the script up to about ten lines, then scrolls. What's typed is applied when the box loses focus, as one undoable change (for every selected object). With several objects selected whose scripts differ, it says **Multiple Values** and can't be typed in.
-- The **Edit** button (an icon over the box's top-right corner, 75% opaque, or 5% while the box has keyboard focus so it doesn't hide the text being typed, unless it's hovered; with a background only while hovered) opens the full graph editor on the script, in a **window of its own**, titled with the object and the property ("Door 1: On Opened", with a `*` while it has unsaved changes). **Save** there writes the property, as one undoable change; closing the window asks about unsaved changes. While the window is open, the property's box can't be typed in: it's darkened, with **Editor open. Click Edit to focus it.** over it in yellow, and the Edit button brings the window to the front instead. Each property has at most one window. Edit needs a single selected object.
+- The **Edit** button (an icon over the box's top-right corner, 75% opaque, or 10% while the box has keyboard focus so it doesn't hide the text being typed, unless it's hovered; with a background only while hovered) opens the full graph editor on the script, in a **window of its own**, titled with the object and the property ("Door 1: On Opened", with a `*` while it has unsaved changes). **Save** there writes the property, as one undoable change; closing the window asks about unsaved changes. While the window is open, the property's box can't be typed in: it's darkened, with **Editor open. Click Edit to focus it.** over it in yellow, and the Edit button brings the window to the front instead. Each property has at most one window. Edit needs a single selected object.
 - A change made to the property elsewhere while its window is open (undo, paste, Reset to Default) is treated as an outside change to a file: with no unsaved changes, the window reloads it; otherwise a bar offers Reload or Keep Mine, and Save asks before overwriting it.
 - Saving from the graph editor writes the script in the saved layout, as for any script: compact unless it has `#USES_GRAPH_EDITOR`, in full (with section headings and node metadata) if it does (section 12). Inline scripts have no `.bango` file to link.
 - **A script with node metadata isn't typed in its box**: it's laid out for the graph, so it's edited in the window. The box shows it without its metadata, read-only, with a note centred at its bottom (clear of its scrollbars): **Has graph layout**, whose tooltip says to click Edit for the full editor, or right-click > Make Editable Inline to remove the layout. Clicking the box makes the note flash yellow twice, so it's seen (selecting and copying text still work). **Make Editable Inline**, on the box's right-click menu, asks first (*"This action will remove all node metadata. The graph representation of this script will lose all layout information. Proceed?"*, Yes / Cancel), then writes the script compact (no metadata, no section headings, no `#USES_GRAPH_EDITOR` line), as one undoable change, and the box can be typed in. A script that doesn't read only has those taken off, line by line. It's also offered for a script with only the `#USES_GRAPH_EDITOR` line.

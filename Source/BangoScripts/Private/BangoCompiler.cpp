@@ -165,7 +165,22 @@ namespace BangoCompilerPrivate
 					return false;
 				}
 			}
-			return !bFailed;
+			if (bFailed)
+			{
+				return false;
+			}
+			// Now every function's code is there, each waitUntil's condition can be followed into the functions it calls.
+			for (FBangoWaitSet& Set : Program.WaitSets)
+			{
+				FBangoDependencies Found = Bango::FindDependencies(Program, Set.Function, Set.CondBegin, Set.CondEnd);
+				Set.Globals = MoveTemp(Found.Globals);
+				Set.PollReason = MoveTemp(Found.PollReason);
+			}
+			if (bCondition && Program.Functions.Num() > 0)
+			{
+				Program.ConditionDependencies = Bango::FindDependencies(Program, 0, 0, Program.Functions[0].Code.Num());
+			}
+			return true;
 		}
 
 	private:
@@ -226,6 +241,7 @@ namespace BangoCompilerPrivate
 
 		// Per function
 		FBangoFunctionCode* Fn = nullptr;
+		int32 FnIndex = 0;
 		const FBangoFunction* FnAst = nullptr;
 		TArray<FScope> Scopes;
 		TArray<FLoop> Loops;
@@ -1062,6 +1078,7 @@ namespace BangoCompilerPrivate
 		bool CompileFunctionBody(int32 FunctionIndex, const FBangoFunction* Ast, const FBangoBlock& Body)
 		{
 			Fn = &Program.Functions[FunctionIndex];
+			FnIndex = FunctionIndex;
 			FnAst = Ast;
 			Scopes.Reset();
 			Loops.Reset();
@@ -1631,6 +1648,7 @@ namespace BangoCompilerPrivate
 			case EBangoStmtKind::Break:
 			case EBangoStmtKind::Continue: return CompileBreakContinue(Stmt);
 			case EBangoStmtKind::Return:   return CompileReturn(*Stmt.As<FBangoReturnStmt>());
+			case EBangoStmtKind::WaitUntil: return CompileWaitUntil(*Stmt.As<FBangoWaitUntilStmt>());
 			case EBangoStmtKind::Label:    return CompileLabel(*Stmt.As<FBangoLabelStmt>());
 			case EBangoStmtKind::Goto:     return CompileGoto(*Stmt.As<FBangoGotoStmt>());
 			case EBangoStmtKind::Params:
@@ -2056,6 +2074,50 @@ namespace BangoCompilerPrivate
 			Emit(EBangoOp::Jump, Start);
 			PatchJump(JumpToEnd, Here());
 			FinishLoop(Here());
+			return true;
+		}
+
+		/**
+		 * `waitUntil (c);` is
+		 *     L: WaitCheck #n
+		 *        <c>
+		 *        WaitResult #n -> L
+		 * WaitResult carries on if c is true; else the script pauses there, and runs from L again once something c reads
+		 * has changed (FBangoWaitSet, filled in by Bango::FindDependencies when every function has been compiled).
+		 */
+		bool CompileWaitUntil(const FBangoWaitUntilStmt& Wait)
+		{
+			if (bCondition)
+			{
+				return Fail(Wait.Loc, TEXT("A condition can't use waitUntil: a condition must answer at once."));
+			}
+			FBangoWaitSet Set;
+			Set.Function = FnIndex;
+			Set.Line = Wait.Loc.Line;
+			Set.Column = Wait.Loc.Column;
+			const int32 SetIndex = Program.WaitSets.Add(Set);
+
+			const int32 Check = Emit(EBangoOp::WaitCheck, SetIndex);
+			const int32 CondBegin = Here();
+			FExprType ConditionType;
+			if (!CompileExpr(*Wait.Condition, nullptr, ConditionType) || !CheckCondition(ConditionType, Wait.Condition->Loc))
+			{
+				return false;
+			}
+			Program.WaitSets[SetIndex].CondBegin = CondBegin;
+			Program.WaitSets[SetIndex].CondEnd = Here();
+			Emit(EBangoOp::WaitResult, SetIndex, Check);
+
+			// A reloaded script can switch to a new version while it waits here, and checks the new condition
+			// (FBangoInstance::TryReload: a paused waitUntil's frame is at its WaitCheck).
+			if (Wait.Node.bHasMetadata)
+			{
+				FBangoStatementRange Range;
+				Range.NodeID = Wait.Node.NodeID;
+				Range.Begin = Check;
+				Range.End = Check;
+				Fn->Statements.Add(Range);
+			}
 			return true;
 		}
 
