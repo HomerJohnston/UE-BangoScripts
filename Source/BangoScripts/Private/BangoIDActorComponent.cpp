@@ -25,9 +25,9 @@ void UBangoIDActorComponent::RegisterName()
 
 	const FString OwnerName = GetOwner() ? GetOwner()->GetActorNameOrLabel() : TEXT("<none>");
 
+	// No name is fine: the actor is still usable in scripts (by its Level or Automatic ID, made when first used).
 	if (BangoName.IsEmpty() && AutomaticID.IsEmpty())
 	{
-		Bango::ReportError(FString::Printf(TEXT("Actor '%s' has a Bango ID component with no name."), *OwnerName));
 		return;
 	}
 

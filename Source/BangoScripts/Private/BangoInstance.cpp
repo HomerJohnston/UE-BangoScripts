@@ -712,9 +712,10 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 		Current = Globals.Find(RootName);
 		if (!Current)
 		{
+			// Still just not set up yet (a condition is false, a waitUntil waits): the hint is for when it stops a script.
 			if (Entities && Entities->IsEntityRegistered(RootName))
 			{
-				return RuntimeFail(FString::Printf(TEXT("Global '%s' doesn't exist. There is an actor with the Bango ID '%s': write @%s to use it."), *RootName, *RootName, *RootName));
+				return UnsetGlobalFail(FString::Printf(TEXT("Global '%s' doesn't exist. There is an actor with the Bango ID '%s': write @%s to use it."), *RootName, *RootName, *RootName), Globals);
 			}
 			return UnsetGlobalFail(FString::Printf(TEXT("Global '%s' doesn't exist. No script or Blueprint has declared it."), *RootName), Globals);
 		}
