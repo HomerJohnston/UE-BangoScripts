@@ -304,6 +304,24 @@ private:
 	/** The document as last opened or saved; the script has unsaved changes when the graphs differ from it. */
 	FBangoGraphDocument SavedDocument;
 	bool bDirty = false;
+
+	/**
+	 * A script without #USES_GRAPH_EDITOR is kept as it was written: VerbatimText is its text as last opened, applied
+	 * from the text pane or saved, and it's what the text pane shows and Save writes, instead of the text written from
+	 * the graphs (which would be reformatted: indents, spacing, blank lines). Until the graphs are changed in a way the
+	 * saved text would show (VerbatimCompact: their text written from them when VerbatimText was set): then the text
+	 * is written from the graphs, as before. Empty: none (a script that uses the graph editor, or none open).
+	 */
+	FString VerbatimText;
+	FString VerbatimCompact;
+	/** VerbatimText as last opened or saved: typing that changes only the layout of the text is an unsaved change too. */
+	FString SavedVerbatimText;
+	/** Sets VerbatimText to Text, the text of Document (as BuildCurrentDocument gives it), if it doesn't use the graph editor. */
+	void SetVerbatimText(const FString& Text, const FBangoGraphDocument& Document);
+	/** The text to show and save for Document (as BuildCurrentDocument gives it): VerbatimText while it still applies, otherwise written from it. */
+	bool GetDocumentText(const FBangoGraphDocument& Document, FString& OutText, FString& OutError) const;
+	/** True if Document (as BuildCurrentDocument gives it), or the text it would be saved as, differs from what was last opened or saved. */
+	bool IsChangedSinceSaved(const FBangoGraphDocument& Document) const;
 	/**
 	 * What the toolbar's Compile Test icon shows, as Blueprint's does: compiled when opened and when saved
 	 * (CompileQuietly), Unknown once changed after.

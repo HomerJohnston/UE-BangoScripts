@@ -79,36 +79,49 @@ namespace BangoInlineScriptCustomizationPrivate
 
 	/**
 	 * The script without its graph layout: no node metadata (//@), no section headings (// ====) and no
-	 * #USES_GRAPH_EDITOR line, so it can be typed in its box. Written compact by the graph writer if it reads
-	 * (which leaves the line out); otherwise each line has its metadata taken off, and the headings, the
-	 * #USES_GRAPH_EDITOR line and reroute lines (metadata only) are dropped.
+	 * #USES_GRAPH_EDITOR line, so it can be typed in its box. Taken off line by line, keeping the rest of the text as
+	 * it's written (it isn't reformatted): each line loses its metadata (and the spaces before it), and the headings,
+	 * the #USES_GRAPH_EDITOR line and reroute lines (only metadata, or `//~` and metadata) are dropped, along with a
+	 * blank line a dropped heading leaves doubled.
 	 */
 	static FString StripNodeLayout(const FString& Script)
 	{
-		FBangoGraphDocument Document;
-		FBangoCompileError Error;
-		FString Compact;
-		FString WriteError;
-		FBangoGraphWriteOptions Options;
-		Options.bCompact = true;
-		if (Bango::BuildGraph(Script, TEXT("inline"), Document, Error) && Bango::WriteGraphText(Document, Compact, WriteError, Options))
-		{
-			return Compact.TrimEnd(); // without the last line's line break, as a script typed in the box would be
-		}
 		TArray<FString> Lines;
 		FBangoMetadataTracker::SplitLines(Script, Lines);
 		TArray<FString> Kept;
+		bool bAfterDropped = false; // the line before was dropped
+		bool bDroppedAny = false;
 		for (const FString& Line : Lines)
 		{
 			FBangoLineMetadata Meta;
 			const FString Visible = FBangoMetadataTracker::SplitLine(Line, Meta).TrimEnd();
 			const FString Trimmed = Visible.TrimStart();
 			const bool bHeading = Trimmed.StartsWith(TEXT("//")) && !Trimmed.StartsWith(TEXT("//~")) && Bango::IsSectionHeadingComment(Trimmed.Mid(2));
-			if (bHeading || IsUsesGraphEditorLine(Trimmed) || (Meta.HasMetadata() && Trimmed.IsEmpty()))
+			const bool bReroute = Meta.HasMetadata() && (Trimmed.IsEmpty() || Trimmed.Equals(TEXT("//~"), ESearchCase::CaseSensitive));
+			if (bHeading || IsUsesGraphEditorLine(Trimmed) || bReroute)
 			{
+				bAfterDropped = bHeading || !bReroute;
+				bDroppedAny = true;
 				continue;
 			}
+			// A heading or settings line taken out between blank lines (or at the top) leaves one blank line, not two.
+			if (bAfterDropped && Trimmed.IsEmpty() && (Kept.Num() == 0 || Kept.Last().TrimStartAndEnd().IsEmpty()))
+			{
+				bDroppedAny = true;
+				continue;
+			}
+			bAfterDropped = false;
+			// A node's comment that the dropped lines kept from the top of the file would be read as the script's
+			// description there: a blank line above it keeps it the node's (as a compact script is written).
+			if (Kept.Num() == 0 && bDroppedAny && Trimmed.StartsWith(TEXT("//")) && !Trimmed.StartsWith(TEXT("//~")))
+			{
+				Kept.Add(FString());
+			}
 			Kept.Add(Visible);
+		}
+		while (Kept.Num() > 0 && Kept.Last().TrimStartAndEnd().IsEmpty())
+		{
+			Kept.Pop(); // as a script typed in the box would be
 		}
 		return FBangoMetadataTracker::JoinLines(Kept);
 	}

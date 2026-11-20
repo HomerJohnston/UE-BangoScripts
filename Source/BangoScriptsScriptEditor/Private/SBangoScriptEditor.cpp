@@ -2565,6 +2565,9 @@ void SBangoScriptEditor::CloseScript()
 	ShownGraph = INDEX_NONE;
 	UpdateInputs();
 	SavedDocument = FBangoGraphDocument();
+	VerbatimText.Reset();
+	VerbatimCompact.Reset();
+	SavedVerbatimText.Reset();
 	bDirty = false;
 	CompileStatus = ECompileStatus::Unknown;
 	bChangedOnDisk = false;
@@ -2699,6 +2702,8 @@ void SBangoScriptEditor::LoadScript(const FString& Script)
 	// What's on disk, as the editor graphs read it back (so an untouched script isn't "changed").
 	FString BuildError;
 	BuildCurrentDocument(SavedDocument, nullptr, BuildError);
+	SetVerbatimText(Source, SavedDocument); // shown and saved as it's written, if it doesn't use the graph editor
+	SavedVerbatimText = VerbatimText;
 	bDirty = false;
 	UpdateScriptText(&SavedDocument);
 	CompileQuietly(); // so the Compile Test icon starts with the script's real status
@@ -3200,6 +3205,53 @@ FBangoGraphWriteOptions SBangoScriptEditor::GetWriteOptions() const
 	FBangoGraphWriteOptions Options;
 	Options.bFollowUsesGraphEditor = true; // node metadata only once the script has #USES_GRAPH_EDITOR
 	return Options;
+}
+
+void SBangoScriptEditor::SetVerbatimText(const FString& Text, const FBangoGraphDocument& Document)
+{
+	VerbatimText.Reset();
+	VerbatimCompact.Reset();
+	// A script that uses the graph editor is written from its graphs, laid out. So is text with node metadata in it
+	// (without #USES_GRAPH_EDITOR, it's dropped when saved, and the nodes are laid out afresh when it's opened).
+	FString Error;
+	if (Document.bUsesGraphEditor || Text.Contains(TEXT("//@")) || !Bango::WriteGraphText(Document, VerbatimCompact, Error, GetWriteOptions()))
+	{
+		VerbatimCompact.Reset();
+		return;
+	}
+	VerbatimText = Text.Replace(TEXT("\r\n"), TEXT("\n")); // as the text pane has it, and the graphs' text is written
+}
+
+bool SBangoScriptEditor::GetDocumentText(const FBangoGraphDocument& Document, FString& OutText, FString& OutError) const
+{
+	if (!VerbatimText.IsEmpty() && !Document.bUsesGraphEditor)
+	{
+		// Kept as written while nothing the saved text would show has changed in the graphs (moving a node doesn't).
+		FString Compact;
+		FString Unused;
+		if (Bango::WriteGraphText(Document, Compact, Unused, GetWriteOptions()) && Compact.Equals(VerbatimCompact, ESearchCase::CaseSensitive))
+		{
+			OutText = VerbatimText;
+			return true;
+		}
+	}
+	return Bango::WriteGraphText(Document, OutText, OutError, GetWriteOptions());
+}
+
+bool SBangoScriptEditor::IsChangedSinceSaved(const FBangoGraphDocument& Document) const
+{
+	if (Document != SavedDocument)
+	{
+		return true;
+	}
+	if (VerbatimText.Equals(SavedVerbatimText, ESearchCase::CaseSensitive))
+	{
+		return false;
+	}
+	// The same graphs, but typed differently (indents, blank lines): changed if that's what would be saved.
+	FString Text;
+	FString Error;
+	return GetDocumentText(Document, Text, Error) && !Text.Equals(SavedVerbatimText, ESearchCase::CaseSensitive);
 }
 
 void SBangoScriptEditor::CheckMovedNodes()
@@ -4023,7 +4075,7 @@ void SBangoScriptEditor::UpdateScriptText(const FBangoGraphDocument* Document)
 		Document = &Built;
 	}
 	FString Text;
-	if (!Bango::WriteGraphText(*Document, Text, Error, GetWriteOptions()))
+	if (!GetDocumentText(*Document, Text, Error))
 	{
 		return;
 	}
@@ -4082,6 +4134,7 @@ bool SBangoScriptEditor::ApplyScriptText()
 
 	// The same file, changed: what it was last saved as, and the changed-on-disk state, stay as they are.
 	const FBangoGraphDocument Saved = SavedDocument;
+	const FString SavedVerbatim = SavedVerbatimText;
 	const bool bWasChangedOnDisk = bChangedOnDisk;
 	const FDateTime Kept = KeptFileTime;
 	KeepingView([this, &Document]()
@@ -4090,9 +4143,17 @@ bool SBangoScriptEditor::ApplyScriptText()
 		ShowDocument(Document);
 	});
 	SavedDocument = Saved;
+	SavedVerbatimText = SavedVerbatim;
 	bChangedOnDisk = bWasChangedOnDisk;
 	KeptFileTime = Kept;
 	TextError.Reset();
+	// A script that doesn't use the graph editor keeps the text as it was typed (with its globals moved up).
+	FBangoGraphDocument Applied;
+	FString BuildError;
+	if (BuildCurrentDocument(Applied, nullptr, BuildError))
+	{
+		SetVerbatimText(Text, Applied);
+	}
 	RefreshDirty();
 	UpdateScriptText(nullptr); // as it'll be saved
 	return true;
@@ -4229,7 +4290,7 @@ void SBangoScriptEditor::RefreshDirty()
 	}
 	else if (BuildCurrentDocument(Current, nullptr, Error))
 	{
-		bDirty = Current != SavedDocument;
+		bDirty = IsChangedSinceSaved(Current);
 	}
 }
 
@@ -4754,7 +4815,7 @@ EActiveTimerReturnType SBangoScriptEditor::OnPoll(double CurrentTime, float Delt
 	{
 		return EActiveTimerReturnType::Continue;
 	}
-	bDirty = Current != SavedDocument;
+	bDirty = IsChangedSinceSaved(Current);
 	if (CompileStatus != ECompileStatus::Unknown && Current != CompiledDocument)
 	{
 		CompileStatus = ECompileStatus::Unknown; // changed since it was compiled
@@ -5308,7 +5369,7 @@ bool SBangoScriptEditor::Save()
 	FBangoGraphDocument Document;
 	FString Error;
 	FString Text;
-	if (!BuildCurrentDocument(Document, nullptr, Error) || !Bango::WriteGraphText(Document, Text, Error, GetWriteOptions()))
+	if (!BuildCurrentDocument(Document, nullptr, Error) || !GetDocumentText(Document, Text, Error))
 	{
 		Notify(FText::Format(LOCTEXT("CantSave", "Can't save: {0}"), FText::FromString(Error)), false);
 		return false;
@@ -5318,6 +5379,8 @@ bool SBangoScriptEditor::Save()
 		return false;
 	}
 	SavedDocument = Document;
+	SetVerbatimText(Text, Document); // what was saved is how it's written now
+	SavedVerbatimText = VerbatimText;
 	bDirty = false;
 
 	// What was saved is compiled too, for the Compile Test icon (as when the script is opened). A script with an error
@@ -5437,7 +5500,7 @@ void SBangoScriptEditor::WriteRecoveryCopy() const
 	{
 		Text = TextBox->GetText().ToString(); // what was typed, even if it doesn't read
 	}
-	else if (OpenScript.IsEmpty() || !BuildCurrentDocument(Document, nullptr, Error) || !Bango::WriteGraphText(Document, Text, Error, GetWriteOptions()))
+	else if (OpenScript.IsEmpty() || !BuildCurrentDocument(Document, nullptr, Error) || !GetDocumentText(Document, Text, Error))
 	{
 		return;
 	}
