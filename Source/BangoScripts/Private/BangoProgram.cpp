@@ -20,7 +20,7 @@ namespace BangoProgramPrivate
 		}
 		for (int32 i = 0; i < Place.NumIndexes; ++i)
 		{
-			Result += TEXT("[]");
+			Result += i == Place.NumIndexes - 1 && Place.Part == FBangoPlace::ElementPart ? TEXT("[part]") : TEXT("[]");
 		}
 		if (Place.Part >= 0 && Place.Part < 3)
 		{

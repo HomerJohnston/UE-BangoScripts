@@ -1,8 +1,12 @@
-# Bango Language Spec (draft v0.73)
+# Bango Language Spec (draft v0.75)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.75:** **vectors and strings can be indexed**, to read and write: `_v[0]` is `_v.x` (a float), `_s[1]` is a string of the character there, and `_v[1] = 5;`, `_s[0] = "B";` set them (section 6, Indexing vectors and strings). An index outside the vector or string stops the script with an error (a vector's parts are `[0]` to `[1]` or `[2]`; a string's characters are UTF-16 units); one written as a number is checked by the compiler. **`Count`** takes a vector (2 or 3) or a string (its length) too.
+
+**Changes in v0.74:** the **Spawn Bango Script** node's **Script** pin can be **connected** (a Bango Script variable, say): the node keeps the parameter pins of the script last picked on it, and the connected script must take the same parameters, checked when it spawns (section 10). It used to drop the node without code.
 
 **Changes in v0.73:** **an entity can stand for an actor component**, not only an actor (section 4, Entity IDs: components). C++ hands one to a script like an actor (`Bango::ObjectToEntity`, and a component a `call` returns or takes), so a trigger component can pass itself in as `_trigger`. A component made by its actor's class, Blueprint or level is found by its actor's ID and its name, the same each time; one added while playing gets an Automatic ID, kept on it if it's an **`IBangoEntity`** (so saves keep it). Commands act on the entity itself: `SetPos`, `GetPos`, `GetDir`, `SetDir`, `SetHidden` and `DistanceTo` work on **scene components** (their own place in the world), `GetVelocity` and `SetVelocity` on movement components and physics-simulating ones, `call` on any component; anything else is a runtime error naming it and the command. People see a component as `BP_Door_3 (Trigger)`. `self` is still always the actor.
 
@@ -317,6 +321,7 @@ _height = GetPos(_who).z;
 - Setting a part of a `nil` vector stops the script; give the vector a whole value first. A part can't be set to `nil`.
 - A part is never `nil` on its own, so `IsNil(_v.x)` is a compile error; use `IsNil(_v)`.
 - `++` and `--` don't work on parts, since they are floats.
+- `_v[0]`, `_v[1]` and `_v[2]` are the same parts by index (Indexing vectors and strings, section 6).
 - Vectors are values, like arrays: `_b = _a;` copies the vector.
 - `Format` and `WriteLog` show a vector as `(1.0, 2.0, 3.0)`.
 
@@ -638,7 +643,25 @@ _grid[1][0] = 5;
   _a[5] = 9;          // _a is now [1, 2, nil, nil, nil, 9]
   ```
 - **Reading past the end stops the script with an error**, like any other `nil` read. A read never grows the array. Use `IsNil(_a[i])` to check first.
-- Using more indices than the array has levels (`_intArray[0][0]`), or indexing a non-array, is a compile error.
+- Using more indices than the array has levels (`_intArray[0][0]`), or indexing anything but an array, a vector or a string (below), is a compile error.
+
+### Indexing vectors and strings
+A vector's parts and a string's characters can be read and written by index, like an array's elements:
+```
+vector3 _v = [1, 2, 3];
+float _z = _v[2];        // the same as _v.z
+_v[0] = 10;              // the same as _v.x = 10;
+string _s = "cat";
+string _c = _s[0];       // "c": a string of one character
+_s[0] = "b";             // _s is now "bat"
+_path[i][1] += 5;        // inside arrays too (vector2[] _path), and on values: GetPos(_who)[2]
+```
+- A **vector**'s parts are `[0]` to `[1]` (`vector2`) or `[0]` to `[2]` (`vector3`): x, y, z. They're floats.
+- A **string**'s characters are `[0]` to `Count(_s) - 1`, each a `string` of one character. They're **UTF-16 units**, as Unreal's strings count them: letters, digits, punctuation and accented letters are one each, but an emoji (and other characters outside the Basic Multilingual Plane) is two, and indexing one gives half of it. Use `text` for words players read; it can't be indexed.
+- **An index outside it stops the script with an error**, reading or writing: negative, or `Count` or more (*"'_s[5]' is past the end of '_s', which has 3 character(s). Check with Count first."*). An index written as a number is checked by the compiler (`_v[3]` on a vector3, `_s[-1]`). Unlike an array, writing past the end never grows a string or a vector.
+- A character is set to a **string of exactly one character**: `_s[0] = "ab";` stops the script, saying so. A part is set to a number.
+- A part or a character is never `nil`, so `IsNil(_v[0])` is a compile error, as `IsNil(_v.x)` is. A `nil` vector or string can't be indexed: give it a value first.
+- `_v[i]` and `_s[i]` can't be followed by `.x` or another index (a part is a float, a character a string: index the character's string after storing it, if need be).
 
 ### Nested writes
 Writing through several indices grows every level as needed. **Any missing or `nil` inner array along the way is created automatically.**
@@ -662,7 +685,7 @@ The target is read, not written, so it must already exist and not be `nil`.
 
 | Command | Effect | Errors |
 |---|---|---|
-| `Count(_a)` → `int` | Number of slots, including `nil` slots. Its value must be used. | — |
+| `Count(_a)` → `int` | Number of slots, including `nil` slots. Also a vector's parts (2 or 3) and a string's characters (its length, in UTF-16 units, section 6). Its value must be used. | — |
 | `_a Push(v);` | Adds `v` at the end | — |
 | `_a InsertAt(v, i);` | Inserts `v` at index `i` and moves later elements up. If `i` is past the end, the gap is filled with `nil`, as with writing. | negative `i` |
 | `_a Pop()` → `T` | Removes and returns the last element | empty array; last element is `nil` |
@@ -1180,7 +1203,9 @@ Scripts->SetGroupInputs(Group, { { TEXT("_trigger"), Self }, { TEXT("_potential"
 ### From Blueprint: the Spawn Bango Script node
 The **Spawn Bango Script** node reads the script's `inputs` line and creates one input pin per parameter:
 
-- The script is **picked on the node** with an asset picker (a Bango Script asset, section 15) and is fixed, not computed at runtime: the Blueprint references the asset, so it's loaded and packaged with the Blueprint, and renaming or moving the script keeps the node pointing at it. The script can't be connected. To choose a script at runtime, use **Spawn Bango Script (Dynamic Path)** (section 11), which passes no arguments. (A node made when scripts were typed paths picks up its script asset when it's next refreshed, if there's one at that path under `/Game` or `/Game/Bango`.)
+- The script is **picked on the node** with an asset picker (a Bango Script asset, section 15): the Blueprint references the asset, so it's loaded and packaged with the Blueprint, and renaming or moving the script keeps the node pointing at it.
+- Or the Script pin can be **connected**, to choose the script at runtime (a Bango Script variable): the node keeps the parameter pins of the script last picked on it (none if none was), and passes them in order. The connected script must take the same parameters: if it doesn't (a required one missing, a type that doesn't fit), or it's empty, the spawn fails with an error saying so and gives an invalid handle. Pick a script with the same `#inputs` line on the node to get its pins, then connect the variable. Its asset is loaded and packaged as the variable's is (a hard reference, usually). **Spawn Bango Script (Dynamic Path)** (section 11) chooses a script by its path, with no arguments.
+- (A node made when scripts were typed paths picks up its script asset when it's next refreshed, if there's one at that path under `/Game` or `/Game/Bango`.)
 - An **Owner** pin: the actor the script belongs to, which `self` means in it (section 4). Self while it's unconnected; in a component's Blueprint, connect its owning actor.
 - Pins are named after the parameters, in order. Pin types:
 
@@ -1233,7 +1258,7 @@ The **Spawn Bango Script** node reads the script's `inputs` line and creates one
 ### Blueprint API
 | Node | Effect |
 |---|---|
-| **Spawn Bango Script** (fixed path, one pin per parameter) → Handle | Starts a script with arguments (section 10). Returns an invalid handle (and shows an error) if it can't start. |
+| **Spawn Bango Script** (a picked or connected script, one pin per parameter) → Handle | Starts a script with arguments (section 10). Returns an invalid handle (and shows an error) if it can't start. |
 | **Spawn Bango Inline Script** (Script, Args, Owner) → Handle | Starts an inline script (a Bango Inline Script variable or property, section 15). **Args** fill its `#inputs` line in order; leave it unconnected for a script with no parameters. They're checked when it starts: if they don't fit, it doesn't start, and an error says why. Owner (Self by default) is the actor it belongs to, which `self` means; it also names it in errors. An empty script does nothing. |
 | **Make Bango Args** → Args, then **Add Bango Arg (Int)**, **(Bool)**, **(Float)**, **(String)**, **(Text)**, **(Actor (Entity))**, **(Vector2)**, **(Vector3)** and their **Array** versions, and **Skip Bango Arg** | Build Spawn Bango Inline Script's arguments, one per parameter, in order: chain them (Make Bango Args → Add Bango Arg (String) → Add Bango Arg (Vector3) → Args). Skip Bango Arg leaves out a parameter that has a default. An actor becomes its Bango ID (an actor without one is an error when the script starts). |
 | **Spawn Bango Script (Dynamic Path)** (path, Owner) → Handle | Starts a script from a path chosen at runtime, with no arguments, so the script can't have required parameters. Owner (Self by default) is what `self` means in it. Returns an invalid handle (and shows an error) if it can't start. |

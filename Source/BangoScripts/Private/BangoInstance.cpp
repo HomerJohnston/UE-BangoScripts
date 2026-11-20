@@ -652,6 +652,67 @@ FString FBangoInstance::DescribePlace(const FBangoPlace& Place) const
 	return Program->Names.IsValidIndex(Place.Index) ? Program->Names[Place.Index] : FString(TEXT("<global>"));
 }
 
+namespace BangoInstancePrivate
+{
+	/** "vector3", "string": what an element index (`_v[i]`, `_s[i]`) is into. */
+	static bool IsElementIndexable(const FBangoValue& Value)
+	{
+		const FBangoType Type = Value.GetType();
+		return !Value.IsNil() && !Type.IsArray() && (Type.IsVector() || Type.Base == EBangoBaseType::String);
+	}
+
+	/** Part or character Index of Value (a vector or a string, not nil), or false with OutError naming Path. */
+	static bool ReadElement(const FBangoValue& Value, int64 Index, const FString& Path, FBangoValue& OutValue, FString& OutError)
+	{
+		const FBangoType Type = Value.GetType();
+		const int64 Count = Type.IsVector() ? Type.GetVectorSize() : Value.GetString().Len();
+		if (Index < 0)
+		{
+			OutError = FString::Printf(TEXT("Index %lld for '%s' is negative."), Index, *Path);
+			return false;
+		}
+		if (Index >= Count)
+		{
+			OutError = Type.IsVector()
+				? FString::Printf(TEXT("'%s[%lld]' is past the end of '%s': a %s has %lld parts, [0] to [%lld]."), *Path, Index, *Path, Type.GetVectorSize() == 2 ? TEXT("vector2") : TEXT("vector3"), Count, Count - 1)
+				: FString::Printf(TEXT("'%s[%lld]' is past the end of '%s', which has %lld character(s). Check with Count first."), *Path, Index, *Path, Count);
+			return false;
+		}
+		OutValue = Type.IsVector() ? FBangoValue::MakeDouble(Value.GetVectorPart((int32)Index)) : FBangoValue::MakeString(Value.GetString().Mid((int32)Index, 1));
+		return true;
+	}
+
+	/** Sets part or character Index of Target (a vector or a string, not nil) to Value, or false with OutError. */
+	static bool WriteElement(FBangoValue& Target, int64 Index, const FBangoValue& Value, const FString& Path, FString& OutError)
+	{
+		FBangoValue Current;
+		if (!ReadElement(Target, Index, Path, Current, OutError))
+		{
+			return false;
+		}
+		if (Target.GetType().IsVector())
+		{
+			if (!IsNumber(Value))
+			{
+				OutError = FString::Printf(TEXT("A vector's part must be a number, but this is %s."), *ValueTypeText(Value));
+				return false;
+			}
+			Target.SetVectorPart((int32)Index, Value.GetNumberAsDouble());
+			return true;
+		}
+		if (Value.IsNil() || Value.GetType() != FBangoType::String() || Value.GetString().Len() != 1)
+		{
+			OutError = Value.IsNil() || Value.GetType() != FBangoType::String()
+				? FString::Printf(TEXT("A string's character must be a string of one character, but this is %s."), *ValueTypeText(Value))
+				: FString::Printf(TEXT("A string's character must be a string of one character, but \"%s\" has %d."), *Value.GetString(), Value.GetString().Len());
+			return false;
+		}
+		const FString& Chars = Target.GetString();
+		Target = FBangoValue::MakeString(Chars.Left((int32)Index) + Value.GetString() + Chars.Mid((int32)Index + 1));
+		return true;
+	}
+}
+
 bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Globals, const IBangoEntityResolver* Entities, bool bNilOk)
 {
 	TArray<int64> Indexes;
@@ -660,7 +721,7 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 		return false;
 	}
 
-	if (bNilOk && Place.Part < 0)
+	if (bNilOk && Place.Part == -1)
 	{
 		// Like IsNil: nil anywhere along the way (or a global nobody made, or past the end) gives nil.
 		const FBangoValue* Root = nullptr;
@@ -712,8 +773,27 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 	}
 
 	FString Path = RootName;
-	for (const int64 Index : Indexes)
+	// The last index picks a vector's part or a string's character: always for an ElementPart place, and for one whose
+	// type wasn't known (a global declared elsewhere) when it reaches a vector or a string.
+	for (int32 i = 0; i < Indexes.Num(); ++i)
 	{
+		const int64 Index = Indexes[i];
+		const bool bLast = i == Indexes.Num() - 1;
+		if (bLast && (Place.Part == FBangoPlace::ElementPart || BangoInstancePrivate::IsElementIndexable(*Current)) && !Current->IsNil())
+		{
+			if (!BangoInstancePrivate::IsElementIndexable(*Current))
+			{
+				return RuntimeFail(FString::Printf(TEXT("'%s' is %s, so it can't be indexed: only arrays, vectors and strings can be."), *Path, *ValueTypeText(*Current)));
+			}
+			FBangoValue Element;
+			FString ElementError;
+			if (!BangoInstancePrivate::ReadElement(*Current, Index, Path, Element, ElementError))
+			{
+				return RuntimeFail(ElementError);
+			}
+			Stack.Add(MoveTemp(Element));
+			return true;
+		}
 		if (Current->IsNil())
 		{
 			if (Place.Kind == EBangoPlaceKind::Global && Path == RootName)
@@ -724,7 +804,7 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 		}
 		if (!Current->GetType().IsArray())
 		{
-			return RuntimeFail(FString::Printf(TEXT("'%s' is %s, not an array, so it can't be indexed."), *Path, *ValueTypeText(*Current)));
+			return RuntimeFail(FString::Printf(TEXT("'%s' is %s, so it can't be indexed: only arrays, vectors and strings can be."), *Path, *ValueTypeText(*Current)));
 		}
 		const FBangoValue* Next = Current->GetElement(Index);
 		if (!Next)
@@ -797,6 +877,38 @@ bool FBangoInstance::StorePlace(const FBangoPlace& Place, FBangoGlobalStore& Glo
 	}
 
 	FString Message;
+	if (Place.Part == FBangoPlace::ElementPart)
+	{
+		// `_v[i] = 1;`, `_s[i] = "a";`: the arrays on the way aren't grown, as reading them must work first.
+		FString Path = RootName;
+		const FBangoValue* Found = Root;
+		for (int32 i = 0; i + 1 < Indexes.Num() && Found; ++i)
+		{
+			if (Found->IsNil() || !Found->GetType().IsArray())
+			{
+				return RuntimeFail(FString::Printf(TEXT("'%s' is nil, so it can't be indexed."), *Path));
+			}
+			const FBangoValue* Next = Found->GetElement(Indexes[i]);
+			if (!Next)
+			{
+				return RuntimeFail(Indexes[i] < 0
+					? FString::Printf(TEXT("Index %lld for '%s' is negative."), Indexes[i], *Path)
+					: FString::Printf(TEXT("'%s[%lld]' is past the end of '%s', which has %lld element(s)."), *Path, Indexes[i], *Path, Found->ArrayCount()));
+			}
+			Path += FString::Printf(TEXT("[%lld]"), Indexes[i]);
+			Found = Next;
+		}
+		if (!Found || Found->IsNil())
+		{
+			return RuntimeFail(FString::Printf(TEXT("'%s' is nil, so one of its parts or characters can't be set on its own. Give it a whole value first."), *Path));
+		}
+		FBangoValue* Target = const_cast<FBangoValue*>(Found); // Root is ours to change
+		if (!BangoInstancePrivate::WriteElement(*Target, Indexes.Last(), Value, Path, Message))
+		{
+			return RuntimeFail(Message);
+		}
+		return true;
+	}
 	if (Place.Part >= 0)
 	{
 		const TCHAR* Part = PartName(Place.Part);
@@ -1491,13 +1603,24 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 			{
 				return false;
 			}
-			if (ArrayValue.IsNil() || !ArrayValue.GetType().IsArray())
-			{
-				return RuntimeFail(FString::Printf(TEXT("Only arrays can be indexed, but this is %s."), *ValueTypeText(ArrayValue)));
-			}
 			if (!IsScalar(IndexValue, EBangoBaseType::Int))
 			{
-				return RuntimeFail(FString::Printf(TEXT("An array index must be an int, but it is %s."), *ValueTypeText(IndexValue)));
+				return RuntimeFail(FString::Printf(TEXT("An index must be an int, but it is %s."), *ValueTypeText(IndexValue)));
+			}
+			if (BangoInstancePrivate::IsElementIndexable(ArrayValue))
+			{
+				FBangoValue Element;
+				FString ElementError;
+				if (!BangoInstancePrivate::ReadElement(ArrayValue, IndexValue.GetInt(), ArrayValue.GetType().IsVector() ? TEXT("the vector") : TEXT("the string"), Element, ElementError))
+				{
+					return RuntimeFail(ElementError);
+				}
+				Stack.Add(MoveTemp(Element));
+				break;
+			}
+			if (ArrayValue.IsNil() || !ArrayValue.GetType().IsArray())
+			{
+				return RuntimeFail(FString::Printf(TEXT("Only arrays, vectors and strings can be indexed, but this is %s."), *ValueTypeText(ArrayValue)));
 			}
 			const FBangoValue* Element = ArrayValue.GetElement(IndexValue.GetInt());
 			if (!Element)
@@ -1847,9 +1970,15 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 			{
 				return false;
 			}
+			if (BangoInstancePrivate::IsElementIndexable(Value))
+			{
+				// A vector's parts (2 or 3), or a string's characters (UTF-16 units).
+				Stack.Add(FBangoValue::MakeInt(Value.GetType().IsVector() ? Value.GetType().GetVectorSize() : Value.GetString().Len()));
+				break;
+			}
 			if (Value.IsNil() || !Value.GetType().IsArray())
 			{
-				return RuntimeFail(FString::Printf(TEXT("Count needs an array, but got %s."), *ValueTypeText(Value)));
+				return RuntimeFail(FString::Printf(TEXT("Count needs an array, a vector or a string, but got %s."), *ValueTypeText(Value)));
 			}
 			Stack.Add(FBangoValue::MakeInt((int32)Value.ArrayCount()));
 			break;

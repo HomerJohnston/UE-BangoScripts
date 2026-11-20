@@ -114,6 +114,8 @@ namespace BangoCompilerPrivate
 		int32 NumIndexes = 0;
 		FExprType Type;
 		FString Text;  // "_x", "_grid[...]", "_pos.x"
+		/** Its last index picks a vector's part or a string's character (`_v[i]`, `_names[0][2]`): never nil. */
+		bool bElement = false;
 	};
 
 	static const TCHAR* PartName(int32 Part)
@@ -2438,14 +2440,27 @@ namespace BangoCompilerPrivate
 				}
 			}
 
-			if (RootType.IsKnown() && IndexExprs.Num() > RootType.Type.ArrayDepth)
+			// One index more than its array levels, on a vector or a string: a part or a character (`_v[1]`, `_names[0][2]`).
+			const bool bIndexableElement = RootType.IsKnown()
+				&& (RootType.Type.Base == EBangoBaseType::Vector2 || RootType.Type.Base == EBangoBaseType::Vector3 || RootType.Type.Base == EBangoBaseType::String);
+			const bool bElement = bIndexableElement && IndexExprs.Num() == RootType.Type.ArrayDepth + 1;
+			if (RootType.IsKnown() && IndexExprs.Num() > RootType.Type.ArrayDepth && !bElement)
 			{
-				if (!RootType.Type.IsArray())
+				if (!RootType.Type.IsArray() && !bIndexableElement)
 				{
-					return Fail(Root->Loc, FString::Printf(TEXT("'%s' is %s, not an array, so it can't be indexed."), *Root->Name, *RootType.Describe()));
+					return Fail(Root->Loc, FString::Printf(TEXT("'%s' is %s, so it can't be indexed: only arrays, vectors and strings can be."), *Root->Name, *RootType.Describe()));
 				}
 				return Fail(Root->Loc, FString::Printf(TEXT("'%s' is %s, so it can be indexed at most %d time(s)."),
-					*Root->Name, *RootType.Describe(), (int32)RootType.Type.ArrayDepth));
+					*Root->Name, *RootType.Describe(), (int32)RootType.Type.ArrayDepth + (bIndexableElement ? 1 : 0)));
+			}
+			if (bElement && Member)
+			{
+				return Fail(Member->Loc, FString::Printf(TEXT("'%s' is a %s, so it has no parts."),
+					*Root->Name, RootType.Type.Base == EBangoBaseType::String ? TEXT("string's character, a string") : TEXT("vector's part, a float")));
+			}
+			if (bElement && !CheckElementIndex(*IndexExprs.Last(), RootType.Type.Base))
+			{
+				return false;
 			}
 
 			for (const FBangoExpr* IndexExpr : IndexExprs)
@@ -2462,12 +2477,17 @@ namespace BangoCompilerPrivate
 			}
 
 			Out.NumIndexes = IndexExprs.Num();
+			Out.bElement = bElement;
 			Out.Text = Root->Name;
 			for (int32 i = 0; i < IndexExprs.Num(); ++i)
 			{
 				Out.Text += TEXT("[...]");
 			}
-			if (RootType.IsKnown())
+			if (bElement)
+			{
+				Out.Type = FExprType::MakeKnown(RootType.Type.Base == EBangoBaseType::String ? FBangoType::String() : FBangoType::Double());
+			}
+			else if (RootType.IsKnown())
 			{
 				Out.Type = FExprType::MakeKnown(FBangoType(RootType.Type.Base, (uint8)(RootType.Type.ArrayDepth - IndexExprs.Num())));
 			}
@@ -2487,7 +2507,47 @@ namespace BangoCompilerPrivate
 				Out.Text += FString::Printf(TEXT(".%s"), PartName(Part));
 				Out.Type = FExprType::MakeKnown(FBangoType::Double());
 			}
-			Out.PlaceIndex = AddPlace(Kind, Index, IndexExprs.Num(), Part);
+			Out.PlaceIndex = AddPlace(Kind, Index, IndexExprs.Num(), bElement ? FBangoPlace::ElementPart : Part);
+			return true;
+		}
+
+		/**
+		 * An index into a vector or a string: an int; one written as a number must be in range (a vector's parts are
+		 * 0 to 1 or 2; nothing is negative). One worked out is checked when it runs.
+		 */
+		bool CheckElementIndex(const FBangoExpr& IndexExpr, EBangoBaseType Base)
+		{
+			const FBangoLiteralExpr* Literal = IndexExpr.As<FBangoLiteralExpr>();
+			int64 Value = 0;
+			bool bConstant = false;
+			if (Literal && Literal->LiteralKind == EBangoLiteralKind::Int)
+			{
+				Value = Literal->IntValue;
+				bConstant = true;
+			}
+			else if (const FBangoUnaryExpr* Unary = IndexExpr.As<FBangoUnaryExpr>(); Unary && Unary->Op == EBangoUnaryOp::Negate)
+			{
+				const FBangoLiteralExpr* Inner = Unary->Operand->As<FBangoLiteralExpr>();
+				if (Inner && Inner->LiteralKind == EBangoLiteralKind::Int)
+				{
+					Value = -Inner->IntValue;
+					bConstant = true;
+				}
+			}
+			if (!bConstant)
+			{
+				return true;
+			}
+			if (Value < 0)
+			{
+				return Fail(IndexExpr.Loc, FString::Printf(TEXT("Index %lld is negative. Indexes start at 0."), Value));
+			}
+			const int32 Size = Base == EBangoBaseType::Vector2 ? 2 : Base == EBangoBaseType::Vector3 ? 3 : -1;
+			if (Size > 0 && Value >= Size)
+			{
+				return Fail(IndexExpr.Loc, FString::Printf(TEXT("A %s has %d parts, [0] to [%d] (x to %s), so it has no [%lld]."),
+					Size == 2 ? TEXT("vector2") : TEXT("vector3"), Size, Size - 1, Size == 2 ? TEXT("y") : TEXT("z"), Value));
+			}
 			return true;
 		}
 
@@ -2638,6 +2698,10 @@ namespace BangoCompilerPrivate
 				if (!ResolvePlace(*Expr.As<FBangoIsNilExpr>()->Operand, EPlaceUse::Check, Place))
 				{
 					return false;
+				}
+				if (Place.bElement)
+				{
+					return Fail(Expr.Loc, TEXT("A vector's part or a string's character is never nil (an index outside it is an error), so IsNil can't check it. Check the vector or string itself, and its Count."));
 				}
 				Emit(EBangoOp::IsNilPlace, Place.PlaceIndex);
 				OutType = FExprType::MakeKnown(FBangoType::Bool());
@@ -2832,9 +2896,15 @@ namespace BangoCompilerPrivate
 			{
 				return false;
 			}
-			if (ArrayType.IsKnown() && !ArrayType.Type.IsArray())
+			const bool bElement = ArrayType.IsKnown() && !ArrayType.Type.IsArray()
+				&& (ArrayType.Type.Base == EBangoBaseType::Vector2 || ArrayType.Type.Base == EBangoBaseType::Vector3 || ArrayType.Type.Base == EBangoBaseType::String);
+			if (ArrayType.IsKnown() && !ArrayType.Type.IsArray() && !bElement)
 			{
-				return Fail(IndexExpr.Loc, FString::Printf(TEXT("Only arrays can be indexed, but this is %s."), *ArrayType.Describe()));
+				return Fail(IndexExpr.Loc, FString::Printf(TEXT("Only arrays, vectors and strings can be indexed, but this is %s."), *ArrayType.Describe()));
+			}
+			if (bElement && !CheckElementIndex(*IndexExpr.Index, ArrayType.Type.Base))
+			{
+				return false;
 			}
 			FExprType IndexType;
 			if (!CompileExpr(*IndexExpr.Index, nullptr, IndexType))
@@ -2846,7 +2916,14 @@ namespace BangoCompilerPrivate
 				return Fail(IndexExpr.Index->Loc, FString::Printf(TEXT("An array index must be an int, but this is %s."), *IndexType.Describe()));
 			}
 			Emit(EBangoOp::Index);
-			OutType = ArrayType.IsKnown() ? FExprType::MakeKnown(ArrayType.Type.GetElementType()) : FExprType::MakeUnknown();
+			if (bElement)
+			{
+				OutType = FExprType::MakeKnown(ArrayType.Type.Base == EBangoBaseType::String ? FBangoType::String() : FBangoType::Double());
+			}
+			else
+			{
+				OutType = ArrayType.IsKnown() ? FExprType::MakeKnown(ArrayType.Type.GetElementType()) : FExprType::MakeUnknown();
+			}
 			return true;
 		}
 
@@ -3286,7 +3363,7 @@ namespace BangoCompilerPrivate
 			{
 				if (Call.Target || Call.Args.Num() != 1)
 				{
-					return Fail(Call.NameLoc, TEXT("Count takes one array and no target: 'Count(_myArray)'."));
+					return Fail(Call.NameLoc, TEXT("Count takes one array, vector or string, and no target: 'Count(_myArray)'."));
 				}
 				if (!bValueNeeded && !bInferring)
 				{
@@ -3297,9 +3374,11 @@ namespace BangoCompilerPrivate
 				{
 					return false;
 				}
-				if (!ArrayType.IsKnownArray() && !ArrayType.IsUnknown())
+				const bool bCountable = ArrayType.IsUnknown() || ArrayType.IsKnownArray()
+					|| ArrayType.Type.Base == EBangoBaseType::Vector2 || ArrayType.Type.Base == EBangoBaseType::Vector3 || ArrayType.Type.Base == EBangoBaseType::String;
+				if (!bCountable)
 				{
-					return Fail(Call.Args[0]->Loc, FString::Printf(TEXT("Count needs an array, but this is %s."), *ArrayType.Describe()));
+					return Fail(Call.Args[0]->Loc, FString::Printf(TEXT("Count needs an array, a vector or a string, but this is %s."), *ArrayType.Describe()));
 				}
 				CurrentLoc = Call.Loc;
 				Emit(EBangoOp::ArrayCount);

@@ -295,7 +295,7 @@ FBangoScriptHandle UBangoBlueprintLibrary::SpawnBangoScriptAssetWithArgs(UObject
 	}
 	if (!Script)
 	{
-		Bango::ReportError(TEXT("Spawn Bango Script: no script was picked on the node."));
+		Bango::ReportError(TEXT("Spawn Bango Script: no script (none was picked on the node, or the one connected is empty)."));
 		return FBangoScriptHandle();
 	}
 

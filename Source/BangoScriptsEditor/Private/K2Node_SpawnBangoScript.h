@@ -14,7 +14,9 @@ class UBangoScriptAsset;
  * Blueprint node: Spawn Bango Script.
  *
  * Pick a Bango Script asset on the node and it shows one input pin per parameter in the
- * script's inputs line, named after the parameter, with the script's defaults filled in.
+ * script's inputs line, named after the parameter, with the script's defaults filled in. Or connect one
+ * (a variable): the node keeps the pins of the script picked last (none if none was), and the connected
+ * script must take the same parameters, which Spawn checks when it runs.
  *  - Required parameters always pass the pin's value.
  *  - Optional parameters count as "not passed" (so the script uses its own default) while their pin is
  *    unconnected and still shows the script's default.

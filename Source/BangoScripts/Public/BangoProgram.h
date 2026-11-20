@@ -104,8 +104,13 @@ struct FBangoPlace
 	EBangoPlaceKind Kind = EBangoPlaceKind::Local;
 	int32 Index = 0;
 	int32 NumIndexes = 0;
-	/** -1 for the whole value; 0, 1 or 2 for a vector's x, y or z. */
+	/**
+	 * -1 for the whole value; 0, 1 or 2 for a vector's x, y or z; ElementPart if the last of the indexes picks a
+	 * vector's part or a string's character (`_v[i]`, `_s[i]`) rather than an array's element.
+	 */
 	int32 Part = -1;
+
+	static constexpr int32 ElementPart = -2;
 };
 
 /**

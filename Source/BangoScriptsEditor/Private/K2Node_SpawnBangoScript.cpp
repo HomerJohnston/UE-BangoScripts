@@ -47,7 +47,7 @@ void UK2Node_SpawnBangoScript::AllocateDefaultPins()
 
 	UEdGraphPin* ScriptPin = CreatePin(EGPD_Input, UEdGraphSchema_K2::PC_Object, UBangoScriptAsset::StaticClass(), ScriptPinName);
 	ScriptPin->DefaultObject = Script;
-	ScriptPin->PinToolTip = TEXT("The Bango Script to spawn. Must be picked here, not connected: its parameters become this node's pins.");
+	ScriptPin->PinToolTip = TEXT("The Bango Script to spawn. Pick it here to get a pin for each of its parameters. Or connect one (a variable): the node keeps the pins of the script picked last, if any, and the connected script must take the same parameters (checked when it spawns).");
 
 	UEdGraphPin* OwnerPin = CreatePin(EGPD_Input, UEdGraphSchema_K2::PC_Object, UObject::StaticClass(), OwnerPinName);
 	OwnerPin->PinFriendlyName = LOCTEXT("OwnerPin", "Owner");
@@ -202,6 +202,7 @@ FText UK2Node_SpawnBangoScript::GetTooltipText() const
 {
 	return LOCTEXT("Tooltip",
 		"Starts a Bango script. Pick it on the node to get a pin for each of the script's parameters.\n"
+		"Or connect a script (a variable): the node keeps the pins of the script picked last, and the connected script must take the same parameters.\n"
 		"Optional parameters use the script's default while their pin is unconnected and unchanged.\n"
 		"If the script's parameters change, right-click the node and choose Refresh Node.");
 }
@@ -227,9 +228,10 @@ void UK2Node_SpawnBangoScript::ValidateNodeDuringCompilation(FCompilerResultsLog
 	Super::ValidateNodeDuringCompilation(MessageLog);
 
 	const UEdGraphPin* ScriptPin = FindPin(ScriptPinName);
-	if (ScriptPin && ScriptPin->LinkedTo.Num() > 0)
+	const bool bScriptConnected = ScriptPin && ScriptPin->LinkedTo.Num() > 0;
+	if (!Script && !bScriptConnected)
 	{
-		MessageLog.Error(*LOCTEXT("ScriptPinLinked", "@@: the script must be picked on the node, not connected. To choose a script at runtime, use Spawn Bango Script (Dynamic Path).").ToString(), this);
+		MessageLog.Error(*LOCTEXT("NoScript", "@@: pick a Bango Script on the node, or connect one.").ToString(), this);
 	}
 }
 
@@ -244,16 +246,18 @@ void UK2Node_SpawnBangoScript::ExpandNode(FKismetCompilerContext& CompilerContex
 		BreakAllNodeLinks();
 	};
 
-	const UEdGraphPin* ScriptPin = FindPin(ScriptPinName);
-	if (ScriptPin && ScriptPin->LinkedTo.Num() > 0)
-	{
-		BreakAllNodeLinks();
-		return; // already reported by ValidateNodeDuringCompilation
-	}
-
+	// The script: picked on the node, or connected (a variable). A connected one gets the parameters of the script
+	// picked last (none if none was), and must take the same ones: SpawnBangoScriptAssetWithArgs checks when it runs.
+	UEdGraphPin* ScriptPin = FindPinChecked(ScriptPinName);
+	const bool bScriptConnected = ScriptPin->LinkedTo.Num() > 0;
 	TArray<FBangoScriptParamInfo> Params;
 	FString Error;
-	if (!LoadParams(Params, Error))
+	if (!Script && !bScriptConnected)
+	{
+		BreakAllNodeLinks();
+		return; // reported by ValidateNodeDuringCompilation
+	}
+	if (Script && !LoadParams(Params, Error))
 	{
 		Fail(Error);
 		return;
@@ -321,7 +325,15 @@ void UK2Node_SpawnBangoScript::ExpandNode(FKismetCompilerContext& CompilerContex
 	}
 
 	UK2Node_CallFunction* SpawnNode = SpawnLibraryCall(GET_FUNCTION_NAME_CHECKED(UBangoBlueprintLibrary, SpawnBangoScriptAssetWithArgs));
-	SpawnNode->FindPinChecked(TEXT("Script"))->DefaultObject = Script;
+	UEdGraphPin* SpawnScriptPin = SpawnNode->FindPinChecked(TEXT("Script"));
+	if (bScriptConnected)
+	{
+		CompilerContext.MovePinLinksToIntermediate(*ScriptPin, *SpawnScriptPin);
+	}
+	else
+	{
+		SpawnScriptPin->DefaultObject = Script;
+	}
 	Schema->TryCreateConnection(ArgsPin, SpawnNode->FindPinChecked(TEXT("Args")));
 
 	UK2Node_Self* SelfNode = CompilerContext.SpawnIntermediateNode<UK2Node_Self>(this, SourceGraph);
