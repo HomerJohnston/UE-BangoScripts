@@ -697,20 +697,24 @@ namespace BangoCompilerPrivate
 		bool FailMisplacedDecl(const FBangoVarDeclStmt& Decl, bool bInFunction)
 		{
 			CurrentStmt = &Decl;
+			if (Decl.bGlobal && Decl.bDefault)
+			{
+				return Fail(Decl.Loc, FString::Printf(TEXT("A global's default ('?=') goes in its declaration at the top of the file, after the settings lines (#inputs and the others) and before everything else: move 'global %s %s ?= ...;' up there. To set it here, each time this runs, write '=': 'global %s %s = ...;'."),
+					*Decl.Type.ToString(), *Decl.Name, *Decl.Type.ToString(), *Decl.Name));
+			}
 			if (Decl.bGlobal)
 			{
-				// What's left here if it moves: its value, as an assignment (a value up there would only be a default).
-				const FString Left = Decl.Init.IsValid() ? FString::Printf(TEXT(", and set it here with '%s = ...;'"), *Decl.Name) : FString();
-				return Fail(Decl.Loc, FString::Printf(TEXT("Globals are declared at the top of the file, after the settings lines (#inputs and the others) and before everything else%s: move 'global %s %s;' up there%s. (The script editor's Apply does that for you.)"),
-					bInFunction ? TEXT(", not in a function") : TEXT(""), *Decl.Type.ToString(), *Decl.Name, *Left));
+				return Fail(Decl.Loc, FString::Printf(TEXT("A global declared in the code must be given a value, like 'global %s %s = ...;' (it's set to it each time this runs). To only declare it, put 'global %s %s;' at the top of the file, after the settings lines (#inputs and the others) and before everything else%s."),
+					*Decl.Type.ToString(), *Decl.Name, *Decl.Type.ToString(), *Decl.Name, bInFunction ? TEXT(", not in a function") : TEXT("")));
 			}
 			return Fail(Decl.Loc, FString::Printf(TEXT("scriptVar declarations go at the top of their %s, before its code: move 'scriptVar %s %s;' up there. Or drop 'scriptVar' to declare a local here, which exists from here to the end of its block."),
 				bInFunction ? TEXT("function") : TEXT("script"), *Decl.Type.ToString(), *Decl.Name));
 		}
 
 		/**
-		 * A global or scriptVar declaration nested in a block (they only go at the top). Locals can be declared in
-		 * blocks; a for header isn't in a block.
+		 * A scriptVar declaration, or a global's without a value or with a default (?=), nested in a block (they only
+		 * go at the top). Locals, and globals set in the code (`global bool b = true;`), can be declared in blocks; a
+		 * for header isn't in a block.
 		 */
 		bool CheckNoDeclsInBlock(const FBangoBlock& Block, bool bInFunction)
 		{
@@ -731,7 +735,7 @@ namespace BangoCompilerPrivate
 			case EBangoStmtKind::VarDecl:
 			{
 				const FBangoVarDeclStmt& Decl = *Stmt.As<FBangoVarDeclStmt>();
-				return Decl.IsLocal() || FailMisplacedDecl(Decl, bInFunction);
+				return Decl.IsLocal() || Decl.IsGlobalAssignment() || FailMisplacedDecl(Decl, bInFunction);
 			}
 			case EBangoStmtKind::If:
 			{
@@ -773,8 +777,8 @@ namespace BangoCompilerPrivate
 		}
 
 		/**
-		 * Global and scriptVar declarations aren't graph nodes (globals and script variables are listed in the editor's
-		 * side panel), so they have no metadata. (A local's declaration is a node.)
+		 * Global and scriptVar declarations at the top aren't graph nodes (globals and script variables are listed in the
+		 * editor's side panel), so they have no metadata. (A local's declaration is a node, and so is a global's in the code.)
 		 */
 		bool CheckDeclHasNoMetadata(const FBangoVarDeclStmt& Decl)
 		{
@@ -803,8 +807,9 @@ namespace BangoCompilerPrivate
 		}
 
 		/**
-		 * Globals are declared only at the top of the file (after the settings lines (#inputs and the others), before the main graph's script
-		 * variables and anything else, functions included), once each and without a value. Script variables
+		 * Globals are declared at the top of the file (after the settings lines (#inputs and the others), before the main graph's script
+		 * variables and anything else, functions included), once each, with a fixed default (?=) or none; or in the
+		 * code, anywhere, with a value (`global bool b = true;`, a statement), any number of times. Script variables
 		 * (scriptVar) are declared only at the top of their graph, before its code, with fixed starting values. Locals
 		 * (plain declarations) can be anywhere, so they aren't checked here; nor are loop variables.
 		 */
@@ -826,9 +831,10 @@ namespace BangoCompilerPrivate
 					continue;
 				}
 				const FBangoVarDeclStmt* Decl = Stmt->As<FBangoVarDeclStmt>();
-				if (!Decl || Decl->IsLocal())
+				if (!Decl || Decl->IsLocal() || Decl->IsGlobalAssignment())
 				{
-					// The script's code (a local's declaration is code): no more globals or scriptVars after it.
+					// The script's code (a local's declaration is code, and so is a global's with a value): no more
+					// globals or scriptVars after it.
 					bInLead = false;
 					if (!CheckNoDeclsInStmt(*Stmt, false))
 					{
@@ -851,12 +857,12 @@ namespace BangoCompilerPrivate
 					{
 						return Fail(Decl->Loc, FString::Printf(TEXT("Global declarations come before the script's scriptVars: move 'global %s %s;' above them."), *Decl->Type.ToString(), *Decl->Name));
 					}
-					// A value is a default (used only if the global doesn't exist yet), so it's fixed, like a scriptVar's.
+					// A default (used only if the global doesn't exist yet or is nil) is fixed, like a scriptVar's.
 					if (Decl->Init.IsValid() && !IsFixedValue(*Decl->Init))
 					{
 						CurrentStmt = Decl;
-						return Fail(Decl->Init->Loc, FString::Printf(TEXT("A global's default must be a fixed value: a number, a string, true, false, nil, a Bango ID like @john, a text, or an array of those. It's only used if the global doesn't exist yet. To set it to something worked out, declare it here ('global %s %s;') and set it in the code ('%s = ...;')."),
-							*Decl->Type.ToString(), *Decl->Name, *Decl->Name));
+						return Fail(Decl->Init->Loc, FString::Printf(TEXT("A global's default must be a fixed value: a number, a string, true, false, nil, a Bango ID like @john, a text, or an array of those. It's only used if the global doesn't exist yet or is nil. To set it to something worked out, set it in the code: 'global %s %s = ...;'."),
+							*Decl->Type.ToString(), *Decl->Name));
 					}
 					if (const int32* Line = GlobalLines.Find(Decl->Name))
 					{
@@ -880,7 +886,7 @@ namespace BangoCompilerPrivate
 				for (const FBangoStmtPtr& Stmt : Function->Body)
 				{
 					const FBangoVarDeclStmt* Decl = Stmt->As<FBangoVarDeclStmt>();
-					if (!Decl || Decl->IsLocal())
+					if (!Decl || Decl->IsLocal() || Decl->IsGlobalAssignment())
 					{
 						bInFunctionLead = false;
 						if (!CheckNoDeclsInStmt(*Stmt, true))
@@ -943,7 +949,7 @@ namespace BangoCompilerPrivate
 				Global.Name = Decl.Name;
 				Global.Type = Decl.Type;
 				Global.Line = Stmt.Loc.Line;
-				if (Decl.Init.IsValid())
+				if (Decl.Init.IsValid() && Decl.bDefault)
 				{
 					CurrentStmt = &Stmt;
 					if (!EvaluateConstant(*Decl.Init, Decl.Type, Decl.Name, Global.Default))
@@ -1663,11 +1669,26 @@ namespace BangoCompilerPrivate
 
 		bool CompileVarDecl(const FBangoVarDeclStmt& Decl)
 		{
-			if (Decl.bGlobal)
+			if (Decl.bGlobal && !Decl.IsGlobalAssignment())
 			{
 				// Globals are declared when the instance starts, which gives one its default if it doesn't exist yet
-				// (FBangoGlobalDecl, checked in CollectGlobals). The line itself does nothing.
+				// or is nil (FBangoGlobalDecl, checked in CollectGlobals). The line itself does nothing.
 				Emit(EBangoOp::Nop);
+				return true;
+			}
+			if (Decl.bGlobal)
+			{
+				// `global bool b = true;`: declared when the instance starts, like one at the top (CollectGlobals); the
+				// line sets it. It's the global even where a local of the same name is visible.
+				const FBangoType* Declared = DeclaredGlobals.Find(Decl.Name);
+				const FBangoType& Type = Declared ? *Declared : Decl.Type;
+				FExprType ValueType;
+				if (!CompileExpr(*Decl.Init, &Type, ValueType)
+					|| !CanAssign(Type, ValueType, Decl.Init->Loc, FString::Printf(TEXT("Global '%s'"), *Decl.Name)))
+				{
+					return false;
+				}
+				Emit(EBangoOp::StorePlace, AddPlace(EBangoPlaceKind::Global, AddName(Decl.Name), 0));
 				return true;
 			}
 

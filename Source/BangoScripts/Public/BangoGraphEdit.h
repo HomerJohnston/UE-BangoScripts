@@ -185,12 +185,12 @@ namespace Bango
 	BANGOSCRIPTS_API bool FillMissingPlaceholders(FBangoGraphDocument& Document, const FBangoNodeLayoutContext& Context);
 
 	/**
-	 * For the script text pane's Apply: moves a global declared anywhere but the top of the file (in the code, in a
-	 * block, or in a function) up to the top, after its other globals. It's always split: `global bool open = IsOpen(@d);`
-	 * leaves `open = IsOpen(@d);` where it was, and `global bool open;` is put at the top (a value up there would only
-	 * be a default, so it isn't moved). One without a value is just moved. One the top already declares, with the same
-	 * type, just loses its declaration; with another type, that's an error. Text that doesn't read is returned as it
-	 * is (reading it reports the error). False, with OutError, on a clash.
+	 * For the script text pane's Apply: moves a global declared without a value (`global int seen;`) or with a default
+	 * (`global int seen ?= 0;`) anywhere but the top of the file (in the code, in a block, or in a function) up to the
+	 * top, after its other globals. A global set in the code (`global bool open = true;`) is code, and stays. One the
+	 * top already declares, with the same type, just loses its declaration (one with a default is left, for its error);
+	 * with another type, that's an error. Text that doesn't read is returned as it is (reading it reports the error).
+	 * False, with OutError, on a clash.
 	 */
 	BANGOSCRIPTS_API bool HoistLateGlobals(const FString& Source, FString& OutSource, FBangoCompileError& OutError);
 }

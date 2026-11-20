@@ -208,6 +208,17 @@ namespace Bango
 					FString(TEXT("local declare new variable ")) + Type + (bArray ? TEXT(" array list") : TEXT("")));
 			}
 		}
+		// Set Global nodes: `global bool newBool = ...;`, declaring the global for the whole script.
+		for (const TCHAR* Type : { TEXT("bool"), TEXT("int"), TEXT("float"), TEXT("string"), TEXT("entity"), TEXT("text"), TEXT("vector2"), TEXT("vector3") })
+		{
+			for (const bool bArray : { false, true })
+			{
+				const FString TypeText = FString(Type) + (bArray ? TEXT("[]") : TEXT(""));
+				const FString Base = FString(TEXT("new")) + CapitalizeFirst(Type) + (bArray ? TEXT("Array") : TEXT(""));
+				Menu.Add(Vars, EBangoGraphNodeKind::Global, TypeText + TEXT(" ") + Bango::MakeUniqueName(Base, Used) + TEXT(" ="),
+					FString(TEXT("global set declare new variable ")) + Type + (bArray ? TEXT(" array list") : TEXT("")));
+			}
+		}
 		Menu.Add(Vars, EBangoGraphNodeKind::Assign, TEXT("="), TEXT("set assign =")).Description = TEXT("Gives a variable a new value.");
 		Menu.Add(Vars, EBangoGraphNodeKind::Assign, TEXT("+="), TEXT("add plus +=")).Description = TEXT("Adds a value to a variable.");
 		Menu.Add(Vars, EBangoGraphNodeKind::Assign, TEXT("-="), TEXT("subtract minus -=")).Description = TEXT("Subtracts a value from a variable.");

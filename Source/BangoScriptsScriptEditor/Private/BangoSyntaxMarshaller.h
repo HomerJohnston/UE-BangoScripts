@@ -49,6 +49,12 @@ public:
 	void SetCursor(const FBangoTextPosition& InCursor);
 
 	/**
+	 * Whether the cursor's highlights (the bracket boxes and the other uses of the name under the cursor) are drawn:
+	 * only while the text has keyboard focus (SBangoTextEditor). Off takes them away; on puts them back where the cursor is.
+	 */
+	void SetCursorHighlightsShown(bool bShown);
+
+	/**
 	 * Watches where characters BeginColumn to EndColumn of a line are drawn (for placing the autocomplete list beside
 	 * the word being typed). Nothing is drawn; GetProbe says where they were, once the text has been painted.
 	 */
@@ -128,6 +134,7 @@ private:
 
 	/** The cursor, for the bracket boxes. */
 	FBangoTextPosition BracketCursor;
+	bool bCursorHighlightsShown = false;
 	TArray<FTextLineHighlight> BracketHighlights;
 	TArray<FTextLineHighlight> NameHighlights;
 	TSharedPtr<ISlateLineHighlighter> MatchHighlighter;

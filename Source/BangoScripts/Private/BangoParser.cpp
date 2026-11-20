@@ -563,17 +563,20 @@ namespace BangoParserPrivate
 				default:
 					break;
 				}
-				// A local's declaration is a node, so it can be disabled; script variables and globals aren't nodes.
-				if (Next.Kind == EBangoTokenKind::KwGlobal || Next.Kind == EBangoTokenKind::KwScriptVar)
+				// A local's declaration is a node, so it can be disabled, and so is a global's in the code (`global bool b = true;`).
+				// Script variables and the globals at the top of the file aren't nodes.
+				if (Next.Kind == EBangoTokenKind::KwScriptVar)
 				{
-					return FailPlain(Next.Loc, Next.Kind == EBangoTokenKind::KwGlobal
-						? TEXT("A global declaration can't be disabled with '/*' and '*/': it isn't a graph node. Only statements can be disabled.")
-						: TEXT("A scriptVar declaration can't be disabled with '/*' and '*/': it isn't a graph node. Only statements can be disabled."));
+					return FailPlain(Next.Loc, TEXT("A scriptVar declaration can't be disabled with '/*' and '*/': it isn't a graph node. Only statements can be disabled."));
 				}
 				FBangoStmtPtr Stmt = ParseStatement();
 				if (!Stmt)
 				{
 					return false;
+				}
+				if (const FBangoVarDeclStmt* Decl = Stmt->As<FBangoVarDeclStmt>(); Decl && Decl->bGlobal && !Decl->IsGlobalAssignment())
+				{
+					return FailPlain(Next.Loc, TEXT("A global declaration at the top of the file can't be disabled with '/*' and '*/': it isn't a graph node. Only statements can be disabled."));
 				}
 				Stmt->bDisabled = true;
 				Block.Add(MoveTemp(Stmt));
@@ -973,7 +976,7 @@ namespace BangoParserPrivate
 			return Stmt;
 		}
 
-		/** `global T name [= e]` or `T _name [= e]`, without the ';'. */
+		/** `global T name [= e | ?= e]` or `T _name [= e]`, without the ';'. */
 		FBangoStmtPtr ParseVarDecl(bool bGlobal, bool bScriptVar = false)
 		{
 			TUniquePtr<FBangoVarDeclStmt> Decl = MakeUnique<FBangoVarDeclStmt>();
@@ -1003,8 +1006,16 @@ namespace BangoParserPrivate
 				return nullptr;
 			}
 
-			if (Match(EBangoTokenKind::Assign))
+			if (Check(EBangoTokenKind::QuestionAssign) && !bGlobal)
 			{
+				Fail(Cur().Loc, FString::Printf(TEXT("'?=' gives a global its default, like 'global int gold ?= 0;'. To give %s '%s' its value, write '='."),
+					bScriptVar ? TEXT("script variable") : TEXT("local"), *Decl->Name));
+				return nullptr;
+			}
+			const bool bDefault = Match(EBangoTokenKind::QuestionAssign);
+			if (bDefault || Match(EBangoTokenKind::Assign))
+			{
+				Decl->bDefault = bDefault;
 				Decl->Init = ParseExpression();
 				if (!Decl->Init)
 				{
@@ -1042,6 +1053,11 @@ namespace BangoParserPrivate
 				return nullptr;
 			}
 
+			if (Check(EBangoTokenKind::QuestionAssign))
+			{
+				Fail(Cur().Loc, TEXT("'?=' only gives a global its default, in its declaration at the top of the file, like 'global int gold ?= 0;'. To set something, write '='."));
+				return nullptr;
+			}
 			if (IsAssignOp(Cur().Kind))
 			{
 				const EBangoAssignOp Op = ToAssignOp(Advance().Kind);

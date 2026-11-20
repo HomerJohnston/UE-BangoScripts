@@ -468,9 +468,12 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 	{ TEXT("command fails"), TEXT("Talk(\"before\");\nFail();"), TEXT("before"), TEXT("(2:1)"), TEXT("Fail: boom") },
 	{ TEXT("names without underscores"), TEXT("global int _shared;\nint count = 2;\nint[] list = [1, 2];\n_shared = count;\nforEach (item in list)\n{\n\tcount += item;\n};\nTalk(\"{0} {1}\", count, _shared);"), TEXT("5 2"), nullptr, nullptr },
 	{ TEXT("a local hides a global this file doesn't declare"), TEXT("int score = 3;\nTalk(\"{0}\", score);"), TEXT("3"), nullptr, nullptr },
-	{ TEXT("global default: given when the global doesn't exist"), TEXT("global int fresh = 4;\nglobal int[] list = [1, 2];\nTalk(\"{0} {1}\", fresh, Count(list));"), TEXT("4 2"), nullptr, nullptr },
-	{ TEXT("global default: one that exists keeps its value"), TEXT("global int score = 1;\nTalk(\"{0}\", score);"), TEXT("7"), nullptr, nullptr },
-	{ TEXT("global default: nil"), TEXT("global int unsetYet = nil;\nTalk(\"{0}\", IsNil(unsetYet));"), TEXT("true"), nullptr, nullptr },
+	{ TEXT("global default: given when the global doesn't exist"), TEXT("global int fresh ?= 4;\nglobal int[] list ?= [1, 2];\nTalk(\"{0} {1}\", fresh, Count(list));"), TEXT("4 2"), nullptr, nullptr },
+	{ TEXT("global default: one that exists keeps its value"), TEXT("global int score ?= 1;\nTalk(\"{0}\", score);"), TEXT("7"), nullptr, nullptr },
+	{ TEXT("global default: nil"), TEXT("global int unsetYet ?= nil;\nTalk(\"{0}\", IsNil(unsetYet));"), TEXT("true"), nullptr, nullptr },
+	{ TEXT("global set in the code: each time the line runs"), TEXT("global int score ?= 1;\nTalk(\"{0}\", score);\nglobal int score = 2;\nTalk(\"{0}\", score);\nfor (int _i = 0; _i < 2; _i++)\n{\n\tglobal int score = score + 10;\n};\nTalk(\"{0}\", score);"), TEXT("7|2|22"), nullptr, nullptr },
+	{ TEXT("global set in the code: readable before the line, and in a function"), TEXT("Talk(\"{0}\", IsNil(later));\nSetIt();\nTalk(\"{0}\", later);\nfunction void SetIt()\n{\n\tglobal string later = \"done\";\n};"), TEXT("true|done"), nullptr, nullptr },
+	{ TEXT("global set in the code: a disabled one doesn't run"), TEXT("global int score ?= 1;\n/* global int score = 50; */\nTalk(\"{0}\", score);"), TEXT("7"), nullptr, nullptr },
 	{ TEXT("an undeclared name without underscore is a global read"), TEXT("Talk(\"{0}\", cuont);"), TEXT(""), TEXT("(1:13)"), TEXT("Global 'cuont' doesn't exist") },
 	{ TEXT("string placeholders: {n}, backtick escapes, and what's left as it is"), TEXT("Talk(\"`{0`} is {0}, `` and {Name}, 100% and {1\", 5);"), TEXT("{0} is 5, ` and {Name}, 100% and {1"), nullptr, nullptr },
 	{ TEXT("IsNull on nil and missing actors"), TEXT("entity _e;\nentity[] _a = [@john];\nTalk(\"{0} {1} {2}\", IsNull(@john), IsNull(@ghost), IsNull(_e));\nTalk(\"{0} {1} {2}\", IsNull(_a[0]), IsNull(_a[5]), IsNull(nobody));\n_e = @player;\nTalk(\"{0}\", IsNull(_e));"), TEXT("false true true|false true true|false"), nullptr, nullptr },
@@ -835,7 +838,7 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 		auto LastLog = [&Log]() { return Log.Num() > 0 ? Log.Last() : FString(); };
 
 		// Global defaults across scripts: one declared without a value first leaves the global nil, and a later default
-		// isn't used, with a warning (once).
+		// is given then, as it's nil; one that has a value keeps it.
 		{
 			FReloadRun Run;
 			BangoMakeRuntimeTestGlobals(Run.Globals);
@@ -843,22 +846,23 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			FBangoRuntimeError StartError;
 			FBangoInstance First;
 			Expect(First.Start(Compile(TEXT("global int stage;")), Commands, Run.Globals, 1, StartError), TEXT("global defaults: a value-less declaration starts"));
-			FBangoInstance Second;
-			Expect(Second.Start(Compile(TEXT("global int stage = 1;")), Commands, Run.Globals, 2, StartError), TEXT("global defaults: the one with a default starts"));
 			const FBangoValue* Stage = Run.Globals.Find(TEXT("stage"));
-			Expect(Stage && Stage->IsNil(), TEXT("global defaults: the default isn't used, as the global exists"));
-			const TArray<FString> Warned = Second.TakeWarnings();
-			Expect(Warned.Num() == 1 && Warned[0].Contains(TEXT("already exists, holding nil")), TEXT("global defaults: it's warned about"));
-			FBangoInstance Third;
-			Third.Start(Compile(TEXT("global int stage = 1;")), Commands, Run.Globals, 3, StartError);
-			Expect(Third.TakeWarnings().Num() == 0, TEXT("global defaults: once per global"));
-			// Set to a value, a later default changes nothing, and there's no warning.
+			Expect(Stage && Stage->IsNil(), TEXT("global defaults: declared without a value, it's nil"));
+			FBangoInstance Second;
+			Expect(Second.Start(Compile(TEXT("global int stage ?= 1;")), Commands, Run.Globals, 2, StartError), TEXT("global defaults: the one with a default starts"));
+			Stage = Run.Globals.Find(TEXT("stage"));
+			Expect(Stage && !Stage->IsNil() && Stage->GetInt() == 1, TEXT("global defaults: a nil global gets the default"));
 			FString SetError;
 			Run.Globals.Set(TEXT("stage"), FBangoValue::MakeInt(5), SetError);
-			FBangoInstance Fourth;
-			Fourth.Start(Compile(TEXT("global int stage = 1;")), Commands, Run.Globals, 4, StartError);
+			FBangoInstance Third;
+			Third.Start(Compile(TEXT("global int stage ?= 1;")), Commands, Run.Globals, 3, StartError);
 			Stage = Run.Globals.Find(TEXT("stage"));
-			Expect(Stage && !Stage->IsNil() && Stage->GetInt() == 5 && Fourth.TakeWarnings().Num() == 0, TEXT("global defaults: a global with a value keeps it"));
+			Expect(Stage && !Stage->IsNil() && Stage->GetInt() == 5, TEXT("global defaults: a global with a value keeps it"));
+			Run.Globals.Set(TEXT("stage"), FBangoValue::MakeNil(FBangoType::Int()), SetError);
+			FBangoInstance Fourth;
+			Fourth.Start(Compile(TEXT("global int stage ?= 3;")), Commands, Run.Globals, 4, StartError);
+			Stage = Run.Globals.Find(TEXT("stage"));
+			Expect(Stage && !Stage->IsNil() && Stage->GetInt() == 3, TEXT("global defaults: one set back to nil gets the default again"));
 		}
 
 		// A moving platform: the math in the loop changes while it runs, and a local is added.

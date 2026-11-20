@@ -42,6 +42,8 @@ enum class EBangoTokenKind : uint8
 	Less, LessEqual, Greater, GreaterEqual,
 	AndAnd, OrOr,
 	PlusAssign, MinusAssign, StarAssign, SlashAssign,
+	/** `?=`: a global's default, at the top of the file (`global int gold ?= 0;`). */
+	QuestionAssign,
 	PlusPlus, MinusMinus,
 
 	// Slash-star and star-slash around disabled nodes (spec section 1). Not comments: what's between them must be statements.

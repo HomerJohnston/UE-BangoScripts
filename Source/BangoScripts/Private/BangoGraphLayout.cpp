@@ -760,8 +760,37 @@ namespace BangoGraphLayoutPrivate
 		}
 	}
 
+	/** The global a Global node (`bool opened = true`) sets, or false. */
+	static bool ReadNodeGlobal(const FBangoGraphNode& Node, FString& OutType, FString& OutName)
+	{
+		bool bGlobal = false;
+		return Node.Kind == EBangoGraphNodeKind::Global && !Node.bDisabled && ReadDeclaration(Node.Text, bGlobal, OutType, OutName) && !bGlobal;
+	}
+
+	/** The globals the document's Global nodes set (`global bool opened = true;` in the code), in graph and node order. */
+	static void GetCodeGlobals(const FBangoGraphDocument& Document, TArray<TPair<FString, FString>>& Out)
+	{
+		auto FromGraph = [&Out](const FBangoGraph& Graph)
+		{
+			for (const FBangoGraphNode& Node : Graph.Nodes)
+			{
+				FString Type;
+				FString Name;
+				if (ReadNodeGlobal(Node, Type, Name))
+				{
+					Out.Add(TPair<FString, FString>(Name, Type));
+				}
+			}
+		};
+		FromGraph(Document.Main);
+		for (const FBangoGraph& Function : Document.Functions)
+		{
+			FromGraph(Function);
+		}
+	}
+
 	/** "Local Int", "Local Float Array", "Local Vector3": the title of a Local node declaring Type. */
-	static FString LocalNodeTitle(const FString& Type)
+	static FString LocalNodeTitle(const FString& Type, const TCHAR* Prefix = TEXT("Local "))
 	{
 		FString Base = Type;
 		int32 Arrays = 0;
@@ -770,7 +799,7 @@ namespace BangoGraphLayoutPrivate
 			Base.LeftChopInline(2);
 			++Arrays;
 		}
-		FString Title = FString(TEXT("Local ")) + (Base.IsEmpty() ? Base : Base.Left(1).ToUpper() + Base.Mid(1));
+		FString Title = FString(Prefix) + (Base.IsEmpty() ? Base : Base.Left(1).ToUpper() + Base.Mid(1));
 		for (int32 i = 0; i < Arrays; ++i)
 		{
 			Title += TEXT(" Array");
@@ -934,6 +963,12 @@ namespace BangoGraphLayoutPrivate
 		for (const FBangoGraphDecl& Global : Document.Globals)
 		{
 			DeclareVariable(Globals, Global.Name, Global.Type);
+		}
+		TArray<TPair<FString, FString>> CodeGlobals;
+		GetCodeGlobals(Document, CodeGlobals);
+		for (const TPair<FString, FString>& Global : CodeGlobals)
+		{
+			DeclareVariable(Globals, Global.Key, Global.Value);
 		}
 		TArray<const FBangoGraph*> Graphs;
 		Graphs.Add(&Document.Main);
@@ -1109,6 +1144,42 @@ namespace BangoGraphLayoutPrivate
 				Value.Begin = Value.End = Value.OuterBegin = Value.OuterEnd = Tok.EndOf(NameTok);
 			}
 			Value.InsertPrefix = TEXT(" = ");
+			Out.Fields.Add(Value);
+			return;
+		}
+
+		case EBangoGraphNodeKind::Global:
+		{
+			// `bool opened = true`: "Set Global Bool", with a Name row and a To row (of the global's type).
+			bool bGlobal = false;
+			FString Type;
+			FString Name;
+			if (!ReadDeclaration(Node.Text, bGlobal, Type, Name) || bGlobal)
+			{
+				break;
+			}
+			int32 NameTok = 0;
+			while (NameTok < N && !(Tok.Is(NameTok, EBangoTokenKind::Identifier) && Tok.T[NameTok].Text.Equals(Name, ESearchCase::CaseSensitive)))
+			{
+				++NameTok;
+			}
+			if (NameTok >= N || !Tok.Is(NameTok + 1, EBangoTokenKind::Assign))
+			{
+				break;
+			}
+			Out.Title = LocalNodeTitle(Type, TEXT("Set Global "));
+			Out.Description = FString::Printf(TEXT("Sets the global '%s' (%s) each time this runs. It's declared for the whole script, as if it were in the Globals list."), *Name, *Type);
+			FBangoNodeField NameField = Tok.Field(TEXT("Name"), FString(), NameTok, NameTok + 1);
+			NameField.bVariable = true;
+			NameField.VariableType = Type;
+			Out.Fields.Add(NameField);
+			FBangoNodeField Value = Tok.Field(TEXT("To"), Type, FMath::Min(NameTok + 2, N), N);
+			if (NameTok + 2 >= N)
+			{
+				// `bool opened =`, a new node: the value goes after the `=`.
+				Value.Begin = Value.End = Value.OuterBegin = Value.OuterEnd = Tok.EndOf(NameTok + 1);
+				Value.InsertPrefix = TEXT(" ");
+			}
 			Out.Fields.Add(Value);
 			return;
 		}
@@ -1361,6 +1432,13 @@ namespace Bango
 		for (int32 i = 0; i < Document.Globals.Num(); ++i)
 		{
 			Add(Globals, Document.Globals[i].Name, Document.Globals[i].Type, FBangoGraphVariable::EKind::Global, INDEX_NONE, i);
+		}
+		// Then the ones the file sets in its code (Global nodes, in any graph), which aren't in the Globals list.
+		TArray<TPair<FString, FString>> CodeGlobals;
+		GetCodeGlobals(Document, CodeGlobals);
+		for (const TPair<FString, FString>& Global : CodeGlobals)
+		{
+			Add(Globals, Global.Key, Global.Value, FBangoGraphVariable::EKind::Global, INDEX_NONE, INDEX_NONE);
 		}
 		TArray<FBangoGraphVariable> Undeclared;
 		for (int32 i = 1; i < Graph->Nodes.Num(); ++i)

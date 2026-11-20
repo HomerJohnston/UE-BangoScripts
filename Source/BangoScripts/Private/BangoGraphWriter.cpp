@@ -204,7 +204,7 @@ namespace BangoGraphWriterPrivate
 			return false;
 		}
 
-		/** `global int gold;` or `scriptVar int _count = 0;`, each under its comment. Declarations have no metadata. */
+		/** `global int gold ?= 0;` or `scriptVar int _count = 0;`, each under its comment. Declarations have no metadata. */
 		void WriteDecls(const TArray<FBangoGraphDecl>& Decls, bool bGlobal, int32 Indent)
 		{
 			for (const FBangoGraphDecl& Decl : Decls)
@@ -214,7 +214,7 @@ namespace BangoGraphWriterPrivate
 				Code += Decl.Type + TEXT(" ") + Decl.Name;
 				if (Decl.bHasValue) // a script variable's starting value, or a global's default
 				{
-					Code += TEXT(" = ") + Decl.Value;
+					Code += (bGlobal ? TEXT(" ?= ") : TEXT(" = ")) + Decl.Value;
 				}
 				AddCode(Indent, -1, Code + TEXT(";"), nullptr);
 			}
@@ -449,6 +449,7 @@ namespace BangoGraphWriterPrivate
 			switch (Kind)
 			{
 			case EBangoGraphNodeKind::Local:
+			case EBangoGraphNodeKind::Global:
 			case EBangoGraphNodeKind::Assign:
 			case EBangoGraphNodeKind::IncDec:  return 2;
 			case EBangoGraphNodeKind::Call:    return 3;
@@ -562,6 +563,9 @@ namespace BangoGraphWriterPrivate
 			case EBangoGraphNodeKind::Local:
 			case EBangoGraphNodeKind::Call:
 				AddCode(Indent, Detached, Text + TEXT(";"), &Node);
+				return true;
+			case EBangoGraphNodeKind::Global:
+				AddCode(Indent, Detached, FString(TEXT("global ")) + Text + TEXT(";"), &Node);
 				return true;
 
 			case EBangoGraphNodeKind::Break:

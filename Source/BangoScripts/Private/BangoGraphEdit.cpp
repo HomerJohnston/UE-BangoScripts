@@ -22,7 +22,8 @@ namespace BangoGraphEditPrivate
 	static bool IsStatementKind(EBangoGraphNodeKind Kind)
 	{
 		return Kind == EBangoGraphNodeKind::Assign
-			|| Kind == EBangoGraphNodeKind::IncDec || Kind == EBangoGraphNodeKind::Call || Kind == EBangoGraphNodeKind::Local;
+			|| Kind == EBangoGraphNodeKind::IncDec || Kind == EBangoGraphNodeKind::Call || Kind == EBangoGraphNodeKind::Local
+			|| Kind == EBangoGraphNodeKind::Global;
 	}
 
 	static FString Trimmed(const FString& Value)
@@ -91,6 +92,14 @@ namespace Bango
 			}
 			Source = Text + TEXT(";");
 			break;
+		case EBangoGraphNodeKind::Global:
+			if (Text.IsEmpty())
+			{
+				OutError = TEXT("The statement is empty.");
+				return false;
+			}
+			Source = FString(TEXT("global ")) + Text + TEXT(";");
+			break;
 		case EBangoGraphNodeKind::If:      Source = FString(TEXT("if (")) + Text + TEXT(")\n{\n};"); break;
 		case EBangoGraphNodeKind::While:   Source = FString(TEXT("while (")) + Text + TEXT(")\n{\n};"); break;
 		case EBangoGraphNodeKind::For:     Source = FString(TEXT("for (")) + Text + TEXT(")\n{\n};"); break;
@@ -150,6 +159,16 @@ namespace Bango
 			{
 				OutError = Decl ? TEXT("A Local node declares a local, like `int _count = 0`: add globals and script variables in their lists instead.")
 					: TEXT("This should declare a local, like `int _count = 0`.");
+				return false;
+			}
+			return true;
+		}
+		if (Kind == EBangoGraphNodeKind::Global)
+		{
+			const FBangoVarDeclStmt* Decl = Script.TopLevel[0]->As<FBangoVarDeclStmt>();
+			if (!Decl || !Decl->IsGlobalAssignment())
+			{
+				OutError = TEXT("This should set a global, like `bool opened = true`. To declare one without setting it, or give it a default, add it to the Globals list.");
 				return false;
 			}
 			return true;
@@ -1014,7 +1033,7 @@ namespace Bango
 
 	namespace HoistPrivate
 	{
-		/** Every global declaration in Block (and its blocks), from index From on. */
+		/** Every global declaration in Block (and its blocks), from index From on, but those that set it (`global bool b = true;`, code). */
 		static void CollectGlobalDecls(const FBangoBlock& Block, int32 From, TArray<const FBangoVarDeclStmt*>& Out)
 		{
 			for (int32 i = From; i < Block.Num(); ++i)
@@ -1022,7 +1041,7 @@ namespace Bango
 				const FBangoStmt& Stmt = *Block[i];
 				if (const FBangoVarDeclStmt* Decl = Stmt.As<FBangoVarDeclStmt>())
 				{
-					if (Decl->bGlobal)
+					if (Decl->bGlobal && !Decl->IsGlobalAssignment())
 					{
 						Out.Add(Decl);
 					}
@@ -1144,7 +1163,7 @@ namespace Bango
 		{
 			const FBangoStmt& Stmt = *Top[FirstLate];
 			const FBangoVarDeclStmt* Decl = Stmt.As<FBangoVarDeclStmt>();
-			if (Decl && Decl->bGlobal)
+			if (Decl && Decl->bGlobal && !Decl->IsGlobalAssignment())
 			{
 				TopGlobals.Add(Decl->Name, Decl->Type);
 				AnchorLine = Decl->Loc.Line;
@@ -1234,7 +1253,12 @@ namespace Bango
 			{
 				continue;
 			}
-			if (const FBangoType* Existing = TopGlobals.Find(Decl->Name))
+			const FBangoType* Existing = TopGlobals.Find(Decl->Name);
+			if (Existing && Decl->bDefault)
+			{
+				continue; // its default would be lost: leave it to the error the text gets
+			}
+			if (Existing)
 			{
 				if (*Existing != Decl->Type)
 				{
@@ -1254,29 +1278,27 @@ namespace Bango
 			}
 			const FString Before = Line.Left(Start);
 			const FString After = Line.Mid(End, Line.Len() - End);
-			if (Decl->Init.IsValid() && Decl->Init->Kind != EBangoExprKind::Empty)
+			// With a default (`?= 1`), it's moved with it.
+			FString Default;
+			if (Decl->bDefault && Decl->Init.IsValid() && Decl->Init->Kind != EBangoExprKind::Empty)
 			{
-				// Split: its value is set where it was, as an assignment.
 				const int32 InitStart = FindInitStart(Line, Start, End, Decl->Name);
 				if (InitStart == INDEX_NONE)
 				{
 					continue;
 				}
-				const FString Value = Line.Mid(InitStart, End - 1 - InitStart).TrimStartAndEnd();
-				Lines[LineIndex] = Before + Decl->Name + TEXT(" = ") + Value + TEXT(";") + After;
+				Default = Line.Mid(InitStart, End - 1 - InitStart).TrimStartAndEnd();
 			}
-			else
+			Keep[LineIndex] = !Before.TrimStartAndEnd().IsEmpty() || !After.TrimStartAndEnd().IsEmpty();
+			if (Keep[LineIndex])
 			{
-				Keep[LineIndex] = !Before.TrimStartAndEnd().IsEmpty() || !After.TrimStartAndEnd().IsEmpty();
-				if (Keep[LineIndex])
-				{
-					Lines[LineIndex] = Before + After;
-				}
+				Lines[LineIndex] = Before + After;
 			}
 			if (!TopGlobals.Find(Decl->Name))
 			{
 				TopGlobals.Add(Decl->Name, Decl->Type);
-				Inserted.Add(FString::Printf(TEXT("global %s %s;"), *Decl->Type.ToString(), *Decl->Name));
+				Inserted.Add(Default.IsEmpty() ? FString::Printf(TEXT("global %s %s;"), *Decl->Type.ToString(), *Decl->Name)
+					: FString::Printf(TEXT("global %s %s ?= %s;"), *Decl->Type.ToString(), *Decl->Name, *Default));
 			}
 			bChanged = true;
 		}

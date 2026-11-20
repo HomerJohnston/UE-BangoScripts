@@ -315,7 +315,9 @@ using FBangoBlock = TArray<FBangoStmtPtr>;
  *    its value each time the declaration runs. It's a graph node ("Local Int" and so on).
  *  - A script variable is declared at the top of its graph, before its code, with a fixed value (or none); it
  *    exists in the whole graph and gets its value when the graph starts. It isn't a node: the editor lists it.
- *  - A global is declared at the top of the file, without a value.
+ *  - A global is declared at the top of the file, with a default or none: `global int gold;`, `global int gold ?= 0;`
+ *    (bDefault). Or in the code, with a value it's set to each time the line runs: `global bool opened = true;`. It
+ *    exists in the whole file either way. In the code, it's a graph node ("Set Global Bool" and so on).
  */
 struct FBangoVarDeclStmt : FBangoStmt
 {
@@ -330,6 +332,10 @@ struct FBangoVarDeclStmt : FBangoStmt
 	FString Name;
 	/** Null if declared without a value (nil). */
 	FBangoExprPtr Init;
+	/** A global's `?= value`: Init is its default. Otherwise a global's Init (`= value`) is set each time the line runs. */
+	bool bDefault = false;
+	/** A global declared in the code: `global bool opened = true;`, a statement (not at the top of the file). */
+	bool IsGlobalAssignment() const { return bGlobal && !bDefault && Init.IsValid(); }
 };
 
 enum class EBangoAssignOp : uint8

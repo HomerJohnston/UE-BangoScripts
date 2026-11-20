@@ -65,6 +65,11 @@ enum class EBangoGraphNodeKind : uint8
 	Reroute,
 	/** `waitUntil (condition);`: pauses until the condition (Text) is true; then Next. */
 	WaitUntil,
+	/**
+	 * `global bool opened = true;` in the code: sets a global each time this runs (and declares it for the whole file,
+	 * like one at the top). Text: without `global`, like `bool opened = true` ("Set Global Bool", ...).
+	 */
+	Global,
 };
 
 struct BANGOSCRIPTS_API FBangoGraphNode
@@ -81,6 +86,7 @@ struct BANGOSCRIPTS_API FBangoGraphNode
 	 * - Entry: `int _a, string _b = "x"` (main graph) or `int AddScore(int _amount)` (function)
 	 * - Assign, IncDec, Call: the statement, like `_x += 2`, `_x++`, `john Speak("Hi")`
 	 * - Local: the declaration, like `int _x = 2` or `string _s`
+	 * - Global: the declaration without `global`, like `bool opened = true`
 	 * - If, While, Switch: the condition or value. For: `int _i = 0; _i < 3; _i++`. ForEach: `_x in _array`
 	 * - Return: the value, or empty. Spawn: where the copy's id goes, or empty. Label, Goto: the label name. Break,
 	 *   Continue, Sequence, Reroute: empty.
@@ -114,9 +120,9 @@ struct BANGOSCRIPTS_API FBangoGraphNode
 };
 
 /**
- * A declaration: one of the file's globals (`global int gold;`), or a script variable at the top of a graph
- * (`scriptVar int _count = 0;`). These aren't nodes; the editor lists them beside the graph. (A local, declared
- * without `scriptVar`, is a node: EBangoGraphNodeKind::Local.)
+ * A declaration: one of the file's globals at the top (`global int gold ?= 0;`), or a script variable at the top of a
+ * graph (`scriptVar int _count = 0;`). These aren't nodes; the editor lists them beside the graph. (A local, declared
+ * without `scriptVar`, is a node: EBangoGraphNodeKind::Local; so is a global set in the code: EBangoGraphNodeKind::Global.)
  */
 struct BANGOSCRIPTS_API FBangoGraphDecl
 {
@@ -125,7 +131,7 @@ struct BANGOSCRIPTS_API FBangoGraphDecl
 	FString Name;
 	/**
 	 * The value as written (a fixed value, like `0`, `"hi"` or `[1, 2]`): a script variable's starting value, or a
-	 * global's default (given only if the global doesn't exist yet).
+	 * global's default (`?=`, given only if the global doesn't exist yet or is nil).
 	 */
 	bool bHasValue = false;
 	FString Value;

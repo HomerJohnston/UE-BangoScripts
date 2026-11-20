@@ -786,6 +786,9 @@ void SBangoTextEditor::Tick(const FGeometry& AllottedGeometry, const double InCu
 {
 	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
 
+	// The cursor's highlights (brackets, the other uses of a name) show only while the text has keyboard focus.
+	Marshaller->SetCursorHighlightsShown(TextBox.IsValid() && TextBox->HasKeyboardFocus());
+
 	// The list belongs to the text being typed in: it closes when the text loses keyboard focus.
 	if (bCompletionOpen && (!TextBox.IsValid() || !TextBox->HasKeyboardFocus()))
 	{

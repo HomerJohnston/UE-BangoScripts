@@ -838,7 +838,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				TEXT("// the gold\n")
 				TEXT("global int gold;\n")
 				TEXT("global string[] names;\n")
-				TEXT("global int stage = 1;\n")
+				TEXT("global int stage ?= 1;\n")
 				TEXT("\n")
 				TEXT("// ============ SCRIPT VARS =====================\n")
 				TEXT("\n")
@@ -1213,32 +1213,89 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			FString(TEXT("entry comment without inputs: ")) + Text);
 	}
 
+	// ---- A global set in the code (`global bool open = true;`): a Set Global node ----
+	{
+		const FString Source =
+			TEXT("global int gold ?= 0;\n")
+			TEXT("Talk(\"x\");    //@1(0, 0)\n")
+			TEXT("global bool open = IsNil(gold);    //@2(4, 0)\n")
+			TEXT("/* global int stage = 1; */    //@3(8, 0)\n")
+			TEXT("open = false;    //@4(12, 0)\n");
+		FBangoGraphDocument Doc;
+		FBangoCompileError Error;
+		const bool bBuilt = Bango::BuildGraph(Source, TEXT("set_global.bango"), Doc, Error);
+		Expect(bBuilt, FString(TEXT("set global: build: ")) + Error.ToString());
+		if (bBuilt)
+		{
+			const TArray<FBangoGraphNode>& N = Doc.Main.Nodes;
+			Expect(Doc.Globals.Num() == 1 && Doc.Globals[0].Name == FString(TEXT("gold")) && Doc.Globals[0].bHasValue && Doc.Globals[0].Value == FString(TEXT("0")),
+				TEXT("set global: only the one at the top is in Globals, with its default"));
+			Expect(N.Num() == 5 && N[2].Kind == EBangoGraphNodeKind::Global && N[2].Text == FString(TEXT("bool open = IsNil(gold)"))
+				&& N[3].Kind == EBangoGraphNodeKind::Global && N[3].bDisabled && N[3].Text == FString(TEXT("int stage = 1")),
+				FString(TEXT("set global: the node, without its keyword: ")) + (N.Num() > 2 ? N[2].Text : FString()));
+			FString Text;
+			FString WriteError;
+			Expect(Bango::WriteGraphText(Doc, Text, WriteError) && Text.Contains(TEXT("global bool open = IsNil(gold);")) && Text.Contains(TEXT("global int gold ?= 0;"))
+				&& Text.Contains(TEXT("/* global int stage = 1; */")), FString(TEXT("set global: written back: ")) + Text + WriteError);
+
+			const FBangoNodeLayoutContext Context = Bango::MakeNodeLayoutContext(Doc, nullptr);
+			if (N.Num() == 5)
+			{
+				const FBangoNodeLayout Layout = Bango::GetNodeLayout(N[2], false, Context);
+				Expect(Layout.Title == FString(TEXT("Set Global Bool")) && Layout.Fields.Num() == 2 && Layout.Fields[0].Label == FString(TEXT("Name"))
+					&& Layout.Fields[0].Text == FString(TEXT("open")) && Layout.Fields[1].Label == FString(TEXT("To")) && Layout.Fields[1].Text == FString(TEXT("IsNil(gold)")),
+					FString(TEXT("set global: layout: ")) + Layout.Title);
+				FBangoGraphNode Array;
+				Array.Kind = EBangoGraphNodeKind::Global;
+				Array.Text = TEXT("string[] names =");
+				const FBangoNodeLayout NewLayout = Bango::GetNodeLayout(Array, false, Context);
+				Expect(NewLayout.Title == FString(TEXT("Set Global String Array")) && NewLayout.Fields.Num() == 2 && !NewLayout.Fields[1].bPresent,
+					FString(TEXT("set global: a new node's layout: ")) + NewLayout.Title);
+				// The Set node after it knows open's type.
+				const FBangoNodeLayout SetLayout = Bango::GetNodeLayout(N[4], false, Context);
+				Expect(SetLayout.Fields.Num() == 2 && SetLayout.Fields[0].VariableType == FString(TEXT("bool")), TEXT("set global: its type is known to the nodes"));
+			}
+			TArray<FBangoGraphVariable> Variables;
+			Bango::GetGraphVariables(Doc, INDEX_NONE, Context, Variables);
+			const FBangoGraphVariable* Open = Variables.FindByPredicate([](const FBangoGraphVariable& V) { return V.Name == FString(TEXT("open")); });
+			Expect(Open && Open->Kind == FBangoGraphVariable::EKind::Global && Open->Type == FString(TEXT("bool")) && Open->Index == INDEX_NONE,
+				TEXT("set global: listed with the globals, with its type"));
+
+			FString Problem;
+			Expect(Bango::ValidateNodeText(EBangoGraphNodeKind::Global, false, TEXT("bool open = true"), Problem), FString(TEXT("set global: valid text: ")) + Problem);
+			Expect(!Bango::ValidateNodeText(EBangoGraphNodeKind::Global, false, TEXT("bool open"), Problem) && Problem.Contains(TEXT("This should set a global")),
+				FString(TEXT("set global: needs a value: ")) + Problem);
+			Expect(!Bango::ValidateNodeText(EBangoGraphNodeKind::Global, false, TEXT("bool open ?= true"), Problem) && Problem.Contains(TEXT("Globals list")),
+				FString(TEXT("set global: not a default: ")) + Problem);
+		}
+	}
+
 	// ---- Globals declared below the top of the file (HoistLateGlobals, the text pane's Apply) ----
 	{
 		struct FHoistCase { const TCHAR* Name; const TCHAR* Source; const TCHAR* Want; const TCHAR* Error; };
 		const FHoistCase HoistCases[] = {
-			{ TEXT("split: its value stays as an assignment"),
-				TEXT("global int gold;\nTalk(\"x\");\nglobal bool open = IsNil(gold);\n"),
-				TEXT("global int gold;\nglobal bool open;\nTalk(\"x\");\nopen = IsNil(gold);\n"), nullptr },
-			{ TEXT("a fixed value is split too (up there it would only be a default)"),
-				TEXT("Talk(\"x\");\nglobal int stage = 2;\n"),
-				TEXT("global int stage;\nTalk(\"x\");\nstage = 2;\n"), nullptr },
+			{ TEXT("a global set in the code is code: it stays"),
+				TEXT("global int gold;\nTalk(\"x\");\nglobal bool open = IsNil(gold);\nif (true)\n{\n\tglobal int stage = 2;\n}\n"),
+				TEXT("global int gold;\nTalk(\"x\");\nglobal bool open = IsNil(gold);\nif (true)\n{\n\tglobal int stage = 2;\n}\n"), nullptr },
+			{ TEXT("a default is moved with it"),
+				TEXT("Talk(\"x\");\nglobal int stage ?= 2;\n"),
+				TEXT("global int stage ?= 2;\nTalk(\"x\");\n"), nullptr },
 			{ TEXT("no value: just moved"),
 				TEXT("#inputs (int _a)\nTalk(\"x\");\nif (true)\n{\n\tglobal int seen;\n\tseen = 1;\n}\n"),
 				TEXT("#inputs (int _a)\nglobal int seen;\nTalk(\"x\");\nif (true)\n{\n\tseen = 1;\n}\n"), nullptr },
 			{ TEXT("above the script variables, and the first line's comment"),
-				TEXT("#inputs ()\n// the count\nscriptVar int _n = 0;\nglobal bool open = true;\n"),
-				TEXT("#inputs ()\nglobal bool open;\n// the count\nscriptVar int _n = 0;\nopen = true;\n"), nullptr },
+				TEXT("#inputs ()\n// the count\nscriptVar int _n = 0;\nglobal bool open;\n"),
+				TEXT("#inputs ()\nglobal bool open;\n// the count\nscriptVar int _n = 0;\n"), nullptr },
 			{ TEXT("in a function"),
-				TEXT("Talk(\"x\");\nfunction void F()\n{\n\tglobal string who = \"a;b\";\n}\n"),
-				TEXT("global string who;\nTalk(\"x\");\nfunction void F()\n{\n\twho = \"a;b\";\n}\n"), nullptr },
-			{ TEXT("already declared at the top, same type: only the assignment stays"),
-				TEXT("global int gold;\nTalk(\"x\");\nglobal int gold = 5;\n"),
-				TEXT("global int gold;\nTalk(\"x\");\ngold = 5;\n"), nullptr },
+				TEXT("Talk(\"x\");\nfunction void F()\n{\n\tglobal string who; who = \"a;b\";\n}\n"),
+				TEXT("global string who;\nTalk(\"x\");\nfunction void F()\n{\n\t who = \"a;b\";\n}\n"), nullptr },
+			{ TEXT("already declared at the top, same type: only the declaration goes"),
+				TEXT("global int gold;\nTalk(\"x\");\nglobal int gold;\n"),
+				TEXT("global int gold;\nTalk(\"x\");\n"), nullptr },
 			{ TEXT("already declared at the top, another type: an error"),
-				TEXT("global int gold;\nTalk(\"x\");\nglobal bool gold = true;\n"), nullptr, TEXT("declared as bool here, but as int") },
+				TEXT("global int gold;\nTalk(\"x\");\nglobal bool gold;\n"), nullptr, TEXT("declared as bool here, but as int") },
 			{ TEXT("nothing to move"),
-				TEXT("global int gold = 1;\nTalk(\"x\");\n"), TEXT("global int gold = 1;\nTalk(\"x\");\n"), nullptr },
+				TEXT("global int gold ?= 1;\nTalk(\"x\");\nglobal int gold = 2;\n"), TEXT("global int gold ?= 1;\nTalk(\"x\");\nglobal int gold = 2;\n"), nullptr },
 		};
 		for (const FHoistCase& Case : HoistCases)
 		{

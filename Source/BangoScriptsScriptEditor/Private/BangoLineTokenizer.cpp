@@ -548,7 +548,7 @@ namespace BangoLineTokenizerPrivate
 				(C == TEXT('|') && N == TEXT('|')) ||
 				(C == TEXT('+') && (N == TEXT('+') || N == TEXT('='))) ||
 				(C == TEXT('-') && (N == TEXT('-') || N == TEXT('='))) ||
-				((C == TEXT('=') || C == TEXT('!') || C == TEXT('<') || C == TEXT('>') || C == TEXT('*') || C == TEXT('/')) && N == TEXT('='));
+				((C == TEXT('=') || C == TEXT('!') || C == TEXT('<') || C == TEXT('>') || C == TEXT('*') || C == TEXT('/') || C == TEXT('?')) && N == TEXT('='));
 			if (bDouble)
 			{
 				Emit(EBangoSyntaxKind::Operator, Pos, 2);

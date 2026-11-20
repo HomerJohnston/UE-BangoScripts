@@ -583,6 +583,9 @@ namespace BangoLexerPrivate
 			case TEXT('|'):
 				if (N == TEXT('|')) return Emit(EBangoTokenKind::OrOr, Loc, 2);
 				return Fail(Loc, TEXT("Unexpected '|'. Did you mean '||'?"));
+			case TEXT('?'):
+				if (N == TEXT('=')) return Emit(EBangoTokenKind::QuestionAssign, Loc, 2);
+				return Fail(Loc, TEXT("Unexpected '?'. A global's default is written '?=', like 'global int gold ?= 0;'."));
 			default:
 				break;
 			}
@@ -629,6 +632,7 @@ namespace Bango
 		case EBangoTokenKind::Colon: return TEXT("':'");
 		case EBangoTokenKind::Dot: return TEXT("'.'");
 		case EBangoTokenKind::Assign: return TEXT("'='");
+		case EBangoTokenKind::QuestionAssign: return TEXT("'?='");
 		case EBangoTokenKind::KwIn: return TEXT("'in'");
 		case EBangoTokenKind::DisabledBegin: return TEXT("'/*'");
 		case EBangoTokenKind::DisabledEnd: return TEXT("'*/'");

@@ -22,8 +22,8 @@
 
 namespace BangoScriptSubsystemPrivate
 {
-	constexpr int32 SaveMagic = 0x4F474E42; // "BNGO"
-	constexpr int32 SaveVersion = 2; // raise it when the save format changes: data in another format is refused, not misread
+	constexpr int32 SubsystemSaveMagic = 0x4F474E42; // "BNGO"
+	constexpr int32 SubsystemSaveVersion = 2; // raise it when the save format changes: data in another format is refused, not misread
 
 	class FWorldEntityResolver : public IBangoEntityResolver
 	{
@@ -998,8 +998,8 @@ bool UBangoScriptSubsystem::SaveState(TArray<uint8>& OutData)
 
 	OutData.Reset();
 	FMemoryWriter Writer(OutData);
-	int32 Magic = SaveMagic;
-	int32 Version = SaveVersion;
+	int32 Magic = SubsystemSaveMagic;
+	int32 Version = SubsystemSaveVersion;
 	Writer << Magic;
 	Writer << Version;
 	Globals->GetStore().Serialize(Writer);
@@ -1049,7 +1049,7 @@ bool UBangoScriptSubsystem::LoadState(const TArray<uint8>& Data)
 	int32 Version = 0;
 	Reader << Magic;
 	Reader << Version;
-	if (Reader.IsError() || Magic != SaveMagic || Version != SaveVersion)
+	if (Reader.IsError() || Magic != SubsystemSaveMagic || Version != SubsystemSaveVersion)
 	{
 		Bango::ReportError(TEXT("Can't load Bango state: the data isn't Bango save data, or is from an incompatible version."));
 		return false;

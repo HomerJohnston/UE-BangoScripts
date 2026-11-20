@@ -165,6 +165,7 @@ namespace Bango
 		case EBangoGraphNodeKind::Assign:   return TEXT("Set");
 		case EBangoGraphNodeKind::IncDec:   return TEXT("Set");
 		case EBangoGraphNodeKind::Local:    return TEXT("Local");
+		case EBangoGraphNodeKind::Global:   return TEXT("Set Global");
 		case EBangoGraphNodeKind::Call:     return TEXT("Call");
 		case EBangoGraphNodeKind::If:       return TEXT("If");
 		case EBangoGraphNodeKind::While:    return TEXT("While");
@@ -599,9 +600,9 @@ namespace BangoGraphPrivate
 			for (; i < Block.Num(); ++i)
 			{
 				const FBangoVarDeclStmt* Decl = Block[i]->As<FBangoVarDeclStmt>();
-				if (!Decl || Decl->IsLocal())
+				if (!Decl || Decl->IsLocal() || Decl->IsGlobalAssignment())
 				{
-					break;
+					break; // code: a node
 				}
 				// Globals go at the top of the file, before the main graph's script variables.
 				if (Decl->bGlobal && (Graph >= 0 || Doc.Main.ScriptVars.Num() > 0))
@@ -664,13 +665,16 @@ namespace BangoGraphPrivate
 
 		int32 BuildNode(int32 Graph, const FBangoStmt& Stmt, TArray<FTarget>* Targets)
 		{
-			if (const FBangoVarDeclStmt* Decl = Stmt.As<FBangoVarDeclStmt>(); Decl && !Decl->IsLocal())
+			const FBangoVarDeclStmt* VarDecl = Stmt.As<FBangoVarDeclStmt>();
+			if (VarDecl && !VarDecl->IsLocal() && !VarDecl->IsGlobalAssignment())
 			{
-				// Globals and scriptVars are only at the top of a graph (ReadDecls); there's no node for one anywhere else.
+				const FBangoVarDeclStmt* Decl = VarDecl;
+				// scriptVars, and globals without a value or with a default, are only at the top of a graph (ReadDecls);
+				// there's no node for one anywhere else.
 				if (!bFailed)
 				{
 					Fail(Decl->Loc.Line, Decl->bGlobal
-						? FString::Printf(TEXT("'%s' is declared here, but globals are declared at the top of the file, after the settings lines (#inputs and the others). Move it there in the text, then open the script again."), *Decl->Name)
+						? FString::Printf(TEXT("'%s' is declared here without a value, or with a default ('?='), but those go at the top of the file, after the settings lines (#inputs and the others). Move it there in the text, or set it here with '=', then open the script again."), *Decl->Name)
 						: FString::Printf(TEXT("'%s' is declared here, but scriptVars are declared at the top of their script or function. Move it there in the text (or drop 'scriptVar' to make it a local), then open the script again."), *Decl->Name));
 					bFailed = true;
 				}
@@ -680,6 +684,12 @@ namespace BangoGraphPrivate
 				FBangoGraphNode& Node = GraphAt(Graph).Nodes.AddDefaulted_GetRef();
 				Node.Kind = NodeKindFor(Stmt.Kind);
 				Node.Text = NodeText(Stmt);
+				if (VarDecl && VarDecl->IsGlobalAssignment())
+				{
+					// `global bool b = true`: the node's text is without its keyword.
+					Node.Kind = EBangoGraphNodeKind::Global;
+					Node.Text = Node.Text.StartsWith(TEXT("global"), ESearchCase::CaseSensitive) ? Node.Text.Mid(6).TrimStart() : Node.Text;
+				}
 				Node.bDisabled = Stmt.bDisabled;
 				if (Stmt.Node.bHasMetadata)
 				{

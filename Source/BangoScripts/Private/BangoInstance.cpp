@@ -4,7 +4,7 @@
 
 namespace BangoInstancePrivate
 {
-	constexpr int32 SaveVersion = 2; // 2: waitUntil. Raise it when the save format changes: data in another format is refused, not misread
+	constexpr int32 InstanceSaveVersion = 2; // 2: waitUntil. Raise it when the save format changes: data in another format is refused, not misread
 
 	static FString TypeText(const FBangoType& Type)
 	{
@@ -306,17 +306,13 @@ bool FBangoInstance::DeclareGlobals(const FBangoProgram& InProgram, FBangoGlobal
 {
 	for (const FBangoGlobalDecl& Global : InProgram.Globals)
 	{
-		const bool bExisted = Globals.Find(Global.Name) != nullptr;
 		if (!Globals.Declare(Global.Name, Global.Type, OutError))
 		{
 			OutLine = Global.Line;
 			return false;
 		}
-		if (!Global.bHasDefault)
-		{
-			continue;
-		}
-		if (!bExisted)
+		// `?= value`: given if it didn't exist (Declare just made it nil) or held nil.
+		if (Global.bHasDefault && !Global.Default.IsNil() && Globals.Find(Global.Name)->IsNil())
 		{
 			FBangoValue Default;
 			if (!ResolveSelf(Global.Default, Default) || !Globals.Set(Global.Name, Default, OutError))
@@ -328,12 +324,6 @@ bool FBangoInstance::DeclareGlobals(const FBangoProgram& InProgram, FBangoGlobal
 				}
 				return false;
 			}
-		}
-		else if (Globals.Find(Global.Name)->IsNil() && Globals.NoteSkippedDefault(Global.Name))
-		{
-			// Another script declared it without a value first, so this default never applies: almost always a mistake.
-			Warnings.Add(FString::Printf(TEXT("%s(%d): global '%s' already exists, holding nil, so its default here isn't used. A script that declared it without a value started first: give that declaration the same default, or set it in a level start script."),
-				*InProgram.FileName, Global.Line, *Global.Name));
 		}
 	}
 	return true;
@@ -2218,9 +2208,9 @@ bool FBangoInstance::MakeReloadedFrames(TArray<FBangoFrame>& OutFrames, FString&
 
 void FBangoInstance::Serialize(FArchive& Ar)
 {
-	int32 Version = SaveVersion;
+	int32 Version = InstanceSaveVersion;
 	Ar << Version;
-	if (Ar.IsLoading() && Version != SaveVersion)
+	if (Ar.IsLoading() && Version != InstanceSaveVersion)
 	{
 		Ar.SetError();
 		return;

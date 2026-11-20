@@ -442,6 +442,17 @@ void FBangoSyntaxMarshaller::SetCursor(const FBangoTextPosition& InCursor)
 	UpdateNameHighlights();
 }
 
+void FBangoSyntaxMarshaller::SetCursorHighlightsShown(bool bShown)
+{
+	if (bShown == bCursorHighlightsShown)
+	{
+		return;
+	}
+	bCursorHighlightsShown = bShown;
+	UpdateBracketHighlights();
+	UpdateNameHighlights();
+}
+
 void FBangoSyntaxMarshaller::UpdateNameHighlights()
 {
 	if (LastLayout == nullptr)
@@ -449,6 +460,10 @@ void FBangoSyntaxMarshaller::UpdateNameHighlights()
 		return;
 	}
 	RemoveHighlights(NameHighlights);
+	if (!bCursorHighlightsShown)
+	{
+		return;
+	}
 	if (!CachedLines.IsValidIndex(BracketCursor.Line) || !CachedTokens.IsValidIndex(BracketCursor.Line))
 	{
 		return;
@@ -528,6 +543,10 @@ void FBangoSyntaxMarshaller::UpdateBracketHighlights()
 		return;
 	}
 	RemoveHighlights(BracketHighlights);
+	if (!bCursorHighlightsShown)
+	{
+		return;
+	}
 
 	const FBangoBracketMatch Match = FBangoEditingAids::FindMatchingBracket(CachedLines, CachedTokens, BracketCursor);
 	if (!Match.bFound)

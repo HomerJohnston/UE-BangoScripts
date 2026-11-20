@@ -45,13 +45,6 @@ public:
 	/** Removes all globals, e.g. when starting a new game. */
 	void ResetAll();
 
-	/**
-	 * A script's default for Name (`global int stage = 1;`) was skipped while the global held nil: another
-	 * declaration, without a value, created it first. True the first time for each global (so it's warned about
-	 * once), until ResetAll or loading.
-	 */
-	bool NoteSkippedDefault(const FString& Name);
-
 	/** Saves or loads every global. Loading replaces the current globals. */
 	void Serialize(FArchive& Ar);
 
@@ -64,7 +57,6 @@ private:
 	void NoteAllChanged() { AllChangedStamp = ++ChangeStamp; ChangeStamps.Reset(); }
 
 	TBangoNameMap<FBangoValue> Globals;
-	TBangoNameMap<bool> WarnedSkippedDefaults;
 	uint64 ChangeStamp = 0;
 	/** Each global's latest change since AllChangedStamp (ones changed only before it aren't kept). */
 	TBangoNameMap<uint64> ChangeStamps;

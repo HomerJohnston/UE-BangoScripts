@@ -64,7 +64,8 @@ bool FBangoLineTokenizerTest::RunTest(const FString& Parameters)
 		}
 	};
 
-	Check(TEXT("global int foundThings = 0;      //@1(0, 0)"), TEXT("DeclKeyword[global] Type[int] Global[foundThings] Operator[=] Number[0] Punctuation[;] Metadata[//@1(0, 0)]"));
+	Check(TEXT("global int foundThings ?= 0;"), TEXT("DeclKeyword[global] Type[int] Global[foundThings] Operator[?=] Number[0] Punctuation[;]"));
+	Check(TEXT("\tglobal bool opened = true;      //@1(0, 0)"), TEXT("DeclKeyword[global] Type[bool] Global[opened] Operator[=] Constant[true] Punctuation[;] Metadata[//@1(0, 0)]"));
 	Check(TEXT("if (IsNil(foundThings) && foundThings >= 10)"), TEXT("Keyword[if] Punctuation[(] Builtin[IsNil] Punctuation[(] Global[foundThings] Punctuation[)] Operator[&&] Global[foundThings] Operator[>=] Number[10]"));
 	Check(TEXT("\tHint(LOCTEXT(\"Countdown\", \"Countdown: {0}\"), 3 - _i);"), TEXT("Call[Hint] Punctuation[(] LocMacro[LOCTEXT] Punctuation[(] LocKey[\"Countdown\"] Punctuation[,] String[\"Countdown: ] Placeholder[{0}] String[\"] Punctuation[)] Punctuation[,] Number[3] Operator[-] Global[_i]"));
 	Check(TEXT("Hint(NSNOTELOCTEXT(\"Ns\", \"K\", \"Hi {Name} `{\", \"note\"));"), TEXT("LocKey[\"Ns\"] Punctuation[,] LocKey[\"K\"] Punctuation[,] String[\"Hi ] Error[{Name}] String[ ] StringEscape[`{] String[\"] Punctuation[,] LocNotes[\"note\"]"));

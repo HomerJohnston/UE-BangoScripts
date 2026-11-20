@@ -157,7 +157,7 @@ namespace BangoDumpPrivate
 			FString Result = FString::Printf(TEXT("(%s %s %s"), S.bGlobal ? TEXT("global") : S.bScriptVar ? TEXT("scriptVar") : TEXT("decl"), *S.Type.ToString(), *S.Name);
 			if (S.Init)
 			{
-				Result += TEXT(" ");
+				Result += S.bDefault ? TEXT(" ?= ") : TEXT(" ");
 				Result += Bango::DumpExpr(*S.Init);
 			}
 			Result += TEXT(")");

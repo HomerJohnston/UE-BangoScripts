@@ -2415,7 +2415,7 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateDeclRow(TSharedPtr<FDeclEntr
 			.Text(FText::FromString(Bango::GetFieldEditText(Field)))
 			.HintText(bGlobal ? LOCTEXT("GlobalNoDefaultHint", "none") : LOCTEXT("LocalNilHint", "nil"))
 			.ToolTipText(bGlobal
-				? LOCTEXT("GlobalValueTooltip", "Its default: given to the global only if it doesn't exist yet (no script has declared it), when this script starts. A fixed value only (a number, a string, true, false, nil, a Bango ID, a text, or an array of those); empty gives none, so a new global starts as nil. To set it every time, do it in the code.")
+				? LOCTEXT("GlobalValueTooltip", "Its default (written ?=): given to the global when this script starts, only if it doesn't exist yet or is nil. A fixed value only (a number, a string, true, false, nil, a Bango ID, a text, or an array of those); empty gives none, so a new global starts as nil. To set it each time, add a Set Global node in the code.")
 				: LOCTEXT("LocalValueTooltip", "The value it starts with, each time the graph starts. A fixed value only (a number, a string, true, false, nil, a Bango ID, a text, or an array of those); empty starts it as nil. Set anything else in the code."))
 			.Font(FCoreStyle::GetDefaultFontStyle("Mono", 9))
 			.SelectAllTextWhenFocused(true)
@@ -4041,8 +4041,8 @@ bool SBangoScriptEditor::ApplyScriptText()
 	}
 	const FString Typed = TextBox->GetText().ToString();
 	FBangoCompileError Error;
-	// Globals go at the top of the file: one declared anywhere else is moved up there (its value, if it has one, is set
-	// where it was, as an assignment).
+	// A global declared without a value, or with a default (?=), goes at the top of the file: one anywhere else is moved
+	// up there. (One set in the code, `global bool b = true;`, is code, and stays.)
 	FString Text;
 	if (!Bango::HoistLateGlobals(Typed, Text, Error))
 	{
