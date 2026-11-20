@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "Framework/Text/BaseTextLayoutMarshaller.h"
 #include "Framework/Text/TextLineHighlight.h"
+#include "Layout/Geometry.h"
 #include "BangoEditingAids.h"
 #include "BangoLineTokenizer.h"
 #include "BangoScriptNames.h"
@@ -22,6 +23,13 @@ struct FBangoTextProbe
 	bool bValid = false;
 	FVector2D AbsolutePosition = FVector2D::ZeroVector;
 	FVector2D AbsoluteSize = FVector2D::ZeroVector;
+};
+
+/** Where the text was last painted (FBangoSyntaxMarshaller::HitTest): the text widget's paint geometry. */
+struct FBangoTextHitMap
+{
+	bool bValid = false;
+	FGeometry Geometry;
 };
 
 class FBangoSyntaxMarshaller : public FBaseTextLayoutMarshaller
@@ -70,6 +78,15 @@ public:
 	const FBangoTextProbe& GetProbe() const { return *Probe; }
 
 	/**
+	 * The character at a point, given in paint space (the space the text was painted in, relative to the window), as
+	 * of the last paint: false off the text (past a line's end, between lines, or not painted yet).
+	 */
+	bool HitTest(const FVector2D& PaintPosition, FBangoTextPosition& OutPosition) const;
+
+	/** Where characters BeginColumn to EndColumn of Line were painted, in paint space; false if they weren't. */
+	bool GetCharactersRect(int32 Line, int32 BeginColumn, int32 EndColumn, FVector2D& OutTopLeft, FVector2D& OutBottomRight) const;
+
+	/**
 	 * Shows Count faint `)`s after the end of Line: the brackets autocomplete left open, not yet typed. Count 0 (or
 	 * Line INDEX_NONE) hides them. They stay until changed, through relayouts, at the end of whatever the line holds.
 	 */
@@ -116,6 +133,9 @@ private:
 	/** Puts the ghost `)`s on the layout, replacing the ones there. */
 	void UpdateGhostHighlight();
 
+	/** Puts the hit map's (invisible) highlights on the layout's lines, replacing the ones there. */
+	void UpdateHitMapHighlights();
+
 	/** Takes Highlights off the layout (those on lines it still has) and empties the list. */
 	void RemoveHighlights(TArray<FTextLineHighlight>& Highlights);
 
@@ -152,6 +172,10 @@ private:
 	TArray<FTextLineHighlight> ErrorHighlights;
 
 	TSharedPtr<ISlateLineHighlighter> GhostHighlighter;
+	/** Draws nothing: records where the text is painted, for HitTest (on every line with text). */
+	TSharedRef<FBangoTextHitMap> HitMap = MakeShared<FBangoTextHitMap>();
+	TSharedPtr<ISlateLineHighlighter> HitMapHighlighter;
+	TArray<FTextLineHighlight> HitMapHighlights;
 	int32 GhostLine = INDEX_NONE;
 	int32 GhostCount = 0;
 	TArray<FTextLineHighlight> GhostHighlights;

@@ -102,6 +102,15 @@ public:
 	/** Whether Column of Line is inside a string or a comment (or its end, for one left open). */
 	static bool IsInStringOrComment(const FString& Line, int32 Column);
 
+	/**
+	 * For the info popup shown when the mouse rests on a name (SBangoTextEditor): the item for the name at Column of
+	 * line LineIndex, from the same items the autocomplete list has for that line (GatherItems), and where the name is
+	 * on the line. False for anything else: a keyword, a number, a string or a comment, an @entity, a vector part, a
+	 * label, a `call`'s Blueprint function, or a name nothing is known about (a global declared elsewhere).
+	 */
+	static bool FindHoverItem(const FBangoScriptNames& Names, const FString& Line, int32 LineIndex, int32 Column,
+		const TArray<FBangoCompletionItem>& CommandItems, FBangoCompletionItem& OutItem, int32& OutStart, int32& OutEnd);
+
 	/** The items starting with Prefix, ignoring case, in their order. */
 	static void Filter(const TArray<FBangoCompletionItem>& Items, const FString& Prefix, TArray<int32>& OutIndices);
 };

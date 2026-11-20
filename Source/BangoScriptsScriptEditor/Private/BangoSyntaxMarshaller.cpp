@@ -88,6 +88,30 @@ namespace BangoSyntaxMarshallerPrivate
 		TSharedRef<FBangoTextProbe> Probe;
 	};
 
+	/** Draws nothing: records the text widget's paint geometry, for FBangoSyntaxMarshaller::HitTest. */
+	class FBangoHitMapHighlighter : public ISlateLineHighlighter
+	{
+	public:
+		explicit FBangoHitMapHighlighter(const TSharedRef<FBangoTextHitMap>& InHitMap)
+			: HitMap(InHitMap)
+		{
+		}
+
+		virtual int32 OnPaint(const FPaintArgs& Args, const FTextLayout::FLineView& Line, const FVector2D Offset, const float Width,
+			const FTextBlockStyle& DefaultStyle, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect,
+			FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
+		{
+			HitMap->Geometry = AllottedGeometry;
+			HitMap->bValid = true;
+			return LayerId;
+		}
+
+	private:
+		TSharedRef<FBangoTextHitMap> HitMap;
+	};
+
+	static constexpr int32 HitMapZOrder = -11;
+
 	/** A red line under a compile error's characters (FBangoSyntaxMarshaller::SetError). */
 	class FBangoErrorHighlighter : public ISlateLineHighlighter
 	{
@@ -285,6 +309,7 @@ FBangoSyntaxMarshaller::FBangoSyntaxMarshaller(TSharedRef<const FBangoSyntaxStyl
 	MatchHighlighter = MakeShared<FBangoBracketHighlighter>(FLinearColor(1.0f, 1.0f, 1.0f, 0.16f));
 	UnmatchedHighlighter = MakeShared<FBangoBracketHighlighter>(FLinearColor(0.9f, 0.1f, 0.1f, 0.45f));
 	ProbeHighlighter = MakeShared<FBangoProbeHighlighter>(Probe);
+	HitMapHighlighter = MakeShared<BangoSyntaxMarshallerPrivate::FBangoHitMapHighlighter>(HitMap);
 	ErrorHighlighter = MakeShared<FBangoErrorHighlighter>();
 
 	const TSharedRef<FBangoGhostTextHighlighter> Ghost = MakeShared<FBangoGhostTextHighlighter>();
@@ -702,6 +727,84 @@ void FBangoSyntaxMarshaller::SetText(const FString& SourceString, FTextLayout& T
 	UpdateErrorHighlight();
 	GhostHighlights.Reset();
 	UpdateGhostHighlight();
+	HitMapHighlights.Reset();
+	UpdateHitMapHighlights();
+}
+
+void FBangoSyntaxMarshaller::UpdateHitMapHighlights()
+{
+	if (LastLayout == nullptr)
+	{
+		return;
+	}
+	RemoveHighlights(HitMapHighlights);
+	const TArray<FTextLayout::FLineModel>& Models = LastLayout->GetLineModels();
+	for (int32 Line = 0; Line < Models.Num(); ++Line)
+	{
+		const int32 Len = Models[Line].Text->Len();
+		if (Len > 0)
+		{
+			FTextLineHighlight Highlight(Line, FTextRange(0, Len), BangoSyntaxMarshallerPrivate::HitMapZOrder, HitMapHighlighter.ToSharedRef());
+			LastLayout->AddLineHighlight(Highlight);
+			HitMapHighlights.Add(Highlight);
+		}
+	}
+}
+
+bool FBangoSyntaxMarshaller::HitTest(const FVector2D& PaintPosition, FBangoTextPosition& OutPosition) const
+{
+	if (LastLayout == nullptr || !HitMap->bValid)
+	{
+		return false;
+	}
+	// Into the layout's space, as Slate's editable text does for a click (its local space, scaled).
+	const FVector2D Relative = FVector2D(HitMap->Geometry.AbsoluteToLocal(PaintPosition)) * HitMap->Geometry.Scale;
+	for (const FTextLayout::FLineView& View : LastLayout->GetLineViews())
+	{
+		if (Relative.Y < View.Offset.Y || Relative.Y >= View.Offset.Y + View.Size.Y)
+		{
+			continue;
+		}
+		ETextHitPoint Hit = ETextHitPoint::WithinText;
+		const FTextLocation Location = LastLayout->GetTextLocationAt(View, Relative, &Hit);
+		if (Hit != ETextHitPoint::WithinText || !Location.IsValid())
+		{
+			return false;
+		}
+		// The hit is the nearer edge of a character: the one under the point is before it if the point is left of it.
+		int32 Column = Location.GetOffset();
+		const FVector2D Edge = LastLayout->GetLocationAt(Location, false);
+		if (Relative.X < Edge.X && Column > 0)
+		{
+			--Column;
+		}
+		OutPosition.Line = Location.GetLineIndex();
+		OutPosition.Column = Column;
+		return true;
+	}
+	return false;
+}
+
+bool FBangoSyntaxMarshaller::GetCharactersRect(int32 Line, int32 BeginColumn, int32 EndColumn, FVector2D& OutTopLeft, FVector2D& OutBottomRight) const
+{
+	if (LastLayout == nullptr || !HitMap->bValid)
+	{
+		return false;
+	}
+	for (const FTextLayout::FLineView& View : LastLayout->GetLineViews())
+	{
+		if (View.ModelIndex != Line || BeginColumn < View.Range.BeginIndex || BeginColumn > View.Range.EndIndex)
+		{
+			continue;
+		}
+		const FVector2D Begin = LastLayout->GetLocationAt(FTextLocation(Line, BeginColumn), false);
+		const FVector2D End = LastLayout->GetLocationAt(FTextLocation(Line, EndColumn), true);
+		const float InverseScale = Inverse(HitMap->Geometry.Scale);
+		OutTopLeft = FVector2D(HitMap->Geometry.LocalToAbsolute(FVector2D(Begin.X, View.Offset.Y) * InverseScale));
+		OutBottomRight = FVector2D(HitMap->Geometry.LocalToAbsolute(FVector2D(FMath::Max(End.X, Begin.X), View.Offset.Y + View.Size.Y) * InverseScale));
+		return true;
+	}
+	return false;
 }
 
 void FBangoSyntaxMarshaller::GetText(FString& TargetString, const FTextLayout& SourceTextLayout)

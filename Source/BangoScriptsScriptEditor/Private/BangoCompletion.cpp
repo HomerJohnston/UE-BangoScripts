@@ -285,6 +285,59 @@ void FBangoCompletion::GatherItems(const FBangoScriptNames& Names, int32 LineInd
 	OutItems = MoveTemp(Sorted);
 }
 
+bool FBangoCompletion::FindHoverItem(const FBangoScriptNames& Names, const FString& Line, int32 LineIndex, int32 Column,
+	const TArray<FBangoCompletionItem>& CommandItems, FBangoCompletionItem& OutItem, int32& OutStart, int32& OutEnd)
+{
+	TArray<FBangoSyntaxToken> Tokens;
+	FBangoLineTokenizer::TokenizeLine(FStringView(Line), Tokens);
+	int32 Found = INDEX_NONE;
+	for (int32 i = 0; i < Tokens.Num(); ++i)
+	{
+		if (Column >= Tokens[i].Start && Column < Tokens[i].Start + Tokens[i].Len)
+		{
+			Found = i;
+			break;
+		}
+	}
+	if (Found == INDEX_NONE)
+	{
+		return false;
+	}
+	const FBangoSyntaxToken& Token = Tokens[Found];
+	const bool bCall = Token.Kind == EBangoSyntaxKind::Call || Token.Kind == EBangoSyntaxKind::Builtin;
+	if (!bCall && Token.Kind != EBangoSyntaxKind::Global)
+	{
+		return false;
+	}
+	// A `call`'s function is a Blueprint function of its target, not one of the script's names.
+	for (int32 i = Found - 1; i >= 0; --i)
+	{
+		if (Tokens[i].Kind == EBangoSyntaxKind::Default && FStringView(Line).Mid(Tokens[i].Start, Tokens[i].Len).TrimStartAndEnd().IsEmpty())
+		{
+			continue;
+		}
+		if (FStringView(Line).Mid(Tokens[i].Start, Tokens[i].Len).Equals(TEXT("call"), ESearchCase::CaseSensitive))
+		{
+			return false;
+		}
+		break;
+	}
+	const FString Name = Line.Mid(Token.Start, Token.Len);
+	TArray<FBangoCompletionItem> Items;
+	GatherItems(Names, LineIndex, CommandItems, Items);
+	for (const FBangoCompletionItem& Item : Items)
+	{
+		if (Item.Kind != EBangoCompletionKind::Keyword && Item.bCallable == bCall && Item.Name.Equals(Name, ESearchCase::CaseSensitive))
+		{
+			OutItem = Item;
+			OutStart = Token.Start;
+			OutEnd = Token.Start + Token.Len;
+			return true;
+		}
+	}
+	return false;
+}
+
 FBangoCompletionInsert FBangoCompletion::MakeInsert(const FBangoCompletionItem& Item, const FString& Line, int32 WordEnd)
 {
 	FBangoCompletionInsert Insert;

@@ -16,6 +16,7 @@
 #include "Widgets/Text/SMultiLineEditableText.h"
 #include "BangoTextMetadata.h"
 #include "BangoCompletion.h"
+#include "BangoEditingAids.h"
 
 struct FBangoInputsSignature;
 
@@ -216,6 +217,21 @@ private:
 	FVector2D GetCompletionWordPosition() const;
 	FVector2D GetCompletionWordSize() const;
 	TSharedRef<SWidget> MakeCompletionPopup();
+
+	/** The registered commands, as autocomplete items (asked for each time: game modules may add commands later). */
+	void GetCommandItems(TArray<FBangoCompletionItem>& OutItems) const;
+
+	/**
+	 * The info popup: with the mouse resting on a name for a moment, its signature or type and its description, as
+	 * autocomplete shows them (FBangoCompletion::FindHoverItem). It closes when the mouse leaves the name, the text
+	 * changes, a button is pressed, or the autocomplete list opens.
+	 */
+	void UpdateHover(double Now);
+	void CloseHover();
+	bool GetHoverWordRect(FVector2D& OutTopLeft, FVector2D& OutBottomRight) const;
+	FVector2D GetHoverWordPosition() const;
+	FVector2D GetHoverWordSize() const;
+	TSharedRef<SWidget> MakeHoverPopup();
 	TSharedRef<ITableRow> MakeCompletionRow(TSharedPtr<FBangoCompletionItem> Item, const TSharedRef<STableViewBase>& OwnerTable);
 	void HandleTextChanged(const FText& NewVisibleText);
 	void HandleTextCommitted(const FText& NewVisibleText, ETextCommit::Type CommitType);
@@ -271,6 +287,26 @@ private:
 	TSharedPtr<class SMenuAnchor> CompletionAnchor;
 	/** Set while this widget opens or closes CompletionAnchor itself, so its OnMenuOpenChanged only reacts to others. */
 	bool bChangingCompletionAnchor = false;
+
+	/** The info popup (UpdateHover): what's shown, where its name is, and the point the mouse is resting on. */
+	TSharedPtr<class SMenuAnchor> HoverAnchor;
+	bool bChangingHoverAnchor = false;
+	bool bHoverOpen = false;
+	/**
+	 * Found, but not opened yet: the anchor is moved onto the name this frame and the popup opened the next, once the
+	 * anchor has been arranged there (opened at once, it showed for a frame where the anchor had been, at the top left).
+	 */
+	bool bHoverPending = false;
+	FBangoCompletionItem HoverItem;
+	int32 HoverLine = INDEX_NONE;
+	int32 HoverStart = 0;
+	int32 HoverEnd = 0;
+	FString HoverLineText;
+	bool bHoverRestValid = false;
+	FBangoTextPosition HoverRest;
+	double HoverRestSince = 0.0;
+	/** The resting place last looked up (and found nothing), so it isn't looked up every frame. */
+	bool bHoverLookedUp = false;
 	/** The text changed since it was last given to BangoScriptReferences (if this is the script it draws). */
 	bool bReferencesDirty = true;
 

@@ -592,6 +592,18 @@ bool FBangoCompletionTest::RunTest(const FString& Parameters)
 	FBangoCompletion::Filter(Items, TEXT("spea"), Shown);
 	TestEqual(TEXT("The script's parameter isn't visible in a function"), Shown.Num(), 0);
 
+	// The info popup: the name under the mouse, from the same items.
+	FBangoCompletionItem Hovered;
+	int32 HoverStart = 0;
+	int32 HoverEnd = 0;
+	const FString CallLine = TEXT("Log(foundThings); // Log");
+	TestTrue(TEXT("Hovering a command"), FBangoCompletion::FindHoverItem(Names, CallLine, 4, 1, Commands, Hovered, HoverStart, HoverEnd)
+		&& Hovered.Name.Equals(TEXT("Log"), ESearchCase::CaseSensitive) && Hovered.bCallable && HoverStart == 0 && HoverEnd == 3);
+	TestTrue(TEXT("Hovering a global"), FBangoCompletion::FindHoverItem(Names, CallLine, 4, 6, Commands, Hovered, HoverStart, HoverEnd)
+		&& Hovered.Name.Equals(TEXT("foundThings"), ESearchCase::CaseSensitive) && Hovered.Detail.Equals(TEXT("int"), ESearchCase::CaseSensitive));
+	TestFalse(TEXT("Hovering a comment"), FBangoCompletion::FindHoverItem(Names, CallLine, 4, 22, Commands, Hovered, HoverStart, HoverEnd));
+	TestFalse(TEXT("Hovering a bracket"), FBangoCompletion::FindHoverItem(Names, CallLine, 4, 3, Commands, Hovered, HoverStart, HoverEnd));
+
 	return true;
 }
 

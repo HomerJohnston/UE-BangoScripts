@@ -328,6 +328,31 @@ void SBangoTextEditor::Construct(const FArguments& InArgs)
 					.Visibility(EVisibility::HitTestInvisible)
 				]
 			]
+
+			// The info popup (UpdateHover), under the name the mouse rests on, the same way.
+			+ SCanvas::Slot()
+			.Position(TAttribute<FVector2D>::CreateSP(this, &SBangoTextEditor::GetHoverWordPosition))
+			.Size(TAttribute<FVector2D>::CreateSP(this, &SBangoTextEditor::GetHoverWordSize))
+			[
+				SAssignNew(HoverAnchor, SMenuAnchor)
+				.Placement(MenuPlacement_BelowAnchor)
+				.Method(EPopupMethod::UseCurrentWindow)
+				.UseApplicationMenuStack(false)
+				.FitInWindow(true)
+				.Visibility(EVisibility::SelfHitTestInvisible)
+				.MenuContent(MakeHoverPopup())
+				.OnMenuOpenChanged_Lambda([this](bool bOpen)
+				{
+					if (!bOpen && bHoverOpen && !bChangingHoverAnchor)
+					{
+						CloseHover();
+					}
+				})
+				[
+					SNew(SSpacer)
+					.Visibility(EVisibility::HitTestInvisible)
+				]
+			]
 		]
 	];
 
@@ -789,6 +814,8 @@ void SBangoTextEditor::Tick(const FGeometry& AllottedGeometry, const double InCu
 	// The cursor's highlights (brackets, the other uses of a name) show only while the text has keyboard focus.
 	Marshaller->SetCursorHighlightsShown(TextBox.IsValid() && TextBox->HasKeyboardFocus());
 
+	UpdateHover(InCurrentTime);
+
 	// The list belongs to the text being typed in: it closes when the text loses keyboard focus.
 	if (bCompletionOpen && (!TextBox.IsValid() || !TextBox->HasKeyboardFocus()))
 	{
@@ -981,23 +1008,7 @@ void SBangoTextEditor::GatherCompletionItems(int32 Line, const FString& LineText
 
 	// The registered commands, asked for each time the list opens (game modules may add commands after this widget is made).
 	TArray<FBangoCompletionItem> Commands;
-	const FBangoCommandTable& Table = FBangoModule::Get().GetCommands();
-	TArray<FString> Names;
-	Table.GetCommandNames(Names);
-	for (const FString& Name : Names)
-	{
-		FBangoCompletionItem Item;
-		Item.Name = Name;
-		Item.Kind = EBangoCompletionKind::Command;
-		Item.bCallable = true;
-		if (const FBangoCommandSignature* Signature = Table.FindCommand(Name))
-		{
-			Item.Detail = Signature->ToString();
-			Item.Description = Signature->CommandDescription;
-			Item.bNoArgs = Signature->Params.IsEmpty() && !Signature->bVariadic;
-		}
-		Commands.Add(Item);
-	}
+	GetCommandItems(Commands);
 
 	FBangoCompletion::GatherItems(Marshaller->GetScriptNames(), Line, Commands, CompletionItems);
 	CompletionItemPtrs.Reset();
@@ -1268,6 +1279,189 @@ TSharedRef<SWidget> SBangoTextEditor::MakeErrorPopup()
 					.Text_Lambda([this]() { return CompileErrorText; })
 					.ColorAndOpacity(FLinearColor(1.0f, 0.45f, 0.4f))
 					.AutoWrapText(true)
+				]
+			]
+		];
+}
+
+void SBangoTextEditor::GetCommandItems(TArray<FBangoCompletionItem>& OutItems) const
+{
+	OutItems.Reset();
+	const FBangoCommandTable& Table = FBangoModule::Get().GetCommands();
+	TArray<FString> Names;
+	Table.GetCommandNames(Names);
+	for (const FString& Name : Names)
+	{
+		FBangoCompletionItem Item;
+		Item.Name = Name;
+		Item.Kind = EBangoCompletionKind::Command;
+		Item.bCallable = true;
+		if (const FBangoCommandSignature* Signature = Table.FindCommand(Name))
+		{
+			Item.Detail = Signature->ToString();
+			Item.Description = Signature->CommandDescription;
+			Item.bNoArgs = Signature->Params.IsEmpty() && !Signature->bVariadic;
+		}
+		OutItems.Add(Item);
+	}
+}
+
+// ---- The info popup ----
+
+void SBangoTextEditor::UpdateHover(double Now)
+{
+	static constexpr double HoverDelaySeconds = 0.5;
+
+	// Where the mouse is, as a character: only while it's over the text, nothing is pressed and the list isn't open.
+	FBangoTextPosition At;
+	bool bOnText = false;
+	if (TextBox.IsValid() && TextBox->IsHovered() && !bCompletionOpen && FSlateApplication::Get().GetPressedMouseButtons().IsEmpty())
+	{
+		// The cursor is in desktop space; the text was painted in the window's space: through this widget's two geometries.
+		const FVector2D Local = GetTickSpaceGeometry().AbsoluteToLocal(FSlateApplication::Get().GetCursorPos());
+		bOnText = Marshaller->HitTest(FVector2D(GetPaintSpaceGeometry().LocalToAbsolute(Local)), At);
+	}
+
+	// Shown (or about to be): it stays while the mouse is on its name and the line is as it was.
+	if (bHoverOpen || bHoverPending)
+	{
+		const TArray<FString>& Lines = Metadata.GetLines();
+		const bool bStill = bOnText && At.Line == HoverLine && At.Column >= HoverStart && At.Column < HoverEnd
+			&& Lines.IsValidIndex(HoverLine) && Lines[HoverLine].Equals(HoverLineText, ESearchCase::CaseSensitive);
+		if (bStill)
+		{
+			if (bHoverPending)
+			{
+				// The anchor has been arranged over the name since last frame: open it there.
+				bHoverPending = false;
+				bHoverOpen = true;
+				if (HoverAnchor.IsValid())
+				{
+					TGuardValue<bool> Changing(bChangingHoverAnchor, true);
+					HoverAnchor->SetIsOpen(true, /*bFocusMenu*/ false);
+				}
+			}
+			return;
+		}
+		CloseHover();
+	}
+
+	// Not shown: once the mouse has rested on one character for a moment, look up what's there.
+	if (!bOnText)
+	{
+		bHoverRestValid = false;
+		return;
+	}
+	if (!bHoverRestValid || At.Line != HoverRest.Line || At.Column != HoverRest.Column)
+	{
+		bHoverRestValid = true;
+		HoverRest = At;
+		HoverRestSince = Now;
+		bHoverLookedUp = false;
+		return;
+	}
+	if (bHoverLookedUp || Now - HoverRestSince < HoverDelaySeconds)
+	{
+		return;
+	}
+	bHoverLookedUp = true;
+
+	const TArray<FString>& Lines = Metadata.GetLines();
+	if (!Lines.IsValidIndex(At.Line))
+	{
+		return;
+	}
+	TArray<FBangoCompletionItem> Commands;
+	GetCommandItems(Commands);
+	if (!FBangoCompletion::FindHoverItem(Marshaller->GetScriptNames(), Lines[At.Line], At.Line, At.Column, Commands, HoverItem, HoverStart, HoverEnd))
+	{
+		return;
+	}
+	HoverLine = At.Line;
+	HoverLineText = Lines[At.Line];
+	bHoverPending = true; // opened next frame, once the anchor is over the name
+}
+
+void SBangoTextEditor::CloseHover()
+{
+	bHoverOpen = false;
+	bHoverPending = false;
+	HoverLine = INDEX_NONE;
+	if (HoverAnchor.IsValid() && HoverAnchor->IsOpen())
+	{
+		TGuardValue<bool> Changing(bChangingHoverAnchor, true);
+		HoverAnchor->SetIsOpen(false);
+	}
+}
+
+bool SBangoTextEditor::GetHoverWordRect(FVector2D& OutTopLeft, FVector2D& OutBottomRight) const
+{
+	FVector2D TopLeft, BottomRight;
+	if ((!bHoverOpen && !bHoverPending) || !Marshaller->GetCharactersRect(HoverLine, HoverStart, HoverEnd, TopLeft, BottomRight))
+	{
+		return false;
+	}
+	// In paint space, like the autocomplete probe (GetCompletionWordRect).
+	const FGeometry& Geometry = GetPaintSpaceGeometry();
+	OutTopLeft = Geometry.AbsoluteToLocal(TopLeft);
+	OutBottomRight = Geometry.AbsoluteToLocal(BottomRight);
+	return true;
+}
+
+FVector2D SBangoTextEditor::GetHoverWordPosition() const
+{
+	FVector2D TopLeft, BottomRight;
+	return GetHoverWordRect(TopLeft, BottomRight) ? TopLeft : FVector2D::ZeroVector;
+}
+
+FVector2D SBangoTextEditor::GetHoverWordSize() const
+{
+	FVector2D TopLeft, BottomRight;
+	return GetHoverWordRect(TopLeft, BottomRight) ? FVector2D::Max(BottomRight - TopLeft, FVector2D(1.0f, 1.0f)) : FVector2D(1.0f, 1.0f);
+}
+
+TSharedRef<SWidget> SBangoTextEditor::MakeHoverPopup()
+{
+	// The signature (or a variable's kind and type), in the text's colours, then the description, as the list shows them.
+	return SNew(SBorder)
+		.Visibility_Lambda([this]() { return bHoverOpen ? EVisibility::HitTestInvisible : EVisibility::Collapsed; })
+		.BorderImage(FAppStyle::GetBrush("Menu.Background"))
+		.Padding(FMargin(8.0f, 5.0f))
+		[
+			SNew(SBox)
+			.MaxDesiredWidth(520.0f)
+			[
+				SNew(SVerticalBox)
+
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				[
+					SNew(STextBlock)
+					.TextStyle(&SyntaxStyle->GetDefaultStyle())
+					.AutoWrapText(true)
+					.Text_Lambda([this]()
+					{
+						const FBangoCompletionItem& Item = HoverItem;
+						if (Item.bCallable)
+						{
+							return FText::FromString(Item.Detail.IsEmpty() ? Item.Name + TEXT("(...)") : Item.Detail);
+						}
+						const TCHAR* Kind = Item.Kind == EBangoCompletionKind::Parameter ? TEXT("parameter")
+							: Item.Kind == EBangoCompletionKind::Global ? TEXT("global") : TEXT("local");
+						return FText::FromString(FString::Printf(TEXT("%s %s %s"), Kind, *Item.Detail, *Item.Name));
+					})
+				]
+
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(FMargin(0.0f, 4.0f, 0.0f, 0.0f))
+				[
+					SNew(STextBlock)
+					.AutoWrapText(true)
+					.Font(FAppStyle::GetFontStyle("SmallFont"))
+					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+					.Visibility_Lambda([this]() { return HoverItem.Description.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
+					.Text_Lambda([this]() { return FText::FromString(HoverItem.Description); })
 				]
 			]
 		];
