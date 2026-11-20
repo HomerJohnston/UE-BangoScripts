@@ -266,8 +266,12 @@ namespace Bango
 	 * - Level: an actor placed in a level, with no Bango ID name: '%' and its path in the level, without Play in
 	 *   Editor's prefix, so it's the same each time the level is played (MakeLevelEntityID);
 	 * - Automatic: an actor spawned while playing, with no Bango ID name: '$' and a random GUID's 32 hex digits, kept
-	 *   on a Bango ID component Bango adds to it, so a save system that saves its components keeps it too.
-	 * Only Named ones can be written in a script. People are shown the others as the actor's name (GetEntityDisplayName).
+	 *   on a Bango ID component Bango adds to it, so a save system that saves its components keeps it too. Or a
+	 *   component added while playing: kept on it if it's an IBangoEntity;
+	 * - Component: a component whose name is the same each time (made by its actor's class, Blueprint or level): its
+	 *   actor's ID, '|', and its name (MakeComponentEntityID), like `door_1|Trigger`.
+	 * Only Named ones can be written in a script. People are shown the others as the actor's name, or the actor's
+	 * and the component's, `BP_Door_3 (Trigger)` (GetEntityDisplayName).
 	 */
 	enum class EBangoEntityIDKind : uint8
 	{
@@ -275,6 +279,7 @@ namespace Bango
 		Keyword,
 		Level,
 		Automatic,
+		Component,
 		/** Not any of those: an empty name, or one no ID could have. */
 		Invalid,
 	};
@@ -286,26 +291,34 @@ namespace Bango
 	/** The Automatic ID for a GUID, given as its 32 hex digits. */
 	BANGOSCRIPTS_API FString MakeAutomaticEntityID(const FString& GuidDigits);
 
+	/** The Component ID for the component named ComponentName on the actor whose ID is OwnerID. */
+	BANGOSCRIPTS_API FString MakeComponentEntityID(const FString& OwnerID, const FString& ComponentName);
+
+	/** A Component ID's actor's ID and component name; false for any other name. */
+	BANGOSCRIPTS_API bool SplitComponentEntityID(const FString& Name, FString& OutOwnerID, FString& OutComponentName);
+
 	/** A Level ID's actor path (without the '%'), or empty for any other name. */
 	BANGOSCRIPTS_API FString GetLevelEntityPath(const FString& Name);
 
 	/**
-	 * Remembers how to show a Level or Automatic ID to people: its actor's name, as the level editor's Outliner shows
-	 * it (its label). Kept after the actor is gone, so a script holding the ID can still say which actor it was.
+	 * Remembers how to show a Level, Automatic or Component ID to people: its actor's name, as the level editor's Outliner
+	 * shows it (its label), or `BP_Door_3 (Trigger)` for a component. Kept after it's gone, so a script holding the ID
+	 * can still say which it was.
 	 */
 	BANGOSCRIPTS_API void SetEntityDisplayName(const FString& Name, const FString& DisplayName);
 
 	/**
 	 * How to show an entity's name to people (in Format, WriteLog, errors and the debugger): a Named one as it is;
-	 * `player` and `self` as those words; a Level or Automatic one as its actor's name (SetEntityDisplayName). A Level
-	 * one never named that way shows the last part of its path (the actor's object name); an Automatic one, "an
-	 * actor that's no longer here".
+	 * `player` and `self` as those words; a Level, Automatic or Component one as its actor's name, or its actor's and
+	 * its own (SetEntityDisplayName). A Level one never named that way shows the last part of its path (the actor's
+	 * object name); a Component one, its actor's shown that way and its name; an Automatic one, "something that's no
+	 * longer here".
 	 */
 	BANGOSCRIPTS_API FString GetEntityDisplayName(const FString& Name);
 
 	/**
-	 * Why an entity's actor can't be found, for errors: no actor with that Bango ID name, no player pawn right now, or
-	 * the actor being gone (destroyed, or not in the level).
+	 * Why an entity's actor or component can't be found, for errors: no actor with that Bango ID name, no player pawn
+	 * right now, or it being gone (destroyed or removed, or not in the level).
 	 */
 	BANGOSCRIPTS_API FString DescribeMissingEntity(const FString& Name);
 

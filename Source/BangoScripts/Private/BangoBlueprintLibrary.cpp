@@ -5,6 +5,7 @@
 #include "BangoGlobalsSubsystem.h"
 #include "BangoScriptAsset.h"
 #include "BangoLog.h"
+#include "Components/ActorComponent.h"
 #include "GameFramework/Actor.h"
 
 namespace BangoBlueprintPrivate
@@ -104,11 +105,11 @@ namespace Bango
 
 namespace BangoBlueprintPrivate
 {
-	static FBangoBlueprintArgs AddEntity(const FBangoBlueprintArgs& Args, const AActor* Actor, FBangoValue& OutValue)
+	static FBangoBlueprintArgs AddEntity(const FBangoBlueprintArgs& Args, const UObject* Object, FBangoValue& OutValue)
 	{
 		FBangoBlueprintArgs Result = Args;
 		FString Error;
-		if (!Bango::ActorToEntity(Actor, OutValue, Error) && Result.Error.IsEmpty())
+		if (!Bango::ObjectToEntity(Object, OutValue, Error) && Result.Error.IsEmpty())
 		{
 			Result.Error = FString::Printf(TEXT("Argument %d: %s"), Args.Values.Num() + 1, *Error);
 		}
@@ -178,6 +179,14 @@ FBangoBlueprintArgs UBangoBlueprintLibrary::AddBangoArgText(const FBangoBlueprin
 }
 
 FBangoBlueprintArgs UBangoBlueprintLibrary::AddBangoArgActor(const FBangoBlueprintArgs& Args, AActor* Value)
+{
+	FBangoValue Entity;
+	FBangoBlueprintArgs Result = AddEntity(Args, Value, Entity);
+	Result.Add(Entity);
+	return Result;
+}
+
+FBangoBlueprintArgs UBangoBlueprintLibrary::AddBangoArgComponent(const FBangoBlueprintArgs& Args, UActorComponent* Value)
 {
 	FBangoValue Entity;
 	FBangoBlueprintArgs Result = AddEntity(Args, Value, Entity);

@@ -865,6 +865,14 @@ namespace Bango
 		{
 			return EBangoEntityIDKind::Invalid;
 		}
+		int32 Bar = INDEX_NONE;
+		if (Name.FindLastChar(TEXT('|'), Bar))
+		{
+			// A component: its actor's ID (of another kind), then its name.
+			const EBangoEntityIDKind OwnerKind = GetEntityIDKind(Name.Left(Bar));
+			const bool bOwnerValid = OwnerKind != EBangoEntityIDKind::Invalid && OwnerKind != EBangoEntityIDKind::Component;
+			return bOwnerValid && Bar + 1 < Name.Len() ? EBangoEntityIDKind::Component : EBangoEntityIDKind::Invalid;
+		}
 		switch (Name[0])
 		{
 		case TEXT('#'):
@@ -903,6 +911,23 @@ namespace Bango
 		return FString(TEXT("$")) + GuidDigits;
 	}
 
+	FString MakeComponentEntityID(const FString& OwnerID, const FString& ComponentName)
+	{
+		return OwnerID + TEXT("|") + ComponentName;
+	}
+
+	bool SplitComponentEntityID(const FString& Name, FString& OutOwnerID, FString& OutComponentName)
+	{
+		int32 Bar = INDEX_NONE;
+		if (GetEntityIDKind(Name) != EBangoEntityIDKind::Component || !Name.FindLastChar(TEXT('|'), Bar))
+		{
+			return false;
+		}
+		OutOwnerID = Name.Left(Bar);
+		OutComponentName = Name.Mid(Bar + 1);
+		return true;
+	}
+
 	FString GetLevelEntityPath(const FString& Name)
 	{
 		return GetEntityIDKind(Name) == EBangoEntityIDKind::Level ? Name.Mid(1) : FString();
@@ -920,7 +945,7 @@ namespace Bango
 	void SetEntityDisplayName(const FString& Name, const FString& DisplayName)
 	{
 		const EBangoEntityIDKind Kind = GetEntityIDKind(Name);
-		if ((Kind == EBangoEntityIDKind::Level || Kind == EBangoEntityIDKind::Automatic) && !DisplayName.IsEmpty())
+		if ((Kind == EBangoEntityIDKind::Level || Kind == EBangoEntityIDKind::Automatic || Kind == EBangoEntityIDKind::Component) && !DisplayName.IsEmpty())
 		{
 			EntityNamesPrivate::GetDisplayNames().Add(Name, DisplayName);
 		}
@@ -933,13 +958,19 @@ namespace Bango
 			return Keyword;
 		}
 		const EBangoEntityIDKind Kind = GetEntityIDKind(Name);
-		if (Kind != EBangoEntityIDKind::Level && Kind != EBangoEntityIDKind::Automatic)
+		if (Kind != EBangoEntityIDKind::Level && Kind != EBangoEntityIDKind::Automatic && Kind != EBangoEntityIDKind::Component)
 		{
 			return Name;
 		}
 		if (const FString* Known = EntityNamesPrivate::GetDisplayNames().Find(Name))
 		{
 			return *Known;
+		}
+		FString OwnerID;
+		FString ComponentName;
+		if (SplitComponentEntityID(Name, OwnerID, ComponentName))
+		{
+			return FString::Printf(TEXT("%s (%s)"), *GetEntityDisplayName(OwnerID), *ComponentName);
 		}
 		if (Kind == EBangoEntityIDKind::Level)
 		{
@@ -955,7 +986,7 @@ namespace Bango
 			}
 			return Cut != INDEX_NONE ? Name.Mid(Cut + 1) : Name.Mid(1);
 		}
-		return TEXT("an actor that's no longer here");
+		return TEXT("something that's no longer here");
 	}
 
 	FString DescribeMissingEntity(const FString& Name)
@@ -967,8 +998,11 @@ namespace Bango
 		switch (GetEntityIDKind(Name))
 		{
 		case EBangoEntityIDKind::Level:
-		case EBangoEntityIDKind::Automatic:
 			return FString::Printf(TEXT("The actor '%s' isn't in the level any more (it was destroyed, or its level isn't loaded)."), *GetEntityDisplayName(Name));
+		case EBangoEntityIDKind::Automatic:
+			return FString::Printf(TEXT("'%s' isn't in the level any more (it was destroyed or removed, or its level isn't loaded)."), *GetEntityDisplayName(Name));
+		case EBangoEntityIDKind::Component:
+			return FString::Printf(TEXT("The component '%s' isn't there any more (it was removed, or its actor is gone)."), *GetEntityDisplayName(Name));
 		default:
 			return FString::Printf(TEXT("No actor is registered with the Bango ID name '%s'. Check the name on the actor's Bango ID component, and that the actor is in the level."), *Name);
 		}

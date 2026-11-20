@@ -1,4 +1,5 @@
 #include "BangoReflectedCall.h"
+#include "Components/ActorComponent.h"
 
 #include "BangoActorRegistry.h"
 #include "BangoIDActorComponent.h"
@@ -108,12 +109,13 @@ namespace BangoReflectedCallPrivate
 		return Text;
 	}
 
-	/** "@light (BP_Light)" */
-	static FString DescribeTarget(const FString& EntityName, const AActor* Actor)
+	/** "@light (BP_Light)", or "BP_Door_3 (Trigger) (BangoTriggerComponent)" for one without a Bango ID name. */
+	static FString DescribeTarget(const FString& EntityName, const UObject* Object)
 	{
-		FString ClassName = Actor->GetClass()->GetName();
+		FString ClassName = Object->GetClass()->GetName();
 		ClassName.RemoveFromEnd(TEXT("_C"));
-		return FString::Printf(TEXT("@%s (%s)"), *EntityName, *ClassName);
+		const bool bNamed = Bango::GetEntityIDKind(EntityName) == Bango::EBangoEntityIDKind::Named;
+		return FString::Printf(TEXT("%s%s (%s)"), bNamed ? TEXT("@") : TEXT(""), *Bango::GetEntityDisplayName(EntityName), *ClassName);
 	}
 
 	/** Without spaces and other characters a Bango name can't have, for "did you mean". */
@@ -178,15 +180,16 @@ namespace BangoReflectedCallPrivate
 		return Found;
 	}
 
-	static AActor* ResolveActor(const UObject* WorldContext, const FBangoValue& Entity, FString& OutError)
+	/** The actor or component an entity stands for, or null (OutError). */
+	static UObject* ResolveEntity(const UObject* WorldContext, const FBangoValue& Entity, FString& OutError)
 	{
 		UBangoActorRegistry* Registry = UBangoActorRegistry::Get(WorldContext);
-		AActor* Actor = Registry ? Registry->FindActor(Entity.GetEntityName()) : nullptr;
-		if (!Actor)
+		UObject* Object = Registry ? Registry->FindEntity(Entity.GetEntityName()) : nullptr;
+		if (!Object)
 		{
 			OutError = Bango::DescribeMissingEntity(Entity.GetEntityName());
 		}
-		return Actor;
+		return Object;
 	}
 
 	/** Puts Value in the parameter at ValuePtr. */
@@ -306,19 +309,19 @@ namespace BangoReflectedCallPrivate
 			{
 				return WrongType();
 			}
-			AActor* Actor = ResolveActor(WorldContext, Value, OutError);
-			if (!Actor)
+			UObject* Object = ResolveEntity(WorldContext, Value, OutError);
+			if (!Object)
 			{
 				OutError = FString::Printf(TEXT("'%s': %s"), *Property->GetName(), *OutError);
 				return false;
 			}
-			if (!Actor->IsA(ObjectProperty->PropertyClass))
+			if (!Object->IsA(ObjectProperty->PropertyClass))
 			{
-				OutError = FString::Printf(TEXT("'%s' must be a %s, but @%s is a %s."), *Property->GetName(), *ObjectProperty->PropertyClass->GetName(),
-					*Value.GetEntityName(), *Actor->GetClass()->GetName());
+				OutError = FString::Printf(TEXT("'%s' must be a %s, but %s is a %s."), *Property->GetName(), *ObjectProperty->PropertyClass->GetName(),
+					*DescribeTarget(Value.GetEntityName(), Object), *Object->GetClass()->GetName());
 				return false;
 			}
-			ObjectProperty->SetObjectPropertyValue(ValuePtr, Actor);
+			ObjectProperty->SetObjectPropertyValue(ValuePtr, Object);
 			return true;
 		}
 		return WrongType();
@@ -385,16 +388,16 @@ namespace BangoReflectedCallPrivate
 		}
 		if (const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
 		{
-			const AActor* Actor = Cast<AActor>(ObjectProperty->GetObjectPropertyValue(ValuePtr));
-			if (!Actor)
+			const UObject* Object = ObjectProperty->GetObjectPropertyValue(ValuePtr);
+			if (!Object)
 			{
 				OutValue = FBangoValue::MakeNil(FBangoType::Entity());
 				return true;
 			}
 			FString EntityError;
-			if (!Bango::ActorToEntity(Actor, OutValue, EntityError))
+			if (!Bango::ObjectToEntity(Object, OutValue, EntityError))
 			{
-				OutError = FString::Printf(TEXT("it returned the actor %s, which a script can't use: %s"), *Actor->GetActorNameOrLabel(), *EntityError);
+				OutError = FString::Printf(TEXT("it returned %s, which a script can't use: %s"), *Object->GetName(), *EntityError);
 				return false;
 			}
 			return true;
@@ -453,7 +456,8 @@ namespace Bango
 		}
 		if (const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
 		{
-			if (ObjectProperty->PropertyClass && ObjectProperty->PropertyClass->IsChildOf(AActor::StaticClass()))
+			// An actor or an actor component (Bango entities stand for those).
+			if (ObjectProperty->PropertyClass && (ObjectProperty->PropertyClass->IsChildOf(AActor::StaticClass()) || ObjectProperty->PropertyClass->IsChildOf(UActorComponent::StaticClass())))
 			{
 				OutType = FBangoType::Entity();
 				return true;
@@ -509,14 +513,14 @@ namespace Bango
 			OutError = FString::Printf(TEXT("'call %s': the target must be an entity."), *Name);
 			return false;
 		}
-		FString ActorError;
-		AActor* Actor = ResolveActor(WorldContext, Target, ActorError);
-		if (!Actor)
+		FString TargetError;
+		UObject* Object = ResolveEntity(WorldContext, Target, TargetError);
+		if (!Object)
 		{
-			OutError = FString::Printf(TEXT("'call %s': %s"), *Name, *ActorError);
+			OutError = FString::Printf(TEXT("'call %s': %s"), *Name, *TargetError);
 			return false;
 		}
-		return CallBangoCallableOn(Actor, DescribeTarget(Target.GetEntityName(), Actor), WorldContext, Name, Args, bWantResult, OutResult, OutError);
+		return CallBangoCallableOn(Object, DescribeTarget(Target.GetEntityName(), Object), WorldContext, Name, Args, bWantResult, OutResult, OutError);
 	}
 
 	bool CallBangoCallableOn(UObject* Object, const FString& TargetText, const UObject* WorldContext, const FString& Name,

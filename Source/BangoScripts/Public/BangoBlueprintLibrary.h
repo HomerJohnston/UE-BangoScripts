@@ -11,6 +11,7 @@ class UBangoScriptAsset;
 #include "BangoBlueprintLibrary.generated.h"
 
 class AActor;
+class UActorComponent;
 
 /**
  * Arguments being collected for a script spawn, built by the Spawn Bango Script node.
@@ -116,6 +117,10 @@ public:
 	/** Adds the next parameter's value. */
 	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Add Bango Arg (Actor (Entity))"))
 	static FBangoBlueprintArgs AddBangoArgActor(const FBangoBlueprintArgs& Args, AActor* Value);
+
+	/** Adds the next parameter's value: an entity standing for the component. */
+	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Add Bango Arg (Component (Entity))"))
+	static FBangoBlueprintArgs AddBangoArgComponent(const FBangoBlueprintArgs& Args, UActorComponent* Value);
 
 	/** Adds the next parameter's value. */
 	UFUNCTION(BlueprintPure, Category = "Bango|Args", meta = (DisplayName = "Add Bango Arg (Vector2)"))

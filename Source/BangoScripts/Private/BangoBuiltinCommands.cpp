@@ -65,7 +65,8 @@ namespace BangoBuiltinPrivate
 		return true;
 	}
 
-	static AActor* ResolveActor(FBangoCommandCall& Call, const FBangoValue& Entity)
+	/** The actor or component an entity stands for; null, with the call's error, if it's nil or isn't there. */
+	static UObject* ResolveEntity(FBangoCommandCall& Call, const FBangoValue& Entity)
 	{
 		if (Entity.IsNil())
 		{
@@ -73,12 +74,47 @@ namespace BangoBuiltinPrivate
 			return nullptr;
 		}
 		UBangoActorRegistry* Registry = UBangoActorRegistry::Get(Call.WorldContext);
-		AActor* Actor = Registry ? Registry->FindActor(Entity.GetEntityName()) : nullptr;
-		if (!Actor)
+		UObject* Object = Registry ? Registry->FindEntity(Entity.GetEntityName()) : nullptr;
+		if (!Object)
 		{
 			Call.Error = Bango::DescribeMissingEntity(Entity.GetEntityName());
 		}
-		return Actor;
+		return Object;
+	}
+
+	/**
+	 * What a command that places, turns or hides things works on: an actor (OutActor), or a scene component, which has
+	 * a place of its own (OutScene). Commands act on the entity itself, so a component is never taken to mean its
+	 * actor. Any other component fails, with the call's error naming the command.
+	 */
+	static bool ResolvePlaced(FBangoCommandCall& Call, const FBangoValue& Entity, const TCHAR* Command, AActor*& OutActor, USceneComponent*& OutScene)
+	{
+		OutActor = nullptr;
+		OutScene = nullptr;
+		UObject* Object = ResolveEntity(Call, Entity);
+		if (!Object)
+		{
+			return false;
+		}
+		OutActor = Cast<AActor>(Object);
+		OutScene = Cast<USceneComponent>(Object);
+		if (!OutActor && !OutScene)
+		{
+			Call.Error = FString::Printf(TEXT("'%s' is a component without a place in the world (it isn't a scene component), so %s can't be used on it."),
+				*Bango::GetEntityDisplayName(Entity.GetEntityName()), Command);
+			return false;
+		}
+		return true;
+	}
+
+	/** Where something ResolvePlaced found is, and which way it faces. */
+	static FVector GetPlacedLocation(const AActor* Actor, const USceneComponent* Scene)
+	{
+		return Actor ? Actor->GetActorLocation() : Scene->GetComponentLocation();
+	}
+	static FVector GetPlacedForward(const AActor* Actor, const USceneComponent* Scene)
+	{
+		return Actor ? Actor->GetActorForwardVector() : Scene->GetForwardVector();
 	}
 
 	/**
@@ -86,13 +122,12 @@ namespace BangoBuiltinPrivate
 	 * from 0 up to 360, clockwise seen from above: 0 is +X, 90 is +Y, as an upright actor's yaw. Fails (the call's error)
 	 * if it faces straight up or down, which has no bearing.
 	 */
-	static bool GetCompassBearing(FBangoCommandCall& Call, const AActor& Actor, double& OutBearing)
+	static bool GetCompassBearing(FBangoCommandCall& Call, const FVector& Forward, const FString& Who, double& OutBearing)
 	{
-		const FVector Forward = Actor.GetActorForwardVector();
 		const FVector2D Flat(Forward.X, Forward.Y);
 		if (Flat.IsNearlyZero(UE_KINDA_SMALL_NUMBER))
 		{
-			Call.Fail(FString::Printf(TEXT("'%s' faces straight up or down, so it has no compass direction."), *Actor.GetName()));
+			Call.Fail(FString::Printf(TEXT("'%s' faces straight up or down, so it has no compass direction."), *Who));
 			return false;
 		}
 		const double Degrees = FMath::RadiansToDegrees(FMath::Atan2(Flat.Y, Flat.X));
@@ -1055,16 +1090,22 @@ namespace Bango
 		{
 			FBangoCommand Command;
 			Command.Signature = FBangoCommandSignature::Make(TEXT("SetPos")).Target(Entity).Param(TEXT("Pos"), Vector3).InCategory(TEXT("Actors"))
-				.Describe(TEXT("Moves the actor. A character stands on Pos: its feet go there, lifted onto a slope if the ground rises under it."));
+				.Describe(TEXT("Moves the actor, or the scene component (in world space). A character stands on Pos: its feet go there, lifted onto a slope if the ground rises under it."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{
-				AActor* Actor = ResolveActor(Call, Call.Target);
-				if (!Actor || !RequireArgs(Call, 1))
+				AActor* Actor = nullptr;
+				USceneComponent* Scene = nullptr;
+				if (!ResolvePlaced(Call, Call.Target, TEXT("SetPos"), Actor, Scene) || !RequireArgs(Call, 1))
 				{
 					return EBangoCommandResult::Failed;
 				}
 				const FBangoValue& Pos = Call.Args[0];
 				FVector Location(Pos.GetVectorPart(0), Pos.GetVectorPart(1), Pos.GetVectorPart(2));
+				if (Scene)
+				{
+					Scene->SetWorldLocation(Location, false, nullptr, ETeleportType::TeleportPhysics);
+					return EBangoCommandResult::Done;
+				}
 				float HalfHeight = 0.0f;
 				float Radius = 0.0f;
 				if (GetCharacterCapsule(Actor, HalfHeight, Radius))
@@ -1082,22 +1123,19 @@ namespace Bango
 		{
 			FBangoCommand Command;
 			Command.Signature = FBangoCommandSignature::Make(TEXT("GetPos")).Param(TEXT("Entity"), Entity).Returns(Vector3).InCategory(TEXT("Actors"))
-				.Describe(TEXT("The actor's location. For a character, where its feet are (the bottom of its capsule), as SetPos takes it."));
+				.Describe(TEXT("The actor's or scene component's location (world space). For a character, where its feet are (the bottom of its capsule), as SetPos takes it."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{
-				if (!RequireArgs(Call, 1))
+				AActor* Actor = nullptr;
+				USceneComponent* Scene = nullptr;
+				if (!RequireArgs(Call, 1) || !ResolvePlaced(Call, Call.Args[0], TEXT("GetPos"), Actor, Scene))
 				{
 					return EBangoCommandResult::Failed;
 				}
-				const AActor* Actor = ResolveActor(Call, Call.Args[0]);
-				if (!Actor)
-				{
-					return EBangoCommandResult::Failed;
-				}
-				FVector Location = Actor->GetActorLocation();
+				FVector Location = GetPlacedLocation(Actor, Scene);
 				float HalfHeight = 0.0f;
 				float Radius = 0.0f;
-				if (GetCharacterCapsule(Actor, HalfHeight, Radius))
+				if (Actor && GetCharacterCapsule(Actor, HalfHeight, Radius))
 				{
 					Location -= FVector::UpVector * HalfHeight;
 				}
@@ -1111,16 +1149,14 @@ namespace Bango
 		{
 			FBangoCommand Command;
 			Command.Signature = FBangoCommandSignature::Make(TEXT("GetDir")).Param(TEXT("Entity"), Entity).Returns(Double).InCategory(TEXT("Actors"))
-				.Describe(TEXT("The actor's compass bearing, in degrees from 0 up to 360: which way it faces, seen from above. 0 is the world's +X, 90 is +Y (turning clockwise from above), as an upright actor's yaw."));
+				.Describe(TEXT("The actor's or scene component's compass bearing, in degrees from 0 up to 360: which way it faces, seen from above. 0 is the world's +X, 90 is +Y (turning clockwise from above), as an upright actor's yaw."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{
-				if (!RequireArgs(Call, 1))
-				{
-					return EBangoCommandResult::Failed;
-				}
-				const AActor* Actor = ResolveActor(Call, Call.Args[0]);
+				AActor* Actor = nullptr;
+				USceneComponent* Scene = nullptr;
 				double Bearing = 0.0;
-				if (!Actor || !GetCompassBearing(Call, *Actor, Bearing))
+				if (!RequireArgs(Call, 1) || !ResolvePlaced(Call, Call.Args[0], TEXT("GetDir"), Actor, Scene)
+					|| !GetCompassBearing(Call, GetPlacedForward(Actor, Scene), Bango::GetEntityDisplayName(Call.Args[0].GetEntityName()), Bearing))
 				{
 					return EBangoCommandResult::Failed;
 				}
@@ -1134,14 +1170,25 @@ namespace Bango
 		{
 			FBangoCommand Command;
 			Command.Signature = FBangoCommandSignature::Make(TEXT("SetDir")).Target(Entity).Param(TEXT("Bearing"), Double).InCategory(TEXT("Actors"))
-				.Describe(TEXT("Turns the actor about the world's up axis so it faces Bearing, a compass bearing in degrees (as GetDir gives), the short way round. Its tilt (pitch and roll) is kept."));
+				.Describe(TEXT("Turns the actor or scene component about the world's up axis so it faces Bearing, a compass bearing in degrees (as GetDir gives), the short way round. Its tilt (pitch and roll) is kept."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{
-				AActor* Actor = ResolveActor(Call, Call.Target);
+				AActor* Actor = nullptr;
+				USceneComponent* Scene = nullptr;
 				double Current = 0.0;
-				if (!Actor || !RequireArgs(Call, 1) || !GetCompassBearing(Call, *Actor, Current))
+				if (!ResolvePlaced(Call, Call.Target, TEXT("SetDir"), Actor, Scene) || !RequireArgs(Call, 1)
+					|| !GetCompassBearing(Call, GetPlacedForward(Actor, Scene), Bango::GetEntityDisplayName(Call.Target.GetEntityName()), Current))
 				{
 					return EBangoCommandResult::Failed;
+				}
+				if (Scene)
+				{
+					const double SceneDelta = FMath::FindDeltaAngleDegrees(Current, Call.Args[0].GetNumberAsDouble());
+					if (!FMath::IsNearlyZero(SceneDelta))
+					{
+						Scene->SetWorldRotation(FQuat(FVector::UpVector, FMath::DegreesToRadians(SceneDelta)) * Scene->GetComponentQuat(), false, nullptr, ETeleportType::TeleportPhysics);
+					}
+					return EBangoCommandResult::Done;
 				}
 				// The short way round: -180 to 180 degrees. Bearings turn clockwise from above, as yaw does about +Z.
 				const double Delta = FMath::FindDeltaAngleDegrees(Current, Call.Args[0].GetNumberAsDouble());
@@ -1173,17 +1220,34 @@ namespace Bango
 		{
 			FBangoCommand Command;
 			Command.Signature = FBangoCommandSignature::Make(TEXT("GetVelocity")).Param(TEXT("Entity"), Entity).Returns(Vector3).InCategory(TEXT("Actors"))
-				.Describe(TEXT("The actor's velocity, in cm per second (world space): its character movement's, its physics-simulating root's, or its movement component's, as SetVelocity sets. Otherwise its root's velocity, which is [0, 0, 0] for an actor nothing moves."));
+				.Describe(TEXT("The actor's velocity, in cm per second (world space): its character movement's, its physics-simulating root's, or its movement component's, as SetVelocity sets. Otherwise its root's velocity, which is [0, 0, 0] for an actor nothing moves. A movement component's own velocity, or a scene component's (its physics velocity if it simulates physics)."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{
 				if (!RequireArgs(Call, 1))
 				{
 					return EBangoCommandResult::Failed;
 				}
-				const AActor* Actor = ResolveActor(Call, Call.Args[0]);
-				if (!Actor)
+				UObject* Object = ResolveEntity(Call, Call.Args[0]);
+				if (!Object)
 				{
 					return EBangoCommandResult::Failed;
+				}
+				if (const UMovementComponent* OwnMovement = Cast<UMovementComponent>(Object))
+				{
+					Call.Result = MakeVector(OwnMovement->Velocity);
+					return EBangoCommandResult::Done;
+				}
+				if (const USceneComponent* Scene = Cast<USceneComponent>(Object))
+				{
+					const UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(Scene);
+					Call.Result = MakeVector(Primitive && Primitive->IsSimulatingPhysics() ? Primitive->GetPhysicsLinearVelocity() : Scene->GetComponentVelocity());
+					return EBangoCommandResult::Done;
+				}
+				const AActor* Actor = Cast<AActor>(Object);
+				if (!Actor)
+				{
+					return Call.Fail(FString::Printf(TEXT("'%s' is a component that doesn't move (not a movement or scene component), so GetVelocity can't be used on it."),
+						*Bango::GetEntityDisplayName(Call.Args[0].GetEntityName())));
 				}
 				FVector Velocity = Actor->GetVelocity(); // the root's: for an actor none of the below move
 				if (const ACharacter* Character = Cast<ACharacter>(Actor); Character && Character->GetCharacterMovement())
@@ -1209,15 +1273,38 @@ namespace Bango
 		{
 			FBangoCommand Command;
 			Command.Signature = FBangoCommandSignature::Make(TEXT("SetVelocity")).Target(Entity).Param(TEXT("Velocity"), Vector3).InCategory(TEXT("Actors"))
-				.Describe(TEXT("Sets the actor's velocity, in cm per second (world space). A character keeps moving from it under its own movement rules (friction, gravity, its input), and one on the ground given an upward velocity leaves the ground. A physics-simulating actor gets it as its linear velocity. Fails for an actor with nothing that moves it."));
+				.Describe(TEXT("Sets the actor's velocity, in cm per second (world space). A character keeps moving from it under its own movement rules (friction, gravity, its input), and one on the ground given an upward velocity leaves the ground. A physics-simulating actor gets it as its linear velocity. Fails for an actor with nothing that moves it. On a component: a movement component's velocity, or a physics-simulating one's linear velocity."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{
-				AActor* Actor = ResolveActor(Call, Call.Target);
-				if (!Actor || !RequireArgs(Call, 1))
+				UObject* Object = ResolveEntity(Call, Call.Target);
+				if (!Object || !RequireArgs(Call, 1))
 				{
 					return EBangoCommandResult::Failed;
 				}
 				const FVector Velocity = GetVector(Call.Args[0]);
+
+				// A component: the movement component itself, or a primitive that simulates physics.
+				if (UMovementComponent* OwnMovement = Cast<UMovementComponent>(Object))
+				{
+					OwnMovement->Velocity = Velocity;
+					if (UCharacterMovementComponent* CharacterMovement = Cast<UCharacterMovementComponent>(OwnMovement); CharacterMovement && Velocity.Z > 0.0 && CharacterMovement->IsMovingOnGround())
+					{
+						CharacterMovement->SetMovementMode(MOVE_Falling);
+					}
+					OwnMovement->UpdateComponentVelocity();
+					return EBangoCommandResult::Done;
+				}
+				if (UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(Object); Primitive && Primitive->IsSimulatingPhysics())
+				{
+					Primitive->SetPhysicsLinearVelocity(Velocity);
+					return EBangoCommandResult::Done;
+				}
+				AActor* Actor = Cast<AActor>(Object);
+				if (!Actor)
+				{
+					return Call.Fail(FString::Printf(TEXT("'%s' is a component that nothing moves (not a movement component, or one simulating physics), so it has no velocity to set."),
+						*Bango::GetEntityDisplayName(Call.Target.GetEntityName())));
+				}
 
 				// A character: its movement's velocity. On the ground, an upward velocity would be lost to the ground
 				// snapping it back down, so it falls (jumps) instead, as launching a character does.
@@ -1256,13 +1343,19 @@ namespace Bango
 		// entity SetHidden(hidden)
 		{
 			FBangoCommand Command;
-			Command.Signature = FBangoCommandSignature::Make(TEXT("SetHidden")).Target(Entity).Param(TEXT("Hidden"), Bool).InCategory(TEXT("Actors")).Describe(TEXT("Hides or shows the actor in game."));
+			Command.Signature = FBangoCommandSignature::Make(TEXT("SetHidden")).Target(Entity).Param(TEXT("Hidden"), Bool).InCategory(TEXT("Actors")).Describe(TEXT("Hides or shows the actor in game, or the scene component (and only it, not its children)."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{
-				AActor* Actor = ResolveActor(Call, Call.Target);
-				if (!Actor || !RequireArgs(Call, 1))
+				AActor* Actor = nullptr;
+				USceneComponent* Scene = nullptr;
+				if (!ResolvePlaced(Call, Call.Target, TEXT("SetHidden"), Actor, Scene) || !RequireArgs(Call, 1))
 				{
 					return EBangoCommandResult::Failed;
+				}
+				if (Scene)
+				{
+					Scene->SetHiddenInGame(Call.Args[0].GetBool());
+					return EBangoCommandResult::Done;
 				}
 				Actor->SetActorHiddenInGame(Call.Args[0].GetBool());
 				return EBangoCommandResult::Done;
@@ -1273,16 +1366,19 @@ namespace Bango
 		// entity DistanceTo(other) -> double
 		{
 			FBangoCommand Command;
-			Command.Signature = FBangoCommandSignature::Make(TEXT("DistanceTo")).Target(Entity).Param(TEXT("Other"), Entity).Returns(Double).InCategory(TEXT("Actors")).Describe(TEXT("Distance between two actors."));
+			Command.Signature = FBangoCommandSignature::Make(TEXT("DistanceTo")).Target(Entity).Param(TEXT("Other"), Entity).Returns(Double).InCategory(TEXT("Actors")).Describe(TEXT("Distance between two actors or scene components (their locations)."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{
-				const AActor* A = ResolveActor(Call, Call.Target);
-				const AActor* B = A ? ResolveActor(Call, Call.Args[0]) : nullptr;
-				if (!A || !B)
+				AActor* ActorA = nullptr;
+				USceneComponent* SceneA = nullptr;
+				AActor* ActorB = nullptr;
+				USceneComponent* SceneB = nullptr;
+				if (!RequireArgs(Call, 1) || !ResolvePlaced(Call, Call.Target, TEXT("DistanceTo"), ActorA, SceneA)
+					|| !ResolvePlaced(Call, Call.Args[0], TEXT("DistanceTo"), ActorB, SceneB))
 				{
 					return EBangoCommandResult::Failed;
 				}
-				Call.Result = FBangoValue::MakeDouble(FVector::Dist(A->GetActorLocation(), B->GetActorLocation()));
+				Call.Result = FBangoValue::MakeDouble(FVector::Dist(GetPlacedLocation(ActorA, SceneA), GetPlacedLocation(ActorB, SceneB)));
 				return EBangoCommandResult::Done;
 			};
 			Add(Commands, Command);
@@ -1293,12 +1389,12 @@ namespace Bango
 		{
 			FBangoCommand Command;
 			Command.Signature = FBangoCommandSignature::Make(TEXT("IsNull")).Param(TEXT("Entity"), Entity).MayBeNil().Returns(Bool).InCategory(TEXT("Actors"))
-				.Describe(TEXT("True if the entity is nil, or no actor in the level has its Bango ID (it was never there, or it's been destroyed)."));
+				.Describe(TEXT("True if the entity is nil, or what it stands for isn't there: no actor in the level has its Bango ID (it was never there, or it's been destroyed), or the component's been removed."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{
 				UBangoActorRegistry* Registry = UBangoActorRegistry::Get(Call.WorldContext);
-				const AActor* Actor = Registry && Call.Args.Num() > 0 && !Call.Args[0].IsNil() ? Registry->FindActor(Call.Args[0].GetEntityName()) : nullptr;
-				Call.Result = FBangoValue::MakeBool(!IsValid(Actor));
+				const UObject* Object = Registry && Call.Args.Num() > 0 && !Call.Args[0].IsNil() ? Registry->FindEntity(Call.Args[0].GetEntityName()) : nullptr;
+				Call.Result = FBangoValue::MakeBool(!IsValid(Object));
 				return EBangoCommandResult::Done;
 			};
 			Add(Commands, Command);

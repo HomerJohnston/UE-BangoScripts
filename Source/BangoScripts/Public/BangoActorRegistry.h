@@ -7,18 +7,20 @@
 
 class AActor;
 class APawn;
+class UActorComponent;
 class FBangoValue;
 
 /**
- * Maps entity names to actors for one game world (spec section 4, Bango IDs).
+ * Maps entity names to actors and actor components for one game world (spec section 4, Bango IDs and Entity IDs).
  *
  * Scripts name an actor with an entity literal: `@john Speak("Hi");`. Bango IDs are their own namespace:
- * they don't create globals, so they can't clash with them. Any other actor gets an entity name of its own the first
- * time it becomes an entity (GetOrMakeEntityID): a Level ID for one placed in a level, an Automatic ID for one
- * spawned while playing (Bango::EBangoEntityIDKind).
+ * they don't create globals, so they can't clash with them. Any other actor, and any actor component, gets an entity
+ * name of its own the first time it becomes an entity (GetOrMakeEntityID): a Level ID for an actor placed in a level,
+ * an Automatic ID for one spawned while playing or a component added while playing, and a Component ID (its actor's
+ * ID and its name) for a component made by its actor's class, Blueprint or level (Bango::EBangoEntityIDKind).
  *
- * Entity values only store the name. They are resolved through FindActor() each time they're used,
- * so saved scripts never hold actor pointers.
+ * Entity values only store the name. They are resolved through FindEntity() each time they're used,
+ * so saved scripts never hold pointers.
  */
 UCLASS()
 class BANGOSCRIPTS_API UBangoActorRegistry : public UWorldSubsystem
@@ -37,24 +39,32 @@ public:
 	 */
 	bool Register(const FString& Name, AActor* Actor, FString& OutError);
 
-	/** Removes Name, if it is registered to Actor. Entity values naming it stay; using them afterwards fails to find the actor. */
-	void Unregister(const FString& Name, const AActor* Actor);
+	/** Removes Name, if it is registered to Object. Entity values naming it stay; using them afterwards fails to find it. */
+	void Unregister(const FString& Name, const UObject* Object);
 
 	/**
-	 * The actor registered under Name, or nullptr. Names are case-sensitive. The `player` entity's name
-	 * (Bango::GetPlayerEntityName) finds the first local player's pawn instead.
+	 * The actor or actor component an entity name stands for, or nullptr. Names are case-sensitive. The `player`
+	 * entity's name (Bango::GetPlayerEntityName) finds the first local player's pawn.
 	 */
+	UFUNCTION(BlueprintCallable, Category = "Bango")
+	UObject* FindEntity(const FString& Name) const;
+
+	/** FindEntity, if it's an actor (nullptr for a component). */
 	UFUNCTION(BlueprintCallable, Category = "Bango")
 	AActor* FindActor(const FString& Name) const;
 
 	/**
-	 * The entity name scripts use for Actor, made now if it has none: its Bango ID name; else, for an actor placed in a
-	 * level, its Level ID; else, for one spawned while playing, a new Automatic ID, kept on a Bango ID component added
-	 * to it (so a save system that saves its components keeps it). The `player` entity for the player's pawn without a
-	 * Bango ID name. Empty (OutError) for a null actor, one that isn't in this world, or one whose Bango ID component's
-	 * name couldn't be registered (invalid, or another actor's).
+	 * The entity name scripts use for Object, an actor or an actor component, made now if it has none.
+	 * - An actor: its Bango ID name; else, for one placed in a level, its Level ID; else, for one spawned while
+	 *   playing, a new Automatic ID, kept on a Bango ID component added to it (so a save system that saves its
+	 *   components keeps it). The `player` entity for the player's pawn without a Bango ID name.
+	 * - A component: the ID it keeps, if it's an IBangoEntity that has one; else, for one whose name is the same each
+	 *   time (made by its actor's class, Blueprint or level), a Component ID: its actor's ID (made now if need be) and
+	 *   its name; else (added while playing), a new Automatic ID, kept on it if it's an IBangoEntity.
+	 * Empty (OutError) for null, anything else (only actors and actor components can be entities), one that isn't in
+	 * this world, or an actor whose Bango ID component's name couldn't be registered (invalid, or another actor's).
 	 */
-	FString GetOrMakeEntityID(const AActor* Actor, FString& OutError);
+	FString GetOrMakeEntityID(const UObject* Object, FString& OutError);
 
 	/** The first local player's pawn (what a script's `player` is), or nullptr if there's none right now. */
 	UFUNCTION(BlueprintCallable, Category = "Bango")
@@ -64,15 +74,22 @@ protected:
 	virtual bool DoesSupportWorldType(const EWorldType::Type WorldType) const override;
 
 private:
+	FString GetOrMakeActorID(const AActor* Actor, FString& OutError);
+	FString GetOrMakeComponentID(const UActorComponent* Component, FString& OutError);
 	/** A Level ID's actor, found by its path in this world (with this world's Play in Editor prefix), or null. */
 	AActor* FindLevelActor(const FString& Path) const;
-	/** Adds Name for Actor, and makes it Actor's entity name if it has none, or it's a Bango ID name over another kind. */
-	void Add(const FString& Name, AActor* Actor);
+	/**
+	 * Adds Name for Object, and makes it Object's entity name if it has none, or it's a Bango ID name over another
+	 * kind. Const for FindEntity, which remembers what it finds.
+	 */
+	void Add(const FString& Name, UObject* Object) const;
+	/** Whether Name is registered to a live object other than Object. */
+	bool IsTakenByAnother(const FString& Name, const UObject* Object) const;
 
-	// Mutable: FindActor remembers the Level IDs it finds.
-	mutable TBangoNameMap<TWeakObjectPtr<AActor>> Actors;
-	/** Each actor's entity name (GetOrMakeEntityID). */
-	mutable TMap<TWeakObjectPtr<const AActor>, FString> EntityIDs;
+	// Mutable: FindEntity remembers the Level and Component IDs it finds.
+	mutable TBangoNameMap<TWeakObjectPtr<UObject>> Objects;
+	/** Each actor's and component's entity name (GetOrMakeEntityID). */
+	mutable TMap<TWeakObjectPtr<const UObject>, FString> EntityIDs;
 };
 
 namespace Bango
@@ -83,4 +100,16 @@ namespace Bango
 	 * registered (invalid or duplicate), or one outside a game world.
 	 */
 	BANGOSCRIPTS_API bool ActorToEntity(const AActor* Actor, FBangoValue& OutValue, FString& OutError);
+
+	/**
+	 * The entity value for Object, an actor or an actor component (UBangoActorRegistry::GetOrMakeEntityID), or nil if
+	 * Object is null. Fails for anything else, or one outside a game world.
+	 */
+	BANGOSCRIPTS_API bool ObjectToEntity(const UObject* Object, FBangoValue& OutValue, FString& OutError);
+
+	/**
+	 * Registers an IBangoEntity component's ID now (making one if it has none), so it's found by it before anything
+	 * asks for it: call it in its BeginPlay. Logs an error if it can't be.
+	 */
+	BANGOSCRIPTS_API void RegisterEntity(const UObject* Object);
 }

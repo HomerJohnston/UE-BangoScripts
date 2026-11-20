@@ -19,6 +19,8 @@
 #include "BangoScriptSubsystem.h"
 #include "UObject/Package.h"
 #include "BangoIDActorComponent.h"
+#include "BangoEntityTestComponent.h"
+#include "BangoCommand.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -537,7 +539,12 @@ bool FBangoEntityIDsTest::RunTest(const FString& Parameters)
 		&& Bango::GetEntityIDKind(TEXT("%/Game/Maps/Farm.Farm:PersistentLevel.Door_3")) == Bango::EBangoEntityIDKind::Level
 		&& Bango::GetEntityIDKind(TEXT("$0123456789ABCDEF0123456789abcdef")) == Bango::EBangoEntityIDKind::Automatic
 		&& Bango::GetEntityIDKind(TEXT("$12")) == Bango::EBangoEntityIDKind::Invalid
-		&& Bango::GetEntityIDKind(TEXT("#nope")) == Bango::EBangoEntityIDKind::Invalid);
+		&& Bango::GetEntityIDKind(TEXT("#nope")) == Bango::EBangoEntityIDKind::Invalid
+		&& Bango::GetEntityIDKind(TEXT("door_1|Trigger")) == Bango::EBangoEntityIDKind::Component
+		&& Bango::GetEntityIDKind(TEXT("%/Game/Maps/Farm.Farm:PersistentLevel.Door_3|Trigger")) == Bango::EBangoEntityIDKind::Component
+		&& Bango::GetEntityIDKind(TEXT("door_1|")) == Bango::EBangoEntityIDKind::Invalid
+		&& Bango::GetEntityIDKind(TEXT("a|b|c")) == Bango::EBangoEntityIDKind::Invalid);
+	TestEqual(TEXT("a Component ID never seen shows its actor's and its name"), Bango::GetEntityDisplayName(TEXT("%/Game/Maps/Farm.Farm:PersistentLevel.Door_3|Trigger")), FString(TEXT("Door_3 (Trigger)")));
 	TestEqual(TEXT("a Level ID never seen shows its object name"), Bango::GetEntityDisplayName(TEXT("%/Game/Maps/Farm.Farm:PersistentLevel.Door_3")), FString(TEXT("Door_3")));
 	TestEqual(TEXT("a named one shows as it is"), FBangoValue::MakeEntity(TEXT("john")).ToDisplayString(), FString(TEXT("john")));
 
@@ -609,6 +616,84 @@ bool FBangoEntityIDsTest::RunTest(const FString& Parameters)
 		AActor* Owner = World->SpawnActor<AActor>();
 		const FBangoScriptOwner ScriptOwner = UBangoScriptSubsystem::GetScriptOwner(Owner);
 		TestTrue(TEXT("any actor can be self"), ScriptOwner.Problem.IsEmpty() && Registry->FindActor(ScriptOwner.BangoName) == Owner);
+
+		// ---- Components ----
+		// One made by its actor's class or level (here: marked as on a startup actor): its actor's ID and its name.
+		AActor* Door = World->SpawnActor<AActor>();
+		Door->bNetStartup = true;
+		USceneComponent* Root = NewObject<USceneComponent>(Door, TEXT("Root"));
+		Door->SetRootComponent(Root);
+		Root->RegisterComponent();
+		USceneComponent* Trigger = NewObject<USceneComponent>(Door, TEXT("Trigger"));
+		Trigger->SetIsNetStartupComponent(true);
+		Trigger->SetupAttachment(Root);
+		Trigger->RegisterComponent();
+		TestTrue(TEXT("a component becomes an entity"), Bango::ObjectToEntity(Trigger, Entity, Error));
+		const FString TriggerID = Entity.IsNil() ? FString() : Entity.GetEntityName();
+		TestEqual(TEXT("its actor's ID and its name"), TriggerID, Bango::MakeComponentEntityID(Registry->GetOrMakeEntityID(Door, Error), TEXT("Trigger")));
+		TestTrue(TEXT("found by it"), Registry->FindEntity(TriggerID) == Trigger && Registry->FindActor(TriggerID) == nullptr);
+		TestEqual(TEXT("shown as its actor's and its name"), Entity.ToDisplayString(), FString::Printf(TEXT("%s (Trigger)"), *Door->GetActorNameOrLabel()));
+		TestEqual(TEXT("the same ID again"), Registry->GetOrMakeEntityID(Trigger, Error), TriggerID);
+
+		// Commands act on the component itself: its own place, not its actor's.
+		FBangoCommandTable Commands;
+		Bango::RegisterBuiltinCommands(Commands);
+		auto Run = [&Commands, World](const TCHAR* Name, const FBangoValue* Target, TArray<FBangoValue> Args, FBangoCommandCall& OutCall)
+		{
+			OutCall = FBangoCommandCall();
+			OutCall.WorldContext = World;
+			OutCall.bHasTarget = Target != nullptr;
+			if (Target)
+			{
+				OutCall.Target = *Target;
+			}
+			OutCall.Args = MoveTemp(Args);
+			const FBangoCommand* Command = Commands.FindCommandImpl(Name);
+			return Command && Command->Start(OutCall) == EBangoCommandResult::Done;
+		};
+		FBangoCommandCall Call;
+		const FBangoValue TriggerEntity = FBangoValue::MakeEntity(TriggerID);
+		TestTrue(TEXT("SetPos on a scene component"), Run(TEXT("SetPos"), &TriggerEntity, { FBangoValue::MakeVector3(100.0, 200.0, 300.0) }, Call));
+		TestTrue(TEXT("it moved, and its actor didn't"), Trigger->GetComponentLocation().Equals(FVector(100.0, 200.0, 300.0)) && Door->GetActorLocation().IsNearlyZero());
+		TestTrue(TEXT("GetPos on it"), Run(TEXT("GetPos"), nullptr, { TriggerEntity }, Call) && Call.Result.ToDebugString() == FBangoValue::MakeVector3(100.0, 200.0, 300.0).ToDebugString());
+		TestTrue(TEXT("SetHidden on it"), Run(TEXT("SetHidden"), &TriggerEntity, { FBangoValue::MakeBool(true) }, Call) && Trigger->bHiddenInGame && !Door->IsHidden());
+
+		// One with no place (not a scene component): a runtime error naming it and the command.
+		UActorComponent* Plain = NewObject<UBangoPlainTestComponent>(Door, TEXT("Counter"));
+		Plain->SetIsNetStartupComponent(true);
+		Plain->RegisterComponent();
+		TestTrue(TEXT("a plain component becomes an entity"), Bango::ObjectToEntity(Plain, Entity, Error));
+		TestFalse(TEXT("SetPos on a component with no place fails"), Run(TEXT("SetPos"), &Entity, { FBangoValue::MakeVector3(0.0, 0.0, 0.0) }, Call));
+		TestTrue(TEXT("saying why"), Call.Error.Contains(TEXT("(Counter)")) && Call.Error.Contains(TEXT("SetPos can't be used on it")));
+
+		// Added while playing: an Automatic ID; one that keeps its own keeps it there.
+		UActorComponent* AddedLater = NewObject<UBangoPlainTestComponent>(Door);
+		AddedLater->RegisterComponent();
+		const FString AddedID = Registry->GetOrMakeEntityID(AddedLater, Error);
+		TestTrue(TEXT("a component added while playing gets an Automatic ID"), Bango::GetEntityIDKind(AddedID) == Bango::EBangoEntityIDKind::Automatic && Registry->FindEntity(AddedID) == AddedLater);
+		UBangoEntityTestComponent* Keeper = NewObject<UBangoEntityTestComponent>(Door);
+		Keeper->RegisterComponent();
+		const FString KeptID = Registry->GetOrMakeEntityID(Keeper, Error);
+		TestTrue(TEXT("one that keeps its ID keeps it"), Bango::GetEntityIDKind(KeptID) == Bango::EBangoEntityIDKind::Automatic && Keeper->EntityID == KeptID);
+		// As if loaded from a save: a new component holding that ID, registered at its BeginPlay, is found by it.
+		Keeper->DestroyComponent();
+		TestNull(TEXT("a removed component isn't found"), Registry->FindEntity(KeptID));
+		UBangoEntityTestComponent* Loaded = NewObject<UBangoEntityTestComponent>(Door);
+		Loaded->EntityID = KeptID;
+		Loaded->RegisterComponent();
+		Bango::RegisterEntity(Loaded);
+		TestTrue(TEXT("a loaded one is found by the ID it kept"), Registry->FindEntity(KeptID) == Loaded);
+
+		// call on a component, and a component a function returns.
+		FBangoValue CallResult;
+		FString CallError;
+		TestTrue(TEXT("call on a component"), Bango::CallBangoCallable(World, FBangoValue::MakeEntity(KeptID), TEXT("Poke"), { FBangoValue::MakeInt(3) }, false, CallResult, CallError));
+		TestEqual(TEXT("it ran on it"), Loaded->Pokes, 3);
+
+		// Gone: not found, and the error says which.
+		Trigger->DestroyComponent();
+		TestNull(TEXT("a removed component isn't found"), Registry->FindEntity(TriggerID));
+		TestTrue(TEXT("the error names it"), Bango::DescribeMissingEntity(TriggerID).Contains(TEXT("(Trigger)")) && Bango::DescribeMissingEntity(TriggerID).Contains(TEXT("isn't there any more")));
 	}
 
 	World->EndPlay(EEndPlayReason::Quit);

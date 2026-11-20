@@ -33,7 +33,7 @@ namespace BangoScriptSubsystemPrivate
 		virtual bool IsEntityRegistered(const FString& Name) const override
 		{
 			const UBangoActorRegistry* Registry = UBangoActorRegistry::Get(WorldContext.Get());
-			return Registry && Registry->FindActor(Name) != nullptr;
+			return Registry && Registry->FindEntity(Name) != nullptr;
 		}
 
 	private:

@@ -11,3 +11,8 @@ Ideas agreed on but not built yet. The spec (BangoSpec.md) describes only what e
 
 - A `bPure` flag on commands, so a pure command (like `Max`) doesn't make a waitUntil or a watched condition polled.
 - Commands that say when their answer may change (an "inventory changed" event), so a condition like `_activator HasItem("Gasmask")` can be checked on that event instead of polled.
+
+## Entities
+
+- **`GetComponent(entity Actor, string Name)`**: a component by name from a script, without C++ handing it in (`GetComponent(@door, "Trigger") call SetEasier();`).
+- **`GetOwner(entity Component)`**: a component's actor.
