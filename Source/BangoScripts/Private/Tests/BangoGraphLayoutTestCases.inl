@@ -10,7 +10,7 @@
  */
 static FString BangoDescribeLayout(const FBangoNodeLayout& Layout)
 {
-	static const TCHAR* Styles[] = { TEXT("ScriptEntry"), TEXT("FunctionEntry"), TEXT("Command"), TEXT("ScriptFunction"), TEXT("ArrayCommand"), TEXT("Generic") };
+	static const TCHAR* Styles[] = { TEXT("ScriptEntry"), TEXT("FunctionEntry"), TEXT("Command"), TEXT("ScriptFunction"), TEXT("Generic") };
 	FString Result = Layout.Title + TEXT(" (") + Styles[(int32)Layout.Style] + TEXT(")");
 	for (const FBangoNodeField& Field : Layout.Fields)
 	{
@@ -91,9 +91,9 @@ static const FBangoLayoutTestCase GBangoLayoutTestCases[] =
 	{ EBangoGraphNodeKind::Call, false, TEXT("Greet()"), TEXT("Greet (ScriptFunction)") },
 
 	// ---- Array commands ----
-	{ EBangoGraphNodeKind::Call, false, TEXT("_a Push(3)"), TEXT("Push (ArrayCommand) | Target (x array) <array>: `_a` | Value <element>: `3`") },
-	{ EBangoGraphNodeKind::Call, false, TEXT("_g[1] InsertAt(4, 0)"), TEXT("InsertAt (ArrayCommand) | Target (x array) <array>: `_g[1]` | Value <element>: `4` | Index <int>: `0`") },
-	{ EBangoGraphNodeKind::Call, false, TEXT("_a Pop()"), TEXT("Pop (ArrayCommand) | Target (x array) <array>: `_a`") },
+	{ EBangoGraphNodeKind::Call, false, TEXT("_a Push(3)"), TEXT("Push (Command) | Target (x array) <array>: `_a` | Value <element>: `3`") },
+	{ EBangoGraphNodeKind::Call, false, TEXT("_g[1] InsertAt(4, 0)"), TEXT("InsertAt (Command) | Target (x array) <array>: `_g[1]` | Value <element>: `4` | Index <int>: `0`") },
+	{ EBangoGraphNodeKind::Call, false, TEXT("_a Pop()"), TEXT("Pop (Command) | Target (x array) <array>: `_a`") },
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_first = _a RemoveAt(0)"), TEXT("Set (Generic) | Var (x): `_first` | To: `_a RemoveAt(0)`") },
 
 	// ---- Other kinds ----
@@ -135,7 +135,7 @@ static const FBangoLayoutTestCase GBangoLayoutTestCases[] =
 	{ EBangoGraphNodeKind::Entry, true, TEXT("void Greet()"), TEXT("Greet (FunctionEntry) | Returns: `void`") },
 
 	// Values that must be used: such a command can't be a node of its own. Others can.
-	{ EBangoGraphNodeKind::Call, false, TEXT("Count(_a)"), TEXT("Count (ArrayCommand) | Array <array>: `_a` !! Count gives a value that must be used, so it can't be a node of its own. Use it in the To of a Set node, like '_x = Count(...)'.") },
+	{ EBangoGraphNodeKind::Call, false, TEXT("Count(_a)"), TEXT("Count (Command) | Value <array|vector2|vector3|string>: `_a` !! Count gives a value that must be used, so it can't be a node of its own. Use it in the To of a Set node, like '_x = Count(...)'.") },
 	{ EBangoGraphNodeKind::Call, false, TEXT("AskChoice(\"A\", \"B\")"), TEXT("AskChoice (Command) | a <string>: `\"A\"` | b <string>: `\"B\"`") },
 
 	// Text that doesn't lex

@@ -178,10 +178,12 @@ static void BangoMakeRuntimeTestCommands(FBangoCommandTable& Table, TArray<FStri
 
 	// A number command like the built-in Max: an int for two ints, otherwise a float.
 	FBangoCommand Max;
-	Max.Signature = FBangoCommandSignature::Make(TEXT("Max")).NumberParam(TEXT("A")).NumberParam(TEXT("B")).ReturnsNumber();
+	const FBangoTypeVar T(TEXT("T"));
+	const TArray<FBangoType> NumberTypes = { FBangoType::Int(), FBangoType::Double() };
+	Max.Signature = FBangoCommandSignature::Make(TEXT("Max")).TypeParam(T, NumberTypes, TEXT("number")).Param(TEXT("A"), T).Param(TEXT("B"), T).Returns(T).Pure();
 	Max.Start = [](FBangoCommandCall& Call)
 	{
-		if (Call.Args[0].GetType() == FBangoType::Int() && Call.Args[1].GetType() == FBangoType::Int())
+		if (Call.TypeArgs[0] == FBangoType::Int())
 		{
 			Call.Result = FBangoValue::MakeInt(FMath::Max(Call.Args[0].GetInt(), Call.Args[1].GetInt()));
 		}
@@ -195,7 +197,7 @@ static void BangoMakeRuntimeTestCommands(FBangoCommandTable& Table, TArray<FStri
 
 	// A number command that wrongly always returns a float.
 	FBangoCommand BadNumber;
-	BadNumber.Signature = FBangoCommandSignature::Make(TEXT("BadNumber")).NumberParam(TEXT("Value")).ReturnsNumber();
+	BadNumber.Signature = FBangoCommandSignature::Make(TEXT("BadNumber")).TypeParam(T, NumberTypes, TEXT("number")).Param(TEXT("Value"), T).Returns(T);
 	BadNumber.Start = [](FBangoCommandCall& Call)
 	{
 		Call.Result = FBangoValue::MakeDouble(Call.Args[0].GetNumberAsDouble());
@@ -205,13 +207,79 @@ static void BangoMakeRuntimeTestCommands(FBangoCommandTable& Table, TArray<FStri
 
 	// A number command that wrongly returns an int for a float: turned into a float.
 	FBangoCommand IntNumber;
-	IntNumber.Signature = FBangoCommandSignature::Make(TEXT("IntNumber")).NumberParam(TEXT("Value")).ReturnsNumber();
+	IntNumber.Signature = FBangoCommandSignature::Make(TEXT("IntNumber")).TypeParam(T, NumberTypes, TEXT("number")).Param(TEXT("Value"), T).Returns(T);
 	IntNumber.Start = [](FBangoCommandCall& Call)
 	{
 		Call.Result = FBangoValue::MakeInt(3);
 		return EBangoCommandResult::Done;
 	};
 	Table.Add(IntNumber, Error);
+
+	// Like the built-in Lerp: two floats, or two vectors of the same kind, and the result is one too.
+	FBangoCommand Lerp;
+	Lerp.Signature = FBangoCommandSignature::Make(TEXT("Lerp")).TypeParam(T, { FBangoType::Double(), FBangoType::Vector2(), FBangoType::Vector3() })
+		.Param(TEXT("A"), T).Param(TEXT("B"), T).Param(TEXT("Alpha"), FBangoType::Double()).Returns(T).Pure();
+	Lerp.Start = [](FBangoCommandCall& Call)
+	{
+		const double Alpha = Call.Args[2].GetDouble();
+		auto Blend = [&Call, Alpha](int32 Part) { const double A = Call.Args[0].GetVectorPart(Part); return A + (Call.Args[1].GetVectorPart(Part) - A) * Alpha; };
+		if (Call.TypeArgs[0] == FBangoType::Vector2())
+		{
+			Call.Result = FBangoValue::MakeVector2(Blend(0), Blend(1));
+		}
+		else if (Call.TypeArgs[0] == FBangoType::Vector3())
+		{
+			Call.Result = FBangoValue::MakeVector3(Blend(0), Blend(1), Blend(2));
+		}
+		else
+		{
+			const double A = Call.Args[0].GetDouble();
+			Call.Result = FBangoValue::MakeDouble(A + (Call.Args[1].GetDouble() - A) * Alpha);
+		}
+		return EBangoCommandResult::Done;
+	};
+	Table.Add(Lerp, Error);
+
+	// A latent command with a type parameter: gives its argument back a frame later, as the type it came as.
+	FBangoCommand EchoLater;
+	EchoLater.Signature = FBangoCommandSignature::Make(TEXT("EchoLater")).TypeParam(T, NumberTypes, TEXT("number")).Param(TEXT("Value"), T).Returns(T);
+	EchoLater.Start = [](FBangoCommandCall& Call)
+	{
+		Call.LatentState.Add(Call.Args[0]);
+		return EBangoCommandResult::Pending;
+	};
+	EchoLater.Poll = [](FBangoCommandCall& Call)
+	{
+		Call.Result = Call.LatentState[0];
+		return EBangoCommandResult::Done;
+	};
+	Table.Add(EchoLater, Error);
+
+	Bango::RegisterCoreCommands(Table, Error); // Count, and the array commands
+
+	// Changes its target in place, like the array commands: adds one to an int. (A nil one is an error.)
+	FBangoCommand Bump;
+	Bump.Signature = FBangoCommandSignature::Make(TEXT("Bump")).Target(FBangoType::Int()).MutableTarget();
+	Bump.Start = [](FBangoCommandCall& Call)
+	{
+		if (Call.Target.IsNil())
+		{
+			return Call.Fail(TEXT("there's nothing to add to (it's nil)."));
+		}
+		Call.Target = FBangoValue::MakeInt(Call.Target.GetInt() + 1);
+		return EBangoCommandResult::Done;
+	};
+	Table.Add(Bump, Error);
+
+	// Wrongly changes its target's type.
+	FBangoCommand BadBump;
+	BadBump.Signature = FBangoCommandSignature::Make(TEXT("BadBump")).Target(FBangoType::Int()).MutableTarget();
+	BadBump.Start = [](FBangoCommandCall& Call)
+	{
+		Call.Target = FBangoValue::MakeString(TEXT("oops"));
+		return EBangoCommandResult::Done;
+	};
+	Table.Add(BadBump, Error);
 }
 
 /** Globals every runtime test starts with (as if set by other scripts and Blueprints). */
@@ -508,11 +576,11 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 	{ TEXT("undeclared global of the wrong type"), TEXT("int _x;\n_x = lots + 1;"), TEXT(""), TEXT("(2:11)"), TEXT("'+' needs two numbers or two strings, but got a string and an int") },
 	{ TEXT("undeclared global as condition"), TEXT("if (lots)\n{\n};"), TEXT(""), TEXT("(1:"), TEXT("condition must be a bool") },
 	{ TEXT("undeclared global as wrong target"), TEXT("lots Speak(\"x\");"), TEXT(""), TEXT("(1:1)"), TEXT("Expected an entity here, but the value is a string") },
-	{ TEXT("Pop of nil used"), TEXT("int[] _a = [];\nint _x;\n_a[1] = 5;\n_a RemoveAt(1);\n_x = _a Pop();"), TEXT(""), TEXT("(5:6)"), TEXT("removed a nil element") },
+	{ TEXT("Pop of nil used"), TEXT("int[] _a = [];\nint _x;\n_a[1] = 5;\n_a RemoveAt(1);\n_x = _a Pop();"), TEXT(""), TEXT("(5:6)"), TEXT("Pop on '_a': the element it would remove is nil, so its value can't be used.") },
 	{ TEXT("nested write into nil array"), TEXT("int[][] _g;\n_g[0][0] = 1;"), TEXT(""), TEXT("(2:1)"), TEXT("Writing to '_g'") },
 	{ TEXT("compound on missing inner array"), TEXT("int[][] _g = [];\n_g[1][2] += 5;"), TEXT(""), TEXT("(2:1)"), TEXT("past the end") },
 	{ TEXT("runtime error node id"), TEXT("int _x;\nTalk(\"{0}\", _x); //@8(0, 1)"), TEXT(""), TEXT("[node 8]"), TEXT("'_x' is nil") },
-	// ---- Number commands (NumberParam, ReturnsNumber) ----
+	// ---- Number commands (a type parameter that's an int or a float) ----
 	{ TEXT("number command: int for ints, float otherwise"),
 		TEXT("int _i = 3;\nfloat _f = 2.5;\nint _ri;\nfloat _rf;\n_ri = Max(_i, 9);\n_rf = Max(_i, _f);\n_rf = _rf + Max(1, 2);\nTalk(\"{0} {1} {2} {3}\", _ri, _rf, Max(_f, 1), Max(Max(1, 2), 3));"),
 		TEXT("9 5.0 2.5 3"), nullptr, nullptr },
@@ -526,6 +594,45 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 		TEXT("Talk(\"{0}\", BadNumber(2));"), TEXT(""), TEXT("(1:13)"), TEXT("returned a float, but with these arguments it should return an int") },
 	{ TEXT("number command: an int result for a float becomes a float"),
 		TEXT("Talk(\"{0}\", IntNumber(2.5));"), TEXT("3.0"), nullptr, nullptr },
+	// ---- Commands that change their target in place (MutableTarget) ----
+	{ TEXT("in place: a local, an element and a declared global"),
+		TEXT("global int kills = 4;\nint _n = 1;\nint[] _a = [5, 6];\nint[][] _g = [[1], [2]];\n_n Bump();\n_a[1] Bump();\n_g[1][0] Bump();\nkills Bump();\nTalk(\"{0} {1} {2} {3}\", _n, _a, _g, kills);"),
+		TEXT("2 [5, 7] [[1], [3]] 5"), nullptr, nullptr },
+	{ TEXT("in place: a failed call leaves the target as it was"),
+		TEXT("int _n;\n_n Bump();"), TEXT(""), TEXT("(2:1)"), TEXT("Bump on '_n': there's nothing to add to (it's nil).") },
+	{ TEXT("in place: an element that isn't there"),
+		TEXT("int[] _a = [5];\n_a[3] Bump();"), TEXT(""), TEXT("(2:3)"), TEXT("Bump on '_a': Index [3] is out of range") },
+	{ TEXT("in place: the target's type can't change"),
+		TEXT("int _n = 1;\n_n BadBump();"), TEXT(""), TEXT("(2:1)"), TEXT("Command 'BadBump' changed the type of its target, '_n' (it must stay an int).") },
+	{ TEXT("in place: array commands fit values to the array"),
+		TEXT("float[] _f = [];\nint[][] _g = [];\n_f Push(1);\n_f InsertAt(2, 0);\n_g Push([1, 2]);\n_g[0] Push(3);\n_g Push([]);\nfloat _x = _f Pop();\nTalk(\"{0} {1} {2} {3}\", _f, _g, _x, _g[0] RemoveAt(1));\n_g[0] Pop();\nTalk(\"{0}\", _g);"),
+		TEXT("[2.0] [[1, 2, 3], []] 1.0 2|[[1], []]"), nullptr, nullptr },
+	{ TEXT("in place: Pop of nil on a line of its own is fine"),
+		TEXT("int[] _a = [];\n_a[1] = 4;\n_a RemoveAt(0);\nTalk(\"{0}\", _a);"), TEXT("[4]"), nullptr, nullptr },
+
+	// ---- Type parameters (TypeParam) ----
+	{ TEXT("type param: Lerp on floats, ints counting as floats"),
+		TEXT("Talk(\"{0} {1}\", Lerp(0, 10, 0.5), Lerp(1.0, 2, 0.5));"), TEXT("5.0 1.5"), nullptr, nullptr },
+	{ TEXT("type param: Lerp on vectors"),
+		TEXT("vector3 _a = [0, 0, 0];\nvector2 _w = Lerp([0, 0], [1, 1], 0.5);\nTalk(\"{0} {1} {2}\", Lerp(_a, [2, 4, 6], 0.5), _w, Lerp([2, 4, 6], _a, 1));"),
+		TEXT("(1.0, 2.0, 3.0) (0.5, 0.5) (0.0, 0.0, 0.0)"), nullptr, nullptr },
+	{ TEXT("type param: undeclared globals are worked out when called"),
+		TEXT("float _f;\nvector3 _v;\n_f = Lerp(score, ratio, 1);\n_v = Lerp(spot, [3, 4, 5], 0.5);\n_v = Lerp(spot, _v, 0);\nTalk(\"{0} {1} {2}\", _f, _v, Lerp(spot, spot, 0.5));"),
+		TEXT("0.5 (1.0, 2.0, 3.0) (1.0, 2.0, 3.0)"), nullptr, nullptr },
+	{ TEXT("type param: an undeclared global of a type that isn't allowed"),
+		TEXT("Talk(\"{0}\", Lerp(ratio, lots, 0.5));"), TEXT(""), TEXT("(1:13)"), TEXT("Lerp: argument 2 ('B') must be a float, a vector2 or a vector3, but it is a string.") },
+	{ TEXT("type param: undeclared globals of two types"),
+		TEXT("Talk(\"{0}\", Lerp(spot, ratio, 0.5));"), TEXT(""), TEXT("(1:13)"), TEXT("Lerp: 'A' and 'B' must be the same type, but they are a vector3 and a float.") },
+	{ TEXT("type param: an undeclared global beside a written-out vector"),
+		TEXT("vector3 _v;\n_v = Lerp(score, [1, 2, 3], 0.5);"), TEXT(""), TEXT("(2:6)"), TEXT("Expected a vector3 here, but the value is an int.") },
+	{ TEXT("type param: the result's type, found when it runs"),
+		TEXT("float _f;\n_f = Lerp(spot, spot, 0.5);"), TEXT(""), TEXT("(2:1)"), TEXT("Can't store a vector3 in '_f', which holds a float.") },
+	{ TEXT("type param: a latent command keeps its type"),
+		TEXT("int _i;\nfloat _f;\n_i = EchoLater(4);\n_f = EchoLater(2.5);\nTalk(\"{0} {1} {2}\", _i, _f, EchoLater(score));"), TEXT("4 2.5 7"), nullptr, nullptr },
+	{ TEXT("Count is a command: an undeclared global that can't be counted"),
+		TEXT("Talk(\"{0}\", Count(score));"), TEXT(""), TEXT("(1:13)"), TEXT("Count: argument 1 ('Value') must be an array, a vector2, a vector3 or a string, but it is an int.") },
+	{ TEXT("Count is a command: undeclared globals"),
+		TEXT("Talk(\"{0} {1}\", Count(lots), Count(spot));"), TEXT("4 3"), nullptr, nullptr },
 	{ TEXT("command returns the wrong type"), TEXT("int _x;\n_x = BadReturn();"), TEXT(""), TEXT("(2:6)"), TEXT("returned a string, but it should return an int") },
 	{ TEXT("error inside a function"), TEXT("function void F()\n{\n\tint _x;\n\tTalk(\"{0}\", _x);\n};\nF();"), TEXT(""), TEXT("(4:14) in F()"), TEXT("'_x' is nil") },
 	{ TEXT("Talk with a missing value"), TEXT("Talk(\"{1}\", 5);"), TEXT(""), TEXT("(1:1)"), TEXT("uses {1}, but only 1 value(s)") },
@@ -714,6 +821,35 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 		Loaded.Resume(Context);
 		Loaded.Resume(Context);
 		Expect(Loaded.GetStatus() == EBangoInstanceStatus::Finished && Log.Num() == 1 && Log[0] == TEXT("john: back"), TEXT("self save: self is still the owner after loading"));
+	}
+
+	// ---- Save and load keep a pending command's type arguments (what its result must be) ----
+	{
+		Log.Reset();
+		TSharedPtr<FBangoProgram> EchoProgram = MakeShared<FBangoProgram>();
+		Expect(Bango::CompileSource(TEXT("int _i;\n_i = EchoLater(4);\nTalk(\"{0}\", _i + 1);"), TEXT("echo.bango"), Commands, *EchoProgram, CompileError), TEXT("type args save: compiles"));
+		FBangoGlobalStore Globals;
+		Context.Globals = &Globals;
+		FBangoInstance Instance;
+		FBangoRuntimeError Error;
+		Instance.Start(EchoProgram, Commands, Globals, 6, Error);
+		Expect(Instance.Resume(Context) == EBangoInstanceStatus::Waiting, TEXT("type args save: waits in the command"));
+
+		TArray<uint8> Bytes;
+		{
+			FMemoryWriter Writer(Bytes);
+			Instance.Serialize(Writer);
+		}
+		FBangoInstance Loaded;
+		{
+			FMemoryReader Reader(Bytes);
+			Loaded.Serialize(Reader);
+			Expect(!Reader.IsError(), TEXT("type args save: reads back"));
+		}
+		FString BindError;
+		Expect(Loaded.Bind(EchoProgram, Commands, BindError), TEXT("type args save: binds"));
+		Loaded.Resume(Context);
+		Expect(Loaded.GetStatus() == EBangoInstanceStatus::Finished && Log.Num() == 1 && Log[0] == TEXT("5"), TEXT("type args save: the result is still an int after loading"));
 	}
 
 	// ---- Save and load mid-function, mid-expression ----

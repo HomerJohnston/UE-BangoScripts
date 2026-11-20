@@ -4,7 +4,7 @@
 
 namespace BangoInstancePrivate
 {
-	constexpr int32 InstanceSaveVersion = 2; // 2: waitUntil. Raise it when the save format changes: data in another format is refused, not misread
+	constexpr int32 InstanceSaveVersion = 4; // 2: waitUntil. 3: a pending command's type arguments. 4: and whether its result is used. Raise it when the save format changes: data in another format is refused, not misread
 
 	static FString TypeText(const FBangoType& Type)
 	{
@@ -108,16 +108,18 @@ bool FBangoInstance::BindCommandsFor(const FBangoProgram& InProgram, const FBang
 	{
 		for (const FBangoInstruction& Instruction : Function.Code)
 		{
-			if (Instruction.Op != EBangoOp::CallCommand)
+			if (Instruction.Op != EBangoOp::CallCommand && Instruction.Op != EBangoOp::CallCommandInPlace)
 			{
 				continue;
 			}
-			if (!InProgram.Names.IsValidIndex(Instruction.A))
+			const bool bInPlace = Instruction.Op == EBangoOp::CallCommandInPlace;
+			const int32 NameIndex = bInPlace ? Instruction.B : Instruction.A;
+			if (!InProgram.Names.IsValidIndex(NameIndex))
 			{
 				OutError = TEXT("The compiled script is damaged (bad command name).");
 				return false;
 			}
-			const FString& Name = InProgram.Names[Instruction.A];
+			const FString& Name = InProgram.Names[NameIndex];
 			const FBangoCommand* Command = Commands.FindCommandImpl(Name);
 			if (!Command)
 			{
@@ -129,7 +131,13 @@ bool FBangoInstance::BindCommandsFor(const FBangoProgram& InProgram, const FBang
 				OutError = FString::Printf(TEXT("This script calls the command '%s', which has no implementation (only a signature was registered)."), *Name);
 				return false;
 			}
-			OutBound[Instruction.A] = Command;
+			if (Command->Signature.bMutableTarget != bInPlace)
+			{
+				// Compiled against a signature that has changed since (whether it changes its target in place).
+				OutError = FString::Printf(TEXT("The command '%s' isn't what it was when this script was compiled (whether it changes its target). Compile the script again."), *Name);
+				return false;
+			}
+			OutBound[NameIndex] = Command;
 		}
 	}
 	return true;
@@ -1000,92 +1008,6 @@ bool FBangoInstance::IsNilPlace(const FBangoPlace& Place, FBangoGlobalStore& Glo
 	return true;
 }
 
-bool FBangoInstance::ArrayModify(const FBangoPlace& Place, int32 Kind, bool bResultUsed, FBangoGlobalStore& Globals)
-{
-	const EBangoArrayModify Op = (EBangoArrayModify)Kind;
-	const TCHAR* OpName = Op == EBangoArrayModify::Push ? TEXT("Push") : Op == EBangoArrayModify::InsertAt ? TEXT("InsertAt") : Op == EBangoArrayModify::Pop ? TEXT("Pop") : TEXT("RemoveAt");
-
-	FBangoValue Value;
-	int64 Index = 0;
-	if (Op == EBangoArrayModify::InsertAt || Op == EBangoArrayModify::RemoveAt)
-	{
-		const FBangoValue IndexValue = PopValue();
-		if (Status == EBangoInstanceStatus::Failed)
-		{
-			return false;
-		}
-		if (!IsScalar(IndexValue, EBangoBaseType::Int))
-		{
-			return RuntimeFail(FString::Printf(TEXT("The index for %s must be an int, but it is %s."), OpName, *ValueTypeText(IndexValue)));
-		}
-		Index = IndexValue.GetInt();
-	}
-	if (Op == EBangoArrayModify::Push || Op == EBangoArrayModify::InsertAt)
-	{
-		Value = PopValue();
-	}
-	TArray<int64> Indexes;
-	if (Status == EBangoInstanceStatus::Failed || !PopIndexes(Place.NumIndexes, Indexes))
-	{
-		return false;
-	}
-
-	const FString RootName = DescribePlace(Place);
-	FBangoValue* Target = nullptr;
-	if (Place.Kind == EBangoPlaceKind::Local)
-	{
-		FBangoFrame& Frame = Frames.Last();
-		if (!Frame.Slots.IsValidIndex(Place.Index))
-		{
-			return RuntimeFail(TEXT("Internal error: bad local slot."));
-		}
-		Target = &Frame.Slots[Place.Index];
-	}
-	else
-	{
-		Target = Globals.FindMutable(RootName);
-		if (!Target)
-		{
-			return RuntimeFail(FString::Printf(TEXT("Global '%s' doesn't exist."), *RootName));
-		}
-	}
-
-	FString Message;
-	if (Indexes.Num() > 0)
-	{
-		Target = Target->FindElementAtPath(Indexes, Message);
-		if (!Target)
-		{
-			return RuntimeFail(FString::Printf(TEXT("%s on '%s': %s"), OpName, *RootName, *Message));
-		}
-	}
-
-	FBangoValue Removed;
-	bool bOk = false;
-	switch (Op)
-	{
-	case EBangoArrayModify::Push:     bOk = Target->Push(Value, Message); break;
-	case EBangoArrayModify::InsertAt: bOk = Target->InsertAt(Index, Value, Message); break;
-	case EBangoArrayModify::Pop:      bOk = Target->Pop(Removed, Message); break;
-	case EBangoArrayModify::RemoveAt: bOk = Target->RemoveAt(Index, Removed, Message); break;
-	default:                          Message = TEXT("Internal error: unknown array command."); break;
-	}
-	if (!bOk)
-	{
-		return RuntimeFail(FString::Printf(TEXT("%s on '%s': %s"), OpName, *RootName, *Message));
-	}
-
-	if (bResultUsed)
-	{
-		if (Removed.IsNil())
-		{
-			return RuntimeFail(FString::Printf(TEXT("%s on '%s' removed a nil element, so its value can't be used."), OpName, *RootName));
-		}
-		Stack.Add(MoveTemp(Removed));
-	}
-	return true;
-}
-
 bool FBangoInstance::BinaryOp(EBangoOp Op)
 {
 	const FBangoValue Right = PopValue();
@@ -1322,43 +1244,51 @@ bool FBangoInstance::CallReflected(int32 NameIndex, int32 ArgCount, bool bWantRe
 	return true;
 }
 
-bool FBangoInstance::CallCommand(int32 NameIndex, int32 ArgCount, bool bHasTarget, const FBangoExecContext& Context)
+FBangoValue* FBangoInstance::FindPlaceToChange(const FBangoPlace& Place, TConstArrayView<int64> Indexes, FBangoGlobalStore& Globals, const FString& What)
 {
-	const FBangoCommand* Command = BoundCommands.IsValidIndex(NameIndex) ? BoundCommands[NameIndex] : nullptr;
-	if (!Command)
+	const FString RootName = DescribePlace(Place);
+	FBangoValue* Target = nullptr;
+	if (Place.Kind == EBangoPlaceKind::Local)
 	{
-		return RuntimeFail(TEXT("Internal error: command not bound."));
-	}
-	const FBangoCommandSignature& Signature = Command->Signature;
-
-	FBangoCommandCall Call;
-	Call.InstanceId = Id;
-	Call.WorldContext = Context.WorldContext;
-	Call.DeltaSeconds = Context.DeltaSeconds;
-	Call.Args.SetNum(ArgCount);
-	for (int32 i = ArgCount - 1; i >= 0; --i)
-	{
-		Call.Args[i] = PopValue();
-	}
-	if (bHasTarget)
-	{
-		Call.bHasTarget = true;
-		Call.Target = PopValue();
-	}
-	if (Status == EBangoInstanceStatus::Failed)
-	{
-		return false;
-	}
-
-	// Number parameters take an int or a float; an undeclared global passed to one is only checked here.
-	for (int32 i = 0; i < Call.Args.Num() && i < Signature.Params.Num(); ++i)
-	{
-		const FBangoValue& Arg = Call.Args[i];
-		if (Signature.Params[i].bNumber && (Arg.IsNil() || Arg.GetType().IsArray()
-			|| (Arg.GetType().Base != EBangoBaseType::Int && Arg.GetType().Base != EBangoBaseType::Double)))
+		if (Frames.Num() == 0 || !Frames.Last().Slots.IsValidIndex(Place.Index))
 		{
-			return RuntimeFail(FString::Printf(TEXT("%s: argument %d ('%s') must be a number (an int or a float), but it is %s."),
-				*Signature.Name, i + 1, *Signature.Params[i].Name, *ValueTypeText(Arg)));
+			RuntimeFail(TEXT("Internal error: bad local slot."));
+			return nullptr;
+		}
+		Target = &Frames.Last().Slots[Place.Index];
+	}
+	else
+	{
+		Target = Globals.FindMutable(RootName); // which notes that it changed
+		if (!Target)
+		{
+			RuntimeFail(FString::Printf(TEXT("Global '%s' doesn't exist."), *RootName));
+			return nullptr;
+		}
+	}
+	if (Indexes.Num() > 0)
+	{
+		FString Message;
+		Target = Target->FindElementAtPath(Indexes, Message);
+		if (!Target)
+		{
+			RuntimeFail(FString::Printf(TEXT("%s on '%s': %s"), *What, *RootName, *Message));
+			return nullptr;
+		}
+	}
+	return Target;
+}
+
+bool FBangoInstance::PrepareCommandCall(const FBangoCommandSignature& Signature, FBangoCommandCall& Call, const FBangoExecContext& Context)
+{
+	// Its type parameters, from the target and arguments as they are now (an undeclared global passed for one is
+	// only checked here), and those arguments as the types they came out as.
+	if (Signature.TypeParams.Num() > 0)
+	{
+		FString BindError;
+		if (!Signature.BindTypeParams(Call.bHasTarget ? &Call.Target : nullptr, Call.Args, Call.TypeArgs, BindError))
+		{
+			return RuntimeFail(FString::Printf(TEXT("%s: %s"), *Signature.Name, *BindError));
 		}
 	}
 
@@ -1384,6 +1314,141 @@ bool FBangoInstance::CallCommand(int32 NameIndex, int32 ArgCount, bool bHasTarge
 			}
 		}
 	}
+	return true;
+}
+
+bool FBangoInstance::CallCommandInPlace(const FBangoPlace& Place, int32 NameIndex, int32 ArgCount, bool bResultUsed, FBangoGlobalStore& Globals, const FBangoExecContext& Context)
+{
+	const FBangoCommand* Command = BoundCommands.IsValidIndex(NameIndex) ? BoundCommands[NameIndex] : nullptr;
+	if (!Command)
+	{
+		return RuntimeFail(TEXT("Internal error: command not bound."));
+	}
+	const FBangoCommandSignature& Signature = Command->Signature;
+
+	FBangoCommandCall Call;
+	Call.InstanceId = Id;
+	Call.WorldContext = Context.WorldContext;
+	Call.DeltaSeconds = Context.DeltaSeconds;
+	Call.bResultUsed = bResultUsed;
+	Call.Args.SetNum(ArgCount);
+	for (int32 i = ArgCount - 1; i >= 0; --i)
+	{
+		Call.Args[i] = PopValue();
+	}
+	TArray<int64> Indexes;
+	if (Status == EBangoInstanceStatus::Failed || !PopIndexes(Place.NumIndexes, Indexes))
+	{
+		return false;
+	}
+
+	// Everything about the call is checked with the target still in its place...
+	FBangoValue* Target = FindPlaceToChange(Place, Indexes, Globals, Signature.Name);
+	if (!Target)
+	{
+		return false;
+	}
+	const FBangoType TargetType = Target->GetType();
+	if (Signature.TypeParams.Num() > 0)
+	{
+		FString BindError;
+		if (!Signature.BindTypeParams(Target, Call.Args, Call.TypeArgs, BindError))
+		{
+			return RuntimeFail(FString::Printf(TEXT("%s on '%s': %s"), *Signature.Name, *DescribePlace(Place), *BindError));
+		}
+	}
+	if (Context.Entities)
+	{
+		for (int32 i = 0; i < Call.Args.Num() && i < Signature.Params.Num(); ++i)
+		{
+			const FBangoValue& Arg = Call.Args[i];
+			if (!Signature.Params[i].bMayBeNil && IsScalar(Arg, EBangoBaseType::Entity) && !Context.Entities->IsEntityRegistered(Arg.GetEntityName()))
+			{
+				return RuntimeFail(FString::Printf(TEXT("%s: %s"), *Signature.Name, *Bango::DescribeMissingEntity(Arg.GetEntityName())));
+			}
+		}
+	}
+
+	// ...then it's taken out for the command to change, and put back when it's done. No copy of it is made (an
+	// array may be large).
+	Call.bHasTarget = true;
+	Call.Target = MoveTemp(*Target);
+	*Target = FBangoValue::MakeNil(TargetType);
+	const EBangoCommandResult Result = Command->Start(Call);
+
+	// Found again, as the command may have changed other globals (never this instance's frames).
+	const bool bSameType = Call.Target.GetType() == TargetType;
+	FString Unused;
+	Target = Place.Kind == EBangoPlaceKind::Local
+		? (Frames.Num() > 0 && Frames.Last().Slots.IsValidIndex(Place.Index) ? &Frames.Last().Slots[Place.Index] : nullptr)
+		: Globals.FindMutable(DescribePlace(Place));
+	Target = Target && Indexes.Num() > 0 ? Target->FindElementAtPath(Indexes, Unused) : Target;
+	if (Target && bSameType)
+	{
+		*Target = MoveTemp(Call.Target);
+	}
+	Call.Target = FBangoValue();
+	if (Status != EBangoInstanceStatus::Ready)
+	{
+		return false; // the command stopped this instance
+	}
+	if (!Target)
+	{
+		return RuntimeFail(FString::Printf(TEXT("Command '%s': its target, '%s', wasn't there to put back when it finished."), *Signature.Name, *DescribePlace(Place)));
+	}
+	if (!bSameType)
+	{
+		return RuntimeFail(FString::Printf(TEXT("Command '%s' changed the type of its target, '%s' (it must stay %s)."), *Signature.Name, *DescribePlace(Place), *TypeText(TargetType)));
+	}
+	if (Result == EBangoCommandResult::Pending)
+	{
+		return RuntimeFail(FString::Printf(TEXT("Command '%s' changes its target, so it can't wait, but it returned Pending."), *Signature.Name));
+	}
+	if (Result == EBangoCommandResult::Failed)
+	{
+		// Named with what it was called on.
+		return RuntimeFail(FString::Printf(TEXT("%s on '%s': %s"), *Signature.Name, *DescribePlace(Place), Call.Error.IsEmpty() ? TEXT("the command failed.") : *Call.Error));
+	}
+	PendingCommandName = NameIndex;
+	PendingCall = MoveTemp(Call);
+	return FinishCommand(Result);
+}
+
+bool FBangoInstance::CallCommand(int32 NameIndex, int32 ArgCount, int32 Flags, const FBangoExecContext& Context)
+{
+	const bool bHasTarget = (Flags & Bango::CallHasTarget) != 0;
+
+	const FBangoCommand* Command = BoundCommands.IsValidIndex(NameIndex) ? BoundCommands[NameIndex] : nullptr;
+	if (!Command)
+	{
+		return RuntimeFail(TEXT("Internal error: command not bound."));
+	}
+	const FBangoCommandSignature& Signature = Command->Signature;
+
+	if (Signature.bMutableTarget)
+	{
+		return RuntimeFail(FString::Printf(TEXT("Internal error: '%s' changes its target, but was called without a place for it."), *Signature.Name));
+	}
+
+	FBangoCommandCall Call;
+	Call.InstanceId = Id;
+	Call.WorldContext = Context.WorldContext;
+	Call.DeltaSeconds = Context.DeltaSeconds;
+	Call.bResultUsed = (Flags & Bango::CallResultUsed) != 0;
+	Call.Args.SetNum(ArgCount);
+	for (int32 i = ArgCount - 1; i >= 0; --i)
+	{
+		Call.Args[i] = PopValue();
+	}
+	if (bHasTarget)
+	{
+		Call.bHasTarget = true;
+		Call.Target = PopValue();
+	}
+	if (Status == EBangoInstanceStatus::Failed || !PrepareCommandCall(Signature, Call, Context))
+	{
+		return false;
+	}
 
 	const EBangoCommandResult Result = Command->Start(Call);
 	if (Status != EBangoInstanceStatus::Ready)
@@ -1399,11 +1464,6 @@ bool FBangoInstance::CallCommand(int32 NameIndex, int32 ArgCount, bool bHasTarge
 		if (WaitGuard.Set >= 0)
 		{
 			return RuntimeFail(FString::Printf(TEXT("A waitUntil's condition must answer at once, but '%s' waits."), *Signature.Name));
-		}
-		if (Signature.bReturnsNumber)
-		{
-			// Its result's type comes from the arguments, which aren't kept while a command is pending.
-			return RuntimeFail(FString::Printf(TEXT("Command '%s' returns a number (ReturnsNumber), so it can't be latent, but it returned Pending."), *Signature.Name));
 		}
 		if (!Command->Poll)
 		{
@@ -1437,12 +1497,20 @@ bool FBangoInstance::FinishCommand(EBangoCommandResult Result)
 		return RuntimeFail(FString::Printf(TEXT("%s: %s"), *Signature.Name, PendingCall.Error.IsEmpty() ? TEXT("the command failed.") : *PendingCall.Error));
 	}
 
-	if (Signature.bReturnsNumber)
+	if (Signature.bReturnsValue && Signature.TypeParams.IsValidIndex(Signature.ReturnTypeVar))
 	{
-		// The compiler expects an int if every number argument was an int, and a float otherwise (like +).
-		const FBangoType Expected = Signature.NumberResultIsInt(PendingCall.Args) ? FBangoType::Int() : FBangoType::Double();
+		// The type its arguments made its type parameter, which the compiler expects (Max: an int for ints).
+		if (!PendingCall.TypeArgs.IsValidIndex(Signature.ReturnTypeVar))
+		{
+			return RuntimeFail(FString::Printf(TEXT("Command '%s': the type of its result isn't known (its type parameters weren't kept)."), *Signature.Name));
+		}
+		const FBangoType Expected = FBangoCommandSignature::GetTypeOf(PendingCall.TypeArgs[Signature.ReturnTypeVar], Signature.ReturnTypeVarDepth);
 		FBangoValue Converted;
-		if (PendingCall.Result.IsNil() || !PendingCall.Result.TryConvertTo(Expected, Converted))
+		if (PendingCall.Result.IsNil() && !PendingCall.bResultUsed && Signature.bDiscardable)
+		{
+			Converted = FBangoValue::MakeNil(Expected); // thrown away (Pop of a nil element, on a line of its own)
+		}
+		else if (PendingCall.Result.IsNil() || !PendingCall.Result.TryConvertTo(Expected, Converted))
 		{
 			return RuntimeFail(FString::Printf(TEXT("Command '%s' returned %s, but with these arguments it should return %s."),
 				*Signature.Name, *ValueTypeText(PendingCall.Result), *TypeText(Expected)));
@@ -1578,7 +1646,7 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 		case EBangoOp::LoadPlace:
 		case EBangoOp::StorePlace:
 		case EBangoOp::IsNilPlace:
-		case EBangoOp::ArrayModify:
+		case EBangoOp::CallCommandInPlace:
 		{
 			if (!Function.Places.IsValidIndex(I.A))
 			{
@@ -1590,7 +1658,9 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 			case EBangoOp::LoadPlace:      LoadPlace(Place, Globals, Context.Entities, I.B != 0); break;
 			case EBangoOp::StorePlace:     StorePlace(Place, Globals); break;
 			case EBangoOp::IsNilPlace:     IsNilPlace(Place, Globals); break;
-			default:                       ArrayModify(Place, I.B, I.C != 0, Globals); break;
+			default:
+				CallCommandInPlace(Place, I.B, I.C & Bango::InPlaceArgCountMask, ((I.C >> Bango::InPlaceFlagShift) & Bango::CallResultUsed) != 0, Globals, Context);
+				break;
 			}
 			break;
 		}
@@ -1917,7 +1987,7 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 		}
 
 		case EBangoOp::CallCommand:
-			CallCommand(I.A, I.B, I.C != 0, Context);
+			CallCommand(I.A, I.B, I.C, Context);
 			break;
 
 		case EBangoOp::CallReflected:
@@ -1962,27 +2032,6 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 				return RuntimeFail(TEXT("The condition reached its end without returning true or false."));
 			}
 			return RuntimeFail(FString::Printf(TEXT("Function '%s' reached its end without returning a value."), *Function.Name));
-
-		case EBangoOp::ArrayCount:
-		{
-			const FBangoValue Value = PopValue();
-			if (Status == EBangoInstanceStatus::Failed)
-			{
-				return false;
-			}
-			if (BangoInstancePrivate::IsElementIndexable(Value))
-			{
-				// A vector's parts (2 or 3), or a string's characters (UTF-16 units).
-				Stack.Add(FBangoValue::MakeInt(Value.GetType().IsVector() ? Value.GetType().GetVectorSize() : Value.GetString().Len()));
-				break;
-			}
-			if (Value.IsNil() || !Value.GetType().IsArray())
-			{
-				return RuntimeFail(FString::Printf(TEXT("Count needs an array, a vector or a string, but got %s."), *ValueTypeText(Value)));
-			}
-			Stack.Add(FBangoValue::MakeInt((int32)Value.ArrayCount()));
-			break;
-		}
 
 		case EBangoOp::ForEachNext:
 		{
@@ -2375,6 +2424,8 @@ void FBangoInstance::Serialize(FArchive& Ar)
 	Ar << Stack;
 	Ar << PendingCommandName;
 	Ar << PendingCall.LatentState;
+	Ar << PendingCall.TypeArgs; // what a pending command's result must be
+	Ar << PendingCall.bResultUsed;
 	Ar << WaitSet;
 
 	if (Ar.IsLoading())

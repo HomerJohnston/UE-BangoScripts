@@ -90,7 +90,7 @@ bool FBangoLineTokenizerTest::RunTest(const FString& Parameters)
 	Check(TEXT("} else if (b) {"), TEXT("Structure[}] Keyword[else] Keyword[if] Punctuation[(] Global[b] Punctuation[)] Structure[{]"));
 	Check(TEXT("};"), TEXT("Structure[}] Punctuation[;]"));
 	Check(TEXT("forEach (_e in questLog)"), TEXT("Keyword[forEach] Punctuation[(] Global[_e] Keyword[in] Global[questLog]"));
-	Check(TEXT("questLog Push(\"x\");"), TEXT("Global[questLog] Builtin[Push]"));
+	Check(TEXT("questLog Push(\"x\");"), TEXT("Global[questLog] Call[Push]"));
 	Check(TEXT("function int AddScore(int _amount)"), TEXT("DeclKeyword[function] Type[int] Call[AddScore] Punctuation[(] Type[int] Global[_amount]"));
 	Check(TEXT("if (a & b | c)"), TEXT("Error[&] Global[b] Error[|]"));
 	Check(TEXT("Log(\"unterminated);"), TEXT("Call[Log] Punctuation[(] Error[\"unterminated);]"));

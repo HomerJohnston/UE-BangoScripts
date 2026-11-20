@@ -183,17 +183,10 @@ namespace BangoBuiltinPrivate
 		return Resting; // nothing under it there (it may fall), or something in the way above: as on flat ground
 	}
 
-	/** For a ReturnsNumber command: true if every argument is an int, so the result must be one too. */
+	/** For a number command (its type parameter is an int or a float): true if this call's is an int, so its arguments are ints and its result must be one. */
 	static bool AllInts(const FBangoCommandCall& Call)
 	{
-		for (const FBangoValue& Arg : Call.Args)
-		{
-			if (!(Arg.GetType() == FBangoType::Int()))
-			{
-				return false;
-			}
-		}
-		return true;
+		return Call.TypeArgs.Num() > 0 && Call.TypeArgs[0] == FBangoType::Int();
 	}
 
 	/** Sets Call.Result to Value as an int if bInt (the value is then a whole number in the int range), otherwise as a float. */
@@ -234,9 +227,41 @@ namespace BangoBuiltinPrivate
 		return FBangoValue::MakeVector3(V.X, V.Y, V.Z);
 	}
 
+	/** A vector3's parts, or a vector2's with a Z of 0. */
 	static FVector GetVector(const FBangoValue& Value)
 	{
-		return FVector(Value.GetVectorPart(0), Value.GetVectorPart(1), Value.GetVectorPart(2));
+		return FVector(Value.GetVectorPart(0), Value.GetVectorPart(1), Value.GetType().GetVectorSize() == 3 ? Value.GetVectorPart(2) : 0.0);
+	}
+
+	/** V as a vector of Type: a vector3, or a vector2 (its X and Y). */
+	static FBangoValue MakeVectorOf(const FBangoType& Type, const FVector& V)
+	{
+		return Type.GetVectorSize() == 2 ? FBangoValue::MakeVector2(V.X, V.Y) : FBangoValue::MakeVector3(V.X, V.Y, V.Z);
+	}
+
+	/**
+	 * The built-in commands whose answer depends only on their arguments (FBangoCommandSignature::bPure): a condition
+	 * or waitUntil isn't polled for calling them. Not the ones that read the world, the time or chance (GetPos, Time,
+	 * DeltaTime, InterpTo, Random, ...), or that show what an entity is called (Format).
+	 */
+	static bool IsPureBuiltin(const FString& Name)
+	{
+		static const TCHAR* const PureNames[] =
+		{
+			TEXT("Floor"), TEXT("Round"), TEXT("Ceil"), TEXT("Min"), TEXT("Max"), TEXT("Abs"), TEXT("Clamp"), TEXT("Sign"), TEXT("Sqrt"), TEXT("Pow"),
+			TEXT("Log"), TEXT("Ln"), TEXT("Lerp"), TEXT("MapRange"), TEXT("Sin"), TEXT("Cos"), TEXT("SinDegrees"), TEXT("CosDegrees"), TEXT("Tan"),
+			TEXT("TanDegrees"), TEXT("Asin"), TEXT("AsinDegrees"), TEXT("Acos"), TEXT("AcosDegrees"), TEXT("Atan"), TEXT("AtanDegrees"), TEXT("Atan2"),
+			TEXT("Atan2Degrees"), TEXT("Pi"), TEXT("IsNearlyEqual"), TEXT("Length"), TEXT("Distance"), TEXT("Normalize"), TEXT("Dot"), TEXT("Cross"),
+			TEXT("ToEntity"),
+		};
+		for (const TCHAR* PureName : PureNames)
+		{
+			if (Name.Equals(PureName, ESearchCase::CaseSensitive))
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -256,6 +281,7 @@ namespace BangoBuiltinPrivate
 		FBangoCommand Command;
 		Command.Signature = Signature;
 		Command.Signature.bBuiltIn = true;
+		Command.Signature.bPure |= IsPureBuiltin(Signature.Name);
 		Command.Start = [RequiredArgs, Run = MoveTemp(Run)](FBangoCommandCall& Call)
 		{
 			if (!RequireArgs(Call, RequiredArgs))
@@ -275,6 +301,7 @@ namespace BangoBuiltinPrivate
 	{
 		FBangoCommand Command = InCommand;
 		Command.Signature.bBuiltIn = true; // every command registered here comes with the plugin
+		Command.Signature.bPure |= IsPureBuiltin(Command.Signature.Name);
 		FString Error;
 		if (!Commands.Add(Command, Error))
 		{
@@ -294,7 +321,20 @@ namespace Bango
 		const FBangoType String = FBangoType::String();
 		const FBangoType Entity = FBangoType::Entity();
 		const FBangoType TextType = FBangoType::Text();
+		const FBangoType Vector2 = FBangoType::Vector2();
 		const FBangoType Vector3 = FBangoType::Vector3();
+		// Type parameters (FBangoCommandSignature::TypeParam): a number is an int or a float, and stays what it is.
+		const FBangoTypeVar T(TEXT("T"));
+		const TArray<FBangoType> NumberTypes = { Int, Double };
+		const FString Number = TEXT("number");
+		const TArray<FBangoType> VectorTypes = { Vector2, Vector3 };
+
+		// Count, and the other commands that need no engine or world.
+		FString CoreError;
+		if (!Bango::RegisterCoreCommands(Commands, CoreError))
+		{
+			Bango::ReportError(FString::Printf(TEXT("Couldn't register built-in command: %s"), *CoreError));
+		}
 
 		// WriteScreen(text, seconds?): shows a message on screen (and in the output log), like Print String. Text a game
 		// shows its players goes through commands of the game's own.
@@ -515,7 +555,7 @@ namespace Bango
 		for (const bool bMax : { false, true })
 		{
 			FBangoCommand Command;
-			Command.Signature = FBangoCommandSignature::Make(bMax ? TEXT("Max") : TEXT("Min")).NumberParam(TEXT("A")).NumberParam(TEXT("B")).ReturnsNumber()
+			Command.Signature = FBangoCommandSignature::Make(bMax ? TEXT("Max") : TEXT("Min")).TypeParam(T, NumberTypes, Number).Param(TEXT("A"), T).Param(TEXT("B"), T).Returns(T)
 				.InCategory(TEXT("Math")).Describe(bMax
 					? TEXT("The larger of two numbers: an int if both are ints, otherwise a float.")
 					: TEXT("The smaller of two numbers: an int if both are ints, otherwise a float."));
@@ -543,7 +583,7 @@ namespace Bango
 		// Abs(value) -> number: an int for an int, a float for a float.
 		{
 			FBangoCommand Command;
-			Command.Signature = FBangoCommandSignature::Make(TEXT("Abs")).NumberParam(TEXT("Value")).ReturnsNumber()
+			Command.Signature = FBangoCommandSignature::Make(TEXT("Abs")).TypeParam(T, NumberTypes, Number).Param(TEXT("Value"), T).Returns(T)
 				.InCategory(TEXT("Math")).Describe(TEXT("The number without its sign: an int for an int, a float for a float."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{
@@ -570,7 +610,7 @@ namespace Bango
 		// Clamp(value, min, max) -> number: an int if all three are ints, otherwise a float.
 		{
 			FBangoCommand Command;
-			Command.Signature = FBangoCommandSignature::Make(TEXT("Clamp")).NumberParam(TEXT("Value")).NumberParam(TEXT("Min")).NumberParam(TEXT("Max")).ReturnsNumber()
+			Command.Signature = FBangoCommandSignature::Make(TEXT("Clamp")).TypeParam(T, NumberTypes, Number).Param(TEXT("Value"), T).Param(TEXT("Min"), T).Param(TEXT("Max"), T).Returns(T)
 				.InCategory(TEXT("Math")).Describe(TEXT("The value, kept from min to max: an int if all three are ints, otherwise a float."));
 			Command.Start = [](FBangoCommandCall& Call)
 			{
@@ -639,7 +679,7 @@ namespace Bango
 			});
 
 		// Sign(value) -> number: -1, 0 or 1, an int for an int and a float for a float.
-		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Sign")).NumberParam(TEXT("Value")).ReturnsNumber()
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Sign")).TypeParam(T, NumberTypes, Number).Param(TEXT("Value"), T).Returns(T)
 			.InCategory(TEXT("Math")).Describe(TEXT("-1 if the number is negative, 1 if it's positive, 0 if it's 0: an int for an int, a float for a float.")), 1,
 			[](FBangoCommandCall& Call)
 			{
@@ -705,13 +745,27 @@ namespace Bango
 				return SetFloatResult(Call, FMath::Loge(Value), TEXT("The natural logarithm"));
 			});
 
-		// Lerp(a, b, alpha) -> float. Alpha isn't clamped: 2 goes past B, like Unreal's Lerp.
-		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Lerp")).Param(TEXT("A"), Double).Param(TEXT("B"), Double).Param(TEXT("Alpha"), Double, TEXT("0 gives A, 1 gives B"))
-			.Returns(Double).InCategory(TEXT("Math")).Describe(TEXT("Blends from A to B: Alpha 0 gives A, 1 gives B, 0.5 halfway between.")), 3,
+		// Lerp(a, b, alpha): floats, vector2s or vector3s, both the same, and the result is one too. Alpha isn't clamped:
+		// 2 goes past B, like Unreal's Lerp.
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Lerp")).TypeParam(T, { Double, Vector2, Vector3 })
+			.Param(TEXT("A"), T).Param(TEXT("B"), T).Param(TEXT("Alpha"), Double, TEXT("0 gives A, 1 gives B"))
+			.Returns(T).InCategory(TEXT("Math")).Describe(TEXT("Blends from A to B (two floats, or two vectors of the same kind): Alpha 0 gives A, 1 gives B, 0.5 halfway between.")), 3,
 			[](FBangoCommandCall& Call)
 			{
+				const double Alpha = Call.Args[2].GetDouble();
+				if (Call.TypeArgs.Num() > 0 && Call.TypeArgs[0].IsVector())
+				{
+					const FVector From = GetVector(Call.Args[0]);
+					const FVector Blended = From + (GetVector(Call.Args[1]) - From) * Alpha;
+					if (!FMath::IsFinite(Blended.X) || !FMath::IsFinite(Blended.Y) || !FMath::IsFinite(Blended.Z))
+					{
+						return Call.Fail(TEXT("Lerp's result isn't a vector that can be used (it's too large, or undefined)."));
+					}
+					Call.Result = MakeVectorOf(Call.TypeArgs[0], Blended);
+					return EBangoCommandResult::Done;
+				}
 				const double A = Call.Args[0].GetDouble();
-				return SetFloatResult(Call, A + (Call.Args[1].GetDouble() - A) * Call.Args[2].GetDouble(), TEXT("Lerp's result"));
+				return SetFloatResult(Call, A + (Call.Args[1].GetDouble() - A) * Alpha, TEXT("Lerp's result"));
 			});
 
 		// MapRange(value, inMin, inMax, outMin, outMax) -> float, clamped to the out range (Unreal's MapRangeClamped).
@@ -859,38 +913,38 @@ namespace Bango
 				return EBangoCommandResult::Done;
 			});
 
-		// ---- Vectors (vector3) ----
+		// ---- Vectors: a vector2 or a vector3 (both the same, where there are two); Cross is vector3 only ----
 
 		// Length(v) -> float
-		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Length")).Param(TEXT("Vector"), Vector3).Returns(Double).InCategory(TEXT("Vectors"))
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Length")).TypeParam(T, VectorTypes).Param(TEXT("Vector"), T).Returns(Double).InCategory(TEXT("Vectors"))
 			.Describe(TEXT("The vector's length.")), 1, [](FBangoCommandCall& Call)
 			{
 				return SetFloatResult(Call, GetVector(Call.Args[0]).Size(), TEXT("The length"));
 			});
 
 		// Distance(a, b) -> float
-		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Distance")).Param(TEXT("A"), Vector3).Param(TEXT("B"), Vector3).Returns(Double).InCategory(TEXT("Vectors"))
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Distance")).TypeParam(T, VectorTypes).Param(TEXT("A"), T).Param(TEXT("B"), T).Returns(Double).InCategory(TEXT("Vectors"))
 			.Describe(TEXT("The distance between two points. For two actors, use DistanceTo.")), 2, [](FBangoCommandCall& Call)
 			{
 				return SetFloatResult(Call, FVector::Dist(GetVector(Call.Args[0]), GetVector(Call.Args[1])), TEXT("The distance"));
 			});
 
 		// Normalize(v) -> vector3
-		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Normalize")).Param(TEXT("Vector"), Vector3).Returns(Vector3).InCategory(TEXT("Vectors"))
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Normalize")).TypeParam(T, VectorTypes).Param(TEXT("Vector"), T).Returns(T).InCategory(TEXT("Vectors"))
 			.Describe(TEXT("The vector made 1 long, keeping its direction. [0, 0, 0] has no direction, so it's an error.")), 1, [](FBangoCommandCall& Call)
 			{
 				const FVector V = GetVector(Call.Args[0]);
 				const double Length = V.Size();
 				if (!(Length > UE_DOUBLE_SMALL_NUMBER) || !FMath::IsFinite(Length))
 				{
-					return Call.Fail(FString::Printf(TEXT("Can't normalize %s: it has no direction (it's [0, 0, 0], or too small)."), *Call.Args[0].ToDebugString()));
+					return Call.Fail(FString::Printf(TEXT("Can't normalize %s: it has no direction (it's all zeros, or too small)."), *Call.Args[0].ToDebugString()));
 				}
-				Call.Result = MakeVector(V / Length);
+				Call.Result = MakeVectorOf(Call.Args[0].GetType(), V / Length);
 				return EBangoCommandResult::Done;
 			});
 
 		// Dot(a, b) -> float, Cross(a, b) -> vector3
-		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Dot")).Param(TEXT("A"), Vector3).Param(TEXT("B"), Vector3).Returns(Double).InCategory(TEXT("Vectors"))
+		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("Dot")).TypeParam(T, VectorTypes).Param(TEXT("A"), T).Param(TEXT("B"), T).Returns(Double).InCategory(TEXT("Vectors"))
 			.Describe(TEXT("The dot product. For two directions 1 long: 1 if they're the same, 0 at right angles, -1 if opposite.")), 2, [](FBangoCommandCall& Call)
 			{
 				return SetFloatResult(Call, FVector::DotProduct(GetVector(Call.Args[0]), GetVector(Call.Args[1])), TEXT("The dot product"));
@@ -899,16 +953,6 @@ namespace Bango
 			.Describe(TEXT("The cross product: a vector at right angles to both.")), 2, [](FBangoCommandCall& Call)
 			{
 				Call.Result = MakeVector(FVector::CrossProduct(GetVector(Call.Args[0]), GetVector(Call.Args[1])));
-				return EBangoCommandResult::Done;
-			});
-
-		// LerpVector(a, b, alpha) -> vector3
-		AddSimple(Commands, FBangoCommandSignature::Make(TEXT("LerpVector")).Param(TEXT("A"), Vector3).Param(TEXT("B"), Vector3).Param(TEXT("Alpha"), Double, TEXT("0 gives A, 1 gives B"))
-			.Returns(Vector3).InCategory(TEXT("Vectors")).Describe(TEXT("Blends from A to B: Alpha 0 gives A, 1 gives B, 0.5 halfway between.")), 3,
-			[](FBangoCommandCall& Call)
-			{
-				const FVector A = GetVector(Call.Args[0]);
-				Call.Result = MakeVector(A + (GetVector(Call.Args[1]) - A) * Call.Args[2].GetDouble());
 				return EBangoCommandResult::Done;
 			});
 

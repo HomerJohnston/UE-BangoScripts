@@ -201,45 +201,14 @@ namespace BangoGraphLayoutPrivate
 		return F;
 	}
 
-	// ---- Array commands (built into the compiler) ----
-
-	struct FArrayCommandInfo
-	{
-		const TCHAR* Name;
-		bool bHasTarget;
-		const TCHAR* ParamNames[2];
-		const TCHAR* ParamHints[2];
-		int32 NumParams;
-		const TCHAR* ReturnHint; // null: returns nothing
-	};
-
-	static const FArrayCommandInfo GArrayCommands[] =
-	{
-		{ TEXT("Count"),    false, { TEXT("Array"), nullptr },     { TEXT("array"), nullptr },       1, TEXT("int") },
-		{ TEXT("Push"),     true,  { TEXT("Value"), nullptr },     { TEXT("element"), nullptr },     1, nullptr },
-		{ TEXT("InsertAt"), true,  { TEXT("Value"), TEXT("Index") }, { TEXT("element"), TEXT("int") }, 2, nullptr },
-		{ TEXT("Pop"),      true,  { nullptr, nullptr },           { nullptr, nullptr },             0, TEXT("element") },
-		{ TEXT("RemoveAt"), true,  { TEXT("Index"), nullptr },     { TEXT("int"), nullptr },         1, TEXT("element") },
-	};
-
-	static const FArrayCommandInfo* FindArrayCommand(const FString& Name)
-	{
-		for (const FArrayCommandInfo& Info : GArrayCommands)
-		{
-			if (Name.Equals(Info.Name, ESearchCase::CaseSensitive))
-			{
-				return &Info;
-			}
-		}
-		return nullptr;
-	}
-
 	/** What a dedicated call node shows, whichever kind of callee it is. */
 	struct FCallee
 	{
 		EBangoNodeStyle Style = EBangoNodeStyle::Generic;
 		bool bHasTarget = false;
 		FString TargetHint;
+		/** It changes its target in place (Push), so the target is a variable (or an element of one). */
+		bool bMutableTarget = false;
 		TArray<FString> ParamNames;
 		TArray<FString> ParamHints;
 		/** Per parameter; may be shorter than ParamNames (missing ones are empty). */
@@ -266,11 +235,13 @@ namespace BangoGraphLayoutPrivate
 		{
 			Out.Style = Style;
 			Out.bHasTarget = Signature.bHasTarget;
-			Out.TargetHint = Signature.bHasTarget ? Signature.TargetType.ToString() : FString();
-			for (const FBangoCommandParam& Param : Signature.Params)
+			Out.TargetHint = Signature.GetTargetTypeName(); // a type parameter's name ("array") or the type's; empty without a target
+			Out.bMutableTarget = Signature.bMutableTarget;
+			for (int32 i = 0; i < Signature.Params.Num(); ++i)
 			{
+				const FBangoCommandParam& Param = Signature.Params[i];
 				Out.ParamNames.Add(Param.Name);
-				Out.ParamHints.Add(Param.GetTypeName()); // "number" for a NumberParam
+				Out.ParamHints.Add(Signature.GetParamTypeName(i)); // a type parameter's name ("number", "float|vector2|vector3") or the type's
 				Out.ParamDescriptions.Add(Param.Description);
 			}
 			Out.NumRequired = Signature.GetNumRequiredParams();
@@ -290,23 +261,6 @@ namespace BangoGraphLayoutPrivate
 		if (const FBangoCommandSignature* Function = Context.FindFunction(Name))
 		{
 			FromSignature(*Function, EBangoNodeStyle::ScriptFunction);
-			return true;
-		}
-		if (const FArrayCommandInfo* Info = FindArrayCommand(Name))
-		{
-			Out.Style = EBangoNodeStyle::ArrayCommand;
-			Out.bHasTarget = Info->bHasTarget;
-			Out.TargetHint = TEXT("array");
-			for (int32 i = 0; i < Info->NumParams; ++i)
-			{
-				Out.ParamNames.Add(Info->ParamNames[i]);
-				Out.ParamHints.Add(Info->ParamHints[i]);
-			}
-			Out.NumRequired = Info->NumParams;
-			Out.bReturnsValue = Info->ReturnHint != nullptr;
-			Out.bMustUseResult = !Info->bHasTarget && Info->ReturnHint != nullptr; // Count; Pop and RemoveAt can be thrown away
-			Out.ReturnHint = Info->ReturnHint ? Info->ReturnHint : TEXT("");
-			Out.CategoryName = TEXT("Arrays");
 			return true;
 		}
 		if (Context.Commands)
@@ -466,9 +420,9 @@ namespace BangoGraphLayoutPrivate
 			FBangoNodeField Target = Tok.Field(TEXT("Target"), Callee.TargetHint, TargetBegin, NameTok);
 			Target.OuterEnd = Tok.StartOf(NameTok); // with the space before the name
 			Target.InsertSuffix = TEXT(" ");
-			if (Callee.Style == EBangoNodeStyle::ArrayCommand)
+			if (Callee.bMutableTarget)
 			{
-				// Array commands change their target, so it's always a variable (or an element of one).
+				// It changes its target (an array command), so that's always a variable (or an element of one).
 				Target.bVariable = true;
 				Target.VariableType = Callee.TargetHint;
 			}

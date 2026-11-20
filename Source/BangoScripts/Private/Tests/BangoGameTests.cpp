@@ -155,7 +155,7 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 		TEXT("Min"), TEXT("Max"), TEXT("Abs"), TEXT("Clamp"), TEXT("Sin"), TEXT("Cos"), TEXT("SinDegrees"), TEXT("CosDegrees"), TEXT("Time"), TEXT("ToEntity"), TEXT("SetPos"), TEXT("GetPos"), TEXT("SetHidden"), TEXT("DistanceTo"), TEXT("IsNull"),
 		TEXT("Ceil"), TEXT("Sign"), TEXT("Sqrt"), TEXT("Pow"), TEXT("Log"), TEXT("Ln"), TEXT("Lerp"), TEXT("MapRange"), TEXT("InterpTo"), TEXT("DeltaTime"),
 		TEXT("Tan"), TEXT("TanDegrees"), TEXT("Asin"), TEXT("AsinDegrees"), TEXT("Acos"), TEXT("AcosDegrees"), TEXT("Atan"), TEXT("AtanDegrees"), TEXT("Atan2"), TEXT("Atan2Degrees"),
-		TEXT("Pi"), TEXT("RandomBool"), TEXT("Chance"), TEXT("IsNearlyEqual"), TEXT("Length"), TEXT("Distance"), TEXT("Normalize"), TEXT("Dot"), TEXT("Cross"), TEXT("LerpVector"), TEXT("Exec"),
+		TEXT("Pi"), TEXT("RandomBool"), TEXT("Chance"), TEXT("IsNearlyEqual"), TEXT("Length"), TEXT("Distance"), TEXT("Normalize"), TEXT("Dot"), TEXT("Cross"), TEXT("Count"), TEXT("Push"), TEXT("InsertAt"), TEXT("Pop"), TEXT("RemoveAt"), TEXT("Exec"),
 		TEXT("Abort"), TEXT("IsRunning"), TEXT("WaitFor") })
 	{
 		const FBangoCommand* Registered = Commands.FindCommandImpl(Name);
@@ -192,6 +192,10 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 		TEXT("ce = Ceil(1.25);\nsgi = Sign(-7);\nsqr = Sqrt(16);\npw = Pow(2, 10);\nlg = Log(1000);\nlg2 = Log(8, 2);\nlne = Ln(1);\nlp = Lerp(0, 10, 0.25);\n")
 		TEXT("mr = MapRange(5, 0, 10, 100, 200);\na2 = Atan2Degrees(1, 1);\nch = Chance(1);\nne = IsNearlyEqual(0.1 + 0.2, 0.3);\nln3 = Length([1, 2, 2]) + Distance([0, 0, 0], [0, 3, 4]) + Dot([1, 0, 0], [2, 0, 0]);\n")
 		TEXT("nv = Normalize([0, 0, 5]);\ncr = Cross([1, 0, 0], [0, 1, 0]);\n")
+		// Type parameters: Lerp and the vector commands on vector2 and vector3, and Count on an array, a vector and a string.
+		TEXT("global vector3 lpv = Lerp([0, 0, 0], [2, 4, 6], 0.5);\nglobal vector2 lp2 = Lerp([0, 0], [2, 4], 0.5);\n")
+		TEXT("global float ln2 = Length([3, 4]) + Distance([0, 0], [3, 4]) + Dot([1, 2], [3, 4]);\nglobal vector2 nv2 = Normalize([0, 5]);\n")
+		TEXT("global int cnt = Count(\"abc\") + Count([1, 2]) + Count(nv2) + Count(lpv);\n")
 		TEXT("fm = Format(\"{0}-{1}-{2}\", 1, \"a\", [1.5]);\n")
 		TEXT("en = Format(\"{0} {1}\", ToEntity(\"door17\"), [@john, ToEntity(\"_x\")]);\n")
 		TEXT("same = ToEntity(\"john\") == @john;\n")
@@ -245,6 +249,13 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Length, Distance and Dot"), FMath::IsNearlyEqual(Globals.Find(TEXT("ln3"))->GetDouble(), 10.0, 1e-9));
 	TestEqual(TEXT("Normalize"), Globals.Find(TEXT("nv"))->GetVectorPart(2), 1.0);
 	TestEqual(TEXT("Cross"), Globals.Find(TEXT("cr"))->GetVectorPart(2), 1.0);
+	TestTrue(TEXT("Lerp on vector3s"), Globals.Find(TEXT("lpv"))->GetType() == FBangoType::Vector3() && Globals.Find(TEXT("lpv"))->GetVectorPart(2) == 3.0);
+	TestTrue(TEXT("Lerp on vector2s"), Globals.Find(TEXT("lp2"))->GetType() == FBangoType::Vector2() && Globals.Find(TEXT("lp2"))->GetVectorPart(1) == 2.0);
+	TestTrue(TEXT("Length, Distance and Dot on vector2s"), FMath::IsNearlyEqual(Globals.Find(TEXT("ln2"))->GetDouble(), 21.0, 1e-9));
+	TestTrue(TEXT("Normalize on a vector2"), Globals.Find(TEXT("nv2"))->GetType() == FBangoType::Vector2() && Globals.Find(TEXT("nv2"))->GetVectorPart(1) == 1.0);
+	TestEqual(TEXT("Count of a string, an array, a vector2 and a vector3"), Globals.Find(TEXT("cnt"))->GetInt(), 10);
+	TestTrue(TEXT("pure: Max, Count and Lerp are; Random and GetPos aren't"), Commands.FindCommand(TEXT("Max"))->bPure && Commands.FindCommand(TEXT("Count"))->bPure
+		&& Commands.FindCommand(TEXT("Lerp"))->bPure && !Commands.FindCommand(TEXT("Random"))->bPure && !Commands.FindCommand(TEXT("GetPos"))->bPure);
 	TestEqual(TEXT("Format"), Globals.Find(TEXT("fm"))->GetString(), FString(TEXT("1-a-[1.5]")));
 	TestEqual(TEXT("ToEntity and entities in Format"), Globals.Find(TEXT("en"))->GetString(), FString(TEXT("door17 [john, _x]")));
 	TestTrue(TEXT("ToEntity equals the @ literal"), Globals.Find(TEXT("same"))->GetBool());
@@ -267,6 +278,8 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 		{ TEXT("float _x;\n_x = Asin(2);"), TEXT("from -1 to 1") },
 		{ TEXT("bool _x;\n_x = Chance(1.5);"), TEXT("from 0 to 1") },
 		{ TEXT("vector3 _x;\n_x = Normalize([0, 0, 0]);"), TEXT("no direction") },
+		{ TEXT("vector2 _x;\n_x = Normalize([0, 0]);"), TEXT("no direction") },
+		{ TEXT("vector3 _x;\n_x = Lerp([0, 0, 0], [1e308, 0, 0], 1e10);"), TEXT("Lerp's result isn't a vector that can be used") },
 		{ TEXT("float _x;\n_x = MapRange(1, 2, 2, 0, 1);"), TEXT("no range to map from") },
 		{ TEXT("float _t;\n_t = Time();"), TEXT("needs a game world") },
 		{ TEXT("Exec(\"Intro\");"), TEXT("needs a game world") },

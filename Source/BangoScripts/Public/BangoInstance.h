@@ -323,13 +323,18 @@ private:
 	bool LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Globals, const IBangoEntityResolver* Entities, bool bNilOk = false);
 	bool StorePlace(const FBangoPlace& Place, FBangoGlobalStore& Globals);
 	bool IsNilPlace(const FBangoPlace& Place, FBangoGlobalStore& Globals);
-	bool ArrayModify(const FBangoPlace& Place, int32 Kind, bool bResultUsed, FBangoGlobalStore& Globals);
+	/** A command that changes its target in place (bMutableTarget): the place's value is handed to it, and stored back when it's done. */
+	bool CallCommandInPlace(const FBangoPlace& Place, int32 NameIndex, int32 ArgCount, bool bResultUsed, FBangoGlobalStore& Globals, const FBangoExecContext& Context);
+	/** The value a place is, to change it: its local slot or global (which counts as changed), down its indexes. Null, after failing, if it isn't there. */
+	FBangoValue* FindPlaceToChange(const FBangoPlace& Place, TConstArrayView<int64> Indexes, FBangoGlobalStore& Globals, const FString& What);
+	/** Checks a command call's arguments as they are now (its type parameters, the entities it names), before it runs. */
+	bool PrepareCommandCall(const FBangoCommandSignature& Signature, FBangoCommandCall& Call, const FBangoExecContext& Context);
 
 	// Operators
 	bool BinaryOp(EBangoOp Op);
 
 	// Calls
-	bool CallCommand(int32 NameIndex, int32 ArgCount, bool bHasTarget, const FBangoExecContext& Context);
+	bool CallCommand(int32 NameIndex, int32 ArgCount, int32 Flags, const FBangoExecContext& Context);
 	/** `target call Name(args)`: hands it to Context.CallReflected. */
 	bool CallReflected(int32 NameIndex, int32 ArgCount, bool bWantResult, const FBangoExecContext& Context);
 	bool FinishCommand(EBangoCommandResult Result);

@@ -834,7 +834,7 @@ FString SBangoScriptEditor::CheckFunctionName(const FString& OldName, const FStr
 			return FString::Printf(TEXT("This script already has a function called %s."), *NewName);
 		}
 	}
-	if (Bango::IsBuiltinCommandName(NewName) || FBangoModule::Get().GetCommands().FindCommand(NewName))
+	if (FBangoModule::Get().GetCommands().FindCommand(NewName))
 	{
 		return FString::Printf(TEXT("%s is a command, so a function can't have that name."), *NewName);
 	}
@@ -893,7 +893,7 @@ FReply SBangoScriptEditor::OnAddFunctionClicked()
 		Used.Add(Entry->Label);
 	}
 	FString Name = TEXT("NewFunction");
-	for (int32 Suffix = 2; Used.Contains(Name) || Bango::IsBuiltinCommandName(Name) || FBangoModule::Get().GetCommands().FindCommand(Name); ++Suffix)
+	for (int32 Suffix = 2; Used.Contains(Name) || FBangoModule::Get().GetCommands().FindCommand(Name); ++Suffix)
 	{
 		Name = FString::Printf(TEXT("NewFunction%d"), Suffix);
 	}
@@ -2919,17 +2919,6 @@ void SBangoScriptEditor::RefreshCommandList()
 			Entry.Tooltip += Signature->bBuiltIn ? TEXT("\n\n(Built into Bango)") : TEXT("\n\n(This project's own command)");
 		}
 		Entries.Add(MoveTemp(Entry));
-	}
-	for (const TCHAR* Builtin : { TEXT("Count"), TEXT("InsertAt"), TEXT("Pop"), TEXT("Push"), TEXT("RemoveAt") })
-	{
-		if (!Table.FindCommand(Builtin))
-		{
-			FReferenceEntry Entry;
-			Entry.Name = Builtin;
-			Entry.Category = TEXT("Arrays");
-			Entry.Tooltip = LOCTEXT("BuiltinCommandTooltip", "An array command, built into Bango: called on an array, as in _list Push(_x).").ToString();
-			Entries.Add(MoveTemp(Entry));
-		}
 	}
 	FillReferenceList(CommandReference, Entries, TArray<FString>{ FString(TEXT("Other")) },
 		LOCTEXT("NoCommandsMatch", "No command names contain \"{0}\"."));

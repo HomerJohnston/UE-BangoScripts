@@ -261,6 +261,8 @@ namespace BangoCompilerPrivate
 
 		/** True while compiling array literal elements only to learn their types. */
 		bool bInferring = false;
+		/** Calls whose type parameters were worked out ahead of compiling their arguments (InferTypeParams). */
+		TMap<const FBangoCallExpr*, TArray<FExprType>> InferredTypeParams;
 
 		// ---- Errors ----
 
@@ -1028,13 +1030,6 @@ namespace BangoCompilerPrivate
 					return Pair.Key;
 				}
 			}
-			for (const TCHAR* Builtin : { TEXT("Count"), TEXT("Push"), TEXT("InsertAt"), TEXT("Pop"), TEXT("RemoveAt") })
-			{
-				if (Name.Equals(Builtin, ESearchCase::IgnoreCase))
-				{
-					return Builtin;
-				}
-			}
 			return Commands.FindNameIgnoringCase(Name);
 		}
 
@@ -1050,10 +1045,6 @@ namespace BangoCompilerPrivate
 				if (FunctionIndexes.Contains(Function.Name))
 				{
 					return Fail(Function.Loc, FString::Printf(TEXT("There is already a function named '%s' in this script."), *Function.Name));
-				}
-				if (Bango::IsBuiltinCommandName(Function.Name))
-				{
-					return Fail(Function.Loc, FString::Printf(TEXT("'%s' is a built-in array command, so it can't be used as a function name."), *Function.Name));
 				}
 				if (Commands.FindCommand(Function.Name))
 				{
@@ -3037,27 +3028,66 @@ namespace BangoCompilerPrivate
 
 		/**
 		 * NilOk (optional): the arguments a command takes even if nil (MayBeNil), so a nil variable there is passed on as nil.
-		 * Numbers (optional): a command's number parameters (NumberParam), which take an int or a float and leave it as it is;
-		 * OutNumberTypes gets the type of each argument given for one.
+		 * Signature (optional): the command's, for its parameters whose type is a type parameter (TypeParam). TypeArgs
+		 * then has an entry per type parameter, in and out: what each is in this call. In: Known for one the call's
+		 * target has settled, Unknown for one it will settle when it runs, and Void for the rest, which the arguments
+		 * settle here (BindTypeParams).
 		 */
 		bool CompileArgs(const FBangoCallExpr& Call, const TArray<FBangoType>& ParamTypes, const FString& What, const TArray<bool>* NilOk = nullptr,
-			const TArray<bool>* Numbers = nullptr, TArray<FExprType>* OutNumberTypes = nullptr)
+			const FBangoCommandSignature* Signature = nullptr, TArray<FExprType>* TypeArgs = nullptr)
 		{
+			const bool bTypeParams = Signature && Signature->TypeParams.Num() > 0;
+			// The types of the arguments given for type parameters, as they're compiled (when none needs to know its
+			// type first: see InferTypeParams).
+			TArray<FTypeParamArg> TypeParamArgs;
+			TArray<bool> Settled; // the type parameters the target settled: nil can be passed for those
+			if (bTypeParams)
+			{
+				check(TypeArgs && TypeArgs->Num() == Signature->TypeParams.Num());
+				for (const FExprType& TypeArg : *TypeArgs)
+				{
+					Settled.Add(TypeArg.Kind != ETypeKind::Void);
+				}
+				TypeParamArgs.SetNum(FMath::Min(Call.Args.Num(), ParamTypes.Num()));
+				if (NeedsTypesFirst(Call, *Signature, *TypeArgs) && !InferTypeParams(Call, *Signature, What, *TypeArgs))
+				{
+					return false;
+				}
+			}
+
 			for (int32 i = 0; i < Call.Args.Num() && i < ParamTypes.Num(); ++i)
 			{
 				FExprType ArgType;
 				bool bArgOk = false;
-				if (Numbers && Numbers->IsValidIndex(i) && (*Numbers)[i])
+				const int32 TypeVar = bTypeParams ? Signature->Params[i].TypeVar : INDEX_NONE;
+				if (TypeVar != INDEX_NONE)
 				{
-					if (!CompileExpr(*Call.Args[i], nullptr, ArgType) || !CheckNumberArg(ArgType, Call.Args[i]->Loc, FString::Printf(TEXT("Argument %d of %s"), i + 1, *What)))
+					const FExprType Bound = (*TypeArgs)[TypeVar];
+					const FString ArgWhat = FString::Printf(TEXT("Argument %d of %s"), i + 1, *What);
+					if (IsNilLiteral(*Call.Args[i]) && !(Settled[TypeVar] && Bound.IsKnown()))
+					{
+						// Its type comes from its arguments, and nil has none.
+						return Fail(Call.Args[i]->Loc, TEXT("nil can only be assigned, passed or returned where its type is known."));
+					}
+					if (Bound.IsKnown())
+					{
+						// Its type parameter is known already: a written-out [1, 2, 3] becomes a vector, an int a float.
+						const FBangoType Wanted = FBangoCommandSignature::GetTypeOf(Bound.Type, Signature->Params[i].TypeVarDepth);
+						if (!CompileExpr(*Call.Args[i], &Wanted, ArgType) || !CanAssign(Wanted, ArgType, Call.Args[i]->Loc, ArgWhat))
+						{
+							return false;
+						}
+						EmitConvertIfNeeded(Wanted, ArgType);
+						continue;
+					}
+					// Otherwise as it is: the call works its type parameters out from its arguments when it runs, and
+					// converts them (an undeclared global is only checked then).
+					if (!CompileExpr(*Call.Args[i], nullptr, ArgType) || !CheckUsableValue(ArgType, Call.Args[i]->Loc, TEXT("as an argument here")))
 					{
 						return false;
 					}
-					// An undeclared global is checked to be a number when the command is called.
-					if (OutNumberTypes)
-					{
-						OutNumberTypes->Add(ArgType);
-					}
+					TypeParamArgs[i].bGiven = true;
+					TypeParamArgs[i].Type = ArgType;
 					continue;
 				}
 				if (NilOk && NilOk->IsValidIndex(i) && (*NilOk)[i] && IsPlaceExpr(*Call.Args[i]))
@@ -3082,35 +3112,227 @@ namespace BangoCompilerPrivate
 				}
 				EmitConvertIfNeeded(ParamTypes[i], ArgType);
 			}
-			return true;
+			// Whatever is still open is settled by the arguments as they were compiled.
+			return !bTypeParams || BindTypeParams(Call, *Signature, What, TypeParamArgs, *TypeArgs);
 		}
 
-		/** A number parameter's argument: an int, a float, or an undeclared global (checked when the script runs). */
-		bool CheckNumberArg(const FExprType& ArgType, const FBangoSourceLocation& Loc, const FString& What)
+		// ---- Type parameters (FBangoCommandSignature::TypeParam) ----
+
+		/** An argument given for a parameter whose type is a type parameter. */
+		struct FTypeParamArg
 		{
-			if (ArgType.IsNumber() || ArgType.IsUnknown())
-			{
-				return true;
-			}
-			return Fail(Loc, FString::Printf(TEXT("%s needs a number (an int or a float), but this is %s."), *What, *ArgType.Describe()));
+			/** Its type is in Type (not a written-out array, whose type depends on the others'). */
+			bool bGiven = false;
+			FExprType Type;
+			/** A written-out array, like [1, 2, 3]: its number of elements. It's a vector if the type parameter says so. */
+			int32 LiteralCount = INDEX_NONE;
+		};
+
+		static bool IsNilLiteral(const FBangoExpr& Expr)
+		{
+			const FBangoLiteralExpr* Literal = Expr.As<FBangoLiteralExpr>();
+			return Literal && Literal->LiteralKind == EBangoLiteralKind::Nil;
 		}
 
 		/**
-		 * A ReturnsNumber command's result, from its number arguments (like +): a float if any is a float, an int if they're all
-		 * ints, and not known until the script runs if one is an undeclared global (and none is a float).
+		 * True if an argument for a type parameter that's still open is a written-out array: what it is depends on
+		 * its type parameter (`Lerp([0, 0, 0], _to, 0.5)`: a vector3, as _to is), so the others' types are needed first.
 		 */
-		static FExprType NumberResultType(const TArray<FExprType>& NumberArgTypes)
+		static bool NeedsTypesFirst(const FBangoCallExpr& Call, const FBangoCommandSignature& Signature, const TArray<FExprType>& TypeArgs)
 		{
-			bool bUnknown = false;
-			for (const FExprType& ArgType : NumberArgTypes)
+			for (int32 i = 0; i < Call.Args.Num() && i < Signature.Params.Num(); ++i)
 			{
-				if (ArgType.Is(FBangoType::Double()))
+				const int32 TypeVar = Signature.Params[i].TypeVar;
+				if (TypeVar != INDEX_NONE && TypeArgs[TypeVar].Kind == ETypeKind::Void && Call.Args[i]->As<FBangoArrayLiteralExpr>())
 				{
-					return FExprType::MakeKnown(FBangoType::Double());
+					return true;
 				}
-				bUnknown |= ArgType.IsUnknown();
 			}
-			return bUnknown ? FExprType::MakeUnknown() : FExprType::MakeKnown(FBangoType::Int());
+			return false;
+		}
+
+		/**
+		 * Works out a call's open type parameters before its arguments are compiled, by compiling the arguments
+		 * once and throwing that code away (as an array literal does for its elements). Kept per call, so a call
+		 * inside another's arguments is worked out once however often it's compiled.
+		 */
+		bool InferTypeParams(const FBangoCallExpr& Call, const FBangoCommandSignature& Signature, const FString& What, TArray<FExprType>& TypeArgs)
+		{
+			if (const TArray<FExprType>* Found = InferredTypeParams.Find(&Call))
+			{
+				TypeArgs = *Found;
+				return true;
+			}
+			TArray<FTypeParamArg> Args;
+			Args.SetNum(FMath::Min(Call.Args.Num(), Signature.Params.Num()));
+			const int32 Mark = Here();
+			const bool bWasInferring = bInferring;
+			bInferring = true;
+			bool bOk = true;
+			for (int32 i = 0; bOk && i < Args.Num(); ++i)
+			{
+				const int32 TypeVar = Signature.Params[i].TypeVar;
+				if (TypeVar == INDEX_NONE || TypeArgs[TypeVar].Kind != ETypeKind::Void || IsNilLiteral(*Call.Args[i]))
+				{
+					continue;
+				}
+				const FBangoTypeParam& TypeParam = Signature.TypeParams[TypeVar];
+				const FBangoArrayLiteralExpr* Literal = Call.Args[i]->As<FBangoArrayLiteralExpr>();
+				if (Literal && Signature.Params[i].TypeVarDepth == 0 && !TypeParam.bAnyArray && !TypeParam.bAnyType)
+				{
+					Args[i].LiteralCount = Literal->Elements.Num(); // a vector, if anything
+					continue;
+				}
+				// An array whose type can't be worked out ([]) says nothing here; compiling it for real says so.
+				bOk = CompileExpr(*Call.Args[i], nullptr, Args[i].Type)
+					&& (Args[i].Type.Kind != ETypeKind::Void || CheckUsableValue(Args[i].Type, Call.Args[i]->Loc, TEXT("as an argument here")));
+				Args[i].bGiven = true;
+			}
+			bInferring = bWasInferring;
+			Fn->Code.SetNum(Mark);
+			Fn->Debug.SetNum(Mark);
+			if (!bOk || !BindTypeParams(Call, Signature, What, Args, TypeArgs))
+			{
+				return false;
+			}
+			InferredTypeParams.Add(&Call, TypeArgs);
+			return true;
+		}
+
+		/**
+		 * What each of the signature's open type parameters (Void in TypeArgs) is in this call, from its arguments'
+		 * types. An argument that's an array of one (T.Array()) says what it is, exactly, and the others must fit
+		 * that. Without one, they must all be the same allowed type, an int counting as a float beside one (or where
+		 * only floats are allowed). Unknown where it's only known when it runs: an undeclared global among them and
+		 * no type that settles it.
+		 */
+		bool BindTypeParams(const FBangoCallExpr& Call, const FBangoCommandSignature& Signature, const FString& What, const TArray<FTypeParamArg>& Args, TArray<FExprType>& TypeArgs)
+		{
+			for (int32 Var = 0; Var < Signature.TypeParams.Num(); ++Var)
+			{
+				if (TypeArgs[Var].Kind != ETypeKind::Void)
+				{
+					continue; // settled already
+				}
+				const FBangoTypeParam& TypeParam = Signature.TypeParams[Var];
+				bool bHave = false;
+				bool bFromArray = false;
+				FBangoType Type;
+				int32 FirstArg = INDEX_NONE;
+				bool bUnknown = false;
+
+				// The arrays of it say what it is.
+				for (int32 i = 0; i < Args.Num(); ++i)
+				{
+					const int32 Depth = Signature.Params[i].TypeVarDepth;
+					if (Signature.Params[i].TypeVar != Var || Depth == 0 || !Args[i].bGiven)
+					{
+						continue;
+					}
+					if (!Args[i].Type.IsKnown())
+					{
+						bUnknown |= Args[i].Type.IsUnknown();
+						continue;
+					}
+					const FBangoType ArgType = Args[i].Type.Type;
+					const FBangoType Inner(ArgType.Base, (uint8)FMath::Max<int32>(ArgType.ArrayDepth - Depth, 0));
+					if (ArgType.ArrayDepth < Depth || !TypeParam.Allows(Inner))
+					{
+						return Fail(Call.Args[i]->Loc, FString::Printf(TEXT("Argument %d of %s needs %s, but this is %s."), i + 1, *What, *TypeParam.Describe(Depth), *Args[i].Type.Describe()));
+					}
+					if (bHave && !(Inner == Type))
+					{
+						return Fail(Call.Args[i]->Loc, FString::Printf(TEXT("Argument %d of %s is %s, but argument %d ('%s') is %s. They must go together: %s"),
+							i + 1, *What, *Args[i].Type.Describe(), FirstArg + 1, *Signature.Params[FirstArg].Name, *Args[FirstArg].Type.Describe(), *Signature.ToString()));
+					}
+					if (!bHave)
+					{
+						bHave = true;
+						bFromArray = true;
+						Type = Inner;
+						FirstArg = i;
+					}
+				}
+
+				for (int32 i = 0; i < Args.Num(); ++i)
+				{
+					if (Signature.Params[i].TypeVar != Var || Signature.Params[i].TypeVarDepth != 0 || !Args[i].bGiven)
+					{
+						continue;
+					}
+					if (!Args[i].Type.IsKnown())
+					{
+						bUnknown |= Args[i].Type.IsUnknown();
+						continue; // an empty array or nil says nothing
+					}
+					if (bFromArray)
+					{
+						if (!Type.IsAssignableFrom(Args[i].Type.Type))
+						{
+							return Fail(Call.Args[i]->Loc, FString::Printf(TEXT("Argument %d of %s needs %s, but this is %s."), i + 1, *What, *Article(Type), *Args[i].Type.Describe()));
+						}
+						continue;
+					}
+					FBangoType ArgType;
+					if (!TypeParam.Resolve(Args[i].Type.Type, ArgType))
+					{
+						return Fail(Call.Args[i]->Loc, FString::Printf(TEXT("Argument %d of %s needs %s, but this is %s."), i + 1, *What, *TypeParam.Describe(), *Args[i].Type.Describe()));
+					}
+					if (!bHave)
+					{
+						bHave = true;
+						Type = ArgType;
+						FirstArg = i;
+						continue;
+					}
+					FBangoType Unified;
+					if (!FBangoTypeParam::Unify(Type, ArgType, Unified))
+					{
+						return Fail(Call.Args[i]->Loc, FString::Printf(TEXT("Argument %d of %s is %s, but argument %d ('%s') is %s. They must be the same type: %s"),
+							i + 1, *What, *Args[i].Type.Describe(), FirstArg + 1, *Signature.Params[FirstArg].Name, *Args[FirstArg].Type.Describe(), *Signature.ToString()));
+					}
+					Type = Unified;
+				}
+				for (int32 i = 0; bHave && !Type.IsVector() && i < Args.Num(); ++i)
+				{
+					// A written-out array beside something that isn't a vector.
+					if (Signature.Params[i].TypeVar != Var || Args[i].LiteralCount == INDEX_NONE)
+					{
+						continue;
+					}
+					if (TypeParam.Allows(FBangoType::Vector2()) || TypeParam.Allows(FBangoType::Vector3()))
+					{
+						return Fail(Call.Args[i]->Loc, FString::Printf(TEXT("Argument %d of %s is an array of %d value(s), but argument %d ('%s') is %s. They must be the same type: %s"),
+							i + 1, *What, Args[i].LiteralCount, FirstArg + 1, *Signature.Params[FirstArg].Name, *Args[FirstArg].Type.Describe(), *Signature.ToString()));
+					}
+					return Fail(Call.Args[i]->Loc, FString::Printf(TEXT("Argument %d of %s needs %s, but this is an array."), i + 1, *What, *TypeParam.Describe()));
+				}
+				if (!bHave)
+				{
+					// Only written-out arrays say what it is: a vector of that many numbers.
+					for (int32 i = 0; i < Args.Num() && !bHave; ++i)
+					{
+						if (Signature.Params[i].TypeVar != Var || Args[i].LiteralCount == INDEX_NONE)
+						{
+							continue;
+						}
+						const FBangoType Vector = Args[i].LiteralCount == 2 ? FBangoType::Vector2() : FBangoType::Vector3();
+						if ((Args[i].LiteralCount != 2 && Args[i].LiteralCount != 3) || !TypeParam.Allows(Vector))
+						{
+							const bool bVectors = TypeParam.Allows(FBangoType::Vector2()) || TypeParam.Allows(FBangoType::Vector3());
+							return Fail(Call.Args[i]->Loc, bVectors
+								? FString::Printf(TEXT("Argument %d of %s needs %s, but this is an array of %d value(s)."), i + 1, *What, *TypeParam.Describe(), Args[i].LiteralCount)
+								: FString::Printf(TEXT("Argument %d of %s needs %s, but this is an array."), i + 1, *What, *TypeParam.Describe()));
+						}
+						bHave = true;
+						Type = Vector;
+					}
+				}
+				// Ints beside an undeclared global: a float if the global turns out to be one.
+				const bool bMayBecomeFloat = bHave && !bFromArray && bUnknown && Type.Base == EBangoBaseType::Int && TypeParam.Allows(FBangoType(EBangoBaseType::Double, Type.ArrayDepth));
+				TypeArgs[Var] = bHave && !bMayBecomeFloat ? FExprType::MakeKnown(Type) : FExprType::MakeUnknown();
+			}
+			return true;
 		}
 
 		/**
@@ -3164,10 +3386,6 @@ namespace BangoCompilerPrivate
 			if (Call.bReflect)
 			{
 				return CompileReflectedCall(Call, bValueNeeded, OutType);
-			}
-			if (Bango::IsBuiltinCommandName(Call.Name))
-			{
-				return CompileBuiltin(Call, bValueNeeded, OutType);
 			}
 
 			// Script function
@@ -3239,28 +3457,84 @@ namespace BangoCompilerPrivate
 				return false;
 			}
 
+			// What each of its type parameters is in this call: Void until something settles it.
+			TArray<FExprType> TypeArgs;
+			TypeArgs.Init(FExprType::MakeVoid(), Signature->TypeParams.Num());
+			const bool bTargetTypeParam = Signature->TypeParams.IsValidIndex(Signature->TargetTypeVar);
+			FPlaceInfo TargetPlace; // for a command that changes its target in place
 			if (Call.Target)
 			{
 				FExprType TargetType;
-				if (!CompileExpr(*Call.Target, &Signature->TargetType, TargetType)
-					|| !CanAssign(Signature->TargetType, TargetType, Call.Target->Loc, FString::Printf(TEXT("The target of '%s'"), *Call.Name)))
+				const FString TargetWhat = FString::Printf(TEXT("The target of '%s'"), *Call.Name);
+				if (Signature->bMutableTarget)
 				{
-					return false;
+					// The target is where the result goes back, so it's a place: its indexes are worked out here, once.
+					if (!IsPlaceExpr(*Call.Target))
+					{
+						return Fail(Call.Target->Loc, FString::Printf(TEXT("%s changes its target, so the target must be a variable, a global or an array element."), *Call.Name));
+					}
+					if (!ResolvePlace(*Call.Target, EPlaceUse::Write, TargetPlace))
+					{
+						return false;
+					}
+					if (Fn->Places[TargetPlace.PlaceIndex].Part != -1)
+					{
+						return Fail(Call.Target->Loc, FString::Printf(TEXT("%s changes its target, so the target must be a variable, a global or an array element, not a part of a vector or a character of a string ('%s')."),
+							*Call.Name, *TargetPlace.Text));
+					}
+					TargetType = TargetPlace.Type;
+					if (!bTargetTypeParam && !TargetType.Is(Signature->TargetType))
+					{
+						return Fail(Call.Target->Loc, FString::Printf(TEXT("%s needs %s to change, but '%s' is %s."), *TargetWhat, *Article(Signature->TargetType), *TargetPlace.Text, *TargetType.Describe()));
+					}
 				}
-				EmitConvertIfNeeded(Signature->TargetType, TargetType);
+				else if (bTargetTypeParam)
+				{
+					if (!CompileExpr(*Call.Target, nullptr, TargetType) || !CheckUsableValue(TargetType, Call.Target->Loc, TEXT("as a target here")))
+					{
+						return false;
+					}
+				}
+				else
+				{
+					if (!CompileExpr(*Call.Target, &Signature->TargetType, TargetType) || !CanAssign(Signature->TargetType, TargetType, Call.Target->Loc, TargetWhat))
+					{
+						return false;
+					}
+					EmitConvertIfNeeded(Signature->TargetType, TargetType);
+				}
+
+				if (bTargetTypeParam)
+				{
+					// The target says what its type parameter is, exactly (an array is never converted to fit a value).
+					const FBangoTypeParam& TypeParam = Signature->TypeParams[Signature->TargetTypeVar];
+					const int32 Depth = Signature->TargetTypeVarDepth;
+					if (TargetType.IsKnown())
+					{
+						const FBangoType Inner(TargetType.Type.Base, (uint8)FMath::Max<int32>(TargetType.Type.ArrayDepth - Depth, 0));
+						if (TargetType.Type.ArrayDepth < Depth || !TypeParam.Allows(Inner))
+						{
+							return Fail(Call.Target->Loc, Signature->bMutableTarget
+								? FString::Printf(TEXT("%s needs %s as its target, but '%s' is %s."), *Call.Name, *TypeParam.Describe(Depth), *TargetPlace.Text, *TargetType.Describe())
+								: FString::Printf(TEXT("%s needs %s, but this is %s."), *TargetWhat, *TypeParam.Describe(Depth), *TargetType.Describe()));
+						}
+						TypeArgs[Signature->TargetTypeVar] = FExprType::MakeKnown(Inner);
+					}
+					else
+					{
+						TypeArgs[Signature->TargetTypeVar] = FExprType::MakeUnknown(); // an undeclared global: when it runs
+					}
+				}
 			}
 
 			TArray<FBangoType> ParamTypes;
 			TArray<bool> NilOk;
-			TArray<bool> Numbers;
 			for (const FBangoCommandParam& Param : Signature->Params)
 			{
 				ParamTypes.Add(Param.Type);
 				NilOk.Add(Param.bMayBeNil);
-				Numbers.Add(Param.bNumber);
 			}
-			TArray<FExprType> NumberArgTypes;
-			if (!CompileArgs(Call, ParamTypes, FString::Printf(TEXT("'%s'"), *Call.Name), &NilOk, &Numbers, &NumberArgTypes))
+			if (!CompileArgs(Call, ParamTypes, FString::Printf(TEXT("'%s'"), *Call.Name), &NilOk, Signature, &TypeArgs))
 			{
 				return false;
 			}
@@ -3282,10 +3556,20 @@ namespace BangoCompilerPrivate
 			}
 
 			CurrentLoc = Call.Loc;
-			Emit(EBangoOp::CallCommand, AddName(Call.Name), Call.Args.Num(), Call.Target ? 1 : 0);
-			if (Signature->bReturnsNumber)
+			const int32 CallFlags = (Signature->bPure ? Bango::CallIsPure : 0) | (bValueNeeded ? Bango::CallResultUsed : 0);
+			if (Signature->bMutableTarget)
 			{
-				return FinishCall(Call, true, NumberResultType(NumberArgTypes), bValueNeeded, OutType);
+				Emit(EBangoOp::CallCommandInPlace, TargetPlace.PlaceIndex, AddName(Call.Name), Call.Args.Num() | (CallFlags << Bango::InPlaceFlagShift));
+			}
+			else
+			{
+				Emit(EBangoOp::CallCommand, AddName(Call.Name), Call.Args.Num(), (Call.Target ? Bango::CallHasTarget : 0) | CallFlags);
+			}
+			if (Signature->bReturnsValue && TypeArgs.IsValidIndex(Signature->ReturnTypeVar))
+			{
+				const FExprType& TypeArg = TypeArgs[Signature->ReturnTypeVar];
+				return FinishCall(Call, true, TypeArg.IsKnown() ? FExprType::MakeKnown(FBangoCommandSignature::GetTypeOf(TypeArg.Type, Signature->ReturnTypeVarDepth)) : FExprType::MakeUnknown(),
+					bValueNeeded, OutType);
 			}
 			return FinishCall(Call, Signature->bReturnsValue, Signature->ReturnType, bValueNeeded, OutType);
 		}
@@ -3353,112 +3637,6 @@ namespace BangoCompilerPrivate
 				return Fail(Call.NameLoc, FString::Printf(TEXT("'%s' doesn't return a value, so it can't be used here."), *Call.Name));
 			}
 			return true;
-		}
-
-		bool CompileBuiltin(const FBangoCallExpr& Call, bool bValueNeeded, FExprType& OutType)
-		{
-			const FString& Name = Call.Name;
-
-			if (Name.Equals(TEXT("Count"), ESearchCase::CaseSensitive))
-			{
-				if (Call.Target || Call.Args.Num() != 1)
-				{
-					return Fail(Call.NameLoc, TEXT("Count takes one array, vector or string, and no target: 'Count(_myArray)'."));
-				}
-				if (!bValueNeeded && !bInferring)
-				{
-					return FailUnusedResult(Call);
-				}
-				FExprType ArrayType;
-				if (!CompileExpr(*Call.Args[0], nullptr, ArrayType))
-				{
-					return false;
-				}
-				const bool bCountable = ArrayType.IsUnknown() || ArrayType.IsKnownArray()
-					|| ArrayType.Type.Base == EBangoBaseType::Vector2 || ArrayType.Type.Base == EBangoBaseType::Vector3 || ArrayType.Type.Base == EBangoBaseType::String;
-				if (!bCountable)
-				{
-					return Fail(Call.Args[0]->Loc, FString::Printf(TEXT("Count needs an array, a vector or a string, but this is %s."), *ArrayType.Describe()));
-				}
-				CurrentLoc = Call.Loc;
-				Emit(EBangoOp::ArrayCount);
-				return FinishCall(Call, true, FBangoType::Int(), bValueNeeded, OutType);
-			}
-
-			EBangoArrayModify Kind = EBangoArrayModify::Push;
-			int32 ExpectedArgs = 1;
-			const TCHAR* Usage = TEXT("");
-			if (Name.Equals(TEXT("Push"), ESearchCase::CaseSensitive))
-			{
-				Kind = EBangoArrayModify::Push; ExpectedArgs = 1; Usage = TEXT("'_myArray Push(value);'");
-			}
-			else if (Name.Equals(TEXT("InsertAt"), ESearchCase::CaseSensitive))
-			{
-				Kind = EBangoArrayModify::InsertAt; ExpectedArgs = 2; Usage = TEXT("'_myArray InsertAt(value, index);'");
-			}
-			else if (Name.Equals(TEXT("Pop"), ESearchCase::CaseSensitive))
-			{
-				Kind = EBangoArrayModify::Pop; ExpectedArgs = 0; Usage = TEXT("'_myArray Pop();'");
-			}
-			else
-			{
-				Kind = EBangoArrayModify::RemoveAt; ExpectedArgs = 1; Usage = TEXT("'_myArray RemoveAt(index);'");
-			}
-
-			if (!Call.Target || Call.Args.Num() != ExpectedArgs)
-			{
-				return Fail(Call.NameLoc, FString::Printf(TEXT("%s takes an array as its target and %d argument(s): %s"), *Name, ExpectedArgs, Usage));
-			}
-			if (!IsPlaceExpr(*Call.Target))
-			{
-				return Fail(Call.Target->Loc, FString::Printf(TEXT("%s changes its target, so the target must be a variable, a global or an array element."), *Name));
-			}
-
-			FPlaceInfo Place;
-			if (!ResolvePlace(*Call.Target, EPlaceUse::Write, Place))
-			{
-				return false;
-			}
-			if (!Place.Type.IsKnownArray())
-			{
-				return Fail(Call.Target->Loc, FString::Printf(TEXT("%s needs an array as its target, but '%s' is %s."), *Name, *Place.Text, *Place.Type.Describe()));
-			}
-			const FBangoType ElementType = Place.Type.Type.GetElementType();
-
-			if (Kind == EBangoArrayModify::Push || Kind == EBangoArrayModify::InsertAt)
-			{
-				FExprType ValueType;
-				if (!CompileExpr(*Call.Args[0], &ElementType, ValueType)
-					|| !CanAssign(ElementType, ValueType, Call.Args[0]->Loc, FString::Printf(TEXT("%s on '%s'"), *Name, *Place.Text)))
-				{
-					return false;
-				}
-			}
-			if (Kind == EBangoArrayModify::InsertAt || Kind == EBangoArrayModify::RemoveAt)
-			{
-				const FBangoExpr& IndexArg = *Call.Args[Kind == EBangoArrayModify::InsertAt ? 1 : 0];
-				FExprType IndexType;
-				if (!CompileExpr(IndexArg, nullptr, IndexType))
-				{
-					return false;
-				}
-				if (!IndexType.Is(FBangoType::Int()) && !IndexType.IsUnknown())
-				{
-					return Fail(IndexArg.Loc, FString::Printf(TEXT("The index for %s must be an int, but this is %s."), *Name, *IndexType.Describe()));
-				}
-			}
-
-			const bool bReturns = Kind == EBangoArrayModify::Pop || Kind == EBangoArrayModify::RemoveAt;
-			CurrentLoc = Call.Loc;
-			Emit(EBangoOp::ArrayModify, Place.PlaceIndex, (int32)Kind, (bReturns && bValueNeeded) ? 1 : 0);
-
-			if (bReturns)
-			{
-				// The result is only pushed when it's used, so there's nothing to pop.
-				OutType = FExprType::MakeKnown(ElementType);
-				return true;
-			}
-			return FinishCall(Call, false, FBangoType(), bValueNeeded, OutType);
 		}
 	};
 }

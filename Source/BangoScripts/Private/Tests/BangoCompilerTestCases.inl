@@ -29,7 +29,14 @@ static void BangoMakeTestCommands(FBangoCommandTable& Table)
 	Table.Add(FBangoCommandSignature::Make(TEXT("Say")).Param(TEXT("Text"), FBangoType::Text()).WithPlaceholders().Variadic(TEXT("{"), 0, TEXT("}")), Error);
 	Table.Add(FBangoCommandSignature::Make(TEXT("FormatText")).Param(TEXT("Text"), FBangoType::Text()).WithPlaceholders().Variadic(TEXT("{"), 0, TEXT("}")).Returns(FBangoType::Text()), Error);
 	Table.Add(FBangoCommandSignature::Make(TEXT("ToText")).Param(TEXT("Value"), String).Returns(FBangoType::Text()), Error);
-	Table.Add(FBangoCommandSignature::Make(TEXT("Max")).NumberParam(TEXT("A")).NumberParam(TEXT("B")).ReturnsNumber(), Error);
+	// Type parameters: a number command like the built-in Max, and Lerp over floats and vectors.
+	const FBangoTypeVar T(TEXT("T"));
+	Table.Add(FBangoCommandSignature::Make(TEXT("Max")).TypeParam(T, { Int, Double }, TEXT("number")).Param(TEXT("A"), T).Param(TEXT("B"), T).Returns(T).Pure(), Error);
+	Table.Add(FBangoCommandSignature::Make(TEXT("Lerp")).TypeParam(T, { Double, FBangoType::Vector2(), FBangoType::Vector3() })
+		.Param(TEXT("A"), T).Param(TEXT("B"), T).Param(TEXT("Alpha"), Double).Returns(T).Pure(), Error);
+	Bango::RegisterCoreCommands(Table, Error); // Count, and the array commands
+	// Changes its target in place, like the array commands: adds one to an int.
+	Table.Add(FBangoCommandSignature::Make(TEXT("Bump")).Target(Int).MutableTarget(), Error);
 }
 
 struct FBangoCompilerTestCase
@@ -176,12 +183,13 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 		TEXT("  10 StorePlace _g[][]\n")
 		TEXT("  11 PushConst 0\n")
 		TEXT("  12 PushConst 1\n")
-		TEXT("  13 ArrayModify _g[] Push\n")
+		TEXT("  13 CallCommandInPlace _g[] Push 1\n")
 		TEXT("  14 PushConst 0\n")
-		TEXT("  15 ArrayModify _g[] Pop +result\n")
+		TEXT("  15 CallCommandInPlace _g[] Pop 0 +result\n")
 		TEXT("  16 StorePlace _p\n")
-		TEXT("  17 ArrayModify _g Pop\n")
-		TEXT("  18 Halt\n"),
+		TEXT("  17 CallCommandInPlace _g Pop 0\n")
+		TEXT("  18 Pop\n")
+		TEXT("  19 Halt\n"),
 		nullptr, nullptr },
 	{ TEXT("listing: undeclared globals and commands"),
 		TEXT("int _g;\nif (gold > 10)\n{\n\tboss Speak(\"rich\");\n};\n_g = gold;"),
@@ -319,7 +327,7 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 	{ TEXT("function with target"), TEXT("function void F()\n{\n};\njohn F();"), nullptr, TEXT("(4:6)"), TEXT("can't be called with a target") },
 	{ TEXT("duplicate function"), TEXT("function void F()\n{\n};\nfunction void F()\n{\n};"), nullptr, TEXT("(4:1)"), TEXT("already a function named 'F'") },
 	{ TEXT("function named like a command"), TEXT("function void Talk()\n{\n};"), nullptr, TEXT("(1:1)"), TEXT("already a command") },
-	{ TEXT("function named like a built-in"), TEXT("function void Push()\n{\n};"), nullptr, TEXT("(1:1)"), TEXT("built-in") },
+	{ TEXT("function named like a built-in"), TEXT("function void Push()\n{\n};"), nullptr, TEXT("(1:1)"), TEXT("'Push' is already a command") },
 	{ TEXT("duplicate parameter"), TEXT("function void F(int _a, int _a)\n{\n};"), nullptr, TEXT("(1:29)"), TEXT("Two parameters") },
 	{ TEXT("top-level local inside function"), TEXT("int _x = 1;\nfunction void F()\n{\n\t_x = 2;\n};"), nullptr, TEXT("(4:2)"), TEXT("'_x' isn't declared in this script") },
 	{ TEXT("loop variable with a local's name"), TEXT("int _x = 1;\nfor (int _x = 0; _x < 2; _x++)\n{\n\tTalk(\"x\");\n};"), nullptr, TEXT("(2:6)"), TEXT("already declared") },
@@ -414,7 +422,7 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 	{ TEXT("a text can't be indexed"), TEXT("text _t = INVTEXT(\"hi\");\nstring _c;\n_c = _t[0];"), nullptr, TEXT("(3:6)"), TEXT("it can't be indexed") },
 	{ TEXT("index a call's vector"), TEXT("float _f;\n_f = P()[2];\nfunction vector3 P()\n{\n\treturn [1, 2, 3];\n};"), TEXT("*"), nullptr, nullptr },
 	{ TEXT("Count of a string and a vector"), TEXT("int _n;\n_n = Count(\"abc\") + Count([1, 2, 3]);"), TEXT("*"), nullptr, nullptr },
-	{ TEXT("Count of an int"), TEXT("int _n;\n_n = Count(5);"), nullptr, TEXT("(2:12)"), TEXT("Count needs an array, a vector or a string") },
+	{ TEXT("Count of an int"), TEXT("int _n;\n_n = Count(5);"), nullptr, TEXT("(2:12)"), TEXT("Argument 1 of 'Count' needs an array, a vector2, a vector3 or a string, but this is an int.") },
 	{ TEXT("index not an int"), TEXT("int[] _a = [1];\nint _b;\n_b = _a[\"x\"];"), nullptr, TEXT("(3:9)"), TEXT("index must be an int") },
 	{ TEXT("array element type"), TEXT("int[] _a = [1, \"x\"];"), nullptr, TEXT("(1:16)"), TEXT("needs an int, but this is a string") },
 	{ TEXT("array mixed types inferred"), TEXT("Talk(\"{0}\", [1, \"x\"]);"), nullptr, TEXT("(1:13)"), TEXT("mixes an int and a string") },
@@ -422,12 +430,12 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 	{ TEXT("array literal where scalar expected"), TEXT("int _x = [1];"), nullptr, TEXT("(1:10)"), TEXT("Expected an int here, but this is an array") },
 	{ TEXT("++ on float"), TEXT("float _d = 1.0;\n_d++;"), nullptr, TEXT("(2:1)"), TEXT("only works on an int") },
 	{ TEXT("compound result type"), TEXT("int _i = 0;\n_i += 1.5;"), nullptr, TEXT("(2:1)"), TEXT("stored in '_i' needs an int, but this is a float") },
-	{ TEXT("Push wrong type"), TEXT("int[] _a = [];\n_a Push(\"x\");"), nullptr, TEXT("(2:9)"), TEXT("Push on '_a' needs an int") },
+	{ TEXT("Push wrong type"), TEXT("int[] _a = [];\n_a Push(\"x\");"), nullptr, TEXT("(2:9)"), TEXT("Argument 1 of 'Push' needs an int, but this is a string.") },
 	{ TEXT("Push on non-array"), TEXT("int _a = 0;\n_a Push(1);"), nullptr, TEXT("(2:1)"), TEXT("needs an array as its target") },
 	{ TEXT("Push on undeclared global"), TEXT("questLog Push(\"x\");"), nullptr, TEXT("(1:1)"), TEXT("isn't declared in this script") },
 	{ TEXT("Push on a value"), TEXT("[1] Push(2);"), nullptr, TEXT("(1:1)"), TEXT("must be a variable") },
-	{ TEXT("Pop with arguments"), TEXT("int[] _a = [];\n_a Pop(1);"), nullptr, TEXT("(2:4)"), TEXT("0 argument(s)") },
-	{ TEXT("Count wrong"), TEXT("int _c;\n_c = Count(5);"), nullptr, TEXT("(2:12)"), TEXT("Count needs an array") },
+	{ TEXT("Pop with arguments"), TEXT("int[] _a = [];\n_a Pop(1);"), nullptr, TEXT("(2:4)"), TEXT("Wrong number of arguments for 'Pop' (1 given): array Pop() -> element") },
+	{ TEXT("Count wrong"), TEXT("int _c;\n_c = Count(5);"), nullptr, TEXT("(2:12)"), TEXT("of 'Count' needs an array") },
 	{ TEXT("forEach over undeclared global"), TEXT("forEach (_x in questLog)\n{\n};"), nullptr, TEXT("(1:16)"), TEXT("declare it first") },
 	{ TEXT("spawn: the id goes in an int"), TEXT("string _s;\n_s = spawn\n{\n}"), nullptr, TEXT("(2:1)"), TEXT("stored in '_s'") },
 	{ TEXT("spawn: declaring its id variable on the spot"), TEXT("Talk(\"x\");\nint _t = spawn\n{\n}\nTalk(\"{0}\", _t);"), TEXT("*"), nullptr, nullptr },
@@ -534,16 +542,56 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 	{ TEXT("invariant text placeholders are checked"), TEXT("Say(INVTEXT(\"{0} {1}\"), 1);"), nullptr, TEXT("(1:13)"), TEXT("This text uses {1}, but only 1 value comes after it.") },
 	{ TEXT("invariant text with a named placeholder"), TEXT("Say(INVTEXT(\"{Name}\"));"), nullptr, TEXT("(1:13)"), TEXT("This text uses {Name}") },
 
-	// ---- Number commands (NumberParam, ReturnsNumber): an int for ints, otherwise a float ----
+	// ---- Number commands (a type parameter that's an int or a float): an int for ints, otherwise a float ----
 	{ TEXT("number: ints give an int"), TEXT("int _a = 1;\nint _b;\n_b = Max(_a, 2);"), TEXT("*"), nullptr, nullptr },
 	{ TEXT("number: a float gives a float"), TEXT("int _a = 1;\nfloat _f;\n_f = Max(_a, 2.5);\n_f = Max(1, 2);"), TEXT("*"), nullptr, nullptr },
 	{ TEXT("number: a float result into an int"), TEXT("int _a = 1;\nint _b;\n_b = Max(_a, 2.5);"), nullptr, TEXT("(3:6)"), TEXT("float") },
 	{ TEXT("number: nested"), TEXT("int _b;\n_b = Max(Max(1, 2), 3);\n_b = Max(1, 2) + 3;"), TEXT("*"), nullptr, nullptr },
 	{ TEXT("number: not a number"), TEXT("int _b;\n_b = Max(1, \"two\");"), nullptr, TEXT("(2:13)"), TEXT("Argument 2 of 'Max' needs a number (an int or a float), but this is a string.") },
 	{ TEXT("number: nil"), TEXT("int _b;\n_b = Max(1, nil);"), nullptr, TEXT("(2:13)"), TEXT("nil can only be assigned, passed or returned where its type is known.") },
-	{ TEXT("number: an array"), TEXT("int _b;\n_b = Max([1], 2);"), nullptr, TEXT("(2:10)"), TEXT("needs a number (an int or a float), but this is an int[].") },
+	{ TEXT("number: an array"), TEXT("int _b;\n_b = Max([1], 2);"), nullptr, TEXT("(2:10)"), TEXT("needs a number (an int or a float), but this is an array.") },
 	{ TEXT("number: an undeclared global is allowed"), TEXT("int _b;\n_b = Max(someGlobal, 2);"), TEXT("*"), nullptr, nullptr },
 	{ TEXT("number: must be used"), TEXT("Max(1, 2);"), nullptr, TEXT("(1:1)"), TEXT("'Max' gives a value that must be used") },
+
+	// ---- Type parameters (TypeParam): Lerp takes floats or vectors, both the same; Count an array, a vector or a string ----
+	{ TEXT("type param: ints count as floats where only floats are allowed"), TEXT("float _f;\n_f = Lerp(0, 10, 0.5);\n_f = Lerp(_f, 10, 1);"), TEXT("*"), nullptr, nullptr },
+	{ TEXT("type param: so the result is a float"), TEXT("int _i;\n_i = Lerp(0, 10, 0.5);"), nullptr, TEXT("(2:6)"), TEXT("float") },
+	{ TEXT("type param: vectors, written out too"),
+		TEXT("vector3 _a = [0, 0, 0];\nvector3 _v;\nvector2 _w;\n_v = Lerp(_a, [1, 2, 3], 0.5);\n_v = Lerp([1, 2, 3], _a, 0.5);\n_w = Lerp([0, 0], [1, 1], 0.5);\n_v = Lerp([0, 0, 0], [1, 1, 1], 1);"), TEXT("*"), nullptr, nullptr },
+	{ TEXT("type param: a vector3 result into a vector2"), TEXT("vector2 _w;\n_w = Lerp([0, 0, 0], [1, 1, 1], 0.5);"), nullptr, TEXT("(2:6)"), TEXT("vector3") },
+	{ TEXT("type param: two kinds of vector"), TEXT("vector3 _a = [0, 0, 0];\nvector2 _b = [0, 0];\n_a = Lerp(_a, _b, 0.5);"), nullptr, TEXT("(3:15)"),
+		TEXT("Argument 2 of 'Lerp' is a vector2, but argument 1 ('A') is a vector3. They must be the same type: Lerp(float|vector2|vector3 A, float|vector2|vector3 B, float Alpha) -> float|vector2|vector3") },
+	{ TEXT("type param: a float and a written-out vector"), TEXT("float _f;\n_f = Lerp(1.0, [0, 0], 0.5);"), nullptr, TEXT("(2:16)"),
+		TEXT("Argument 2 of 'Lerp' is an array of 2 value(s), but argument 1 ('A') is a float. They must be the same type") },
+	{ TEXT("type param: a type that isn't allowed"), TEXT("string _s;\n_s = Lerp(\"a\", \"b\", 0.5);"), nullptr, TEXT("(2:11)"),
+		TEXT("Argument 1 of 'Lerp' needs a float, a vector2 or a vector3, but this is a string.") },
+	{ TEXT("type param: a written-out array that's no vector"), TEXT("vector3 _v;\n_v = Lerp([1], [2], 0.5);"), nullptr, TEXT("(2:11)"),
+		TEXT("Argument 1 of 'Lerp' needs a float, a vector2 or a vector3, but this is an array of 1 value(s).") },
+	{ TEXT("type param: written-out vectors of two sizes"), TEXT("vector3 _v;\n_v = Lerp([1, 2, 3], [1, 2], 0.5);"), nullptr, TEXT("(2:22)"), TEXT("A vector3 needs exactly 3 numbers") },
+	{ TEXT("type param: an undeclared global beside a written-out vector"), TEXT("vector3 _v;\n_v = Lerp(someGlobal, [1, 2, 3], 0.5);"), TEXT("*"), nullptr, nullptr },
+	{ TEXT("type param: only undeclared globals, checked when it runs"), TEXT("float _f;\nvector3 _v;\n_f = Lerp(globalA, globalB, 0.5);\n_v = Lerp(globalA, globalB, 0.5);"), TEXT("*"), nullptr, nullptr },
+	{ TEXT("type param: a call inside a call"), TEXT("vector3 _v;\n_v = Lerp(Lerp([0, 0, 0], [1, 1, 1], 0.5), Lerp([2, 2, 2], _v, Max(0, 1)), Lerp(0, 1, 0.5));"), TEXT("*"), nullptr, nullptr },
+	{ TEXT("type param: nil"), TEXT("float _f;\n_f = Lerp(nil, 1.0, 0.5);"), nullptr, TEXT("(2:11)"), TEXT("nil can only be assigned, passed or returned where its type is known.") },
+	// ---- Commands that change their target in place (MutableTarget): the array commands, and the test table's Bump ----
+	{ TEXT("in place: the array says what an element is"),
+		TEXT("float[] _f = [];\nint[][] _g = [];\nvector3[] _p = [];\n_f Push(1);\n_f Push(nil);\n_f InsertAt(2, 0);\n_g Push([]);\n_g Push([1, 2]);\n_g[0] Push(3);\n_p Push([1, 2, 3]);\nfloat _x = _f Pop();\nint[] _row = _g RemoveAt(0);"),
+		TEXT("*"), nullptr, nullptr },
+	{ TEXT("in place: an array isn't changed to fit a value"), TEXT("int[] _a = [];\n_a Push(2.5);"), nullptr, TEXT("(2:9)"), TEXT("Argument 1 of 'Push' needs an int, but this is a float.") },
+	{ TEXT("in place: the result is an element"), TEXT("int[] _a = [1];\nstring _s;\n_s = _a Pop();"), nullptr, TEXT("(3:6)"), TEXT("'_s' needs a string, but this is an int.") },
+	{ TEXT("in place: not an array"), TEXT("int _x = 1;\n_x Push(1);"), nullptr, TEXT("(2:1)"), TEXT("Push needs an array as its target, but '_x' is an int.") },
+	{ TEXT("in place: no target"), TEXT("Push(1);"), nullptr, TEXT("(1:1)"), TEXT("'Push' needs a target: array Push(element Value)") },
+	{ TEXT("in place: the target must be a place"), TEXT("[1, 2] Push(3);"), nullptr, TEXT("(1:1)"), TEXT("Push changes its target, so the target must be a variable, a global or an array element.") },
+	{ TEXT("in place: a call's result isn't a place"), TEXT("function int[] Make()\n{\n\treturn [1];\n}\nMake() Push(3);"), nullptr, TEXT("(5:1)"), TEXT("Push changes its target") },
+	{ TEXT("in place: a target of one type"), TEXT("int _n = 1;\nint[] _a = [5, 6];\n_n Bump();\n_a[1] Bump();"),
+		TEXT("function <main>:\n  0 PushConst 1\n  1 StorePlace _n\n  2 PushConst 5\n  3 PushConst 6\n  4 MakeArray 2 int\n  5 StorePlace _a\n  6 CallCommandInPlace _n Bump 0\n  7 PushConst 1\n  8 CallCommandInPlace _a[] Bump 0\n  9 Halt\n"), nullptr, nullptr },
+	{ TEXT("in place: a target of another type"), TEXT("float _f = 1.0;\n_f Bump();"), nullptr, TEXT("(2:1)"), TEXT("The target of 'Bump' needs an int to change, but '_f' is a float.") },
+	{ TEXT("in place: not a character of a string"), TEXT("string _s = \"ab\";\n_s[0] Bump();"), nullptr, TEXT("(2:3)"), TEXT("not a part of a vector or a character of a string ('_s[...]')") },
+	{ TEXT("in place: an undeclared global can't be changed"), TEXT("someGlobal Bump();"), nullptr, TEXT("(1:1)"), TEXT("someGlobal") },
+	{ TEXT("Count is a command: no target"), TEXT("int[] _a = [];\nint _n;\n_n = _a Count();"), nullptr, TEXT("(3:9)"), TEXT("'Count' doesn't take a target: Count(array|vector2|vector3|string Value) -> int") },
+	{ TEXT("Count is a command: one argument"), TEXT("int[] _a = [];\nint _n;\n_n = Count(_a, _a);"), nullptr, TEXT("(3:6)"), TEXT("Wrong number of arguments for 'Count' (2 given)") },
+	{ TEXT("Count can't be a function's name"), TEXT("function int Count(int _n)\n{\n\treturn _n;\n}"), nullptr, TEXT("(1:"), TEXT("'Count' is already a command") },
+	{ TEXT("pure commands don't make a condition polled"), TEXT("global int[] found;\nglobal int stage;\nwaitUntil (Count(found) > Max(stage, 2));"),
+		TEXT("globals: int[] found; int stage;\nwait #0: found, stage\nfunction <main>:\n  0 Nop\n  1 Nop\n  2 WaitCheck #0\n  3 LoadPlace found\n  4 CallCommand Count 1\n  5 LoadPlace stage\n  6 PushConst 2\n  7 CallCommand Max 2\n  8 Greater\n  9 WaitResult #0 -> 2\n  10 Halt\n"), nullptr, nullptr },
 	{ TEXT("waitUntil: globals, in functions too"),
 		TEXT("global int stage;\nfunction bool Dead()\n{\n\treturn soldierIsDead;\n};\nwaitUntil (stage == 3 && Dead());"),
 		TEXT("globals: int stage;\nwait #0: soldierIsDead, stage\nfunction <main>:\n  0 Nop\n  1 WaitCheck #0\n  2 LoadPlace stage\n  3 PushConst 3\n  4 Equal\n  5 JumpIfFalseOrPop -> 7\n  6 CallFunction Dead 0\n  7 WaitResult #0 -> 1\n  8 Halt\nfunction Dead:\n  0 LoadPlace soldierIsDead\n  1 Convert bool\n  2 ReturnValue\n  3 ErrorMissingReturn\n"),

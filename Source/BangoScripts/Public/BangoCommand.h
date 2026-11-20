@@ -6,6 +6,65 @@
 
 class UObject;
 
+/**
+ * Names one of a signature's type parameters (FBangoCommandSignature::TypeParam), where a type goes:
+ *   const FBangoTypeVar T(TEXT("T"));
+ *   Make(TEXT("Lerp")).TypeParam(T, { Float, Vector2, Vector3 }).Param(TEXT("A"), T).Param(TEXT("B"), T).Param(TEXT("Alpha"), Float).Returns(T)
+ */
+struct FBangoTypeVar
+{
+	FString Name;
+	/** 0: the type parameter itself. 1: an array of it (Array()), and so on. */
+	int32 ArrayDepth = 0;
+	explicit FBangoTypeVar(const FString& InName) : Name(InName) {}
+	/**
+	 * An array of this: with T a type parameter, T.Array() is "an array of T", so Push is
+	 *   Make(TEXT("Push")).AnyTypeParam(T, TEXT("element")).Target(T.Array()).MutableTarget().Param(TEXT("Value"), T)
+	 * The array then says what T is, and the value must fit it.
+	 */
+	FBangoTypeVar Array() const
+	{
+		FBangoTypeVar Result = *this;
+		++Result.ArrayDepth;
+		return Result;
+	}
+};
+
+/**
+ * A type parameter of a command's signature: a type worked out at each call, from the arguments given for the
+ * parameters that use it. They must all be the same type, one of Types (or any array, with bAnyArray); an int
+ * counts as a float where the others are floats, or where only a float is allowed (as everywhere in Bango).
+ * So `Max(1, 2)` is an int, `Max(1, 2.5)` a float, and `Lerp(_from, _to, 0.5)` whatever _from and _to are.
+ */
+struct BANGOSCRIPTS_API FBangoTypeParam
+{
+	FString Name;
+	TArray<FBangoType> Types;
+	/** Any array is allowed too, whatever its elements (Count's). */
+	bool bAnyArray = false;
+	/** Any type at all is allowed (FBangoCommandSignature::AnyTypeParam): an array command's element. */
+	bool bAnyType = false;
+	/** What signatures and the editor call it, like "number". Empty: its types, like "float|vector2|vector3" ("any" for any type). */
+	FString DisplayName;
+
+	bool Allows(const FBangoType& Type) const;
+	/** What a parameter that's ArrayDepth levels of array of it is called: "element" (0), "array" (1, of any type) or "number[]". */
+	FString GetDisplayName(int32 ArrayDepth) const;
+	/** For messages, for a parameter that's ArrayDepth levels of array of it: "an array", "a number[]"; Describe() for 0. */
+	FString Describe(int32 ArrayDepth) const;
+	/** The type a value of Type is passed as: Type if it's allowed, float (at the same depth) for an int if that is. False if neither. */
+	bool Resolve(const FBangoType& Type, FBangoType& OutType) const;
+	/** "number", or "float|vector2|vector3". */
+	FString GetDisplayName() const;
+	/** For messages: "a number (an int or a float)", or "a float, a vector2 or a vector3". */
+	FString Describe() const;
+	/**
+	 * Two arguments for the same type parameter: the type both are passed as (A, or B if A fits it: an int beside
+	 * a float is a float). False if they can't be the same type.
+	 */
+	static bool Unify(const FBangoType& A, const FBangoType& B, FBangoType& OutType);
+};
+
 /** One parameter of a C++ command. */
 struct FBangoCommandParam
 {
@@ -20,13 +79,12 @@ struct FBangoCommandParam
 	 */
 	bool bMayBeNil = false;
 	/**
-	 * A number parameter: takes an int or a float, and an int stays an int (Type is then float, only as a fallback).
-	 * See FBangoCommandSignature::NumberParam and ReturnsNumber.
+	 * The signature's type parameter this parameter's type is (an index into FBangoCommandSignature::TypeParams), or
+	 * INDEX_NONE. Type is then its first allowed type, only as a fallback. See FBangoCommandSignature::TypeParam.
 	 */
-	bool bNumber = false;
-
-	/** "number" for a number parameter, otherwise the type's name. */
-	FString GetTypeName() const { return bNumber ? FString(TEXT("number")) : Type.ToString(); }
+	int32 TypeVar = INDEX_NONE;
+	/** With TypeVar: 0 if the parameter is the type parameter itself, 1 for an array of it (FBangoTypeVar::Array), and so on. */
+	int32 TypeVarDepth = 0;
 };
 
 /**
@@ -42,6 +100,18 @@ struct BANGOSCRIPTS_API FBangoCommandSignature
 	/** If true, the command must be called with a target of TargetType: `john Speak("Hi");` */
 	bool bHasTarget = false;
 	FBangoType TargetType;
+	/**
+	 * The type parameter the target's type is (an index into TypeParams), or INDEX_NONE, and how many levels of array
+	 * of it (Push's target is an array of its element type: 1). TargetType is then only a fallback.
+	 */
+	int32 TargetTypeVar = INDEX_NONE;
+	int32 TargetTypeVarDepth = 0;
+	/**
+	 * The command changes its target in place (Push, Pop): the call's target must be a variable, a declared global or
+	 * an array element, the command changes FBangoCommandCall::Target, and that's stored back when it's done. Such a
+	 * command can't wait (return Pending). See MutableTarget.
+	 */
+	bool bMutableTarget = false;
 
 	TArray<FBangoCommandParam> Params;
 	/** How many of Params must be given. The rest are optional. -1 means all are required. */
@@ -64,13 +134,26 @@ struct BANGOSCRIPTS_API FBangoCommandSignature
 	 */
 	int32 PlaceholderParam = INDEX_NONE;
 
+	/** The signature's type parameters (TypeParam), which its parameters and return type can be. */
+	TArray<FBangoTypeParam> TypeParams;
+
 	bool bReturnsValue = false;
 	FBangoType ReturnType;
 	/**
-	 * The command returns a number whose type follows its number parameters (like + does): an int if every number
-	 * argument is an int, a float if any is a float. ReturnType is then float, only as a fallback. See ReturnsNumber.
+	 * The type parameter the return type is (an index into TypeParams), or INDEX_NONE: the command returns whatever
+	 * type its arguments made it, like Max (an int for ints, a float for floats). ReturnType is then only a fallback.
 	 */
-	bool bReturnsNumber = false;
+	int32 ReturnTypeVar = INDEX_NONE;
+	/** With ReturnTypeVar: 0 if the result is the type parameter itself, 1 for an array of it, and so on. */
+	int32 ReturnTypeVarDepth = 0;
+	/**
+	 * The command's answer depends only on its arguments: not on the world, the time, chance, or anything else that
+	 * changes by itself (Max, Count, Sqrt). A condition or waitUntil that calls only such commands isn't polled: it's
+	 * checked again when a global or input it reads changes, like one that calls none. See Pure.
+	 */
+	bool bPure = false;
+	/** What's wrong with how the signature was built (a type parameter that doesn't exist, ...): FBangoCommandTable::Add fails with it. */
+	FString BuildError;
 	/**
 	 * Only for commands that return a value: true if a script may call it on a line of its own and throw the value
 	 * away (like a latent command whose pausing is the point). Otherwise its result must be used, and
@@ -100,13 +183,33 @@ struct BANGOSCRIPTS_API FBangoCommandSignature
 
 	static FBangoCommandSignature Make(const FString& InName);
 	FBangoCommandSignature& Target(const FBangoType& Type);
+	/** The command takes a target whose type is a type parameter, or an array of one (T.Array()). */
+	FBangoCommandSignature& Target(const FBangoTypeVar& Var);
+	/**
+	 * The command changes its target in place (call after Target): `_list Push(4);`. The call's target must then be
+	 * something that can be changed: a variable, a declared global or an array element (`_grid[1] Push(4);`). The
+	 * command changes Call.Target, checking everything before it changes anything (a failed call should leave it as
+	 * it was), and can't wait. Its target's type stays what it was.
+	 */
+	FBangoCommandSignature& MutableTarget();
 	/** Adds a parameter. ParamDescription is the tooltip on its value in the graph editor (e.g. the unit: "Seconds"). */
 	FBangoCommandSignature& Param(const FString& ParamName, const FBangoType& Type, const FString& ParamDescription = FString());
 	/**
-	 * Adds a number parameter: it takes an int or a float, and an int is passed on as an int (Param with a float type
-	 * would turn it into a float). Used with ReturnsNumber for commands like Max that work on either.
+	 * Adds a type parameter: a type worked out at each call from the arguments of the parameters that use it
+	 * (Param(Name, Var)), which must all be the same one of Types. An int counts as a float beside floats, or where
+	 * only a float is allowed. The command gets those arguments as that type (FBangoCommandCall::TypeArgs says
+	 * which), and a result of it (Returns(Var)) must be that type.
+	 *   .TypeParam(T, { Int, Float }, TEXT("number"))    Max: an int for ints, otherwise a float
+	 *   .TypeParam(T, { Float, Vector2, Vector3 })       Lerp: floats or vectors, both the same
+	 * DisplayName is what signatures and the editor show for it; without one, its types ("float|vector2|vector3").
 	 */
-	FBangoCommandSignature& NumberParam(const FString& ParamName, const FString& ParamDescription = FString());
+	FBangoCommandSignature& TypeParam(const FBangoTypeVar& Var, const TArray<FBangoType>& Types, const FString& DisplayName = FString());
+	/** The type parameter added last also takes any array (Count's). */
+	FBangoCommandSignature& OrAnyArray();
+	/** Adds a type parameter that can be any type at all (an array command's element). DisplayName: what it's called ("element"); "any" without one. */
+	FBangoCommandSignature& AnyTypeParam(const FBangoTypeVar& Var, const FString& DisplayName = FString());
+	/** Adds a parameter whose type is a type parameter (TypeParam). */
+	FBangoCommandSignature& Param(const FString& ParamName, const FBangoTypeVar& Var, const FString& ParamDescription = FString());
 	/** The parameter added last may be nil, or an entity naming no actor: the command gets it as it is (bMayBeNil). */
 	FBangoCommandSignature& MayBeNil();
 	/** Marks every parameter added after this call as optional. */
@@ -118,15 +221,33 @@ struct BANGOSCRIPTS_API FBangoCommandSignature
 	/** The command returns a value. Scripts must use it (`_x = Name(...)`), unless Discardable() is also called. */
 	FBangoCommandSignature& Returns(const FBangoType& Type);
 	/**
-	 * The command returns a number: an int if every number argument (NumberParam) is an int, otherwise a float, like
-	 * `_a + _b`. The compiler works out which at each call. The command must return that type (an int result where a
-	 * float is expected is turned into a float), and can't be latent.
+	 * The command returns a value of a type parameter's type: what the call's arguments made it (FBangoCommandCall::TypeArgs).
+	 * The compiler works it out at each call. The command must return that type (an int where it's float is turned into one).
 	 */
-	FBangoCommandSignature& ReturnsNumber();
-	/** "number" for a ReturnsNumber command, otherwise the return type's name. */
-	FString GetReturnTypeName() const { return bReturnsNumber ? FString(TEXT("number")) : ReturnType.ToString(); }
-	/** For a ReturnsNumber command: true if the result should be an int, given these arguments (every number argument is an int). */
-	bool NumberResultIsInt(TConstArrayView<FBangoValue> Args) const;
+	FBangoCommandSignature& Returns(const FBangoTypeVar& Var);
+	/** The command's answer depends only on its arguments (bPure), so a condition that calls it isn't polled for it. */
+	FBangoCommandSignature& Pure();
+	/** A parameter's type as signatures show it: its type parameter's name ("number") or its type's. */
+	FString GetParamTypeName(int32 ParamIndex) const;
+	/** The return type as signatures show it: its type parameter's name ("number") or its type's. */
+	FString GetReturnTypeName() const { return TypeParams.IsValidIndex(ReturnTypeVar) ? TypeParams[ReturnTypeVar].GetDisplayName(ReturnTypeVarDepth) : ReturnType.ToString(); }
+	/** The target's type as signatures show it: its type parameter's name ("array" for an array of any type) or its type's. Empty without a target. */
+	FString GetTargetTypeName() const;
+	/** The type of something that's Depth levels of array of a type parameter that is TypeArg in a call (Depth 0: TypeArg itself). */
+	static FBangoType GetTypeOf(const FBangoType& TypeArg, int32 Depth) { return FBangoType(TypeArg.Base, (uint8)FMath::Min<int32>(TypeArg.ArrayDepth + Depth, FBangoType::MaxArrayDepth)); }
+	/** The index in TypeParams of the type parameter with this name, or INDEX_NONE. */
+	int32 FindTypeParam(const FString& VarName) const;
+	/**
+	 * Works out a call's type parameters from its target (null for none) and arguments as they are when it runs, and
+	 * converts the arguments to them (an int to a float, where its type parameter came out as float). OutTypeArgs:
+	 * one per type parameter (unset, a default FBangoType, for one nothing given uses). False, with why, if they
+	 * don't fit.
+	 *
+	 * A type parameter is whatever its arrays say it is: the target, and anything that's an array of it (T.Array()).
+	 * The rest must fit that (an int into a float is fine), and an array is never converted to fit a value. With no
+	 * array, every argument for it must be the same type, an int counting as a float beside one.
+	 */
+	bool BindTypeParams(const FBangoValue* Target, TArray<FBangoValue>& Args, TArray<FBangoType>& OutTypeArgs, FString& OutError) const;
 	/** A script may call this command on a line of its own and throw its value away. */
 	FBangoCommandSignature& Discardable();
 	FBangoCommandSignature& InCategory(const FString& InCategory);
@@ -157,10 +278,20 @@ struct FBangoCommandCall
 	/** The world the script runs in, if any. Commands use it to find actors, timers, etc. */
 	UObject* WorldContext = nullptr;
 
-	/** Start only: the target and arguments. Not available in Poll; copy what Poll needs into LatentState. */
+	/**
+	 * Start only: the target and arguments. Not available in Poll; copy what Poll needs into LatentState.
+	 * For a command that changes its target (MutableTarget), Target is the value to change: what it holds when the
+	 * command is done is stored back where it came from.
+	 */
 	bool bHasTarget = false;
 	FBangoValue Target;
 	TArray<FBangoValue> Args;
+	/**
+	 * What each of the signature's type parameters (TypeParam) is in this call, in the order they were added: for
+	 * Lerp, TypeArgs[0] is float, vector2 or vector3. The arguments of that type parameter are all that type. Kept
+	 * for Poll too.
+	 */
+	TArray<FBangoType> TypeArgs;
 
 	/** Poll: seconds since the last poll (or since Start). Start: the length of the frame the script is running in. */
 	float DeltaSeconds = 0.0f;
@@ -170,6 +301,12 @@ struct FBangoCommandCall
 	 * For example, Sleep keeps the remaining seconds here. Only use FBangoValues, never pointers.
 	 */
 	TArray<FBangoValue> LatentState;
+
+	/**
+	 * True if the script uses the command's result (`_x = _list Pop();`), false if it's called on a line of its own
+	 * and the result is thrown away (`_list Pop();`, for a Discardable command).
+	 */
+	bool bResultUsed = false;
 
 	/** Done with a return value: put it here. */
 	FBangoValue Result;
@@ -220,7 +357,7 @@ public:
 class BANGOSCRIPTS_API FBangoCommandTable : public IBangoCommandLookup
 {
 public:
-	/** Fails for invalid names, duplicates, and the built-in array commands (Count, Push, InsertAt, Pop, RemoveAt). */
+	/** Fails for invalid names, duplicates, and a signature that wasn't built right (BuildError). */
 	bool Add(const FBangoCommandSignature& Signature, FString& OutError);
 	bool Add(const FBangoCommand& Command, FString& OutError);
 
@@ -237,6 +374,10 @@ private:
 
 namespace Bango
 {
-	/** The array commands built into the compiler: Count, Push, InsertAt, Pop, RemoveAt. */
-	BANGOSCRIPTS_API bool IsBuiltinCommandName(const FString& Name);
+	/**
+	 * Registers the commands that need nothing from the engine or a world, so every command table has them (the
+	 * module's, and tests'): Count, Push, InsertAt, Pop and RemoveAt. Bango::RegisterBuiltinCommands calls it. False, with why, if one couldn't be added
+	 * (the table has a command of that name already).
+	 */
+	BANGOSCRIPTS_API bool RegisterCoreCommands(FBangoCommandTable& Commands, FString& OutError);
 }

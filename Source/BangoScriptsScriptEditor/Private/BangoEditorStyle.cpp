@@ -43,7 +43,7 @@ namespace BangoEditorStylePrivate
 	static const FLinearColor Vector3Color(1.00f, 0.78f, 0.15f); // Blueprint's Vector gold
 	static const FLinearColor Vector2Color(0.85f, 0.70f, 0.30f); // a duller gold, so the two are told apart
 	static const FLinearColor AnyColor(0.70f, 0.70f, 0.70f);
-	static const FLinearColor NumberColor = FMath::Lerp(IntColor, DoubleColor, 0.5f); // an int or a float (a NumberParam)
+	static const FLinearColor NumberColor = FMath::Lerp(IntColor, DoubleColor, 0.5f); // an int or a float (a command's "number" type parameter)
 }
 
 void FBangoEditorStyle::Initialize()
@@ -106,7 +106,7 @@ const FSlateBrush* FBangoEditorStyle::GetTypeIcon(const FString& TypeHint, FLine
 		Base.LeftChopInline(2);
 		bArray = true;
 	}
-	if (Base.Equals(TEXT("array"), ESearchCase::CaseSensitive))
+	if (Base.Equals(TEXT("array"), ESearchCase::CaseSensitive) || Base.StartsWith(TEXT("array|"), ESearchCase::CaseSensitive))
 	{
 		return StyleSet->GetBrush("Bango.Type.Array");
 	}

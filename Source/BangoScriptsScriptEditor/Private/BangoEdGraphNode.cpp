@@ -428,8 +428,7 @@ FLinearColor UBangoEdGraphNode::GetNodeTitleColor() const
 	{
 	case EBangoNodeStyle::ScriptEntry:
 	case EBangoNodeStyle::FunctionEntry:  return FLinearColor(0.75f, 0.05f, 0.05f);   // like Blueprint events
-	case EBangoNodeStyle::Command:
-	case EBangoNodeStyle::ArrayCommand:   return FLinearColor(0.10f, 0.35f, 0.75f);   // like Blueprint function calls
+	case EBangoNodeStyle::Command:        return FLinearColor(0.10f, 0.35f, 0.75f);   // like Blueprint function calls
 	case EBangoNodeStyle::ScriptFunction: return FLinearColor(0.10f, 0.45f, 0.55f);   // a calmer blue for this script's own functions
 	default: break;
 	}

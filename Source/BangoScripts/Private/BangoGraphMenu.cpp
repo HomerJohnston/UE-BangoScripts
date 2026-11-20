@@ -227,20 +227,6 @@ namespace Bango
 		Menu.Add(Vars, EBangoGraphNodeKind::IncDec, TEXT("++"), TEXT("increment add one ++")).Description = TEXT("Adds 1 to an int variable.");
 		Menu.Add(Vars, EBangoGraphNodeKind::IncDec, TEXT("--"), TEXT("decrement subtract one --")).Description = TEXT("Subtracts 1 from an int variable.");
 
-		// ---- Array commands (built into the compiler); Count gives a value that must be used ----
-		struct FArrayEntry { const TCHAR* Name; const TCHAR* Description; };
-		static const FArrayEntry ArrayEntries[] =
-		{
-			{ TEXT("Push"),     TEXT("Adds a value to the end of an array.") },
-			{ TEXT("InsertAt"), TEXT("Puts a value into an array at an index, moving the later elements up.") },
-			{ TEXT("Pop"),      TEXT("Removes the last element of an array.") },
-			{ TEXT("RemoveAt"), TEXT("Removes the element at an index of an array, moving the later elements down.") },
-		};
-		for (const FArrayEntry& Array : ArrayEntries)
-		{
-			Menu.Add(TEXT("Arrays"), EBangoGraphNodeKind::Call, FString::Printf(TEXT("%s()"), Array.Name), TEXT("array list")).Description = Array.Description;
-		}
-
 		// ---- Commands that can be a line of their own ----
 		if (Context.Commands)
 		{

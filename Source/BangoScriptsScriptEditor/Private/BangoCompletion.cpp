@@ -157,12 +157,6 @@ void FBangoCompletion::GetBuiltinItems(TArray<FBangoCompletionItem>& OutItems)
 {
 	using namespace BangoCompletionPrivate;
 	OutItems.Add(MakeItem(TEXT("IsNil"), EBangoCompletionKind::Builtin, TEXT("IsNil(value) -> bool"), TEXT("True if the value is nil. Never reads it, so it never stops the script."), true));
-	OutItems.Add(MakeItem(TEXT("Count"), EBangoCompletionKind::Builtin, TEXT("Count(array) -> int"), TEXT("The number of slots in the array, nil slots included."), true));
-	OutItems.Add(MakeItem(TEXT("Push"), EBangoCompletionKind::Builtin, TEXT("array Push(value)"), TEXT("Adds a value at the end of the array."), true));
-	OutItems.Add(MakeItem(TEXT("InsertAt"), EBangoCompletionKind::Builtin, TEXT("array InsertAt(value, int Index)"), TEXT("Inserts a value at an index and moves later elements up."), true));
-	OutItems.Add(MakeItem(TEXT("Pop"), EBangoCompletionKind::Builtin, TEXT("array Pop() -> element"), TEXT("Removes and returns the last element."), true));
-	OutItems.Last().bNoArgs = true;
-	OutItems.Add(MakeItem(TEXT("RemoveAt"), EBangoCompletionKind::Builtin, TEXT("array RemoveAt(int Index) -> element"), TEXT("Removes and returns an element, and moves later elements down."), true));
 }
 
 void FBangoCompletion::GetKeywordItems(TArray<FBangoCompletionItem>& OutItems, bool bValuesOnly)

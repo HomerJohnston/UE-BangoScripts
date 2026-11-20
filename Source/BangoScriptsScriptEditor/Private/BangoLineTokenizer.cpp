@@ -36,7 +36,7 @@ namespace BangoLineTokenizerPrivate
 	static const TCHAR* const Constants[]      = { TEXT("true"), TEXT("false") };
 	static const TCHAR* const NilWord[]        = { TEXT("nil") };
 	static const TCHAR* const PlayerWord[]     = { TEXT("player"), TEXT("self") }; // the first local player's pawn, and the script's owner: entities, coloured like @john
-	static const TCHAR* const Builtins[]       = { TEXT("IsNil"), TEXT("Count"), TEXT("Push"), TEXT("InsertAt"), TEXT("Pop"), TEXT("RemoveAt"), TEXT("call") };
+	static const TCHAR* const Builtins[]       = { TEXT("IsNil"), TEXT("call") };
 	static const TCHAR* const VectorParts[]    = { TEXT("x"), TEXT("y"), TEXT("z") };
 
 	// Localized-text macros and the role of each string argument, by position.

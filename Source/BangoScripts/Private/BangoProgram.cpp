@@ -39,18 +39,6 @@ namespace BangoProgramPrivate
 		return Function.SlotNames.IsValidIndex(Slot) ? Function.SlotNames[Slot] : FString(TEXT("<bad slot>"));
 	}
 
-	static const TCHAR* ArrayModifyName(int32 Kind)
-	{
-		switch ((EBangoArrayModify)Kind)
-		{
-		case EBangoArrayModify::Push:     return TEXT("Push");
-		case EBangoArrayModify::InsertAt: return TEXT("InsertAt");
-		case EBangoArrayModify::Pop:      return TEXT("Pop");
-		case EBangoArrayModify::RemoveAt: return TEXT("RemoveAt");
-		default:                          return TEXT("?");
-		}
-	}
-
 	static FString DescribeOperands(const FBangoProgram& Program, const FBangoFunctionCode& Function, const FBangoInstruction& I)
 	{
 		switch (I.Op)
@@ -82,11 +70,12 @@ namespace BangoProgramPrivate
 		case EBangoOp::CallFunction:
 			return FString::Printf(TEXT("%s %d"), Program.Functions.IsValidIndex(I.A) ? *Program.Functions[I.A].Name : TEXT("<bad function>"), I.B);
 		case EBangoOp::CallCommand:
-			return FString::Printf(TEXT("%s %d%s"), Program.Names.IsValidIndex(I.A) ? *Program.Names[I.A] : TEXT("<bad name>"), I.B, I.C ? TEXT(" +target") : TEXT(""));
+			return FString::Printf(TEXT("%s %d%s"), Program.Names.IsValidIndex(I.A) ? *Program.Names[I.A] : TEXT("<bad name>"), I.B, (I.C & Bango::CallHasTarget) ? TEXT(" +target") : TEXT(""));
 		case EBangoOp::CallReflected:
 			return FString::Printf(TEXT("%s %d%s"), Program.Names.IsValidIndex(I.A) ? *Program.Names[I.A] : TEXT("<bad name>"), I.B, I.C ? TEXT(" +result") : TEXT(""));
-		case EBangoOp::ArrayModify:
-			return FString::Printf(TEXT("%s %s%s"), *DescribePlace(Program, Function, I.A), ArrayModifyName(I.B), I.C ? TEXT(" +result") : TEXT(""));
+		case EBangoOp::CallCommandInPlace:
+			return FString::Printf(TEXT("%s %s %d%s"), *DescribePlace(Program, Function, I.A), Program.Names.IsValidIndex(I.B) ? *Program.Names[I.B] : TEXT("<bad name>"),
+				I.C & Bango::InPlaceArgCountMask, ((I.C >> Bango::InPlaceFlagShift) & Bango::CallResultUsed) ? TEXT(" +result") : TEXT(""));
 		case EBangoOp::ForEachNext:
 			return FString::Printf(TEXT("%s %s -> %d"), *DescribeSlot(Function, I.A), *DescribeSlot(Function, I.B), I.C);
 		case EBangoOp::WaitCheck:
@@ -143,8 +132,7 @@ namespace Bango
 		case EBangoOp::Halt:               return TEXT("Halt");
 		case EBangoOp::ErrorMissingReturn: return TEXT("ErrorMissingReturn");
 		case EBangoOp::SpawnBlock:         return TEXT("SpawnBlock");
-		case EBangoOp::ArrayCount:         return TEXT("ArrayCount");
-		case EBangoOp::ArrayModify:        return TEXT("ArrayModify");
+		case EBangoOp::CallCommandInPlace: return TEXT("CallCommandInPlace");
 		case EBangoOp::ForEachNext:        return TEXT("ForEachNext");
 		case EBangoOp::WaitCheck:          return TEXT("WaitCheck");
 		case EBangoOp::WaitResult:         return TEXT("WaitResult");
@@ -171,7 +159,12 @@ namespace Bango
 				{
 				case EBangoOp::LoadPlace:
 				case EBangoOp::IsNilPlace:
-				case EBangoOp::ArrayModify:
+				case EBangoOp::CallCommandInPlace:
+					if (I.Op == EBangoOp::CallCommandInPlace && ((I.C >> Bango::InPlaceFlagShift) & Bango::CallIsPure) == 0
+						&& Result.PollReason.IsEmpty() && Program.Names.IsValidIndex(I.B))
+					{
+						Result.PollReason = FString::Printf(TEXT("it calls %s"), *Program.Names[I.B]);
+					}
 					if (Code.Places.IsValidIndex(I.A))
 					{
 						const FBangoPlace& Place = Code.Places[I.A];
@@ -193,6 +186,11 @@ namespace Bango
 					}
 					break;
 				case EBangoOp::CallCommand:
+					if ((I.C & Bango::CallIsPure) != 0)
+					{
+						break; // its answer only changes with its arguments
+					}
+					[[fallthrough]];
 				case EBangoOp::CallReflected:
 					if (Result.PollReason.IsEmpty() && Program.Names.IsValidIndex(I.A))
 					{

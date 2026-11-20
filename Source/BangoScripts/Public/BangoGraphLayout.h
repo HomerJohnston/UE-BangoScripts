@@ -27,8 +27,6 @@ enum class EBangoNodeStyle : uint8
 	Command,
 	/** A call to a function defined in this script. */
 	ScriptFunction,
-	/** Count, Push, InsertAt, Pop or RemoveAt. */
-	ArrayCommand,
 	/** Everything else: Declare, Set, If, For, Return, Label, ... and calls that can't be shown as a command. */
 	Generic,
 };
@@ -112,7 +110,7 @@ struct BANGOSCRIPTS_API FBangoNodeLayout
 {
 	EBangoNodeStyle Style = EBangoNodeStyle::Generic;
 	FString Title;
-	/** For Command/ScriptFunction/ArrayCommand: the name called. */
+	/** For Command/ScriptFunction: the name called. */
 	FString CallName;
 	/** The command's category and description, if it has them. */
 	FString CategoryName;

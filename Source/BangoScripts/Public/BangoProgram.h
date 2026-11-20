@@ -3,6 +3,19 @@
 #include "CoreMinimal.h"
 #include "BangoTypes.h"
 
+namespace Bango
+{
+	/** A CallCommand instruction's C: the call has a target, which comes before its arguments on the stack. */
+	constexpr int32 CallHasTarget = 1;
+	/** A CallCommand instruction's C: the command is pure (FBangoCommandSignature::bPure), so a condition isn't polled for it. */
+	constexpr int32 CallIsPure = 2;
+	/** A CallCommand instruction's C: the call's result is used (FBangoCommandCall::bResultUsed). */
+	constexpr int32 CallResultUsed = 4;
+	/** A CallCommandInPlace instruction's C: its argument count is the low bits, and CallIsPure and CallResultUsed are shifted up past it. */
+	constexpr int32 InPlaceArgCountMask = 0xFFFF;
+	constexpr int32 InPlaceFlagShift = 16;
+}
+
 /**
  * Compiled Bango bytecode (produced by Bango::CompileScript, run by the interpreter).
  *
@@ -48,16 +61,17 @@ enum class EBangoOp : uint8
 
 	// ---- Calls ----
 	CallFunction,       // A = function, B = argument count.  args... -> [result]
-	CallCommand,        // A = name (command), B = argument count, C = 1 if a target comes first.  [target], args... -> [result]
+	CallCommand,        // A = name (command), B = argument count, C = Bango::CallHasTarget and CallIsPure bits.  [target], args... -> [result]
 	CallReflected,      // A = name (a Blueprint function), B = argument count, C = 1 if its result is used.  target, args... -> [result]
 	Return,             // ends a void function
 	ReturnValue,        // value -> (ends a function, the value goes to the caller)
 	Halt,               // ends the script instance
 	ErrorMissingReturn, // a non-void function reached its end without returning
 
-	// ---- Built-in array commands ----
-	ArrayCount,         // array -> int
-	ArrayModify,        // A = place, B = EBangoArrayModify, C = 1 if the result is used.  indexes..., args... -> [result]
+	// A command that changes its target in place (FBangoCommandSignature::bMutableTarget), like Push: the target is the
+	// place, handed to the command and stored back when it's done.
+	CallCommandInPlace, // A = place (the target), B = name (command), C = argument count, and flags above it (Bango::InPlaceFlagShift).  indexes..., args... -> [result]
+
 	ForEachNext,        // A = slot holding the array copy (A + 1 holds the int position), B = loop variable slot, C = target when done
 	SpawnBlock,         // A = target: starts another instance at A with a copy of this frame's slots (a spawn block); this one carries on. B = 1: push the new instance's id
 
@@ -66,14 +80,6 @@ enum class EBangoOp : uint8
 	WaitResult,         // A = wait set, B = its WaitCheck.  bool -> : true carries on; false pauses until one of the set's globals changes (every frame, if it polls), then runs from B again
 
 	Count               // not an op
-};
-
-enum class EBangoArrayModify : uint8
-{
-	Push,       // value
-	InsertAt,   // value, index
-	Pop,        //                 -> element
-	RemoveAt,   // index           -> element
 };
 
 struct FBangoInstruction
