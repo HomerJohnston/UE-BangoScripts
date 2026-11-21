@@ -1,5 +1,7 @@
 #include "SBangoScriptEditor.h"
 
+#include "BangoValueWidgets.h"
+
 #include "BangoScriptAsset.h"
 #include "BangoInlineScriptTarget.h"
 #include "BangoScriptReferences.h"
@@ -958,8 +960,6 @@ void SBangoScriptEditor::DeleteFunction(TSharedPtr<FGraphEntry> Item)
 namespace BangoScriptEditorPrivate
 {
 	/** The types the INPUTS type menu offers (and arrays of each). */
-	static const TCHAR* const InputTypes[] = { TEXT("bool"), TEXT("int"), TEXT("float"), TEXT("string"), TEXT("entity"), TEXT("text"), TEXT("vector2"), TEXT("vector3") };
-
 	/** The icon of a type, as the nodes' fields show it; the plain variable icon when the type isn't known. */
 	static const FSlateBrush* GetTypeIcon(const FString& Type, FLinearColor& OutTint)
 	{
@@ -1277,7 +1277,8 @@ void SBangoScriptEditor::UpdateInputs()
 			Item->Param.Name = Signature->Params[i].Name;
 			GivenInputItems.Add(Item);
 			const FString Tooltip = Signature->Tooltips.IsValidIndex(i) ? Signature->Tooltips[i] : FString();
-			GivenTooltips.Add(Tooltip.IsEmpty() ? FString::Printf(TEXT("Given by %s."), *Signature->Label) : FString::Printf(TEXT("%s\n\nGiven by %s."), *Tooltip, *Signature->Label));
+			const FString Source = Signature->GetSourceLabel(i); // its signature, or the object itself (its own inputs)
+			GivenTooltips.Add(Tooltip.IsEmpty() ? FString::Printf(TEXT("Given by %s."), *Source) : FString::Printf(TEXT("%s\n\nGiven by %s."), *Tooltip, *Source));
 		}
 	}
 	if (GivenInputList.IsValid())
@@ -1593,47 +1594,7 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeInputTypeMenu(int32 Index)
 
 TSharedRef<SWidget> SBangoScriptEditor::MakeTypeMenu(const FString& Current, TFunction<void(const FString&)> OnPick)
 {
-	FMenuBuilder Menu(/*bShouldCloseWindowAfterMenuSelection*/ true, nullptr);
-	auto AddType = [&Menu, &Current, &OnPick](const FString& Type)
-	{
-		FLinearColor Tint = FLinearColor::White;
-		const FSlateBrush* TypeIcon = BangoScriptEditorPrivate::GetTypeIcon(Type, Tint);
-		Menu.AddMenuEntry(
-			FUIAction(
-				FExecuteAction::CreateLambda([OnPick, Type]() { OnPick(Type); }),
-				FCanExecuteAction(),
-				FIsActionChecked::CreateLambda([Current, Type]() { return Current == Type; })),
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			.Padding(0.0f, 0.0f, 6.0f, 0.0f)
-			[
-				SNew(SImage)
-				.Image(TypeIcon)
-				.ColorAndOpacity(Tint)
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			[
-				SNew(STextBlock).Text(FText::FromString(Type))
-			],
-			NAME_None, TAttribute<FText>(), EUserInterfaceActionType::RadioButton);
-	};
-	Menu.BeginSection(NAME_None, LOCTEXT("InputTypes", "Type"));
-	for (const TCHAR* Type : BangoScriptEditorPrivate::InputTypes)
-	{
-		AddType(Type);
-	}
-	Menu.EndSection();
-	Menu.BeginSection(NAME_None, LOCTEXT("InputArrayTypes", "Array of"));
-	for (const TCHAR* Type : BangoScriptEditorPrivate::InputTypes)
-	{
-		AddType(FString(Type) + TEXT("[]"));
-	}
-	Menu.EndSection();
-	return Menu.MakeWidget();
+	return SBangoTypePicker::MakeTypeMenu(Current, MoveTemp(OnPick)); // the public type picker's (BangoValueWidgets.h)
 }
 
 FReply SBangoScriptEditor::OnAddInputClicked()
@@ -2120,16 +2081,16 @@ void SBangoScriptEditor::SetDeclType(bool bGlobal, int32 Index, const FString& T
 		return;
 	}
 	Decls[Index].Type = Type;
-	// A starting value made for the old type rarely fits the new one (nil fits any type).
-	if (Decls[Index].bHasValue && Decls[Index].Value != TEXT("nil"))
+	// A starting value made for the old type rarely fits the new one (nil fits any type): the value box's rule.
+	if (Decls[Index].bHasValue)
 	{
-		Decls[Index].bHasValue = false;
-		Decls[Index].Value.Reset();
+		Decls[Index].Value = SBangoValueBox::GetValueAfterTypeChange(Decls[Index].Value);
+		Decls[Index].bHasValue = !Decls[Index].Value.IsEmpty();
 	}
 	ApplyDecls(bGlobal, Decls, bGlobal ? LOCTEXT("SetGlobalTypeTransaction", "Change Bango Global Type") : LOCTEXT("SetScriptVarTypeTransaction", "Change Bango Script Variable Type"));
 }
 
-void SBangoScriptEditor::SetDeclValue(bool bGlobal, int32 Index, const FString& Typed)
+void SBangoScriptEditor::SetDeclValueText(bool bGlobal, int32 Index, const FString& Value)
 {
 	TArray<FBangoGraphDecl> Decls = GetDecls(bGlobal);
 	if (!Decls.IsValidIndex(Index))
@@ -2137,14 +2098,6 @@ void SBangoScriptEditor::SetDeclValue(bool bGlobal, int32 Index, const FString& 
 		return;
 	}
 	FBangoGraphDecl& Decl = Decls[Index];
-	// Typed like a node's field: a string or a text as plain text (or =expression), anything else as code.
-	FBangoNodeField Field;
-	Field.bHasValue = true;
-	Field.bOptional = true;
-	Field.bPresent = Decl.bHasValue;
-	Field.TypeHint = Decl.Type;
-	Field.Text = Decl.Value;
-	const FString Value = Bango::GetFieldValueFromTyped(Field, Typed).TrimStartAndEnd();
 	const bool bHasValue = !Value.IsEmpty();
 	if (bHasValue == Decl.bHasValue && (!bHasValue || Value == Decl.Value))
 	{
@@ -2402,29 +2355,25 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateDeclRow(TSharedPtr<FDeclEntr
 		return Row;
 	}
 
-	// A local's starting value, or a global's default, typed like a node's field (a string without quotes).
-	TSharedRef<SWidget> ValueBox = SNullWidget::NullWidget;
-	{
-		FBangoNodeField Field;
-		Field.bHasValue = true;
-		Field.bOptional = true;
-		Field.bPresent = Entry.Decl.bHasValue;
-		Field.TypeHint = Entry.Decl.Type;
-		Field.Text = Entry.Decl.Value;
-		ValueBox = SNew(SEditableTextBox)
-			.Text(FText::FromString(Bango::GetFieldEditText(Field)))
-			.HintText(bGlobal ? LOCTEXT("GlobalNoDefaultHint", "none") : LOCTEXT("LocalNilHint", "nil"))
-			.ToolTipText(bGlobal
+	// A script variable's starting value, or a global's default: the public value box (BangoValueWidgets.h), typed
+	// like a node's field (a string without quotes) and checked as it's typed.
+	const FString DeclValueName = Entry.Decl.Name;
+	const TSharedRef<SWidget> ValueBox = SNew(SBangoValueBox)
+		.Type(Entry.Decl.Type)
+		.Value(Entry.Decl.bHasValue ? Entry.Decl.Value : FString())
+		.HintText(bGlobal ? LOCTEXT("GlobalNoDefaultHint", "none") : LOCTEXT("LocalNilHint", "nil"))
+		.ToolTipText(bGlobal
 				? LOCTEXT("GlobalValueTooltip", "Its default (written ?=): given to the global when this script starts, only if it doesn't exist yet or is nil. A fixed value only (a number, a string, true, false, nil, a Bango ID, a text, or an array of those); empty gives none, so a new global starts as nil. To set it each time, add a Set Global node in the code.")
 				: LOCTEXT("LocalValueTooltip", "The value it starts with, each time the graph starts. A fixed value only (a number, a string, true, false, nil, a Bango ID, a text, or an array of those); empty starts it as nil. Set anything else in the code."))
-			.Font(FCoreStyle::GetDefaultFontStyle("Mono", 9))
-			.SelectAllTextWhenFocused(true)
-			.RevertTextOnEscape(true)
-			.OnTextCommitted_Lambda([this, bGlobal, Index](const FText& NewText, ETextCommit::Type CommitType)
-			{
-				SetDeclValue(bGlobal, Index, NewText.ToString());
-			});
-	}
+		.UseScriptNamespace(true) // a text typed here is a LOCTEXT, in the script's namespace
+		// Whether it reads as a fixed value; its type is checked with the rest of the script, when compiling.
+		.OnCheckValue_Lambda([](const FString& TypeName, const FString& Value, FString& OutProblem) { return Bango::CheckDeclValue(TypeName, Value, OutProblem); })
+		.OnValueCommitted_Lambda([this, bGlobal, Index](const FString& Value) { SetDeclValueText(bGlobal, Index, Value); })
+		.OnValueRejected_Lambda([this, bGlobal, DeclValueName](const FString& Problem)
+		{
+			Notify(FText::Format(bGlobal ? LOCTEXT("GlobalValueFailed", "Couldn't set {0}'s default: {1}") : LOCTEXT("LocalValueFailed", "Couldn't set {0}'s starting value: {1}"),
+				FText::FromString(DeclValueName), FText::FromString(Problem)), false);
+		});
 
 	TSharedPtr<SInlineEditableTextBlock> Name;
 	const FString DeclName = Entry.Decl.Name;
@@ -2458,18 +2407,9 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateDeclRow(TSharedPtr<FDeclEntr
 			.VAlign(VAlign_Center)
 			.Padding(0.0f, 0.0f, 4.0f, 0.0f)
 			[
-				SNew(SComboButton)
-				.ComboButtonStyle(FAppStyle::Get(), "SimpleComboButton")
-				.HasDownArrow(false)
-				.ContentPadding(FMargin(2.0f, 1.0f))
-				.ToolTipText(FText::Format(LOCTEXT("DeclTypeTooltip", "{0}. Click to change the type."), FText::FromString(DeclType)))
-				.OnGetMenuContent_Lambda([this, bGlobal, Index, DeclType]() { return MakeTypeMenu(DeclType, [this, bGlobal, Index](const FString& Type) { SetDeclType(bGlobal, Index, Type); }); })
-				.ButtonContent()
-				[
-					SNew(SImage)
-					.Image(Icon)
-					.ColorAndOpacity(Tint)
-				]
+				SNew(SBangoTypePicker) // the public type picker (BangoValueWidgets.h)
+				.Type(DeclType)
+				.OnTypePicked_Lambda([this, bGlobal, Index](const FString& Type) { SetDeclType(bGlobal, Index, Type); })
 			]
 			+ SHorizontalBox::Slot()
 			.FillWidth(1.0f)
@@ -4791,6 +4731,20 @@ EActiveTimerReturnType SBangoScriptEditor::OnPoll(double CurrentTime, float Delt
 	// First, so a script whose text didn't read is reloaded once it's fixed elsewhere.
 	CheckFileOnDisk();
 
+	// The inputs an inline script is given can change while it's open (its owner's own ones, SetInstanceInputs): the
+	// text is checked with the new ones, and the script counts as not compiled yet. The lists and nodes follow below.
+	if (TextBox.IsValid() && InlineTarget.IsValid())
+	{
+		FString SignatureError;
+		const TSharedPtr<const FBangoInputsSignature> Signature = GetInputsSignature(SignatureError);
+		if (Signature != TextBox->GetInputsSignature() || SignatureError != PolledSignatureError)
+		{
+			PolledSignatureError = SignatureError;
+			TextBox->SetInputsSignature(Signature);
+			CompileStatus = ECompileStatus::Unknown;
+		}
+	}
+
 	if (EdGraphs.Num() == 0)
 	{
 		bDirty = false;
@@ -5211,7 +5165,8 @@ void SBangoScriptEditor::AddGivenInputs(FBangoGraphDocument& Document) const
 		Input.Type = Signature->Params[i].Type.ToString();
 		Input.Name = Signature->Params[i].Name;
 		const FString Tooltip = Signature->Tooltips.IsValidIndex(i) ? Signature->Tooltips[i] : FString();
-		Input.Comment = Tooltip.IsEmpty() ? FString::Printf(TEXT("Given by %s."), *Signature->Label) : FString::Printf(TEXT("%s (Given by %s.)"), *Tooltip, *Signature->Label);
+		const FString Source = Signature->GetSourceLabel(i);
+		Input.Comment = Tooltip.IsEmpty() ? FString::Printf(TEXT("Given by %s."), *Source) : FString::Printf(TEXT("%s (Given by %s.)"), *Tooltip, *Source);
 		Document.GivenInputs.Add(MoveTemp(Input));
 	}
 }

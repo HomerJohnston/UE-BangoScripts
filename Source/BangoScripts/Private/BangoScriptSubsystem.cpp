@@ -23,7 +23,7 @@
 namespace BangoScriptSubsystemPrivate
 {
 	constexpr int32 SubsystemSaveMagic = 0x4F474E42; // "BNGO"
-	constexpr int32 SubsystemSaveVersion = 2; // raise it when the save format changes: data in another format is refused, not misread
+	constexpr int32 SubsystemSaveVersion = 3; // raise it when the save format changes: data in another format is refused, not misread
 
 	class FWorldEntityResolver : public IBangoEntityResolver
 	{
@@ -187,6 +187,7 @@ bool UBangoScriptSubsystem::StartSpawnBlock(const FBangoInstance& Parent, int32 
 		Script->Source = (*ParentScript)->Source;
 		Script->SignatureClass = (*ParentScript)->SignatureClass;
 		Script->SignatureName = (*ParentScript)->SignatureName;
+		Script->InstanceInputs = (*ParentScript)->InstanceInputs;
 	}
 	else
 	{
@@ -255,6 +256,10 @@ FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FBangoInlineScript& Script
 		const UClass* SignatureClass = Script.GetInputsSignatureClass();
 		Running->SignatureClass = Script.IsGlobalInputsSignature() || !SignatureClass ? FString() : SignatureClass->GetPathName();
 		Running->SignatureName = Script.GetInputsSignatureName().ToString();
+	}
+	for (const FBangoInputDecl& Input : Script.GetInstanceInputs())
+	{
+		Running->InstanceInputs.Add(Input.Decl);
 	}
 	Running->Instance.SetOwner(GetScriptOwner(Owner));
 	return StartScript(Program, Running, Args, &OutError);
@@ -630,27 +635,47 @@ int32 UBangoScriptSubsystem::AllocateId()
 
 bool UBangoScriptSubsystem::CompileSavedSource(const FRunningScript& Script, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError)
 {
-	if (Script.SignatureName.IsEmpty())
+	if (Script.SignatureName.IsEmpty() && Script.InstanceInputs.Num() == 0)
 	{
 		return CompileFromSource(Script.Source, Script.Path, OutProgram, OutError);
 	}
-	const UClass* Class = nullptr;
-	if (!Script.SignatureClass.IsEmpty())
+	TSharedPtr<const FBangoInputsSignature> Signature;
+	if (!Script.SignatureName.IsEmpty())
 	{
-		Class = FSoftClassPath(Script.SignatureClass).ResolveClass();
-		if (!Class)
+		const UClass* Class = nullptr;
+		if (!Script.SignatureClass.IsEmpty())
 		{
-			OutError = FString::Printf(TEXT("its inputs signature's class, %s, isn't loaded."), *Script.SignatureClass);
+			Class = FSoftClassPath(Script.SignatureClass).ResolveClass();
+			if (!Class)
+			{
+				OutError = FString::Printf(TEXT("its inputs signature's class, %s, isn't loaded."), *Script.SignatureClass);
+				return false;
+			}
+		}
+		Signature = Bango::FindInputsSignature(Class, FName(*Script.SignatureName));
+		if (!Signature.IsValid())
+		{
+			OutError = FString::Printf(TEXT("its inputs signature '%s' isn't registered any more."), *Script.SignatureName);
 			return false;
 		}
 	}
-	const TSharedPtr<const FBangoInputsSignature> Signature = Bango::FindInputsSignature(Class, FName(*Script.SignatureName));
-	if (!Signature.IsValid())
+	if (Script.InstanceInputs.Num() == 0)
 	{
-		OutError = FString::Printf(TEXT("its inputs signature '%s' isn't registered any more."), *Script.SignatureName);
+		return FBangoModule::Get().GetInlineProgram(Script.Source, Signature.Get(), Script.Path, OutProgram, OutError);
+	}
+	// With its object's own inputs after the signature's, as it was compiled when it was spawned.
+	TArray<FBangoInputDecl> InstanceInputs;
+	for (const FString& Decl : Script.InstanceInputs)
+	{
+		InstanceInputs.Add(FBangoInputDecl(Decl));
+	}
+	FBangoInputsSignature Inputs;
+	TArray<FString> Warnings;
+	if (!Bango::AddInstanceInputs(Signature.Get(), InstanceInputs, Inputs, OutError, Warnings))
+	{
 		return false;
 	}
-	return FBangoModule::Get().GetInlineProgram(Script.Source, Signature.Get(), Script.Path, OutProgram, OutError);
+	return FBangoModule::Get().GetInlineProgram(Script.Source, &Inputs, Script.Path, OutProgram, OutError);
 }
 
 bool UBangoScriptSubsystem::CompileFromSource(const FString& Source, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError)
@@ -1027,6 +1052,7 @@ bool UBangoScriptSubsystem::SaveState(TArray<uint8>& OutData)
 			Writer << Script.Source; // it has no file to compile it from again
 			Writer << Script.SignatureClass;
 			Writer << Script.SignatureName;
+			Writer << Script.InstanceInputs;
 		}
 		Script.Instance.Serialize(Writer);
 	}
@@ -1078,6 +1104,7 @@ bool UBangoScriptSubsystem::LoadState(const TArray<uint8>& Data)
 			Reader << Script->Source;
 			Reader << Script->SignatureClass;
 			Reader << Script->SignatureName;
+			Reader << Script->InstanceInputs;
 		}
 		Script->Instance.Serialize(Reader);
 		if (Reader.IsError())

@@ -284,6 +284,7 @@ public:
 			]
 		];
 
+		ShownSignatureError = SignatureError;
 		if (!SignatureError.IsEmpty())
 		{
 			// Its signature isn't registered: said here, since compiling without it can't say why its inputs are unknown.
@@ -305,6 +306,26 @@ public:
 			const bool bTyping = TextBox.IsValid() && (TextBox->HasKeyboardFocus() || TextBox->HasFocusedDescendants());
 			EditButton->SetRenderOpacity(bTyping && !EditButton->IsHovered()
 				? BangoInlineScriptCustomizationPrivate::EditButtonTypingOpacity : BangoInlineScriptCustomizationPrivate::EditButtonOpacity);
+		}
+
+		// The inputs its owner gives it can change without its text changing (the object's own ones,
+		// FBangoInlineScriptBase::SetInstanceInputs): checked again with the new ones, even while it's typed in.
+		if (StructHandle.IsValid() && StructHandle->IsValidHandle() && TextBox.IsValid())
+		{
+			FString SignatureError;
+			const TSharedPtr<const FBangoInputsSignature> Signature = FBangoInlineScriptTarget::GetInputsSignature(StructHandle.ToSharedRef(), SignatureError);
+			if (Signature != TextBox->GetInputsSignature() || SignatureError != ShownSignatureError)
+			{
+				ShownSignatureError = SignatureError;
+				TextBox->ClearOutsideError();
+				TextBox->SetInputsSignature(Signature);
+				if (!SignatureError.IsEmpty())
+				{
+					FBangoCompileError Error;
+					Error.Message = SignatureError;
+					TextBox->ShowError(Error, false);
+				}
+			}
 		}
 
 		if (!SourceHandle.IsValid() || !SourceHandle->IsValidHandle() || !TextBox.IsValid() || TextBox->HasAnyUserFocusOrFocusedDescendants())
@@ -335,6 +356,8 @@ private:
 	/** The text the box was last given (or that was last applied from it). */
 	FString Shown;
 	bool bMultipleValues = false;
+	/** Why the inputs its owner gives it can't be used, as last shown in the box (empty: they can). */
+	FString ShownSignatureError;
 
 	void ReadValue(FString& OutValue, bool& bOutMultiple) const
 	{
@@ -510,12 +533,13 @@ namespace BangoInlineScriptCustomizationPrivate
 				bOutEmpty = true;
 				return nullptr;
 			}
-			if (!bCached || Source != CachedSource)
+			FString SignatureError;
+			const TSharedPtr<const FBangoInputsSignature> Signature = FBangoInlineScriptTarget::GetInputsSignature(StructHandle, SignatureError);
+			if (!bCached || Source != CachedSource || Signature != CachedSignature)
 			{
 				bCached = true;
 				CachedSource = Source;
-				FString SignatureError;
-				const TSharedPtr<const FBangoInputsSignature> Signature = FBangoInlineScriptTarget::GetInputsSignature(StructHandle, SignatureError);
+				CachedSignature = Signature; // its owner can change the inputs it gives it
 				FBangoProgram Program;
 				FBangoCompileError CompileError;
 				bCompiled = Bango::CompileCondition(Source, TEXT("Condition"), FBangoModule::Get().GetCommands(), Program, CompileError, Signature.Get());
@@ -528,6 +552,7 @@ namespace BangoInlineScriptCustomizationPrivate
 		TSharedRef<IPropertyHandle> StructHandle;
 		TSharedPtr<IPropertyHandle> SourceHandle;
 		FString CachedSource;
+		TSharedPtr<const FBangoInputsSignature> CachedSignature;
 		bool bCached = false;
 		bool bCompiled = false;
 		FBangoDependencies Dependencies;

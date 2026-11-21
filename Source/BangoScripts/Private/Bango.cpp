@@ -21,7 +21,7 @@ bool FBangoModule::GetInlineProgram(const FBangoInlineScript& Script, const FStr
 {
 	FString SignatureError;
 	const TSharedPtr<const FBangoInputsSignature> Signature = Script.FindInputsSignature(SignatureError);
-	if (Script.HasInputsSignature() && !Signature.IsValid())
+	if (Script.HasGivenInputs() && !Signature.IsValid())
 	{
 		OutError = FString::Printf(TEXT("%s: %s"), *Name, *SignatureError);
 		return false;

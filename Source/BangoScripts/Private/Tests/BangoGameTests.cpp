@@ -412,6 +412,59 @@ bool FBangoModuleTest::RunTest(const FString& Parameters)
 	}
 	Bango::UnregisterCondition(ConditionHandle);
 
+	// Instance inputs: an object's own, after its signature's (FBangoInlineScriptBase::SetInstanceInputs).
+	FString OwnError;
+	FString FindError;
+	FBangoInlineScript Lit = Signed;
+	Lit.Source = TEXT("Sleep(_damage + _speed);\nWriteScreen(Format(\"{0}\", _red));");
+	TestTrue(TEXT("instance inputs: set"), Lit.SetInstanceInputs({ { TEXT("vector3 _red"), TEXT("Its colour.") }, { TEXT("float _speed") } }, &OwnError)
+		&& Lit.GetInstanceInputs().Num() == 2 && Lit.HasGivenInputs());
+	TSharedPtr<const FBangoProgram> LitProgram;
+	TestTrue(TEXT("instance inputs: the script compiles with both"), Module.GetInlineProgram(Lit, TEXT("Test (inline script)"), LitProgram, Error)
+		&& LitProgram.IsValid() && LitProgram->Params.Num() == 4 && LitProgram->Params[1].Name == TEXT("_damage") && LitProgram->Params[2].Name == TEXT("_red")
+		&& LitProgram->Params[3].Type == FBangoType::Double());
+	const TSharedPtr<const FBangoInputsSignature> LitInputs = Lit.FindInputsSignature(FindError);
+	TestTrue(TEXT("instance inputs: after the signature's"), LitInputs.IsValid() && LitInputs->NumInstanceInputs == 2 && LitInputs->Params.Num() == 4
+		&& LitInputs->Label == TEXT("the global 'BangoTests.Hit' and this object") && LitInputs->Tooltips[2] == TEXT("Its colour.") && LitInputs->IsInstanceInput(3) && !LitInputs->IsInstanceInput(1));
+	FBangoInlineScript Lit2 = Signed;
+	Lit2.SetInstanceInputs({ { TEXT("vector3 _red"), TEXT("Its colour.") }, { TEXT("float _speed") } }, &OwnError);
+	TestTrue(TEXT("instance inputs: the same list on another script is the same inputs"), Lit2.FindInputsSignature(FindError) == LitInputs);
+	TestTrue(TEXT("instance inputs: setting the same list again changes nothing"), Lit.SetInstanceInputs({ { TEXT("vector3 _red"), TEXT("Its colour.") }, { TEXT("float _speed") } }, &OwnError)
+		&& Lit.FindInputsSignature(FindError) == LitInputs);
+	TestTrue(TEXT("instance inputs: a script without any still has just its signature"), Signed.FindInputsSignature(FindError) == Hit && Signed.GetInstanceInputs().Num() == 0);
+	FBangoInlineScript OtherList = Lit;
+	TSharedPtr<const FBangoProgram> OtherListProgram;
+	TestTrue(TEXT("instance inputs: another list is another program"), OtherList.SetInstanceInputs({ { TEXT("vector3 _red") }, { TEXT("int _speed") } }, &OwnError)
+		&& Module.GetInlineProgram(OtherList, TEXT("Test (inline script)"), OtherListProgram, Error) && OtherListProgram != LitProgram
+		&& OtherListProgram->Params[3].Type == FBangoType::Int() && OtherList.FindInputsSignature(FindError) != LitInputs);
+	FBangoInlineScript OnlyOwn;
+	OnlyOwn.Source = TEXT("Sleep(_speed);");
+	TSharedPtr<const FBangoProgram> OnlyOwnProgram;
+	TestTrue(TEXT("instance inputs: without a signature"), OnlyOwn.SetInstanceInputs({ { TEXT("float _speed") } }, &OwnError) && OnlyOwn.HasGivenInputs() && !OnlyOwn.HasInputsSignature()
+		&& Module.GetInlineProgram(OnlyOwn, TEXT("Test (inline script)"), OnlyOwnProgram, Error) && OnlyOwnProgram->Params.Num() == 1);
+	FBangoInlineScript Clash = Signed;
+	TestFalse(TEXT("instance inputs: a signature input's name"), Clash.SetInstanceInputs({ { TEXT("int _damage") } }, &OwnError));
+	TestTrue(TEXT("instance inputs: a signature input's name: the error"), OwnError.Contains(TEXT("This object's own input '_damage' (SetInstanceInputs) has the name of an input of the global 'BangoTests.Hit'"), ESearchCase::CaseSensitive));
+	TestFalse(TEXT("instance inputs: wrong ones stop the script compiling"), Module.GetInlineProgram(Clash, TEXT("Test (inline script)"), InlineProgram, Error));
+	TestTrue(TEXT("instance inputs: wrong ones stop the script compiling: the error"), Error.Contains(TEXT("has the name of an input of"), ESearchCase::CaseSensitive));
+	TestFalse(TEXT("instance inputs: a default"), Clash.SetInstanceInputs({ { TEXT("float _speed = 1") } }, &OwnError));
+	TestTrue(TEXT("instance inputs: a default: the error"), OwnError.Contains(TEXT("can't have a default"), ESearchCase::CaseSensitive));
+	TestTrue(TEXT("instance inputs: taken away again"), Clash.SetInstanceInputs({}, &OwnError) && !Clash.GetInstanceInputs().Num()
+		&& Module.GetInlineProgram(Clash, TEXT("Test (inline script)"), InlineProgram, Error) && InlineProgram == SignedProgram);
+	AddExpectedError(TEXT("should begin with an underscore: 'speed'"), EAutomationExpectedErrorFlags::Contains, 1);
+	FBangoInlineScript NoUnderscore = Signed;
+	NoUnderscore.Source = TEXT("Sleep(speed);");
+	TestTrue(TEXT("instance inputs: a name without '_' is reported, but works"), NoUnderscore.SetInstanceInputs({ { TEXT("float speed") } }, &OwnError)
+		&& Module.GetInlineProgram(NoUnderscore, TEXT("Test (inline script)"), InlineProgram, Error) && InlineProgram->Params.Num() == 3);
+	FBangoInlineCondition LitCondition;
+	LitCondition.UseInputsSignature(nullptr, Signed.GetInputsSignatureName());
+	LitCondition.SetInstanceInputs({ { TEXT("float _speed") } }, &OwnError);
+	LitCondition.Source = TEXT("_damage > 3 && _speed > 1");
+	FBangoConditionHandle LitConditionHandle = Bango::RegisterCondition(LitCondition, TEXT("Test condition"), ConditionError);
+	const TSharedPtr<const FBangoProgram> LitConditionProgram = Bango::FindCondition(LitConditionHandle);
+	TestTrue(TEXT("instance inputs: a condition with some"), LitConditionProgram.IsValid() && LitConditionProgram->Params.Num() == 3 && LitConditionProgram->Params[2].Name == TEXT("_speed"));
+	Bango::UnregisterCondition(LitConditionHandle);
+
 	// Per class, from a template only; a name without '_' is reported, but works; registering again replaces it.
 	AddExpectedError(TEXT("isn't a template, so it was ignored"), EAutomationExpectedErrorFlags::Contains, 1);
 	Bango::RegisterInputsSignature(Asset, TEXT("BangoTests.Asset"), { { TEXT("int _a") } });

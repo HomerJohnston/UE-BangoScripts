@@ -138,6 +138,9 @@ namespace BangoCompilerPrivate
 		{
 		}
 
+		/** For Bango::ParseFixedValue: true if Expr is a fixed value (a literal, a negated number, or an array of those). */
+		static bool IsFixedValueExpr(const FBangoExpr& Expr) { return IsFixedValue(Expr); }
+
 		/** A condition (Bango::CompileCondition): the main graph returns a bool. */
 		bool bCondition = false;
 		/** An inline script's inputs signature: its inputs are the main graph's parameters, and #inputs is an error. */
@@ -3704,6 +3707,147 @@ namespace Bango
 			Info.Type = Decl.Type;
 			OutSignature.Params.Add(MoveTemp(Info));
 			OutSignature.Tooltips.Add(Input.Tooltip);
+		}
+		return true;
+	}
+
+	const TArray<FString>& GetValueTypeNames()
+	{
+		static const TArray<FString> Names = []()
+		{
+			const TCHAR* const Types[] = { TEXT("bool"), TEXT("int"), TEXT("float"), TEXT("string"), TEXT("entity"), TEXT("text"), TEXT("vector2"), TEXT("vector3") };
+			TArray<FString> Result;
+			for (const TCHAR* Type : Types)
+			{
+				Result.Add(Type);
+			}
+			for (const TCHAR* Type : Types)
+			{
+				Result.Add(FString(Type) + TEXT("[]"));
+			}
+			return Result;
+		}();
+		return Names;
+	}
+
+	bool ParseFixedValue(const FString& TypeName, const FString& Text, FBangoValue& OutValue, FString& OutError)
+	{
+		OutValue = FBangoValue();
+		FBangoType Type;
+		const FString TrimmedType = TypeName.TrimStartAndEnd();
+		if (!FBangoType::FromString(TrimmedType, Type))
+		{
+			OutError = FString::Printf(TEXT("'%s' isn't a type a value can have (bool, int, float, string, entity, text, vector2, vector3, or an array of one, like int[])."), *TypeName);
+			return false;
+		}
+		const FString Value = Text.TrimStartAndEnd();
+		if (Value.IsEmpty())
+		{
+			OutValue = FBangoValue::MakeNil(Type);
+			return true;
+		}
+		if (Value.Contains(TEXT("\n")) || Value.Contains(TEXT("\r")))
+		{
+			OutError = TEXT("A value is written on one line.");
+			return false;
+		}
+
+		// Read and checked as a script variable's starting value is: `scriptVar <type> _value = <text>;`.
+		static const TCHAR* const VarName = TEXT("_value");
+		FBangoScript Script;
+		FBangoCompileError Error;
+		const FString Source = FString::Printf(TEXT("scriptVar %s %s = %s;"), *TrimmedType, VarName, *Value);
+		const FBangoVarDeclStmt* Decl = nullptr;
+		if (ParseScript(Source, TEXT("value"), Script, Error) && Script.TopLevel.Num() == 1 && Script.Functions.Num() == 0)
+		{
+			Decl = Script.TopLevel[0]->As<FBangoVarDeclStmt>();
+		}
+		if (!Decl || !Decl->Init.IsValid() || Decl->Init->Kind == EBangoExprKind::Empty)
+		{
+			OutError = Error.Message.IsEmpty() ? FString(TEXT("This doesn't read as one value.")) : FString::Printf(TEXT("This doesn't read as a value: %s"), *Error.Message);
+			return false;
+		}
+		if (!BangoCompilerPrivate::FCompiler::IsFixedValueExpr(*Decl->Init))
+		{
+			OutError = TEXT("This must be a fixed value: a number, a string, true, false, nil, a Bango ID like @john, a text, or an array of those. A name, a call or a calculation isn't one.");
+			return false;
+		}
+		// `self` is whoever a script belongs to: a value on its own has no script, so it would never be anyone.
+		TFunction<bool(const FBangoExpr&)> UsesSelf = [&UsesSelf](const FBangoExpr& Expr) -> bool
+		{
+			if (const FBangoLiteralExpr* Literal = Expr.As<FBangoLiteralExpr>())
+			{
+				return Literal->LiteralKind == EBangoLiteralKind::Entity && Literal->StringValue.Equals(Bango::GetSelfEntityName(), ESearchCase::CaseSensitive);
+			}
+			if (const FBangoArrayLiteralExpr* ArrayExpr = Expr.As<FBangoArrayLiteralExpr>())
+			{
+				for (const FBangoExprPtr& Element : ArrayExpr->Elements)
+				{
+					if (Element.IsValid() && UsesSelf(*Element))
+					{
+						return true;
+					}
+				}
+			}
+			return false;
+		};
+		if (UsesSelf(*Decl->Init))
+		{
+			OutError = TEXT("'self' is the actor a script belongs to, so it can't be written in a value outside one. Name the actor with its Bango ID, like @john.");
+			return false;
+		}
+		const FBangoCommandTable NoCommands;
+		FBangoProgram Program;
+		if (!CompileScript(Script, NoCommands, Program, Error))
+		{
+			// Said about the value, not the variable it was read as.
+			OutError = Error.Message.Replace(*FString::Printf(TEXT("'%s'"), VarName), TEXT("This value"), ESearchCase::CaseSensitive);
+			if (OutError.Contains(TEXT("LOCTEXT_NAMESPACE"), ESearchCase::CaseSensitive))
+			{
+				OutError = TEXT("A LOCTEXT takes its namespace from a script, and there's none here. Write the text as INVTEXT(\"...\") (never translated) or NSLOCTEXT(\"Namespace\", \"Key\", \"...\").");
+			}
+			return false;
+		}
+		const FBangoFunctionCode* Main = Program.Functions.Num() > 0 ? &Program.Functions[0] : nullptr; // the main graph comes first
+		const int32 Slot = Main ? Main->SlotNames.IndexOfByPredicate([](const FString& Name) { return Name.Equals(VarName, ESearchCase::CaseSensitive); }) : INDEX_NONE;
+		if (!Main || !Main->SlotStartValues.IsValidIndex(Slot))
+		{
+			OutError = TEXT("Internal error: the value wasn't found after it was read.");
+			return false;
+		}
+		OutValue = Main->SlotStartValues[Slot];
+		if (OutValue.IsNil())
+		{
+			OutValue = FBangoValue::MakeNil(Type); // written as nil
+		}
+		return true;
+	}
+
+	bool AddInstanceInputs(const FBangoInputsSignature* Signature, const TArray<FBangoInputDecl>& InstanceInputs, FBangoInputsSignature& OutInputs, FString& OutError,
+		TArray<FString>& OutWarnings)
+	{
+		FBangoInputsSignature Own;
+		FString ParseError;
+		if (!ParseInputsSignature(InstanceInputs, Own, ParseError, OutWarnings))
+		{
+			OutError = FString::Printf(TEXT("This object's own inputs (SetInstanceInputs): %s"), *ParseError);
+			return false;
+		}
+		OutInputs = Signature ? *Signature : FBangoInputsSignature();
+		OutInputs.SignatureLabel = Signature ? Signature->Label : FString();
+		OutInputs.NumInstanceInputs = Own.Params.Num();
+		OutInputs.Label = Signature ? Signature->Label + TEXT(" and this object") : FString(TEXT("this object"));
+		OutInputs.Tooltips.SetNum(OutInputs.Params.Num()); // one per input, whatever the signature had
+		for (int32 i = 0; i < Own.Params.Num(); ++i)
+		{
+			const FString& Name = Own.Params[i].Name;
+			if (OutInputs.Params.ContainsByPredicate([&Name](const FBangoScriptParamInfo& Other) { return Other.Name.Equals(Name, ESearchCase::CaseSensitive); }))
+			{
+				OutError = FString::Printf(TEXT("This object's own input '%s' (SetInstanceInputs) has the name of an input of %s. Rename it."), *Name, Signature ? *Signature->Label : TEXT("its signature"));
+				return false;
+			}
+			OutInputs.Params.Add(Own.Params[i]);
+			OutInputs.Tooltips.Add(Own.Tooltips.IsValidIndex(i) ? Own.Tooltips[i] : FString());
 		}
 		return true;
 	}

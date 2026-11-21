@@ -1197,6 +1197,62 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			}
 		}
 
+		// Bango::ParseFixedValue: a value written as text, checked as a script variable's starting value is.
+		{
+			struct FFixedCase { const TCHAR* Type; const TCHAR* Text; const TCHAR* Expected; }; // Expected: its debug text and type, or "!" and part of the error
+			const FFixedCase FixedCases[] = {
+				{ TEXT("vector3"), TEXT("[1, 2, 3]"), TEXT("(1.0, 2.0, 3.0) vector3") },
+				{ TEXT("vector2[]"), TEXT("[[1, 2]]"), TEXT("[(1.0, 2.0)] vector2[]") },
+				{ TEXT("float"), TEXT(" 2 "), TEXT("2.0 float") },
+				{ TEXT("int"), TEXT("-3"), TEXT("-3 int") },
+				{ TEXT("float[]"), TEXT("[1, 2.5]"), TEXT("[1.0, 2.5] float[]") },
+				{ TEXT("int[][]"), TEXT("[[1], []]"), TEXT("[[1], []] int[][]") },
+				{ TEXT("string"), TEXT("\"hi\""), TEXT("\"hi\" string") },
+				{ TEXT("bool"), TEXT("true"), TEXT("true bool") },
+				{ TEXT("entity"), TEXT("@john"), TEXT("@john entity") },
+				{ TEXT("entity[]"), TEXT("[@a, @b]"), TEXT("[@a, @b] entity[]") },
+				{ TEXT("entity"), TEXT("player"), TEXT("player entity") },
+				{ TEXT("text"), TEXT("INVTEXT(\"Hi\")"), TEXT("text(\"Hi\") text") },
+				{ TEXT("text"), TEXT("NSLOCTEXT(\"Game\", \"Key\", \"Hi\")"), TEXT("text(\"Hi\") text") },
+				{ TEXT("bool"), TEXT(""), TEXT("nil bool") },
+				{ TEXT("vector3"), TEXT("   "), TEXT("nil vector3") },
+				{ TEXT("int"), TEXT("nil"), TEXT("nil int") },
+				{ TEXT("vector3"), TEXT("[1, 2]"), TEXT("!A vector3 needs exactly 3 numbers") },
+				{ TEXT("int"), TEXT("2.5"), TEXT("!This value needs an int, but this is a float.") },
+				{ TEXT("int"), TEXT("\"s\""), TEXT("!This value needs an int, but this is a string.") },
+				{ TEXT("string"), TEXT("hi"), TEXT("!This must be a fixed value") },
+				{ TEXT("int"), TEXT("1 + 2"), TEXT("!This must be a fixed value") },
+				{ TEXT("int"), TEXT("Count(_x)"), TEXT("!A name, a call or a calculation isn't one.") },
+				{ TEXT("int"), TEXT("1; WriteLog(\"x\")"), TEXT("!This doesn't read as one value.") },
+				{ TEXT("int[]"), TEXT("[1, 2"), TEXT("!This doesn't read as a value: Expected ']'") },
+				{ TEXT("int"), TEXT("1\n2"), TEXT("!A value is written on one line.") },
+				{ TEXT("int"), TEXT("99999999999"), TEXT("!too large for an int") },
+				{ TEXT("thing"), TEXT("1"), TEXT("!'thing' isn't a type a value can have") },
+				{ TEXT("void"), TEXT("1"), TEXT("!isn't a type a value can have") },
+				{ TEXT("text"), TEXT("LOCTEXT(\"Key\", \"Hi\")"), TEXT("!A LOCTEXT takes its namespace from a script") },
+				{ TEXT("entity"), TEXT("self"), TEXT("!'self' is the actor a script belongs to") },
+				{ TEXT("entity[]"), TEXT("[@a, self]"), TEXT("!'self' is the actor a script belongs to") },
+			};
+			for (const FFixedCase& Case : FixedCases)
+			{
+				FBangoValue Value;
+				FString FixedError;
+				const bool bRead = Bango::ParseFixedValue(Case.Type, Case.Text, Value, FixedError);
+				const FString Got = bRead ? (Value.IsNil() ? FString(TEXT("nil")) : Value.ToDebugString()) + TEXT(" ") + Value.GetType().ToString() : FString(TEXT("!")) + FixedError;
+				const bool bOk = Case.Expected[0] == TEXT('!') ? !bRead && FixedError.Contains(Case.Expected + 1) : bRead && Got == Case.Expected;
+				Expect(bOk, *FString::Printf(TEXT("fixed value: %s '%s' (got %s)"), Case.Type, Case.Text, *Got));
+			}
+			const TArray<FString>& TypeNames = Bango::GetValueTypeNames();
+			Expect(TypeNames.Num() == 16 && TypeNames[0] == TEXT("bool") && TypeNames[4] == TEXT("entity") && TypeNames[7] == TEXT("vector3") && TypeNames[8] == TEXT("bool[]") && TypeNames[15] == TEXT("vector3[]"),
+				TEXT("fixed value: the types a value can have, in menu order"));
+			for (const FString& TypeName : TypeNames)
+			{
+				FBangoValue Value;
+				FString FixedError;
+				Expect(Bango::ParseFixedValue(TypeName, TEXT("nil"), Value, FixedError) && Value.IsNil() && Value.GetType().ToString() == TypeName, *(FString(TEXT("fixed value: nil of ")) + TypeName));
+			}
+		}
+
 		// Inputs signatures (an inline script's inputs given by its owner's C++, Bango::RegisterInputsSignature).
 		{
 			FBangoInputsSignature Signature;
@@ -1274,6 +1330,90 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				}
 				const bool bOk = Case.Expected >= 0 ? Got == Case.Expected : Got == -1 && Outcome.Contains(Case.ErrorContains);
 				Expect(bOk, *FString::Printf(TEXT("signature: %s (got %d: %s)"), Case.Name, Got, *Outcome));
+			}
+
+			// An object's own instance inputs (FBangoInlineScriptBase::SetInstanceInputs), after the signature's.
+			{
+				const TArray<FBangoInputDecl> Own = { { TEXT("vector3 _red"), TEXT("The colour when it's on.") }, { TEXT("float _speed") } };
+				FBangoInputsSignature WithOwn;
+				FString OwnError;
+				TArray<FString> OwnWarnings;
+				Expect(Bango::AddInstanceInputs(&Signature, Own, WithOwn, OwnError, OwnWarnings) && OwnWarnings.Num() == 0, *(FString(TEXT("instance inputs: read: ")) + OwnError));
+				Expect(WithOwn.ToInputsText() == TEXT("entity _trigger, int _count, entity[] _inside, vector3 _red, float _speed") && WithOwn.NumInstanceInputs == 2
+					&& WithOwn.Tooltips.Num() == 5 && WithOwn.Tooltips[3] == TEXT("The colour when it's on.") && WithOwn.Tooltips[0] == TEXT("The trigger."),
+					*(FString(TEXT("instance inputs: after the signature's: ")) + WithOwn.ToInputsText()));
+				Expect(WithOwn.Label == TEXT("BangoTrigger's 'Activation' and this object") && WithOwn.SignatureLabel == Signature.Label
+					&& !WithOwn.IsInstanceInput(2) && WithOwn.IsInstanceInput(3) && WithOwn.IsInstanceInput(4) && !WithOwn.IsInstanceInput(5)
+					&& WithOwn.GetSourceLabel(0) == TEXT("BangoTrigger's 'Activation'") && WithOwn.GetSourceLabel(4) == TEXT("this object (its own inputs)"),
+					*(FString(TEXT("instance inputs: whose each is: ")) + WithOwn.Label));
+				Expect(Signature.Params.Num() == 3 && Signature.NumInstanceInputs == 0 && Signature.GetSourceLabel(1) == Signature.Label, TEXT("instance inputs: the signature itself is untouched"));
+
+				// Without a signature: they're all there is.
+				FBangoInputsSignature OnlyOwn;
+				Expect(Bango::AddInstanceInputs(nullptr, Own, OnlyOwn, OwnError, OwnWarnings) && OnlyOwn.ToInputsText() == TEXT("vector3 _red, float _speed")
+					&& OnlyOwn.Label == TEXT("this object") && OnlyOwn.NumInstanceInputs == 2 && OnlyOwn.IsInstanceInput(0), TEXT("instance inputs: without a signature"));
+
+				const FBadInputs BadOwn[] = {
+					{ TEXT("a signature input's name"), { { TEXT("float _speed") }, { TEXT("int _count") } }, TEXT("This object's own input '_count' (SetInstanceInputs) has the name of an input of BangoTrigger's 'Activation'") },
+					{ TEXT("the same name twice"), { { TEXT("float _speed") }, { TEXT("int _speed") } }, TEXT("This object's own inputs (SetInstanceInputs): Two inputs are named '_speed'") },
+					{ TEXT("a default"), { { TEXT("float _speed = 2") } }, TEXT("can't have a default") },
+					{ TEXT("doesn't read"), { { TEXT("_speed") } }, TEXT("should be a type and a name") },
+				};
+				for (const FBadInputs& Case : BadOwn)
+				{
+					FBangoInputsSignature Bad;
+					FString BadError;
+					TArray<FString> BadWarnings;
+					Expect(!Bango::AddInstanceInputs(&Signature, Case.Inputs, Bad, BadError, BadWarnings) && BadError.Contains(Case.ErrorContains),
+						*FString::Printf(TEXT("instance inputs: %s: %s"), Case.Name, *BadError));
+				}
+				{
+					FBangoInputsSignature NoUnderscore;
+					FString NoUnderscoreError;
+					TArray<FString> NoUnderscoreWarnings;
+					Expect(Bango::AddInstanceInputs(&Signature, { { TEXT("float speed") } }, NoUnderscore, NoUnderscoreError, NoUnderscoreWarnings)
+						&& NoUnderscore.Params.Num() == 4 && NoUnderscoreWarnings.Num() == 1 && NoUnderscoreWarnings[0].Contains(TEXT("'speed'")),
+						TEXT("instance inputs: a name without '_' works, with a warning"));
+				}
+
+				// Compiled with them: parameters after the signature's, passed in that order.
+				const FSignatureCase OwnCases[] = {
+					{ TEXT("reads both kinds"), TEXT("_count == 3 && _red.z == 9 && _speed > 1"), 1, nullptr },
+					{ TEXT("as a script"), TEXT("vector3 _dim = _red * _speed;\nreturn _dim.x == 2.5 && Count(_inside) == 0;"), 1, nullptr },
+					{ TEXT("no #inputs line"), TEXT("#inputs (int _n = 1)\n_n > 0"), -1, TEXT("This script's inputs are given by BangoTrigger's 'Activation' and this object: _trigger, _count, _inside, _red, _speed. Remove the #inputs line") },
+					{ TEXT("a local can't have an instance input's name"), TEXT("float _speed = 1;\nreturn true;"), -1, TEXT("'_speed' is an input given by BangoTrigger's 'Activation' and this object") },
+				};
+				for (const FSignatureCase& Case : OwnCases)
+				{
+					TSharedPtr<FBangoProgram> OwnProgram = MakeShared<FBangoProgram>();
+					FBangoCompileError CompileOwnError;
+					FString Outcome;
+					int32 Got = -1;
+					if (!Bango::CompileCondition(Case.Source, TEXT("own"), Commands, *OwnProgram, CompileOwnError, &WithOwn))
+					{
+						Outcome = CompileOwnError.ToString();
+					}
+					else
+					{
+						FBangoGlobalStore OwnGlobals;
+						Context.Globals = &OwnGlobals;
+						FBangoInstance Instance;
+						FBangoRuntimeError StartError;
+						const TArray<FBangoValue> Args = { FBangoValue::MakeNil(FBangoType::Entity()), FBangoValue::MakeInt(3), FBangoValue::MakeArray(FBangoType::Entity(), TArray<FBangoValue>()),
+							FBangoValue::MakeVector3(1, 0, 9), FBangoValue::MakeDouble(2.5) };
+						if (!Instance.Start(OwnProgram, Commands, OwnGlobals, 1, StartError, Args))
+						{
+							Outcome = StartError.ToString();
+						}
+						else
+						{
+							const EBangoConditionResult Result = Instance.FinishCondition(Instance.Resume(Context), Outcome);
+							Got = Result == EBangoConditionResult::True ? 1 : Result == EBangoConditionResult::False ? 0 : -1;
+						}
+					}
+					const bool bOk = Case.Expected >= 0 ? Got == Case.Expected : Got == -1 && Outcome.Contains(Case.ErrorContains);
+					Expect(bOk, *FString::Printf(TEXT("instance inputs: %s (got %d: %s)"), Case.Name, Got, *Outcome));
+				}
 			}
 		}
 

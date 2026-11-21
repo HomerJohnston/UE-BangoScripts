@@ -1209,6 +1209,14 @@ void SBangoTextEditor::ShowError(const FBangoCompileError& Error, bool bFocus)
 	}
 }
 
+void SBangoTextEditor::ClearOutsideError()
+{
+	if (bErrorFromOutside)
+	{
+		ClearShownError();
+	}
+}
+
 void SBangoTextEditor::ClearShownError()
 {
 	bErrorFromOutside = false;

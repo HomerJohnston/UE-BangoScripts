@@ -411,7 +411,8 @@ private:
 	void DeleteDecl(bool bGlobal, int32 Index);
 	void SetDeclType(bool bGlobal, int32 Index, const FString& Type);
 	/** Sets a local's starting value, or a global's default, from what was typed in its box (empty: none). */
-	void SetDeclValue(bool bGlobal, int32 Index, const FString& Typed);
+	/** Sets a declaration's value from its Bango text (empty: none), as the value box reports it. */
+	void SetDeclValueText(bool bGlobal, int32 Index, const FString& Value);
 	void MoveDecl(bool bGlobal, int32 From, int32 To);
 	/** Why NewName can't be the name of declaration Index, or empty if it can. */
 	FString CheckDeclName(bool bGlobal, int32 Index, const FString& NewName) const;
@@ -560,6 +561,8 @@ private:
 	 * with OutError, if it isn't registered.
 	 */
 	TSharedPtr<const FBangoInputsSignature> GetInputsSignature(FString& OutError) const;
+	/** GetInputsSignature's error as last polled, to notice when the open inline script's given inputs change. */
+	FString PolledSignatureError;
 	/** The actor `self` is while editing the open script (an inline script's actor), or null. */
 	const AActor* GetSelfActorForChecks() const;
 	/** Lets Context's call nodes show their targets' Blueprint functions (BangoCallChecks). */

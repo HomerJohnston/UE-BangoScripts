@@ -41,6 +41,74 @@ namespace BangoInputsSignaturePrivate
 	}
 }
 
+namespace BangoInputsSignaturePrivate
+{
+	/** A signature with an object's instance inputs after it, or why they can't be used. */
+	struct FWithInstanceInputs
+	{
+		TWeakPtr<const FBangoInputsSignature> Signature; // the registered one it was made from (not valid: none)
+		bool bHadSignature = false;
+		TSharedPtr<const FBangoInputsSignature> Inputs; // null: Error says why
+		FString Error;
+	};
+
+	static TMap<FString, FWithInstanceInputs>& GetWithInstanceInputs()
+	{
+		static TMap<FString, FWithInstanceInputs> Made;
+		return Made;
+	}
+
+	/**
+	 * Signature's inputs (null for none) with InstanceInputs after them. Made once for each signature and list, and
+	 * kept: every script with the same ones gets the same object, so two can be compared by pointer (the editor does,
+	 * for several selected objects, and to notice a change), and the errors of a wrong list are reported once.
+	 */
+	static TSharedPtr<const FBangoInputsSignature> FindWithInstanceInputs(const TSharedPtr<const FBangoInputsSignature>& Signature, const TArray<FBangoInputDecl>& InstanceInputs, FString& OutError)
+	{
+		FString Key = Signature.IsValid() ? Signature->Label : FString();
+		for (const FBangoInputDecl& Input : InstanceInputs)
+		{
+			Key += TEXT("\n");
+			Key += Input.Decl;
+			Key += TEXT("\t");
+			Key += Input.Tooltip;
+		}
+
+		FScopeLock Lock(&GetLock());
+		TMap<FString, FWithInstanceInputs>& Made = GetWithInstanceInputs();
+		if (const FWithInstanceInputs* Found = Made.Find(Key))
+		{
+			// Still made from this signature (a class can register its signature again, with other inputs).
+			if (Found->bHadSignature == Signature.IsValid() && (!Signature.IsValid() || Found->Signature.Pin() == Signature))
+			{
+				OutError = Found->Error;
+				return Found->Inputs;
+			}
+		}
+		if (Made.Num() >= 4096)
+		{
+			Made.Reset(); // far more lists than any game has: scripts keep the ones they were compiled with
+		}
+
+		FWithInstanceInputs Entry;
+		Entry.Signature = Signature;
+		Entry.bHadSignature = Signature.IsValid();
+		TSharedPtr<FBangoInputsSignature> Inputs = MakeShared<FBangoInputsSignature>();
+		TArray<FString> Warnings;
+		if (Bango::AddInstanceInputs(Signature.Get(), InstanceInputs, *Inputs, Entry.Error, Warnings))
+		{
+			Entry.Inputs = Inputs;
+			for (const FString& Warning : Warnings)
+			{
+				Bango::ReportError(FString::Printf(TEXT("An object's own script inputs (SetInstanceInputs): %s"), *Warning));
+			}
+		}
+		Made.Add(Key, Entry);
+		OutError = Entry.Error;
+		return Entry.Inputs;
+	}
+}
+
 namespace Bango
 {
 	void RegisterInputsSignature(const UObject* Template, FName Name, const TArray<FBangoInputDecl>& Inputs)
@@ -103,23 +171,55 @@ void FBangoInlineScriptBase::UseInputsSignature(const UObject* Owner, FName Name
 	InputsSignatureName = Name;
 }
 
+bool FBangoInlineScriptBase::SetInstanceInputs(TArray<FBangoInputDecl> Inputs, FString* OutError)
+{
+	if (Inputs != InstanceInputs)
+	{
+		InstanceInputs = MoveTemp(Inputs);
+	}
+	if (InstanceInputs.Num() == 0)
+	{
+		return true;
+	}
+	// Checked now, so whoever sets them hears about it (the script itself says the same when it's compiled).
+	FString Error;
+	if (FindInputsSignature(Error).IsValid() || Error.IsEmpty())
+	{
+		return true;
+	}
+	if (OutError)
+	{
+		*OutError = Error;
+	}
+	else
+	{
+		Bango::ReportError(Error);
+	}
+	return false;
+}
+
 TSharedPtr<const FBangoInputsSignature> FBangoInlineScriptBase::FindInputsSignature(FString& OutError) const
 {
-	if (!HasInputsSignature())
+	TSharedPtr<const FBangoInputsSignature> Signature;
+	if (HasInputsSignature())
 	{
-		return nullptr;
+		const UClass* Class = InputsSignatureClass.Get();
+		if (!bGlobalInputsSignature && !Class)
+		{
+			OutError = FString::Printf(TEXT("This script uses the inputs signature '%s' of a class that no longer exists."), *InputsSignatureName.ToString());
+			return nullptr;
+		}
+		Signature = Bango::FindInputsSignature(Class, InputsSignatureName);
+		if (!Signature.IsValid())
+		{
+			OutError = FString::Printf(TEXT("This script uses the inputs signature %s, but none is registered by that name (Bango::RegisterInputsSignature). Is the name spelled the same in both places?"),
+				*BangoInputsSignaturePrivate::MakeLabel(Class, InputsSignatureName));
+			return nullptr;
+		}
 	}
-	const UClass* Class = InputsSignatureClass.Get();
-	if (!bGlobalInputsSignature && !Class)
+	if (InstanceInputs.Num() == 0)
 	{
-		OutError = FString::Printf(TEXT("This script uses the inputs signature '%s' of a class that no longer exists."), *InputsSignatureName.ToString());
-		return nullptr;
+		return Signature;
 	}
-	TSharedPtr<const FBangoInputsSignature> Signature = Bango::FindInputsSignature(Class, InputsSignatureName);
-	if (!Signature.IsValid())
-	{
-		OutError = FString::Printf(TEXT("This script uses the inputs signature %s, but none is registered by that name (Bango::RegisterInputsSignature). Is the name spelled the same in both places?"),
-			*BangoInputsSignaturePrivate::MakeLabel(Class, InputsSignatureName));
-	}
-	return Signature;
+	return BangoInputsSignaturePrivate::FindWithInstanceInputs(Signature, InstanceInputs, OutError);
 }

@@ -126,8 +126,14 @@ public:
 	 */
 	void ShowError(const FBangoCompileError& Error, bool bFocus);
 
-	/** Changes the InputsSignature argument (the script editor opens one script after another). */
+	/**
+	 * Changes the InputsSignature argument (the script editor opens one script after another, and a script's owner
+	 * can change the inputs it gives it): the text is checked again with them, without having been edited.
+	 */
 	void SetInputsSignature(const TSharedPtr<const FBangoInputsSignature>& InSignature);
+	const TSharedPtr<const FBangoInputsSignature>& GetInputsSignature() const { return InputsSignature; }
+	/** Takes away an error shown with ShowError (not one compiling as you type found). */
+	void ClearOutsideError();
 
 	/** Puts the cursor at a line and column (both from 0) of the whole text, scrolling it into view. */
 	void GoTo(const FTextLocation& Location);

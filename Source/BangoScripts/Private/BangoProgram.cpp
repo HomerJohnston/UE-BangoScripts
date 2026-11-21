@@ -287,6 +287,11 @@ FString FBangoInputsSignature::ToInputsText() const
 	return FString::Join(Parts, TEXT(", "));
 }
 
+FString FBangoInputsSignature::GetSourceLabel(int32 Index) const
+{
+	return IsInstanceInput(Index) ? FString(TEXT("this object (its own inputs)")) : (SignatureLabel.IsEmpty() ? Label : SignatureLabel);
+}
+
 FString FBangoInputsSignature::GetNames() const
 {
 	TArray<FString> Parts;

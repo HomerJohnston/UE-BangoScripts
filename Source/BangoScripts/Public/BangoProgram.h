@@ -186,20 +186,38 @@ struct FBangoInputDecl
 
 	FBangoInputDecl(const TCHAR* InDecl, const TCHAR* InTooltip = TEXT("")) : Decl(InDecl), Tooltip(InTooltip) {}
 	FBangoInputDecl(const FString& InDecl, const FString& InTooltip = FString()) : Decl(InDecl), Tooltip(InTooltip) {}
+
+	bool operator==(const FBangoInputDecl& Other) const { return Decl.Equals(Other.Decl, ESearchCase::CaseSensitive) && Tooltip.Equals(Other.Tooltip, ESearchCase::CaseSensitive); }
+	bool operator!=(const FBangoInputDecl& Other) const { return !(*this == Other); }
 };
 
 /**
  * The inputs an object's C++ gives one of its inline scripts, in place of an #inputs line (spec section 15): the
  * script reads them without declaring them, and can't have an #inputs line. Its owner passes their values in this order.
+ *
+ * They're a registered inputs signature's (Bango::RegisterInputsSignature), then, last, the object's own instance
+ * inputs (FBangoInlineScriptBase::SetInstanceInputs), if it has any: either part may be missing.
  */
 struct FBangoInputsSignature
 {
-	/** Whose they are, for messages: "BangoTrigger's 'Activation'" ("'Activation'" for a global one). */
+	/**
+	 * Whose they are, for messages: "BangoTrigger's 'Activation'" ("the global 'Activation'" for a global one), with
+	 * " and this object" after it (or just "this object") when the last ones are the object's own.
+	 */
 	FString Label;
 	/** In order. None has a default. */
 	TArray<FBangoScriptParamInfo> Params;
 	/** One per input, maybe empty: what it is, for the editor. */
 	TArray<FString> Tooltips;
+	/** How many of Params, at the end, are the object's own instance inputs. The ones before are the registered signature's. */
+	int32 NumInstanceInputs = 0;
+	/** The registered signature's label ("BangoTrigger's 'Activation'"), or empty if there's none (only instance inputs). */
+	FString SignatureLabel;
+
+	/** True if input Index is one of the object's own (an instance input). */
+	bool IsInstanceInput(int32 Index) const { return Index >= Params.Num() - NumInstanceInputs && Index < Params.Num(); }
+	/** Who gives input Index, for the editor: the signature's label, or "this object (its own inputs)". */
+	BANGOSCRIPTS_API FString GetSourceLabel(int32 Index) const;
 
 	/** "entity _trigger, int _count": as an #inputs line would list them. */
 	BANGOSCRIPTS_API FString ToInputsText() const;

@@ -59,7 +59,7 @@ namespace Bango
 		const FString ConditionName = Name.IsEmpty() ? FString(TEXT("Condition")) : Name;
 		FString SignatureError;
 		const TSharedPtr<const FBangoInputsSignature> Signature = Condition.FindInputsSignature(SignatureError);
-		if (Condition.HasInputsSignature() && !Signature.IsValid())
+		if (Condition.HasGivenInputs() && !Signature.IsValid())
 		{
 			OutError = FString::Printf(TEXT("%s: %s"), *ConditionName, *SignatureError);
 			return Handle;

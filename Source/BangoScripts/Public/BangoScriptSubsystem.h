@@ -268,6 +268,11 @@ private:
 		 */
 		FString SignatureClass;
 		FString SignatureName;
+		/**
+		 * An inline script's own instance inputs (FBangoInlineScriptBase::SetInstanceInputs), as they were declared
+		 * ("vector3 _red"), saved with it for the same reason. Their values are saved with the instance, as its parameters.
+		 */
+		TArray<FString> InstanceInputs;
 		FBangoInstance Instance;
 		/** The newest version it's been asked to switch to (hot reload), so each version is asked for once. */
 		TSharedPtr<const FBangoProgram> ReloadTarget;

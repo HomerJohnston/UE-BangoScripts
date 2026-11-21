@@ -438,7 +438,7 @@ TArray<FBangoVisibleName> BangoTextEditor::GivenInputs(const FBangoInputsSignatu
 		Input.Tooltip = Signature.Tooltips.IsValidIndex(I) ? Signature.Tooltips[I] : FString();
 		if (Input.Tooltip.IsEmpty())
 		{
-			Input.Tooltip = FString::Printf(TEXT("Given by %s."), *Signature.Label);
+			Input.Tooltip = FString::Printf(TEXT("Given by %s."), *Signature.GetSourceLabel(I));
 		}
 		Inputs.Add(MoveTemp(Input));
 	}

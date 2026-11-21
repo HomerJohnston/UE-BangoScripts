@@ -7,17 +7,24 @@ public class BangoScriptsScriptEditor : ModuleRules
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
-		PrivateDependencyModuleNames.AddRange(
+		// What its public headers need (Public/BangoValueWidgets.h: the value widgets other editor modules can use).
+		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
 				"Core",
 				"CoreUObject",
+				"Slate",
+				"SlateCore",
+			}
+		);
+
+		PrivateDependencyModuleNames.AddRange(
+			new string[]
+			{
 				"Engine",
 				"DeveloperSettings",
 				"InputCore",
 				"ApplicationCore",
-				"Slate",
-				"SlateCore",
 				"UnrealEd",
 				"GraphEditor",
 				"ToolMenus",

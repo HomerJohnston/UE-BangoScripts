@@ -2,9 +2,9 @@
 
 #include "CoreMinimal.h"
 #include "UObject/WeakObjectPtrTemplates.h"
+#include "BangoProgram.h"
 #include "BangoInlineScript.generated.h"
 
-struct FBangoInputsSignature;
 class UClass;
 
 /**
@@ -15,7 +15,7 @@ class UClass;
  *
  * The script may start with a `#inputs (...)` line; whoever runs it passes the values, in order. Or its owner's C++
  * gives it an inputs signature (UseInputsSignature): then the signature's inputs are its parameters, and it can't have
- * an #inputs line.
+ * an #inputs line. One object can add inputs of its own after those (SetInstanceInputs).
  */
 USTRUCT()
 struct BANGOSCRIPTS_API FBangoInlineScriptBase
@@ -42,7 +42,33 @@ struct BANGOSCRIPTS_API FBangoInlineScriptBase
 	/** True if UseInputsSignature gave it one. */
 	bool HasInputsSignature() const { return !InputsSignatureName.IsNone(); }
 
-	/** Its inputs signature. Null if it has none, or, with OutError, if that signature isn't registered. */
+	/**
+	 * Gives this one script inputs of its owner's own, after its signature's (or by themselves, without one): constants
+	 * that differ from one placed object to the next, like a light trigger's `vector3 _red`. Each is written like a
+	 * signature's input, without a default (`entity _lamp`), with an optional description for the editor. The script
+	 * reads them like the signature's, and whoever runs it passes their values after the signature's, in this order
+	 * (Spawn, EvaluateCondition), or by name (watches).
+	 *
+	 * Not saved, like UseInputsSignature: the owner calls it when it's set up (its constructor, PostLoad or OnRegister)
+	 * and again whenever its list changes (PostEditChangeProperty, undo). The same list again does nothing. An open
+	 * editor on the script picks a change up by itself.
+	 *
+	 * False if they can't be used: one doesn't read or has a default, or has the name of another or of one of the
+	 * signature's inputs. The script then doesn't compile, with that as its error (also shown in the editor), until
+	 * they're set right. The error goes in OutError, or, without one, is reported (Bango::ReportError). A name that
+	 * doesn't start with '_' is reported, but works.
+	 */
+	bool SetInstanceInputs(TArray<FBangoInputDecl> Inputs, FString* OutError = nullptr);
+	const TArray<FBangoInputDecl>& GetInstanceInputs() const { return InstanceInputs; }
+
+	/** True if its owner gives it inputs: a signature's, its own instance inputs, or both. */
+	bool HasGivenInputs() const { return HasInputsSignature() || InstanceInputs.Num() > 0; }
+
+	/**
+	 * The inputs it's given: its inputs signature's, then its instance inputs. Null if it has neither, or, with
+	 * OutError, if they can't be used (the signature isn't registered, or the instance inputs are wrong). Scripts with
+	 * the same signature and the same instance inputs get the same object.
+	 */
 	TSharedPtr<const FBangoInputsSignature> FindInputsSignature(FString& OutError) const;
 
 	/** For saving a running script: the signature's class (null for a global one, or one that's gone) and name. */
@@ -55,6 +81,8 @@ private:
 	TWeakObjectPtr<const UClass> InputsSignatureClass;
 	FName InputsSignatureName;
 	bool bGlobalInputsSignature = false;
+	// Set by the owner, not saved (SetInstanceInputs).
+	TArray<FBangoInputDecl> InstanceInputs;
 };
 
 /**

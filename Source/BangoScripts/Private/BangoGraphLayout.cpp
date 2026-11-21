@@ -1469,9 +1469,18 @@ namespace Bango
 	bool LayoutContextsMatch(const FBangoNodeLayoutContext& A, const FBangoNodeLayoutContext& B)
 	{
 		if (A.Commands != B.Commands || A.Functions.Num() != B.Functions.Num() || A.VisibleVariables.Num() != B.VisibleVariables.Num()
-			|| A.ReturnTypes.Num() != B.ReturnTypes.Num())
+			|| A.ReturnTypes.Num() != B.ReturnTypes.Num() || A.GivenInputs.Num() != B.GivenInputs.Num())
 		{
 			return false;
+		}
+		// The inputs an inline script is given (its owner can change its own ones while the script is open).
+		for (int32 i = 0; i < A.GivenInputs.Num(); ++i)
+		{
+			if (!A.GivenInputs[i].Type.Equals(B.GivenInputs[i].Type, ESearchCase::CaseSensitive) || !A.GivenInputs[i].Name.Equals(B.GivenInputs[i].Name, ESearchCase::CaseSensitive)
+				|| !A.GivenInputs[i].Comment.Equals(B.GivenInputs[i].Comment, ESearchCase::CaseSensitive))
+			{
+				return false;
+			}
 		}
 		for (const TPair<int64, FString>& Entry : A.ReturnTypes)
 		{
