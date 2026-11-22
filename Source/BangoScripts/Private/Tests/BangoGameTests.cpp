@@ -741,7 +741,7 @@ bool FBangoEntityIDsTest::RunTest(const FString& Parameters)
 		Keeper->RegisterComponent();
 		const FString KeptID = Registry->GetOrMakeEntityID(Keeper, Error);
 		TestTrue(TEXT("one that keeps its ID keeps it"), Bango::GetEntityIDKind(KeptID) == Bango::EBangoEntityIDKind::Automatic && Keeper->EntityID == KeptID);
-		// As if loaded from a save: a new component holding that ID, registered at its BeginPlay, is found by it.
+		// As if loaded from a save: a new component holding that ID, registered as it's initialized, is found by it.
 		Keeper->DestroyComponent();
 		TestNull(TEXT("a removed component isn't found"), Registry->FindEntity(KeptID));
 		UBangoEntityTestComponent* Loaded = NewObject<UBangoEntityTestComponent>(Door);

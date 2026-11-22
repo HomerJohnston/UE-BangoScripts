@@ -171,11 +171,30 @@ void FBangoInlineScriptBase::UseInputsSignature(const UObject* Owner, FName Name
 	InputsSignatureName = Name;
 }
 
+TArray<FBangoInputDecl> FBangoInlineScriptBase::GetInstanceInputs() const
+{
+	TArray<FBangoInputDecl> Inputs;
+	Inputs.Reserve(InstanceInputs.Num());
+	for (const FBangoInstanceInput& Input : InstanceInputs)
+	{
+		Inputs.Emplace(Input.Decl, Input.Tooltip);
+	}
+	return Inputs;
+}
+
 bool FBangoInlineScriptBase::SetInstanceInputs(TArray<FBangoInputDecl> Inputs, FString* OutError)
 {
-	if (Inputs != InstanceInputs)
+	TArray<FBangoInstanceInput> Kept;
+	Kept.Reserve(Inputs.Num());
+	for (const FBangoInputDecl& Input : Inputs)
 	{
-		InstanceInputs = MoveTemp(Inputs);
+		FBangoInstanceInput& Added = Kept.AddDefaulted_GetRef();
+		Added.Decl = Input.Decl;
+		Added.Tooltip = Input.Tooltip;
+	}
+	if (Kept != InstanceInputs)
+	{
+		InstanceInputs = MoveTemp(Kept);
 	}
 	if (InstanceInputs.Num() == 0)
 	{
@@ -221,5 +240,5 @@ TSharedPtr<const FBangoInputsSignature> FBangoInlineScriptBase::FindInputsSignat
 	{
 		return Signature;
 	}
-	return BangoInputsSignaturePrivate::FindWithInstanceInputs(Signature, InstanceInputs, OutError);
+	return BangoInputsSignaturePrivate::FindWithInstanceInputs(Signature, GetInstanceInputs(), OutError);
 }

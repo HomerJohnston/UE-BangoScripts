@@ -10,7 +10,6 @@
 #include "BangoReflectedCall.h"
 #include "BangoIDActorComponent.h"
 #include "BangoLevelStartScript.h"
-#include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "BangoLog.h"
 #include "BangoSettings.h"
@@ -108,15 +107,8 @@ void UBangoScriptSubsystem::RunLevelStartScript(UWorld& InWorld)
 		return;
 	}
 
-	// Actors register their Bango IDs in BeginPlay, which hasn't happened yet: register them now, so the script can use them.
-	for (TActorIterator<AActor> It(&InWorld); It; ++It)
-	{
-		TInlineComponentArray<UBangoIDActorComponent*> IDs(*It);
-		for (UBangoIDActorComponent* ID : IDs)
-		{
-			ID->RegisterName();
-		}
-	}
+	// No actor has begun play yet, but their Bango IDs are registered: that's done as their components are
+	// initialized for play (UBangoIDActorComponent::InitializeComponent), before this.
 
 	FBangoModule& Module = FBangoModule::Get();
 	TSharedPtr<const FBangoProgram> Program;

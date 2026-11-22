@@ -12,9 +12,11 @@
  * Automatic ID instead (AutomaticID; spec section 4, Bango IDs), so a save system that saves and respawns actors with
  * their components keeps the actor's ID.
  *
- * On BeginPlay the name is registered with UBangoActorRegistry, or earlier, when the world begins play, if the level
- * has a start script (UBangoLevelStartScript), so the start script can use it. Any problem (an empty, invalid or
- * duplicate name) is shown on screen as an error, once, and the name is not registered.
+ * The name is registered with UBangoActorRegistry when the component is initialized for play (InitializeComponent),
+ * which Unreal does for every actor of a level before it calls any of their BeginPlays, and for a spawned actor
+ * before its own. So a script started from any BeginPlay, or the level's start script, finds every Bango ID of the
+ * actors that are there, whichever actor begins play first. Any problem (an empty, invalid or duplicate name) is
+ * shown on screen as an error, once, and the name is not registered.
  */
 UCLASS(ClassGroup = (Bango), meta = (BlueprintSpawnableComponent, DisplayName = "Bango ID"))
 class BANGOSCRIPTS_API UBangoIDActorComponent : public UActorComponent
@@ -43,17 +45,25 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Bango")
 	bool IsRegistered() const { return bRegistered; }
 
-	/** Registers BangoName and AutomaticID, if that hasn't been tried since it last began play. BeginPlay calls it. */
+	/**
+	 * Registers BangoName and AutomaticID, if that hasn't been tried since it was last unregistered.
+	 * InitializeComponent calls it (and BeginPlay, for a component that wasn't initialized first).
+	 */
 	void RegisterName();
 
 protected:
+	virtual void InitializeComponent() override;
+	virtual void UninitializeComponent() override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
+	/** Takes back what RegisterName registered, so it can be tried again. */
+	void UnregisterName();
+
 	bool bRegistered = false;
-	/** What was registered, to unregister at EndPlay. */
+	/** What was registered, to unregister when it ends play or is uninitialized. */
 	TArray<FString> RegisteredNames;
-	/** RegisterName has run (and reported any problem), so it isn't tried again until EndPlay. */
+	/** RegisterName has run (and reported any problem), so it isn't tried again until UnregisterName. */
 	bool bTriedRegistering = false;
 };

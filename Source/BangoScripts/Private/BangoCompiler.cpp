@@ -2286,7 +2286,30 @@ namespace BangoCompilerPrivate
 			}
 			if (ArrayType.IsUnknown())
 			{
-				return Fail(ForEach.Array->Loc, TEXT("forEach needs to know the array's type. This global isn't declared in this script, so declare it first, like 'global string[] questLog;'."));
+				// A name that's no local, parameter or input is read as a global, and one this script doesn't declare
+				// has no type here. Often it was meant to be an input the script wasn't given, so say what it has.
+				const FBangoNameExpr* Named = ForEach.Array->As<FBangoNameExpr>();
+				if (!Named)
+				{
+					return Fail(ForEach.Array->Loc, TEXT("forEach needs to know the array's type, and this comes from a global that isn't declared in this script. Declare it first, like 'global string[] questLog;'."));
+				}
+				FString Why;
+				if (FnAst)
+				{
+					Why = InputsSignature && InputsSignature->Params.ContainsByPredicate([Named](const FBangoScriptParamInfo& Input) { return Input.Name.Equals(Named->Name, ESearchCase::CaseSensitive); })
+						? FString::Printf(TEXT("It's one of the script's inputs, but a function doesn't see those: give the function a parameter and pass it in, like '%s(%s)'. "), *FnAst->Name, *Named->Name)
+						: FString(TEXT("It isn't a local or a parameter of this function. "));
+				}
+				else if (InputsSignature && InputsSignature->Params.Num() > 0)
+				{
+					Why = FString::Printf(TEXT("It isn't a local or one of the inputs this script is given (%s). "), *InputsSignature->GetNames());
+				}
+				else
+				{
+					Why = TEXT("It isn't a local, and this script is given no inputs. ");
+				}
+				return Fail(ForEach.Array->Loc, FString::Printf(TEXT("forEach needs to know the type of '%s'. %sSo it's read as a global, and this script doesn't declare one of that name: if it is a global, declare it first, like 'global string[] %s;'."),
+					*Named->Name, *Why, *Named->Name));
 			}
 			if (!ArrayType.IsKnownArray())
 			{

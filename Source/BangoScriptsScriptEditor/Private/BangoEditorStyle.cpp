@@ -74,6 +74,13 @@ void FBangoEditorStyle::Initialize()
 	// A Bango script (the scripts' folder tree and tabs), from Resources/ClassIcons.
 	StyleSet->Set(GetScriptIconName(), new FSlateVectorImageBrush(StyleSet->RootToContentDir(TEXT("ClassIcons/Icon_Script"), TEXT(".svg")), FVector2D(16.0f, 16.0f)));
 
+	// The same for Bango Script assets wherever the editor shows a class's icon (the Content Browser's list and
+	// columns, asset pickers, the asset's editor tab) or its thumbnail (the Content Browser's tiles, in place of the
+	// default cube): the editor looks "ClassIcon.<class>" and "ClassThumbnail.<class>" up in every registered style
+	// set, by the class's name without its U.
+	StyleSet->Set("ClassIcon.BangoScriptAsset", new FSlateVectorImageBrush(StyleSet->RootToContentDir(TEXT("ClassIcons/Icon_Script"), TEXT(".svg")), FVector2D(16.0f, 16.0f)));
+	StyleSet->Set("ClassThumbnail.BangoScriptAsset", new FSlateVectorImageBrush(StyleSet->RootToContentDir(TEXT("ClassIcons/Icon_Script"), TEXT(".svg")), FVector2D(64.0f, 64.0f)));
+
 	// Buttons, from Resources/ButtonIcons.
 	StyleSet->Set("Bango.EditScript", new FSlateVectorImageBrush(StyleSet->RootToContentDir(TEXT("ButtonIcons/Icon_EditScript"), TEXT(".svg")), FVector2D(16.0f, 16.0f)));
 

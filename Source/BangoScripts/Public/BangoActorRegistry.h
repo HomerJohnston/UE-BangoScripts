@@ -109,7 +109,9 @@ namespace Bango
 
 	/**
 	 * Registers an IBangoEntity component's ID now (making one if it has none), so it's found by it before anything
-	 * asks for it: call it in its BeginPlay. Logs an error if it can't be.
+	 * asks for it: call it in its InitializeComponent (with bWantsInitializeComponent set), which runs before any
+	 * actor's BeginPlay; its own BeginPlay can be too late for a script another actor's BeginPlay starts. Does
+	 * nothing outside a game world. Logs an error if it can't be.
 	 */
 	BANGOSCRIPTS_API void RegisterEntity(const UObject* Object);
 }

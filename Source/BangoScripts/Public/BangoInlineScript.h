@@ -8,6 +8,27 @@
 class UClass;
 
 /**
+ * One of an inline script's instance inputs, as it's kept on the script (FBangoInlineScriptBase::SetInstanceInputs):
+ * an FBangoInputDecl, as properties.
+ */
+USTRUCT()
+struct BANGOSCRIPTS_API FBangoInstanceInput
+{
+	GENERATED_BODY()
+
+	/** `entity _lamp`: a type and a name. */
+	UPROPERTY(VisibleAnywhere, Category = "Bango")
+	FString Decl;
+
+	/** What it is, shown in the editor. */
+	UPROPERTY(VisibleAnywhere, Category = "Bango")
+	FString Tooltip;
+
+	bool operator==(const FBangoInstanceInput& Other) const { return Decl.Equals(Other.Decl, ESearchCase::CaseSensitive) && Tooltip.Equals(Other.Tooltip, ESearchCase::CaseSensitive); }
+	bool operator!=(const FBangoInstanceInput& Other) const { return !(*this == Other); }
+};
+
+/**
  * What inline scripts and inline conditions share: a Bango script kept in a property of any class or Blueprint,
  * instead of in a Bango Script asset (spec section 15). In the editor's details panel it's a box to type the script
  * in, with an Edit button that opens the full graph editor in a window of its own. Use FBangoInlineScript or
@@ -49,9 +70,13 @@ struct BANGOSCRIPTS_API FBangoInlineScriptBase
 	 * reads them like the signature's, and whoever runs it passes their values after the signature's, in this order
 	 * (Spawn, EvaluateCondition), or by name (watches).
 	 *
-	 * Not saved, like UseInputsSignature: the owner calls it when it's set up (its constructor, PostLoad or OnRegister)
-	 * and again whenever its list changes (PostEditChangeProperty, undo). The same list again does nothing. An open
-	 * editor on the script picks a change up by itself.
+	 * The owner calls it when it's set up (its constructor, PostLoad or OnRegister) and again whenever its list
+	 * changes (PostEditChangeProperty, undo, and UActorComponent::PostApplyToComponent for a component). The same list
+	 * again does nothing. An open editor on the script picks a change up by itself.
+	 *
+	 * The list is kept on the script as a property (InstanceInputs), so it goes wherever Unreal copies the script's
+	 * owner by its properties, without the owner being told: a Blueprint's component is made again from the
+	 * Blueprint each time its actor's construction script reruns, and then given back what was edited on it.
 	 *
 	 * False if they can't be used: one doesn't read or has a default, or has the name of another or of one of the
 	 * signature's inputs. The script then doesn't compile, with that as its error (also shown in the editor), until
@@ -59,7 +84,16 @@ struct BANGOSCRIPTS_API FBangoInlineScriptBase
 	 * doesn't start with '_' is reported, but works.
 	 */
 	bool SetInstanceInputs(TArray<FBangoInputDecl> Inputs, FString* OutError = nullptr);
-	const TArray<FBangoInputDecl>& GetInstanceInputs() const { return InstanceInputs; }
+	TArray<FBangoInputDecl> GetInstanceInputs() const;
+
+	/**
+	 * The instance inputs, as SetInstanceInputs left them: set them with that, not here. A property so that it's
+	 * copied with the script (see SetInstanceInputs), and VisibleAnywhere because Unreal only carries a component's
+	 * editable properties over when it makes the component again; the details panel doesn't show it (the script's
+	 * row is its own).
+	 */
+	UPROPERTY(VisibleAnywhere, Category = "Bango")
+	TArray<FBangoInstanceInput> InstanceInputs;
 
 	/** True if its owner gives it inputs: a signature's, its own instance inputs, or both. */
 	bool HasGivenInputs() const { return HasInputsSignature() || InstanceInputs.Num() > 0; }
@@ -81,8 +115,6 @@ private:
 	TWeakObjectPtr<const UClass> InputsSignatureClass;
 	FName InputsSignatureName;
 	bool bGlobalInputsSignature = false;
-	// Set by the owner, not saved (SetInstanceInputs).
-	TArray<FBangoInputDecl> InstanceInputs;
 };
 
 /**
