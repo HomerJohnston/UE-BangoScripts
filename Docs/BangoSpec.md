@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.81)
+# Bango Language Spec (draft v0.82)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.82:** **`IsNil` is now `isNil`**, and it and `call` are plain keywords: the separate "built-in" kind is gone. `isNil(_x)` reads and works as before (section 3); it's written like the other keywords (`forEach`, `waitUntil`) because it is one: it takes a variable, not a value, and never reads it, which no command can do. In the editor, `isNil` and `call` are coloured as keywords and listed as keywords (K) in autocomplete, and autocomplete puts a keyword's bracket in with it: `if (`, `while (`, `waitUntil (`, `isNil(` (section 12). Scripts that say `IsNil` no longer compile.
 
 **Changes in v0.81:** **`waitUntil` can have a timeout**: `waitUntil (condition) timeout (seconds) { ... }` waits no longer than that many seconds; if the condition still isn't true then, its block runs, then what follows (section 8). `timeout` is only a word of the language there: elsewhere it's an ordinary name. In the graph, the Wait Until node has an optional **Timeout** row and a **Timeout** output above **Then** (section 12). **A `waitUntil` whose condition can't change while the script waits is a compile error**: one that reads no global and calls no command that could answer differently later (`waitUntil (_count > 3);`). Save data from earlier versions can't be loaded.
 
@@ -331,7 +333,7 @@ _height = GetPos(_who).z;
 ```
 - A `vector2` has only `x` and `y`. Parts are lowercase; `.X` and any other name after a `.` is a compile error.
 - Setting a part of a `nil` vector stops the script; give the vector a whole value first. A part can't be set to `nil`.
-- A part is never `nil` on its own, so `IsNil(_v.x)` is a compile error; use `IsNil(_v)`.
+- A part is never `nil` on its own, so `isNil(_v.x)` is a compile error; use `isNil(_v)`.
 - `++` and `--` don't work on parts, since they are floats.
 - `_v[0]`, `_v[1]` and `_v[2]` are the same parts by index (Indexing vectors and strings, section 6).
 - Vectors are values, like arrays: `_b = _a;` copies the vector.
@@ -355,7 +357,7 @@ A text literal copies Unreal's macros. Each text has a **namespace**, a **key** 
 #LOCTEXT_NAMESPACE "Quest.Intro"
 #inputs (text _line = nil)
 
-if (IsNil(_line))
+if (isNil(_line))
 {
 	_line = LOCTEXT("GuardHello", "Halt! Who goes there?");
 }
@@ -385,19 +387,19 @@ WriteScreen(ToString(NSLOCTEXT("Shared.UI", "Continue", "Continue")));
   _arr[2] = nil;
   ```
 - `nil` with no known type is a compile error, like `[nil]` passed where any array would do. The exception is an extra value of a variadic command: `WriteLog("{0}", nil)` is allowed, and shows `nil`.
-- The only way to test for `nil` is `IsNil(...)`. `x == nil` is a compile error, because comparing reads `x`.
+- The only way to test for `nil` is `isNil(...)`. `x == nil` is a compile error, because comparing reads `x`.
 
-### IsNil
-- True if the value is `nil`. Built into the compiler, and never reads the value, so it never stops the script.
+### isNil
+- `isNil(x)` is true if `x` is `nil`. It's a **keyword**, not a command (which is why it starts with a small letter, like `forEach` and `waitUntil`): it takes the variable itself, not its value, and never reads it, so it never stops the script. A command only ever gets values, so no command could do this.
 - Accepts a variable name, a global name or an array element. Anything else (a call, a literal, an expression) is a compile error.
   ```
-  IsNil(_name)
-  IsNil(playerHasGun)     // true if the global was never created
-  IsNil(_arr[5])          // true if index 5 is nil or past the end
-  IsNil(_grid[3][2])      // true if any level is nil or past the end
+  isNil(_name)
+  isNil(playerHasGun)     // true if the global was never created
+  isNil(_arr[5])          // true if index 5 is nil or past the end
+  isNil(_grid[3][2])      // true if any level is nil or past the end
   ```
-- The index expressions inside `IsNil(...)` are still evaluated normally, so `IsNil(_a[_i])` stops the script if `_i` is `nil`.
-- `IsNil` is about values, not actors: an entity that names an actor that's gone isn't `nil`. `IsNull` checks both (section 7).
+- The index expressions inside `isNil(...)` are still evaluated normally, so `isNil(_a[_i])` stops the script if `_i` is `nil`.
+- `isNil` is about values, not actors: an entity that names an actor that's gone isn't `nil`. `IsNull` checks both (section 7).
 - It has no node of its own in the graph (it gives a value, like `Format`), so it's written in a field, such as an If's condition.
 
 ### Conversions
@@ -414,7 +416,7 @@ WriteScreen(ToString(NSLOCTEXT("Shared.UI", "Continue", "Continue")));
 - **Names are case-sensitive**: `john` and `John` are different names. This covers variables, globals, functions, labels, commands, keywords, type names and Bango ID names (`@john` and `@John` are different actors).
 - Calling a command or function with the wrong capitalisation is a compile error that suggests the right name: *"Unknown command or function 'writeScreen'. Did you mean 'WriteScreen'? Names are case-sensitive."*
 - A name is letters, digits and `_`, and doesn't start with a digit.
-- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn waitUntil switch case default break continue return label goto function global scriptVar call player self true false nil bool int float string entity text vector2 vector3 void IsNil LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
+- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn waitUntil switch case default break continue return label goto function global scriptVar call isNil player self true false nil bool int float string entity text vector2 vector3 void LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
 
 ### Locals and script variables
 A graph (the main script, or a function) has two kinds of variables of its own, besides its parameters and loop variables. Both only exist inside the running script instance.
@@ -598,7 +600,7 @@ All binary operators are left-associative: `a - b - c` is `(a - b) - c`.
 | `!` | bool | bool |
 | unary `-` | number or vector | same type |
 
-- `&&` and `||` **short-circuit**, so `if (!IsNil(x) && x)` is safe.
+- `&&` and `||` **short-circuit**, so `if (!isNil(x) && x)` is safe.
 - `int / int` gives `int`, rounded toward zero. `%` on floats gives the floating-point remainder.
 - **Dividing by zero stops the script**, for both ints and floats, with `/` or `%`.
 - **Integer overflow stops the script.** An int result outside -2147483648 to 2147483647 is an error that points at the operator, e.g. `2147483647 + 1`, `65536 * 65536`, `(-2147483647 - 1) / -1`, or negating -2147483648. It never wraps around. Mixing in a float (`65536 * 65536.0`) gives a float instead.
@@ -671,7 +673,7 @@ _grid[1][0] = 5;
   int[] _a = [1, 2];
   _a[5] = 9;          // _a is now [1, 2, nil, nil, nil, 9]
   ```
-- **Reading past the end stops the script with an error**, like any other `nil` read. A read never grows the array. Use `IsNil(_a[i])` to check first.
+- **Reading past the end stops the script with an error**, like any other `nil` read. A read never grows the array. Use `isNil(_a[i])` to check first.
 - Using more indices than the array has levels (`_intArray[0][0]`), or indexing anything but an array, a vector or a string (below), is a compile error.
 
 ### Indexing vectors and strings
@@ -689,7 +691,7 @@ _path[i][1] += 5;        // inside arrays too (vector2[] _path), and on values: 
 - A **string**'s characters are `[0]` to `Count(_s) - 1`, each a `string` of one character. They're **UTF-16 units**, as Unreal's strings count them: letters, digits, punctuation and accented letters are one each, but an emoji (and other characters outside the Basic Multilingual Plane) is two, and indexing one gives half of it. Use `text` for words players read; it can't be indexed.
 - **An index outside it stops the script with an error**, reading or writing: negative, or `Count` or more (*"'_s[5]' is past the end of '_s', which has 3 character(s). Check with Count first."*). An index written as a number is checked by the compiler (`_v[3]` on a vector3, `_s[-1]`). Unlike an array, writing past the end never grows a string or a vector.
 - A character is set to a **string of exactly one character**: `_s[0] = "ab";` stops the script, saying so. A part is set to a number.
-- A part or a character is never `nil`, so `IsNil(_v[0])` is a compile error, as `IsNil(_v.x)` is. A `nil` vector or string can't be indexed: give it a value first.
+- A part or a character is never `nil`, so `isNil(_v[0])` is a compile error, as `isNil(_v.x)` is. A `nil` vector or string can't be indexed: give it a value first.
 - `_v[i]` and `_s[i]` can't be followed by `.x` or another index (a part is a float, a character a string: index the character's string after storing it, if need be).
 
 ### Nested writes
@@ -956,7 +958,7 @@ forEach (_x in _myArray)
 - Declares the local `_x`, whose type is the array's element type and which only exists inside the loop. `_x` can't have the name of a local, a parameter or another loop's variable it's inside. For an `int[][]`, `_x` is an `int[]` (a copy of that row).
 - The array must have a type known to the compiler, so looping over a global the script hasn't declared is a compile error.
 - The array is copied once, when the loop starts. Changing the array inside the loop doesn't affect which elements the loop visits.
-- A `nil` element is visited too. Reading `_x` then stops the script, so check `IsNil(_x)` if the array might have gaps.
+- A `nil` element is visited too. Reading `_x` then stops the script, so check `isNil(_x)` if the array might have gaps.
 - `break` and `continue` work as usual.
 
 ### sequence
@@ -1242,7 +1244,7 @@ Bango::UnregisterCondition(Condition); // and Condition is made invalid
 - **A condition must answer at once:** calling a command that waits (`Sleep`, a dialogue choice) is an error, and `waitUntil` in a condition is a compile error.
 - `EvaluateCondition` gives an **`EBangoConditionResult`** (`BangoInstance.h`):
   - **`True`** or **`False`**: what it returned.
-  - **`Unset`**: it read a global that **doesn't exist or is `nil`** (`foundThings >= 10` before anything has set `foundThings`, or indexing a `nil` global array), with the message in `Error`. That's usually not a mistake, just something not set up yet, so a caller can treat it as false without reporting it. `IsNil(foundThings)` and `IsNull(...)` don't count: they give `true` for such a global. `&&` and `||` stop as soon as they know the answer, so `IsNil(gold) || gold < 5` never reads a `nil` `gold`.
+  - **`Unset`**: it read a global that **doesn't exist or is `nil`** (`foundThings >= 10` before anything has set `foundThings`, or indexing a `nil` global array), with the message in `Error`. That's usually not a mistake, just something not set up yet, so a caller can treat it as false without reporting it. `isNil(foundThings)` and `IsNull(...)` don't count: they give `true` for such a global. `&&` and `||` stop as soon as they know the answer, so `isNil(gold) || gold < 5` never reads a `nil` `gold`.
   - **`Error`**: it's broken, with the error in `Error`: the handle isn't registered (or the text doesn't compile), its arguments don't fit, it stopped with any other error, it didn't return a `bool`, or it waited.
   Nothing is shown or logged by it, so a caller asking often can show each once (`Bango::ReportError`).
 - A condition isn't a running script: it isn't listed in the debugger, saved or reloaded, and it has no handle. Globals it sets stay set.
@@ -1576,7 +1578,7 @@ The graph editor is the **Bango Scripts** tab (Tools menu). It doesn't need the 
 ### Fields
 Each node shows its text as **fields** in columns, like the details panel: each row starts with its type's icon (bool (a ?), int, float, number (float's icon, tinted between int's and float's colours; another type parameter, like Lerp's `float|vector2|vector3`, has the any icon), string (an S), text (a T), entity, array, or any; hovering it shows the type), then the name, then the value, which fills the rest. Values stay on one line, in a box 90 to 240 pixels wide (wider only if the node is): a longer value ends in "…". Hovering a value shows its parameter's description if it has one (Sleep's Time says *Seconds*), or else the whole value. Rows that name a variable (a Var, For Each's Variable, an array command's Target) show a variable icon, an italic `(x)`, tinted with the variable's type when it's known. Rows without a type leave the icon space empty so the names line up, and a node where no row has a type has no icon column. Empty fields show *not set* (optional) or *missing* (required).
 
-**Autocomplete.** While a field is being edited, typing a name opens a list under it of what fits there, as in the script text pane: the variables the node can see (its graph's parameters and script variables, the locals and loop variables visible where the node is, the file's globals), this script's functions, the registered commands and the built-in `IsNil`, sorted by name, with each one's kind (P, L, G, F, C or B), type or signature, and a command's description. It filters as more is typed and closes when nothing matches or the name is typed in full. Up and Down (and Page Up / Page Down) pick, **Enter** or **Tab** puts the name in (a command or function also gets its `(`, and its `)` too if it takes no arguments; each key can be turned off in the editor preferences, section 11, and then closes the list and does what it does without one), clicking an entry does the same, and **Escape** closes the list (a second Escape cancels the edit). **Ctrl+Space** opens it for the word at the cursor. Nothing is offered in a string or text field's plain text (one that starts with `=` is an expression, and gets the list), after `@` or `.`, or inside a string.
+**Autocomplete.** While a field is being edited, typing a name opens a list under it of what fits there, as in the script text pane: the variables the node can see (its graph's parameters and script variables, the locals and loop variables visible where the node is, the file's globals), this script's functions, the registered commands and the keywords that give a value (`true`, `false`, `nil`, `player`, `self` and `isNil`), sorted by name, with each one's kind (P, L, G, F, C or K), type or signature, and a command's description. It filters as more is typed and closes when nothing matches or the name is typed in full. Up and Down (and Page Up / Page Down) pick, **Enter** or **Tab** puts the name in (a command or function also gets its `(`, and its `)` too if it takes no arguments; each key can be turned off in the editor preferences, section 11, and then closes the list and does what it does without one), clicking an entry does the same, and **Escape** closes the list (a second Escape cancels the edit). **Ctrl+Space** opens it for the word at the cursor. Nothing is offered in a string or text field's plain text (one that starts with `=` is an expression, and gets the list), after `@` or `.`, or inside a string.
 
 **Moving between fields.** While a field is being edited (and the autocomplete list isn't open; when it is, Enter and Tab pick from it), **Enter** applies what's typed and opens the node's next field, with its text selected; after the last field, editing ends. **Tab** does the same but wraps around to the first field, and **Shift+Enter** / **Shift+Tab** go to the previous field instead. Fields that can't be edited are skipped, and the next field is found after the edit, so an edit that changes the node's fields (like a call's command) moves on through its new ones.
 
@@ -1660,7 +1662,7 @@ function void Nag()
 	AwaitSpeak();                  //@21(0, 1)
 }
 
-if (!IsNil(foundThings) && foundThings >= 10)   //@4(0, 3)
+if (!isNil(foundThings) && foundThings >= 10)   //@4(0, 3)
 {
 	WriteScreen(ToString(LOCTEXT("FoundTen", "You found at least 10 things!")));    //@5(1, 4)
 	questLog Push("Found 10 things");              //@6(1, 5)
@@ -1673,7 +1675,7 @@ for (int _i = 0; _i < 3; _i++)     //@7(0, 6)
 }
 
 label Check;                       //@10(0, 9)
-if (IsNil(playerHasGun))      //@11(0, 10)
+if (isNil(playerHasGun))      //@11(0, 10)
 {
 	@john Speak("Congrats! You found a bug.");     //@12(1, 11)
 	AwaitSpeak();                  //@13(1, 12)
@@ -1691,7 +1693,7 @@ else
 
 forEach (_entry in questLog)       //@19(0, 15)
 {
-	if (!IsNil(_entry))         //@22(1, 16)
+	if (!isNil(_entry))         //@22(1, 16)
 	{
 		WriteLog(_entry);               //@23(2, 17)
 	}
