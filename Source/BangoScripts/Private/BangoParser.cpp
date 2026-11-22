@@ -729,7 +729,7 @@ namespace BangoParserPrivate
 			}
 			if (Bango::IsReservedWord(Cur().Text))
 			{
-				// Words like LOCTEXT, INVTEXT and IsNil that aren't keyword tokens, but still mean something.
+				// Words like LOCTEXT, INVTEXT and isNil that aren't keyword tokens, but still mean something.
 				return Fail(Cur().Loc, FString::Printf(TEXT("Expected a name %s, but found '%s', which is a word Bango uses and can't be a name."), Context, *Cur().Text));
 			}
 			OutLoc = Cur().Loc;
@@ -1172,7 +1172,7 @@ namespace BangoParserPrivate
 						}
 						if (const FBangoExpr* TextLit = FindTextLiteral(*Param.Default))
 						{
-							Fail(TextLit->Loc, FString::Printf(TEXT("A text default can't be translated: its text isn't gathered for translators. Give '%s' the default nil, and set it in the script: if (IsNil(%s)) { %s = LOCTEXT(...); }"),
+							Fail(TextLit->Loc, FString::Printf(TEXT("A text default can't be translated: its text isn't gathered for translators. Give '%s' the default nil, and set it in the script: if (isNil(%s)) { %s = LOCTEXT(...); }"),
 								*Param.Name, *Param.Name, *Param.Name));
 							return nullptr;
 						}
@@ -2188,7 +2188,7 @@ namespace BangoParserPrivate
 			case EBangoTokenKind::KwIsNil:
 			{
 				Advance();
-				if (!Expect(EBangoTokenKind::LParen, TEXT("after 'IsNil'")))
+				if (!Expect(EBangoTokenKind::LParen, TEXT("after 'isNil'")))
 				{
 					return nullptr;
 				}
@@ -2199,15 +2199,15 @@ namespace BangoParserPrivate
 				}
 				if (const FBangoMemberExpr* Member = Operand->As<FBangoMemberExpr>())
 				{
-					Fail(Member->MemberLoc, FString::Printf(TEXT("A vector's parts are never nil on their own. Check the whole vector instead: IsNil(%s)."), *Bango::DumpExpr(*Member->Object)));
+					Fail(Member->MemberLoc, FString::Printf(TEXT("A vector's parts are never nil on their own. Check the whole vector instead: isNil(%s)."), *Bango::DumpExpr(*Member->Object)));
 					return nullptr;
 				}
 				if (!IsPlace(*Operand))
 				{
-					Fail(Operand->Loc, TEXT("IsNil needs a variable, a global or an array element, like IsNil(_x) or IsNil(_a[2])."));
+					Fail(Operand->Loc, TEXT("isNil needs a variable, a global or an array element, like isNil(_x) or isNil(_a[2])."));
 					return nullptr;
 				}
-				if (!Expect(EBangoTokenKind::RParen, TEXT("after the IsNil argument")))
+				if (!Expect(EBangoTokenKind::RParen, TEXT("after the isNil argument")))
 				{
 					return nullptr;
 				}

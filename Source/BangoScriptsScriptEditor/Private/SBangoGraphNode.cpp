@@ -1372,7 +1372,6 @@ namespace BangoNodeCompletionPrivate
 		case EBangoCompletionKind::Local:    return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("9CDCFE")));
 		case EBangoCompletionKind::Global:   return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("4FC1FF")));
 		case EBangoCompletionKind::Function: return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("DCDCAA")));
-		case EBangoCompletionKind::Builtin:  return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("C586C0")));
 		case EBangoCompletionKind::Keyword:  return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("569CD6")));
 		default:                             return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("4EC9B0")));
 		}
@@ -1386,7 +1385,6 @@ namespace BangoNodeCompletionPrivate
 		case EBangoCompletionKind::Local:     return TEXT("L");
 		case EBangoCompletionKind::Global:    return TEXT("G");
 		case EBangoCompletionKind::Function:  return TEXT("F");
-		case EBangoCompletionKind::Builtin:   return TEXT("B");
 		case EBangoCompletionKind::Keyword:   return TEXT("K");
 		default:                              return TEXT("C");
 		}
@@ -1536,10 +1534,9 @@ void SBangoGraphNode::GatherCompletionItems()
 			}
 		}
 	}
-	TArray<FBangoCompletionItem> Builtins;
-	FBangoCompletion::GetBuiltinItems(Builtins);
-	FBangoCompletion::GetKeywordItems(Builtins, /*bValuesOnly*/ true); // true, false, nil: a field holds an expression
-	for (const FBangoCompletionItem& Item : Builtins)
+	TArray<FBangoCompletionItem> ValueKeywords;
+	FBangoCompletion::GetKeywordItems(ValueKeywords, /*bValuesOnly*/ true); // true, false, nil, isNil: a field holds an expression
+	for (const FBangoCompletionItem& Item : ValueKeywords)
 	{
 		AddItem(Item);
 	}

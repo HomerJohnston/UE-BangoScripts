@@ -119,7 +119,7 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 		TEXT("  16 Halt\n"),
 		nullptr, nullptr },
 	{ TEXT("listing: global, for, compound, &&"),
-		TEXT("global int gold;\nbool _b;\ngold = 0;\nfor (int _i = 0; _i < 3; _i++)\n{\n\tgold += _i;\n};\n_b = gold > 1 && IsNil(gold);"),
+		TEXT("global int gold;\nbool _b;\ngold = 0;\nfor (int _i = 0; _i < 3; _i++)\n{\n\tgold += _i;\n};\n_b = gold > 1 && isNil(gold);"),
 		TEXT("globals: int gold;\n")
 		TEXT("function <main>:\n")
 		TEXT("  0 Nop\n")
@@ -211,7 +211,7 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 
 	// ---- Must compile ----
 	{ TEXT("spec example"),
-		TEXT("global int foundThings;\nglobal bool playerHasGun;\nglobal string[] questLog;\nfunction void Nag()\n{\n\t@john Speak(\"Find a gun.\");    //@20(0, 0)\n\tAwaitSpeak();                  //@21(0, 1)\n};\nif (!IsNil(foundThings) && foundThings >= 10)   //@4(0, 3)\n{\n\tTalk(\"You found at least 10 things!\");         //@5(1, 4)\n\tquestLog Push(\"Found 10 things\");              //@6(1, 5)\n};\nfor (int _i = 0; _i < 3; _i++)     //@7(0, 6)\n{\n\tTalk(\"Countdown: {0}\", 3 - _i); //@8(1, 7)\n\tSleep(1.0);                    //@9(1, 8)\n};\nlabel Check;                       //@10(0, 9)\nif (IsNil(playerHasGun))      //@11(0, 10)\n{\n\t@john Speak(\"Congrats! You found a bug.\");     //@12(1, 11)\n\tAwaitSpeak();                  //@13(1, 12)\n\treturn;                        //@14(1, 13)\n}\nelse\n{\n\tif (!playerHasGun)             //@15(2, 11)\n\t{\n\t\tNag();                     //@16(3, 12)\n\t\tSleep(Random(3.0, 5.0));   //@17(3, 13)\n\t\tgoto Check;                //@18(3, 14)\n\t};\n};\nforEach (_entry in questLog)       //@19(0, 15)\n{\n\tif (!IsNil(_entry))         //@22(1, 16)\n\t{\n\t\tTalk(_entry);              //@23(2, 17)\n\t};\n};\n@john Speak(\"Great, you found a gun.\");  //@24(0, 18)\nAwaitSpeak();                            //@25(0, 19)\n"),
+		TEXT("global int foundThings;\nglobal bool playerHasGun;\nglobal string[] questLog;\nfunction void Nag()\n{\n\t@john Speak(\"Find a gun.\");    //@20(0, 0)\n\tAwaitSpeak();                  //@21(0, 1)\n};\nif (!isNil(foundThings) && foundThings >= 10)   //@4(0, 3)\n{\n\tTalk(\"You found at least 10 things!\");         //@5(1, 4)\n\tquestLog Push(\"Found 10 things\");              //@6(1, 5)\n};\nfor (int _i = 0; _i < 3; _i++)     //@7(0, 6)\n{\n\tTalk(\"Countdown: {0}\", 3 - _i); //@8(1, 7)\n\tSleep(1.0);                    //@9(1, 8)\n};\nlabel Check;                       //@10(0, 9)\nif (isNil(playerHasGun))      //@11(0, 10)\n{\n\t@john Speak(\"Congrats! You found a bug.\");     //@12(1, 11)\n\tAwaitSpeak();                  //@13(1, 12)\n\treturn;                        //@14(1, 13)\n}\nelse\n{\n\tif (!playerHasGun)             //@15(2, 11)\n\t{\n\t\tNag();                     //@16(3, 12)\n\t\tSleep(Random(3.0, 5.0));   //@17(3, 13)\n\t\tgoto Check;                //@18(3, 14)\n\t};\n};\nforEach (_entry in questLog)       //@19(0, 15)\n{\n\tif (!isNil(_entry))         //@22(1, 16)\n\t{\n\t\tTalk(_entry);              //@23(2, 17)\n\t};\n};\n@john Speak(\"Great, you found a gun.\");  //@24(0, 18)\nAwaitSpeak();                            //@25(0, 19)\n"),
 		TEXT("*"), nullptr, nullptr },
 	{ TEXT("listing: Bango IDs"),
 		TEXT("entity[] _c;\n@john Speak(\"hi\");\n_c = [@a, @b];"),
@@ -242,7 +242,7 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 		TEXT("#inputs (entity _who = @john, entity[] _crowd = [@bob, @alice], entity _other = nil)\nentity _e;\nbool _same;\nstring _n;\n@door17 SetLocked(true);\n_e = @john;\n_same = _e == @john && _who != @if;\nforEach (_x in [@a, @b])\n{\n\t_x Speak(\"hi\");\n};\n_crowd Push(@carol);\n_n = @john GetName();\nTalk(\"{0} {1}\", @john, [@a]);"),
 		TEXT("*"), nullptr, nullptr },
 	{ TEXT("undeclared globals in many places"),
-		TEXT("string _n;\nint _x;\nbool _b;\nfloat _d;\nint _e;\n_n = boss GetName();\n_x = gold + 1;\n_b = gold == 3 || flag;\nTalk(\"{0}\", boss);\n_d = -speed;\n_e = list[2];\nif (!IsNil(list[1][2]))\n{\n};"),
+		TEXT("string _n;\nint _x;\nbool _b;\nfloat _d;\nint _e;\n_n = boss GetName();\n_x = gold + 1;\n_b = gold == 3 || flag;\nTalk(\"{0}\", boss);\n_d = -speed;\n_e = list[2];\nif (!isNil(list[1][2]))\n{\n};"),
 		TEXT("*"), nullptr, nullptr },
 	{ TEXT("nested arrays"),
 		TEXT("int[][] _g = [[1, 2], []];\nint[] _row;\nint _c;\nfloat[] _d;\nint _r;\n_g[3][2] = 7;\n_g[0] Push(4);\n_row = _g Pop();\n_c = Count(_g) + Count(_g[0]);\n_d = [1, 2.5];\n_g Pop();\n_g[1] InsertAt(9, 0);\n_r = _g[1] RemoveAt(0);"),
@@ -292,7 +292,7 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 	{ TEXT("float into int"), TEXT("int _x = 2.5;"), nullptr, TEXT("(1:10)"), TEXT("needs an int, but this is a float") },
 	{ TEXT("string plus int"), TEXT("string _s;\n_s = \"a\" + 1;"), nullptr, TEXT("(2:10)"), TEXT("join two strings") },
 	{ TEXT("condition not bool"), TEXT("if (1)\n{\n};"), nullptr, TEXT("(1:5)"), TEXT("condition must be a bool") },
-	{ TEXT("compare with nil"), TEXT("int _x = 1;\nif (_x == nil)\n{\n};"), nullptr, TEXT("(2:8)"), TEXT("Use IsNil") },
+	{ TEXT("compare with nil"), TEXT("int _x = 1;\nif (_x == nil)\n{\n};"), nullptr, TEXT("(2:8)"), TEXT("Use isNil") },
 	{ TEXT("write undeclared global"), TEXT("gold = 5;"), nullptr, TEXT("(1:1)"), TEXT("isn't declared in this script") },
 	{ TEXT("global declared twice"), TEXT("global int a;\nglobal float a;"), nullptr, TEXT("(2:1)"), TEXT("Global 'a' is already declared on line 1") },
 	{ TEXT("unknown command"), TEXT("Foo();"), nullptr, TEXT("(1:1)"), TEXT("Unknown command or function 'Foo'") },
@@ -418,7 +418,7 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 	{ TEXT("a vector part is a float"), TEXT("vector3 _v = [1, 2, 3];\nint _i;\n_i = _v[0];"), nullptr, TEXT("(3:8)"), TEXT("'_i' needs an int, but this is a float") },
 	{ TEXT("a string's character is a string"), TEXT("string _s = \"abc\";\nint _i;\n_i = _s[0];"), nullptr, TEXT("(3:8)"), TEXT("'_i' needs an int, but this is a string") },
 	{ TEXT("index a vector twice"), TEXT("vector3 _v = [1, 2, 3];\nfloat _f;\n_f = _v[0][0];"), nullptr, TEXT("(3:6)"), TEXT("can be indexed at most 1 time(s)") },
-	{ TEXT("IsNil of a vector's part by index"), TEXT("vector3 _v = [1, 2, 3];\nbool _b;\n_b = IsNil(_v[0]);"), nullptr, TEXT("(3:6)"), TEXT("is never nil") },
+	{ TEXT("isNil of a vector's part by index"), TEXT("vector3 _v = [1, 2, 3];\nbool _b;\n_b = isNil(_v[0]);"), nullptr, TEXT("(3:6)"), TEXT("is never nil") },
 	{ TEXT("a text can't be indexed"), TEXT("text _t = INVTEXT(\"hi\");\nstring _c;\n_c = _t[0];"), nullptr, TEXT("(3:6)"), TEXT("it can't be indexed") },
 	{ TEXT("index a call's vector"), TEXT("float _f;\n_f = P()[2];\nfunction vector3 P()\n{\n\treturn [1, 2, 3];\n};"), TEXT("*"), nullptr, nullptr },
 	{ TEXT("Count of a string and a vector"), TEXT("int _n;\n_n = Count(\"abc\") + Count([1, 2, 3]);"), TEXT("*"), nullptr, nullptr },
@@ -455,7 +455,7 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 	{ TEXT("switch: a repeated case value"), TEXT("string _s = \"a\";\nswitch (_s)\n{\n\tcase \"a\", \"b\":\n\t{\n\t}\n\tcase \"b\":\n\t{\n\t}\n}"), nullptr, TEXT("(7:7)"), TEXT("already in an earlier case") },
 	{ TEXT("switch: a declaration in a case"), TEXT("int _x = 1;\nswitch (_x)\n{\n\tcase 1:\n\t{\n\t\tint _y;\n\t}\n}"), TEXT("*"), nullptr, nullptr },
 	{ TEXT("forEach over non-array"), TEXT("forEach (_x in 5)\n{\n};"), nullptr, TEXT("(1:16)"), TEXT("loops over an array") },
-	{ TEXT("nil without a type"), TEXT("bool _b;\n_b = IsNil(nil);"), nullptr, TEXT("(2:"), TEXT("IsNil needs") },
+	{ TEXT("nil without a type"), TEXT("bool _b;\n_b = isNil(nil);"), nullptr, TEXT("(2:"), TEXT("isNil needs") },
 	{ TEXT("array of only nils"), TEXT("Talk(\"{0}\", [nil]);"), nullptr, TEXT("(1:13)"), TEXT("can't be worked out") },
 	{ TEXT("comparing different types"), TEXT("bool _b;\n_b = \"a\" == 1;"), nullptr, TEXT("(2:10)"), TEXT("same type") },
 	{ TEXT("arrays with operators"), TEXT("int[] _a = [];\nbool _b;\n_b = _a == _a;"), nullptr, TEXT("(3:9)"), TEXT("Arrays can't be used") },
@@ -596,7 +596,7 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 		TEXT("global int stage;\nfunction bool Dead()\n{\n\treturn soldierIsDead;\n};\nwaitUntil (stage == 3 && Dead());"),
 		TEXT("globals: int stage;\nwait #0: soldierIsDead, stage\nfunction <main>:\n  0 Nop\n  1 WaitCheck #0\n  2 LoadPlace stage\n  3 PushConst 3\n  4 Equal\n  5 JumpIfFalseOrPop -> 7\n  6 CallFunction Dead 0\n  7 WaitResult #0 -> 1\n  8 Halt\nfunction Dead:\n  0 LoadPlace soldierIsDead\n  1 Convert bool\n  2 ReturnValue\n  3 ErrorMissingReturn\n"),
 		nullptr, nullptr },
-	{ TEXT("waitUntil: a command makes it polled"), TEXT("waitUntil (Random(0, 1) > 0.5 && IsNil(boss));"),
+	{ TEXT("waitUntil: a command makes it polled"), TEXT("waitUntil (Random(0, 1) > 0.5 && isNil(boss));"),
 		TEXT("wait #0: boss; polled: it calls Random\nfunction <main>:\n  0 WaitCheck #0\n  1 PushConst 0\n  2 Convert float\n  3 PushConst 1\n  4 Convert float\n  5 CallCommand Random 2\n  6 PushConst 0.5\n  7 Greater\n  8 JumpIfFalseOrPop -> 10\n  9 IsNilPlace boss\n  10 WaitResult #0 -> 0\n  11 Halt\n"),
 		nullptr, nullptr },
 	{ TEXT("waitUntil: its condition must be a bool"), TEXT("waitUntil (3);"), nullptr, TEXT("(1:12)"), TEXT("A condition must be a bool, but this is an int.") },

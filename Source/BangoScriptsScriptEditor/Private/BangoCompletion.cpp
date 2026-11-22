@@ -69,7 +69,6 @@ namespace BangoCompletionPrivate
 		case EBangoSyntaxKind::Parameter:
 		case EBangoSyntaxKind::UndeclaredGlobal:
 		case EBangoSyntaxKind::Call:
-		case EBangoSyntaxKind::Builtin:
 		case EBangoSyntaxKind::Keyword:
 		case EBangoSyntaxKind::JumpKeyword:
 		case EBangoSyntaxKind::LabelKeyword:
@@ -153,16 +152,10 @@ bool FBangoCompletion::FindWordBeforeCursor(const FString& Line, int32 CursorCol
 	return true;
 }
 
-void FBangoCompletion::GetBuiltinItems(TArray<FBangoCompletionItem>& OutItems)
-{
-	using namespace BangoCompletionPrivate;
-	OutItems.Add(MakeItem(TEXT("IsNil"), EBangoCompletionKind::Builtin, TEXT("IsNil(value) -> bool"), TEXT("True if the value is nil. Never reads it, so it never stops the script."), true));
-}
-
 void FBangoCompletion::GetKeywordItems(TArray<FBangoCompletionItem>& OutItems, bool bValuesOnly)
 {
 	using namespace BangoCompletionPrivate;
-	struct FKeyword { const TCHAR* Name; const TCHAR* Detail; const TCHAR* Description; bool bValue; bool bHeader = false; };
+	struct FKeyword { const TCHAR* Name; const TCHAR* Detail; const TCHAR* Description; bool bValue; bool bHeader = false; bool bBracket = false; };
 	static const FKeyword Keywords[] =
 	{
 		{ TEXT("if"),       TEXT("flow"),        TEXT("if (condition) { ... } runs its block when the condition is true."), false, true },
@@ -185,6 +178,7 @@ void FBangoCompletion::GetKeywordItems(TArray<FBangoCompletionItem>& OutItems, b
 		{ TEXT("global"),   TEXT("declaration"), TEXT("global int stage; declares a global, at the top of the file."), false },
 		{ TEXT("scriptVar"), TEXT("declaration"), TEXT("scriptVar int _count = 0; declares a script variable with a fixed starting value, at the top of the script or function."), false },
 		{ TEXT("call"),     TEXT("call"),        TEXT("@light call TurnOn(); calls a Blueprint function of an actor: one in the category 'Bango', named exactly as written."), false },
+		{ TEXT("isNil"),    TEXT("isNil(x) -> bool"), TEXT("True if the variable, global or array element is nil. Never reads it, so it never stops the script."), true, false, true },
 		{ TEXT("function"), TEXT("declaration"), TEXT("function int AddScore(int _amount) { ... } defines a function, at the top level."), false },
 		{ TEXT("bool"),     TEXT("type"),        TEXT("true or false."), false },
 		{ TEXT("int"),      TEXT("type"),        TEXT("A whole number."), false },
@@ -197,7 +191,7 @@ void FBangoCompletion::GetKeywordItems(TArray<FBangoCompletionItem>& OutItems, b
 		{ TEXT("void"),     TEXT("type"),        TEXT("A function that gives back no result."), false },
 		{ TEXT("true"),     TEXT("value"),       TEXT("The bool value true."), true },
 		{ TEXT("false"),    TEXT("value"),       TEXT("The bool value false."), true },
-		{ TEXT("nil"),      TEXT("value"),       TEXT("No value. Reading nil stops the script; check with IsNil."), true },
+		{ TEXT("nil"),      TEXT("value"),       TEXT("No value. Reading nil stops the script; check with isNil."), true },
 		{ TEXT("player"),   TEXT("entity"),      TEXT("The first local player's pawn, found each time it's used: player SetPos(...)."), true },
 		{ TEXT("self"),     TEXT("entity"),      TEXT("The actor this script belongs to (its owner), by its Bango ID: self SetPos(...)."), true },
 	};
@@ -207,6 +201,7 @@ void FBangoCompletion::GetKeywordItems(TArray<FBangoCompletionItem>& OutItems, b
 		{
 			FBangoCompletionItem Item = MakeItem(Keyword.Name, EBangoCompletionKind::Keyword, Keyword.Detail, Keyword.Description, false);
 			Item.bHeader = Keyword.bHeader;
+			Item.bCallable = Keyword.bBracket; // isNil(x): its bracket straight after it, as a call's
 			Item.bSemicolonsInHeader = Item.Name == TEXT("for"); // `for (a; b; c)`
 			OutItems.Add(Item);
 		}
@@ -242,11 +237,9 @@ void FBangoCompletion::GatherItems(const FBangoScriptNames& Names, int32 LineInd
 		OutItems.Add(Item);
 	}
 
-	TArray<FBangoCompletionItem> Builtins;
-	GetBuiltinItems(Builtins);
 	TArray<FBangoCompletionItem> Keywords;
 	GetKeywordItems(Keywords);
-	const TArray<FBangoCompletionItem>* const Groups[] = { &CommandItems, &Builtins, &Keywords };
+	const TArray<FBangoCompletionItem>* const Groups[] = { &CommandItems, &Keywords };
 	for (const TArray<FBangoCompletionItem>* Group : Groups)
 	{
 		for (const FBangoCompletionItem& Item : *Group)
@@ -301,7 +294,47 @@ bool FBangoCompletion::FindHoverItem(const FBangoScriptNames& Names, const FStri
 		return false;
 	}
 	const FBangoSyntaxToken& Token = Tokens[Found];
-	const bool bCall = Token.Kind == EBangoSyntaxKind::Call || Token.Kind == EBangoSyntaxKind::Builtin;
+	switch (Token.Kind)
+	{
+	case EBangoSyntaxKind::Keyword:
+	case EBangoSyntaxKind::JumpKeyword:
+	case EBangoSyntaxKind::LabelKeyword:
+	case EBangoSyntaxKind::DeclKeyword:
+	case EBangoSyntaxKind::Type:
+	case EBangoSyntaxKind::Constant:
+	case EBangoSyntaxKind::Nil:
+	case EBangoSyntaxKind::Entity: // player and self (an @name isn't a word of the language)
+	{
+		// A word of the language: what autocomplete says of it. (A type's token may have its `[]`s after the name.)
+		FString Word = Line.Mid(Token.Start, Token.Len);
+		int32 Bracket = INDEX_NONE;
+		if (Word.FindChar(TEXT('['), Bracket))
+		{
+			Word = Word.Left(Bracket);
+			if (Column >= Token.Start + Bracket)
+			{
+				return false;
+			}
+		}
+		TArray<FBangoCompletionItem> Words;
+		GetKeywordItems(Words);
+		Words.Add(GetTimeoutItem()); // coloured as a keyword only where it is one
+		for (const FBangoCompletionItem& Item : Words)
+		{
+			if (Item.Name.Equals(Word, ESearchCase::CaseSensitive))
+			{
+				OutItem = Item;
+				OutStart = Token.Start;
+				OutEnd = Token.Start + Word.Len();
+				return true;
+			}
+		}
+		return false;
+	}
+	default:
+		break;
+	}
+	const bool bCall = Token.Kind == EBangoSyntaxKind::Call;
 	if (!bCall && Token.Kind != EBangoSyntaxKind::Global)
 	{
 		return false;
@@ -333,6 +366,23 @@ bool FBangoCompletion::FindHoverItem(const FBangoScriptNames& Names, const FStri
 		}
 	}
 	return false;
+}
+
+FString FBangoCompletion::GetHoverTitle(const FBangoCompletionItem& Item)
+{
+	if (Item.bCallable)
+	{
+		return Item.Detail.IsEmpty() ? Item.Name + TEXT("(...)") : Item.Detail; // its signature
+	}
+	if (Item.Kind == EBangoCompletionKind::Keyword)
+	{
+		// `type int`, `value nil`, `entity player`; anything else is a `keyword`.
+		const bool bOwnKind = Item.Detail == TEXT("type") || Item.Detail == TEXT("value") || Item.Detail == TEXT("entity");
+		return (bOwnKind ? Item.Detail : FString(TEXT("keyword"))) + TEXT(" ") + Item.Name;
+	}
+	const TCHAR* Kind = Item.Kind == EBangoCompletionKind::Parameter ? TEXT("parameter")
+		: Item.Kind == EBangoCompletionKind::Global ? TEXT("global") : TEXT("local");
+	return FString::Printf(TEXT("%s %s %s"), Kind, *Item.Detail, *Item.Name);
 }
 
 FBangoCompletionInsert FBangoCompletion::MakeInsert(const FBangoCompletionItem& Item, const FString& Line, int32 WordEnd)

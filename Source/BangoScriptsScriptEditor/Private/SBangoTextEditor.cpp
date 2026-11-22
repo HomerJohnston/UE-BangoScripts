@@ -1460,14 +1460,7 @@ TSharedRef<SWidget> SBangoTextEditor::MakeHoverPopup()
 					.AutoWrapText(true)
 					.Text_Lambda([this]()
 					{
-						const FBangoCompletionItem& Item = HoverItem;
-						if (Item.bCallable)
-						{
-							return FText::FromString(Item.Detail.IsEmpty() ? Item.Name + TEXT("(...)") : Item.Detail);
-						}
-						const TCHAR* Kind = Item.Kind == EBangoCompletionKind::Parameter ? TEXT("parameter")
-							: Item.Kind == EBangoCompletionKind::Global ? TEXT("global") : TEXT("local");
-						return FText::FromString(FString::Printf(TEXT("%s %s %s"), Kind, *Item.Detail, *Item.Name));
+						return FText::FromString(FBangoCompletion::GetHoverTitle(HoverItem));
 					})
 				]
 
@@ -1588,7 +1581,6 @@ TSharedRef<ITableRow> SBangoTextEditor::MakeCompletionRow(TSharedPtr<FBangoCompl
 	case EBangoCompletionKind::Local:     Kind = EBangoSyntaxKind::Local;     Letter = TEXT("L"); break;
 	case EBangoCompletionKind::Global:    Kind = EBangoSyntaxKind::Global;    Letter = TEXT("G"); break;
 	case EBangoCompletionKind::Function:  Kind = EBangoSyntaxKind::Function;  Letter = TEXT("F"); break;
-	case EBangoCompletionKind::Builtin:   Kind = EBangoSyntaxKind::Builtin;   Letter = TEXT("B"); break;
 	case EBangoCompletionKind::Command:   Kind = EBangoSyntaxKind::Command;   Letter = TEXT("C"); break;
 	case EBangoCompletionKind::Keyword:
 	{

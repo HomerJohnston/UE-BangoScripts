@@ -167,13 +167,13 @@ static const TCHAR* const GBangoGraphRoundTripSources[] =
 	TEXT("\tAwaitSpeak();                  //@21(0, 1)\n")
 	TEXT("}\n")
 	TEXT("\n")
-	TEXT("if (!IsNil(foundThings) && foundThings >= 10)   //@4(0, 3)\n")
+	TEXT("if (!isNil(foundThings) && foundThings >= 10)   //@4(0, 3)\n")
 	TEXT("{\n")
 	TEXT("\tTalk(\"You found at least 10 things!\");         //@5(1, 4)\n")
 	TEXT("\tquestLog Push(\"Found 10 things\");              //@6(1, 5)\n")
 	TEXT("}\n")
 	TEXT("label Check;                       //@10(0, 9)\n")
-	TEXT("if (IsNil(playerHasGun))      //@11(0, 10)\n")
+	TEXT("if (isNil(playerHasGun))      //@11(0, 10)\n")
 	TEXT("{\n")
 	TEXT("\treturn;                        //@14(1, 13)\n")
 	TEXT("}\n")
@@ -187,7 +187,7 @@ static const TCHAR* const GBangoGraphRoundTripSources[] =
 	TEXT("}\n")
 	TEXT("forEach (_entry in questLog)       //@19(0, 15)\n")
 	TEXT("{\n")
-	TEXT("\tif (!IsNil(_entry))         //@22(1, 16)\n")
+	TEXT("\tif (!isNil(_entry))         //@22(1, 16)\n")
 	TEXT("\t{\n")
 	TEXT("\t\tTalk(_entry);              //@23(2, 17)\n")
 	TEXT("\t}\n")
@@ -1288,7 +1288,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		const FString Source =
 			TEXT("global int gold ?= 0;\n")
 			TEXT("Talk(\"x\");    //@1(0, 0)\n")
-			TEXT("global bool open = IsNil(gold);    //@2(4, 0)\n")
+			TEXT("global bool open = isNil(gold);    //@2(4, 0)\n")
 			TEXT("/* global int stage = 1; */    //@3(8, 0)\n")
 			TEXT("open = false;    //@4(12, 0)\n");
 		FBangoGraphDocument Doc;
@@ -1300,12 +1300,12 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			const TArray<FBangoGraphNode>& N = Doc.Main.Nodes;
 			Expect(Doc.Globals.Num() == 1 && Doc.Globals[0].Name == FString(TEXT("gold")) && Doc.Globals[0].bHasValue && Doc.Globals[0].Value == FString(TEXT("0")),
 				TEXT("set global: only the one at the top is in Globals, with its default"));
-			Expect(N.Num() == 5 && N[2].Kind == EBangoGraphNodeKind::Global && N[2].Text == FString(TEXT("bool open = IsNil(gold)"))
+			Expect(N.Num() == 5 && N[2].Kind == EBangoGraphNodeKind::Global && N[2].Text == FString(TEXT("bool open = isNil(gold)"))
 				&& N[3].Kind == EBangoGraphNodeKind::Global && N[3].bDisabled && N[3].Text == FString(TEXT("int stage = 1")),
 				FString(TEXT("set global: the node, without its keyword: ")) + (N.Num() > 2 ? N[2].Text : FString()));
 			FString Text;
 			FString WriteError;
-			Expect(Bango::WriteGraphText(Doc, Text, WriteError) && Text.Contains(TEXT("global bool open = IsNil(gold);")) && Text.Contains(TEXT("global int gold ?= 0;"))
+			Expect(Bango::WriteGraphText(Doc, Text, WriteError) && Text.Contains(TEXT("global bool open = isNil(gold);")) && Text.Contains(TEXT("global int gold ?= 0;"))
 				&& Text.Contains(TEXT("/* global int stage = 1; */")), FString(TEXT("set global: written back: ")) + Text + WriteError);
 
 			const FBangoNodeLayoutContext Context = Bango::MakeNodeLayoutContext(Doc, nullptr);
@@ -1313,7 +1313,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			{
 				const FBangoNodeLayout Layout = Bango::GetNodeLayout(N[2], false, Context);
 				Expect(Layout.Title == FString(TEXT("Set Global Bool")) && Layout.Fields.Num() == 2 && Layout.Fields[0].Label == FString(TEXT("Name"))
-					&& Layout.Fields[0].Text == FString(TEXT("open")) && Layout.Fields[1].Label == FString(TEXT("To")) && Layout.Fields[1].Text == FString(TEXT("IsNil(gold)")),
+					&& Layout.Fields[0].Text == FString(TEXT("open")) && Layout.Fields[1].Label == FString(TEXT("To")) && Layout.Fields[1].Text == FString(TEXT("isNil(gold)")),
 					FString(TEXT("set global: layout: ")) + Layout.Title);
 				FBangoGraphNode Array;
 				Array.Kind = EBangoGraphNodeKind::Global;
@@ -1345,8 +1345,8 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		struct FHoistCase { const TCHAR* Name; const TCHAR* Source; const TCHAR* Want; const TCHAR* Error; };
 		const FHoistCase HoistCases[] = {
 			{ TEXT("a global set in the code is code: it stays"),
-				TEXT("global int gold;\nTalk(\"x\");\nglobal bool open = IsNil(gold);\nif (true)\n{\n\tglobal int stage = 2;\n}\n"),
-				TEXT("global int gold;\nTalk(\"x\");\nglobal bool open = IsNil(gold);\nif (true)\n{\n\tglobal int stage = 2;\n}\n"), nullptr },
+				TEXT("global int gold;\nTalk(\"x\");\nglobal bool open = isNil(gold);\nif (true)\n{\n\tglobal int stage = 2;\n}\n"),
+				TEXT("global int gold;\nTalk(\"x\");\nglobal bool open = isNil(gold);\nif (true)\n{\n\tglobal int stage = 2;\n}\n"), nullptr },
 			{ TEXT("a default is moved with it"),
 				TEXT("Talk(\"x\");\nglobal int stage ?= 2;\n"),
 				TEXT("global int stage ?= 2;\nTalk(\"x\");\n"), nullptr },

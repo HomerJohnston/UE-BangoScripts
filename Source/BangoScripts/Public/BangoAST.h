@@ -242,7 +242,7 @@ struct FBangoEmptyExpr : FBangoExpr
 	FBangoEmptyExpr() : FBangoExpr(StaticKind) {}
 };
 
-/** IsNil(x). Operand is always a Name or an Index chain rooted at a Name. */
+/** isNil(x). Operand is always a Name or an Index chain rooted at a Name. */
 struct FBangoIsNilExpr : FBangoExpr
 {
 	static constexpr EBangoExprKind StaticKind = EBangoExprKind::IsNil;

@@ -40,7 +40,6 @@ namespace BangoSyntaxStylePrivate
 		case EBangoSyntaxKind::LocNotes:           return { TEXT("6A9955"), false, true  };
 		case EBangoSyntaxKind::VectorPart:         return { TEXT("89DDFF"), false, false };
 		case EBangoSyntaxKind::Call:               return { TEXT("DCDCAA"), false, false };
-		case EBangoSyntaxKind::Builtin:            return { TEXT("4FC1FF"), false, false };
 		case EBangoSyntaxKind::Comment:            return { TEXT("6A9955"), false, true  };
 		case EBangoSyntaxKind::Metadata:           return { TEXT("3A3A3A"), false, false };
 		case EBangoSyntaxKind::DisconnectedMarker: return { TEXT("6A9955"), false, false };

@@ -401,7 +401,7 @@ bool FBangoModuleTest::RunTest(const FString& Parameters)
 
 	FBangoInlineCondition Condition;
 	Condition.UseInputsSignature(nullptr, Signed.GetInputsSignatureName());
-	Condition.Source = TEXT("_damage > 3 && IsNil(_who)");
+	Condition.Source = TEXT("_damage > 3 && isNil(_who)");
 	FString ConditionError;
 	FBangoConditionHandle ConditionHandle = Bango::RegisterCondition(Condition, TEXT("Test condition"), ConditionError);
 	const TSharedPtr<const FBangoProgram> ConditionProgram = Bango::FindCondition(ConditionHandle);

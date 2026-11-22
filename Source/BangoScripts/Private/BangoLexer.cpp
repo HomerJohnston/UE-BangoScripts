@@ -45,7 +45,7 @@ namespace BangoLexerPrivate
 		{ TEXT("vector2"), EBangoTokenKind::KwVector2 },
 		{ TEXT("vector3"), EBangoTokenKind::KwVector3 },
 		{ TEXT("void"), EBangoTokenKind::KwVoid },
-		{ TEXT("IsNil"), EBangoTokenKind::KwIsNil },
+		{ TEXT("isNil"), EBangoTokenKind::KwIsNil },
 		{ TEXT("call"), EBangoTokenKind::KwCall },
 	};
 

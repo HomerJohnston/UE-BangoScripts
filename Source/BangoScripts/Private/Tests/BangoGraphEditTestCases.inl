@@ -58,7 +58,7 @@ static const FBangoFieldEditTestCase GBangoFieldEditTestCases[] =
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_x = 1"), 0, TEXT("_y"), TEXT("_y = 1"), EBangoGraphNodeKind::Assign },
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_x += 1"), 1, TEXT("_a * 2"), TEXT("_x += _a * 2"), EBangoGraphNodeKind::Assign },
 	{ EBangoGraphNodeKind::IncDec, false, TEXT("_x++"), 0, TEXT("_a[1]"), TEXT("_a[1]++"), EBangoGraphNodeKind::IncDec },
-	{ EBangoGraphNodeKind::If, false, TEXT("_a > 1"), 0, TEXT("_a > 2 && !IsNil(g)"), TEXT("_a > 2 && !IsNil(g)"), EBangoGraphNodeKind::If },
+	{ EBangoGraphNodeKind::If, false, TEXT("_a > 1"), 0, TEXT("_a > 2 && !isNil(g)"), TEXT("_a > 2 && !isNil(g)"), EBangoGraphNodeKind::If },
 	// A value left out reads (it fails to compile instead), but text that doesn't read is still refused.
 	{ EBangoGraphNodeKind::If, false, TEXT("_a > 1"), 0, TEXT("_a >"), TEXT("_a >"), EBangoGraphNodeKind::If },
 	{ EBangoGraphNodeKind::If, false, TEXT("_a > 1"), 0, TEXT("_a 1"), nullptr, EBangoGraphNodeKind::If },

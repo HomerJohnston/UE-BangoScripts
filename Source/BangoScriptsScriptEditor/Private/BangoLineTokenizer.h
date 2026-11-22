@@ -38,7 +38,6 @@ enum class EBangoSyntaxKind : uint8
 	LocNotes,           // notes string of NOTELOCTEXT / NSNOTELOCTEXT
 	VectorPart,         // .x .y .z (the part after the dot)
 	Call,               // a name followed by (
-	Builtin,            // IsNil Count Push InsertAt Pop RemoveAt
 	Comment,
 	Metadata,           // //@12(4, 7) to the end of the line
 	DisconnectedMarker, // the //~ at the start of a disconnected line

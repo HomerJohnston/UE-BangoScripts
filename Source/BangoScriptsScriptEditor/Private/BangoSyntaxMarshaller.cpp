@@ -504,8 +504,7 @@ void FBangoSyntaxMarshaller::UpdateNameHighlights()
 		switch (Token.Kind)
 		{
 		case EBangoSyntaxKind::Global:    return ENameGroup::Variable;
-		case EBangoSyntaxKind::Call:
-		case EBangoSyntaxKind::Builtin:   return ENameGroup::Call;
+		case EBangoSyntaxKind::Call:      return ENameGroup::Call;
 		case EBangoSyntaxKind::LabelName: return ENameGroup::Label;
 		case EBangoSyntaxKind::Entity:    return Token.Len > 1 && CachedLines[LineIndex][Token.Start] == TEXT('@') ? ENameGroup::Entity : ENameGroup::None;
 		default:                          return ENameGroup::None;

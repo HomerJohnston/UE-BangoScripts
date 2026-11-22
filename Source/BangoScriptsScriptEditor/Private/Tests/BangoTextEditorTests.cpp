@@ -15,7 +15,7 @@ namespace BangoLineTokenizerTests
 			TEXT("Default"), TEXT("Keyword"), TEXT("JumpKeyword"), TEXT("LabelKeyword"), TEXT("LabelName"), TEXT("DeclKeyword"),
 			TEXT("Type"), TEXT("Constant"), TEXT("Nil"), TEXT("Preprocessor"), TEXT("Local"), TEXT("Global"), TEXT("Entity"),
 			TEXT("Number"), TEXT("String"), TEXT("StringEscape"), TEXT("Placeholder"), TEXT("LocMacro"), TEXT("LocKey"),
-			TEXT("LocNotes"), TEXT("VectorPart"), TEXT("Call"), TEXT("Builtin"), TEXT("Comment"), TEXT("Metadata"),
+			TEXT("LocNotes"), TEXT("VectorPart"), TEXT("Call"), TEXT("Comment"), TEXT("Metadata"),
 			TEXT("DisconnectedMarker"), TEXT("DisabledMarker"), TEXT("Structure"), TEXT("Operator"), TEXT("Punctuation"), TEXT("Error"),
 			TEXT("Command"), TEXT("Function"), TEXT("Parameter"), TEXT("UndeclaredGlobal"),
 		};
@@ -66,7 +66,7 @@ bool FBangoLineTokenizerTest::RunTest(const FString& Parameters)
 
 	Check(TEXT("global int foundThings ?= 0;"), TEXT("DeclKeyword[global] Type[int] Global[foundThings] Operator[?=] Number[0] Punctuation[;]"));
 	Check(TEXT("\tglobal bool opened = true;      //@1(0, 0)"), TEXT("DeclKeyword[global] Type[bool] Global[opened] Operator[=] Constant[true] Punctuation[;] Metadata[//@1(0, 0)]"));
-	Check(TEXT("if (IsNil(foundThings) && foundThings >= 10)"), TEXT("Keyword[if] Punctuation[(] Builtin[IsNil] Punctuation[(] Global[foundThings] Punctuation[)] Operator[&&] Global[foundThings] Operator[>=] Number[10]"));
+	Check(TEXT("if (isNil(foundThings) && foundThings >= 10)"), TEXT("Keyword[if] Punctuation[(] Keyword[isNil] Punctuation[(] Global[foundThings] Punctuation[)] Operator[&&] Global[foundThings] Operator[>=] Number[10]"));
 	Check(TEXT("\tHint(LOCTEXT(\"Countdown\", \"Countdown: {0}\"), 3 - _i);"), TEXT("Call[Hint] Punctuation[(] LocMacro[LOCTEXT] Punctuation[(] LocKey[\"Countdown\"] Punctuation[,] String[\"Countdown: ] Placeholder[{0}] String[\"] Punctuation[)] Punctuation[,] Number[3] Operator[-] Global[_i]"));
 	Check(TEXT("Hint(NSNOTELOCTEXT(\"Ns\", \"K\", \"Hi {Name} `{\", \"note\"));"), TEXT("LocKey[\"Ns\"] Punctuation[,] LocKey[\"K\"] Punctuation[,] String[\"Hi ] Error[{Name}] String[ ] StringEscape[`{] String[\"] Punctuation[,] LocNotes[\"note\"]"));
 	Check(TEXT("Hint(INVTEXT(\"Score {0}\"), 1);"), TEXT("Call[Hint] Punctuation[(] LocMacro[INVTEXT] Punctuation[(] String[\"Score ] Placeholder[{0}] String[\"] Punctuation[)] Punctuation[,] Number[1]"));
@@ -265,7 +265,7 @@ bool FBangoScriptNamesTest::RunTest(const FString& Parameters)
 		TEXT("global string[] questLog;\n")
 		TEXT("scriptVar int count = 0;\n")
 		TEXT("string _name;\n")
-		TEXT("if (IsNil(foundThings) && otherGlobal)    //@1(0, 0)\n")
+		TEXT("if (isNil(foundThings) && otherGlobal)    //@1(0, 0)\n")
 		TEXT("{\n")
 		TEXT("\tcount += _rounds;\n")
 		TEXT("};\n")
@@ -560,6 +560,10 @@ bool FBangoCompletionTest::RunTest(const FString& Parameters)
 				TestTrue(*FString::Printf(TEXT("'%s' goes in alone before a bracket"), *Keyword.Name),
 					FBangoCompletion::MakeInsert(Keyword, Keyword.Name.Left(1) + TEXT("  (x)"), 1).Text == Keyword.Name);
 			}
+			else if (Keyword.bCallable)
+			{
+				TestTrue(TEXT("isNil goes in with its bracket, like a call"), Keyword.Name == TEXT("isNil") && KeywordInsert.Text == TEXT("isNil(") && KeywordInsert.bOpenParen);
+			}
 			else
 			{
 				TestTrue(*FString::Printf(TEXT("'%s' goes in as it is"), *Keyword.Name), KeywordInsert.Text == Keyword.Name && !KeywordInsert.bOpenParen);
@@ -611,7 +615,7 @@ bool FBangoCompletionTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("'whi' is the keyword while"), Shown.Num() == 1 && Items[Shown[0]].Name.Equals(TEXT("while"), ESearchCase::CaseSensitive));
 	TArray<FBangoCompletionItem> Values;
 	FBangoCompletion::GetKeywordItems(Values, /*bValuesOnly*/ true);
-	TestEqual(TEXT("Keywords for a node's field: true, false, nil, player and self"), Values.Num(), 5);
+	TestEqual(TEXT("Keywords for a node's field: true, false, nil, player, self and isNil"), Values.Num(), 6);
 
 	// The local count hides the global count; the function is listed with its signature.
 	const FBangoCompletionItem* Count = Items.FindByPredicate([](const FBangoCompletionItem& Item) { return Item.Name.Equals(TEXT("count"), ESearchCase::CaseSensitive); });
@@ -639,6 +643,23 @@ bool FBangoCompletionTest::RunTest(const FString& Parameters)
 		&& Hovered.Name.Equals(TEXT("foundThings"), ESearchCase::CaseSensitive) && Hovered.Detail.Equals(TEXT("int"), ESearchCase::CaseSensitive));
 	TestFalse(TEXT("Hovering a comment"), FBangoCompletion::FindHoverItem(Names, CallLine, 4, 22, Commands, Hovered, HoverStart, HoverEnd));
 	TestFalse(TEXT("Hovering a bracket"), FBangoCompletion::FindHoverItem(Names, CallLine, 4, 3, Commands, Hovered, HoverStart, HoverEnd));
+
+	// Words of the language show what autocomplete says of them.
+	auto HoverTitle = [&](const TCHAR* HoverLine, int32 Column) -> FString
+	{
+		FBangoCompletionItem Item;
+		return FBangoCompletion::FindHoverItem(Names, HoverLine, 4, Column, Commands, Item, HoverStart, HoverEnd) && !Item.Description.IsEmpty()
+			? FBangoCompletion::GetHoverTitle(Item) : FString();
+	};
+	TestEqual(TEXT("Hovering a keyword"), HoverTitle(TEXT("if (isNil(foundThings)) { }"), 0), FString(TEXT("keyword if")));
+	TestEqual(TEXT("Hovering isNil"), HoverTitle(TEXT("if (isNil(foundThings)) { }"), 5), FString(TEXT("isNil(x) -> bool")));
+	TestEqual(TEXT("Hovering call"), HoverTitle(TEXT("@light call TurnOn();"), 8), FString(TEXT("keyword call")));
+	TestEqual(TEXT("Hovering a type"), HoverTitle(TEXT("int[] _list = [];"), 1), FString(TEXT("type int")));
+	TestEqual(TEXT("Hovering a type's brackets"), HoverTitle(TEXT("int[] _list = [];"), 4), FString());
+	TestEqual(TEXT("Hovering nil"), HoverTitle(TEXT("return nil;"), 8), FString(TEXT("value nil")));
+	TestEqual(TEXT("Hovering player"), HoverTitle(TEXT("player SetHidden(true);"), 2), FString(TEXT("entity player")));
+	TestEqual(TEXT("Hovering an @name"), HoverTitle(TEXT("@light call TurnOn();"), 2), FString());
+	TestEqual(TEXT("Hovering a waitUntil's timeout"), HoverTitle(TEXT("waitUntil (ready) timeout (5)"), 20), FString(TEXT("keyword timeout")));
 
 	return true;
 }

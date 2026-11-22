@@ -37,7 +37,7 @@ namespace BangoLineTokenizerPrivate
 	static const TCHAR* const NilWord[]        = { TEXT("nil") };
 	static const TCHAR* const TimeoutWord[]    = { TEXT("timeout") }; // a keyword only in `waitUntil (...) timeout (...)`: after a `)`, before a `(`
 	static const TCHAR* const PlayerWord[]     = { TEXT("player"), TEXT("self") }; // the first local player's pawn, and the script's owner: entities, coloured like @john
-	static const TCHAR* const Builtins[]       = { TEXT("IsNil"), TEXT("call") };
+	static const TCHAR* const OtherKeywords[]  = { TEXT("isNil"), TEXT("call") }; // keywords that aren't flow control: coloured like it
 	static const TCHAR* const VectorParts[]    = { TEXT("x"), TEXT("y"), TEXT("z") };
 
 	// Localized-text macros and the role of each string argument, by position.
@@ -290,7 +290,7 @@ namespace BangoLineTokenizerPrivate
 			else if (IsOneOf(Line, Start, WordLen, Constants))      { Kind = EBangoSyntaxKind::Constant; }
 			else if (IsOneOf(Line, Start, WordLen, NilWord))        { Kind = EBangoSyntaxKind::Nil; }
 			else if (IsOneOf(Line, Start, WordLen, PlayerWord))     { Kind = EBangoSyntaxKind::Entity; }
-			else if (IsOneOf(Line, Start, WordLen, Builtins))       { Kind = EBangoSyntaxKind::Builtin; }
+			else if (IsOneOf(Line, Start, WordLen, OtherKeywords))  { Kind = EBangoSyntaxKind::Keyword; }
 			else if (IsFollowedByOpenParen())                       { Kind = EBangoSyntaxKind::Call; }
 			// A name is the graph's local, parameter or loop variable if it has one, and otherwise a global. One line
 			// can't tell, so it's a global here; FBangoScriptNames, which reads the whole file, tells them apart.

@@ -491,11 +491,11 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 	{ TEXT("sequence: a disabled one"), TEXT("/*\nsequence\n{\n\tTalk(\"no\");\n}\n*/\nTalk(\"yes\");"), TEXT("yes"), nullptr, nullptr },
 	{ TEXT("for"), TEXT("int _sum = 0;\nfor (int _i = 1; _i <= 10; _i++)\n{\n\t_sum += _i;\n};\nTalk(\"{0}\", _sum);"), TEXT("55"), nullptr, nullptr },
 	{ TEXT("for continue runs the step"), TEXT("for (int _i = 0; _i < 5; _i++)\n{\n\tif (_i % 2 == 0)\n\t{\n\t\tcontinue;\n\t};\n\tTalk(\"{0}\", _i);\n};"), TEXT("1|3"), nullptr, nullptr },
-	{ TEXT("loop body locals reset"), TEXT("int _t;\nfor (int _i = 0; _i < 2; _i++)\n{\n\t_t = nil;\n\tTalk(\"{0}\", !IsNil(_t));\n\t_t = 1;\n};"), TEXT("false|false"), nullptr, nullptr },
-	{ TEXT("forEach with gaps"), TEXT("int[] _a = [1, 2];\n_a[4] = 5;\nforEach (_v in _a)\n{\n\tif (!IsNil(_v))\n\t{\n\t\tTalk(\"{0}\", _v);\n\t}\n\telse\n\t{\n\t\tTalk(\"gap\");\n\t};\n};"), TEXT("1|2|gap|gap|5"), nullptr, nullptr },
+	{ TEXT("loop body locals reset"), TEXT("int _t;\nfor (int _i = 0; _i < 2; _i++)\n{\n\t_t = nil;\n\tTalk(\"{0}\", !isNil(_t));\n\t_t = 1;\n};"), TEXT("false|false"), nullptr, nullptr },
+	{ TEXT("forEach with gaps"), TEXT("int[] _a = [1, 2];\n_a[4] = 5;\nforEach (_v in _a)\n{\n\tif (!isNil(_v))\n\t{\n\t\tTalk(\"{0}\", _v);\n\t}\n\telse\n\t{\n\t\tTalk(\"gap\");\n\t};\n};"), TEXT("1|2|gap|gap|5"), nullptr, nullptr },
 	{ TEXT("forEach loops over a copy"), TEXT("int[] _a = [1, 2];\nforEach (_v in _a)\n{\n\t_a Push(_v);\n};\nTalk(\"{0}\", _a);"), TEXT("[1, 2, 1, 2]"), nullptr, nullptr },
 	{ TEXT("forEach break and continue"), TEXT("forEach (_v in [1, 2, 3, 4])\n{\n\tif (_v == 2)\n\t{\n\t\tcontinue;\n\t};\n\tif (_v == 4)\n\t{\n\t\tbreak;\n\t};\n\tTalk(\"{0}\", _v);\n};"), TEXT("1|3"), nullptr, nullptr },
-	{ TEXT("nested arrays"), TEXT("int[][] _g = [[1, 2], [3]];\n_g[3][2] = 7;\n_g[0] Push(4);\n_g[0][0] += 10;\nTalk(\"{0} {1}\", _g, Count(_g));\nTalk(\"{0} {1}\", !IsNil(_g[2]), !IsNil(_g[3][2]));"), TEXT("[[11, 2, 4], [3], nil, [nil, nil, 7]] 4|false true"), nullptr, nullptr },
+	{ TEXT("nested arrays"), TEXT("int[][] _g = [[1, 2], [3]];\n_g[3][2] = 7;\n_g[0] Push(4);\n_g[0][0] += 10;\nTalk(\"{0} {1}\", _g, Count(_g));\nTalk(\"{0} {1}\", !isNil(_g[2]), !isNil(_g[3][2]));"), TEXT("[[11, 2, 4], [3], nil, [nil, nil, 7]] 4|false true"), nullptr, nullptr },
 	{ TEXT("array commands"), TEXT("int[] _a = [1, 2, 3];\nint _last;\nint _first;\n_a InsertAt(0, 0);\n_last = _a Pop();\n_first = _a RemoveAt(0);\n_a InsertAt(9, 5);\nTalk(\"{0} {1} {2}\", _a, _last, _first);"), TEXT("[1, 2, nil, nil, nil, 9] 3 0"), nullptr, nullptr },
 	// Vectors' parts and strings' characters by index, read and written.
 	{ TEXT("index: read vectors and strings"), TEXT("vector3 _v = [1.5, 2, 3];\nstring _s = \"hey\";\nint _i = 2;\nTalk(\"{0} {1} {2} {3}\", _v[0], _v[_i], _s[1], _s[_i]);"), TEXT("1.5 3.0 e y"), nullptr, nullptr },
@@ -523,11 +523,11 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 	{ TEXT("Bango IDs"), TEXT("entity _e = @john;\n_e Speak(\"a\");\n@player Speak(\"b\");\nTalk(\"{0} {1} {2} {3}\", _e, [@john, @ghost], @john == _e, @john != @player);"), TEXT("john: a|player: b|john [john, ghost] true true"), nullptr, nullptr },
 	{ TEXT("Bango ID that isn't in the level, unused"), TEXT("entity _g = @ghost;\nTalk(\"{0}\", _g);"), TEXT("ghost"), nullptr, nullptr },
 	{ TEXT("Bango IDs as parameter defaults"), TEXT("#inputs (entity _who = @john, entity[] _all = [@john, @player])\n_who Speak(\"hi\");\nforEach (_x in _all)\n{\n\t_x Speak(\"all\");\n};"), TEXT("john: hi|john: all|player: all"), nullptr, nullptr },
-	{ TEXT("IsNil on globals"), TEXT("Talk(\"{0} {1}\", !IsNil(nothere), !IsNil(flag));"), TEXT("false true"), nullptr, nullptr },
-	{ TEXT("short-circuit"), TEXT("bool _b;\nbool _c;\n_b = !IsNil(nothere) && nothere;\n_c = flag || nothere;\nTalk(\"{0} {1}\", _b, _c);"), TEXT("false true"), nullptr, nullptr },
+	{ TEXT("isNil on globals"), TEXT("Talk(\"{0} {1}\", !isNil(nothere), !isNil(flag));"), TEXT("false true"), nullptr, nullptr },
+	{ TEXT("short-circuit"), TEXT("bool _b;\nbool _c;\n_b = !isNil(nothere) && nothere;\n_c = flag || nothere;\nTalk(\"{0} {1}\", _b, _c);"), TEXT("false true"), nullptr, nullptr },
 	{ TEXT("latent commands"), TEXT("Talk(\"start\");\nSleep(1.0);\nif (AskChoice(\"a\", \"b\") == 2)\n{\n\tTalk(\"two\");\n};"), TEXT("start|two"), nullptr, nullptr },
 	{ TEXT("nil as an extra value"), TEXT("Talk(\"{0} and {1}\", 1, nil);"), TEXT("1 and nil"), nullptr, nullptr },
-	{ TEXT("nil assignment"), TEXT("int _x = 1;\n_x = nil;\nTalk(\"{0}\", !IsNil(_x));"), TEXT("false"), nullptr, nullptr },
+	{ TEXT("nil assignment"), TEXT("int _x = 1;\n_x = nil;\nTalk(\"{0}\", !isNil(_x));"), TEXT("false"), nullptr, nullptr },
 
 	{ TEXT("read nil local"), TEXT("int _x;\nTalk(\"{0}\", _x);"), TEXT(""), TEXT("(2:13)"), TEXT("'_x' is nil") },
 	{ TEXT("missing global"), TEXT("Talk(\"{0}\", nothere);"), TEXT(""), TEXT("(1:13)"), TEXT("Global 'nothere' doesn't exist") },
@@ -550,9 +550,9 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 	{ TEXT("a local hides a global this file doesn't declare"), TEXT("int score = 3;\nTalk(\"{0}\", score);"), TEXT("3"), nullptr, nullptr },
 	{ TEXT("global default: given when the global doesn't exist"), TEXT("global int fresh ?= 4;\nglobal int[] list ?= [1, 2];\nTalk(\"{0} {1}\", fresh, Count(list));"), TEXT("4 2"), nullptr, nullptr },
 	{ TEXT("global default: one that exists keeps its value"), TEXT("global int score ?= 1;\nTalk(\"{0}\", score);"), TEXT("7"), nullptr, nullptr },
-	{ TEXT("global default: nil"), TEXT("global int unsetYet ?= nil;\nTalk(\"{0}\", IsNil(unsetYet));"), TEXT("true"), nullptr, nullptr },
+	{ TEXT("global default: nil"), TEXT("global int unsetYet ?= nil;\nTalk(\"{0}\", isNil(unsetYet));"), TEXT("true"), nullptr, nullptr },
 	{ TEXT("global set in the code: each time the line runs"), TEXT("global int score ?= 1;\nTalk(\"{0}\", score);\nglobal int score = 2;\nTalk(\"{0}\", score);\nfor (int _i = 0; _i < 2; _i++)\n{\n\tglobal int score = score + 10;\n};\nTalk(\"{0}\", score);"), TEXT("7|2|22"), nullptr, nullptr },
-	{ TEXT("global set in the code: readable before the line, and in a function"), TEXT("Talk(\"{0}\", IsNil(later));\nSetIt();\nTalk(\"{0}\", later);\nfunction void SetIt()\n{\n\tglobal string later = \"done\";\n};"), TEXT("true|done"), nullptr, nullptr },
+	{ TEXT("global set in the code: readable before the line, and in a function"), TEXT("Talk(\"{0}\", isNil(later));\nSetIt();\nTalk(\"{0}\", later);\nfunction void SetIt()\n{\n\tglobal string later = \"done\";\n};"), TEXT("true|done"), nullptr, nullptr },
 	{ TEXT("global set in the code: a disabled one doesn't run"), TEXT("global int score ?= 1;\n/* global int score = 50; */\nTalk(\"{0}\", score);"), TEXT("7"), nullptr, nullptr },
 	{ TEXT("an undeclared name without underscore is a global read"), TEXT("Talk(\"{0}\", cuont);"), TEXT(""), TEXT("(1:13)"), TEXT("Global 'cuont' doesn't exist") },
 	{ TEXT("string placeholders: {n}, backtick escapes, and what's left as it is"), TEXT("Talk(\"`{0`} is {0}, `` and {Name}, 100% and {1\", 5);"), TEXT("{0} is 5, ` and {Name}, 100% and {1"), nullptr, nullptr },
@@ -1055,7 +1055,7 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				TEXT("\tbool _n = true;    //@8(1, 1)\n")
 				TEXT("\tSleep(0);    //@4(2, 0)\n")
 				TEXT("\t_d += 1;    //@6(3, 0)\n")
-				TEXT("\tTalk(\"{0} {1}\", _d, IsNil(_n));    //@7(4, 0)\n};");
+				TEXT("\tTalk(\"{0} {1}\", _d, isNil(_n));    //@7(4, 0)\n};");
 			FReloadRun Run;
 			Expect(StartRun(Run, Compile(LocalsV1)) && Log.Num() == 0, TEXT("reload locals: waits in the loop"));
 			FString ReloadError;
@@ -1156,7 +1156,7 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				{ TEXT("unset: a global that doesn't exist, named like an actor's Bango ID"), TEXT("john"), 2, TEXT("(1:1)"), TEXT("write @john") },
 				{ TEXT("unset: not a global that doesn't exist"), TEXT("!nothere"), 2, nullptr, TEXT("nothere") },
 				{ TEXT("unset: a returned global that doesn't exist"), TEXT("return nothere;"), 2, nullptr, TEXT("nothere") },
-				{ TEXT("IsNil of a global that doesn't exist is true"), TEXT("IsNil(nothere)"), 1, nullptr, nullptr },
+				{ TEXT("isNil of a global that doesn't exist is true"), TEXT("isNil(nothere)"), 1, nullptr, nullptr },
 				{ TEXT("&& stops at false"), TEXT("false && nothere > 1"), 0, nullptr, nullptr },
 				{ TEXT("|| stops at true"), TEXT("flag || nothere > 1"), 1, nullptr, nullptr },
 				{ TEXT("an unset global behind || is still read"), TEXT("!flag || nothere > 1"), 2, nullptr, TEXT("nothere") },
@@ -1295,7 +1295,7 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			// Compiled with it: the inputs are the script's parameters, in order, and its owner passes them.
 			struct FSignatureCase { const TCHAR* Name; const TCHAR* Source; int32 Expected; const TCHAR* ErrorContains; };
 			const FSignatureCase SignatureCases[] = {
-				{ TEXT("reads its inputs"), TEXT("_count == 3 && IsNil(_trigger) && Count(_inside) == 0"), 1, nullptr },
+				{ TEXT("reads its inputs"), TEXT("_count == 3 && isNil(_trigger) && Count(_inside) == 0"), 1, nullptr },
 				{ TEXT("as a script"), TEXT("int _more = _count + 1;\nreturn _more == 4;"), 1, nullptr },
 				{ TEXT("no #inputs line"), TEXT("#inputs (int _n = 1)\n_n > 0"), -1, TEXT("This script's inputs are given by BangoTrigger's 'Activation': _trigger, _count, _inside. Remove the #inputs line") },
 				{ TEXT("a local can't have an input's name"), TEXT("int _count = 1;\nreturn true;"), -1, TEXT("'_count' is an input given by BangoTrigger's 'Activation'") },
@@ -2003,7 +2003,7 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 
 			// Errors: unsatisfied, shown once until it answers true or false again. Unset is unsatisfied, quietly.
 			FBangoWatchGroupHandle Broken;
-			Broken = Registry.CreateGroup(CompileWatched(TEXT("#inputs (entity _activator)\nscore / zero > 1 || IsNil(later) == false && later > 0")), 0.5f, TEXT("Broken"), Recorder(&Broken));
+			Broken = Registry.CreateGroup(CompileWatched(TEXT("#inputs (entity _activator)\nscore / zero > 1 || isNil(later) == false && later > 0")), 0.5f, TEXT("Broken"), Recorder(&Broken));
 			FBangoWatchHandle Br;
 			FString DeclareError;
 			WatchGlobals.Declare(TEXT("zero"), FBangoType::Int(), DeclareError);
@@ -2074,15 +2074,15 @@ static void BangoRunArgumentTests(TArray<FString>& OutFailures)
 
 	const FBangoValue John = FBangoValue::MakeEntity(TEXT("john"));
 	const TCHAR* Greet = TEXT("#inputs (entity _who, string _line, int _times = 2, entity _listener = nil)\n")
-		TEXT("for (int _i = 0; _i < _times; _i++)\n{\n\t_who Speak(_line);\n};\nTalk(\"{0}\", !IsNil(_listener));");
+		TEXT("for (int _i = 0; _i < _times; _i++)\n{\n\t_who Speak(_line);\n};\nTalk(\"{0}\", !isNil(_listener));");
 
 	const FArgCase Cases[] =
 	{
 		{ TEXT("all arguments"), Greet, { John, FBangoValue::MakeString(TEXT("hi")), FBangoValue::MakeInt(1), FBangoValue::MakeEntity(TEXT("player")) }, TEXT("john: hi|true"), nullptr },
 		{ TEXT("defaults for trailing arguments"), Greet, { John, FBangoValue::MakeString(TEXT("hi")) }, TEXT("john: hi|john: hi|false"), nullptr },
 		{ TEXT("int argument for a float parameter"), TEXT("#inputs (float _d)\nTalk(\"{0}\", _d);"), { FBangoValue::MakeInt(3) }, TEXT("3.0"), nullptr },
-		{ TEXT("explicit nil overrides a default"), TEXT("#inputs (int _n = 5)\nTalk(\"{0}\", !IsNil(_n));"), { FBangoValue::MakeNil(FBangoType::Int()) }, TEXT("false"), nullptr },
-		{ TEXT("nil of any type fits any parameter"), TEXT("#inputs (int _n)\nTalk(\"{0}\", !IsNil(_n));"), { FBangoValue::MakeNil(FBangoType::String()) }, TEXT("false"), nullptr },
+		{ TEXT("explicit nil overrides a default"), TEXT("#inputs (int _n = 5)\nTalk(\"{0}\", !isNil(_n));"), { FBangoValue::MakeNil(FBangoType::Int()) }, TEXT("false"), nullptr },
+		{ TEXT("nil of any type fits any parameter"), TEXT("#inputs (int _n)\nTalk(\"{0}\", !isNil(_n));"), { FBangoValue::MakeNil(FBangoType::String()) }, TEXT("false"), nullptr },
 		{ TEXT("array argument"), TEXT("#inputs (int[] _list)\n_list Push(3);\nTalk(\"{0}\", _list);"), { FBangoValue::MakeArray(FBangoType::Int(), { FBangoValue::MakeInt(1), FBangoValue::MakeInt(2) }) }, TEXT("[1, 2, 3]"), nullptr },
 		{ TEXT("array default is fresh each spawn"), TEXT("#inputs (int[] _a = [1, 2])\n_a Push(3);\nTalk(\"{0}\", _a);"), {}, TEXT("[1, 2, 3]"), nullptr },
 		{ TEXT("no inputs, no arguments"), TEXT("Talk(\"ok\");"), {}, TEXT("ok"), nullptr },

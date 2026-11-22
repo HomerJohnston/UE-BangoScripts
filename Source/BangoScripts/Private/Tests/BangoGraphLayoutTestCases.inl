@@ -103,7 +103,7 @@ static const FBangoLayoutTestCase GBangoLayoutTestCases[] =
 	{ EBangoGraphNodeKind::Assign, false, TEXT("_n -= 1"), TEXT("Subtract From (Generic) | Var (x): `_n` | Value: `1`") },
 	{ EBangoGraphNodeKind::IncDec, false, TEXT("_a[2]++"), TEXT("Increment (Generic) | Var (x int) <int>: `_a[2]`") },
 	{ EBangoGraphNodeKind::IncDec, false, TEXT("--_x"), TEXT("Decrement (Generic) | Var (x int) <int>: `_x`") },
-	{ EBangoGraphNodeKind::If, false, TEXT("_n > 1 && !IsNil(g)"), TEXT("If (Generic) | Condition <bool, no icon>: `_n > 1 && !IsNil(g)`") },
+	{ EBangoGraphNodeKind::If, false, TEXT("_n > 1 && !isNil(g)"), TEXT("If (Generic) | Condition <bool, no icon>: `_n > 1 && !isNil(g)`") },
 	{ EBangoGraphNodeKind::While, false, TEXT("true"), TEXT("While (Generic) | Condition <bool, no icon>: `true`") },
 	// Simple counting loops (<= with ++, >= with --) look like Blueprint's For Loop; anything else is one Expression row.
 	{ EBangoGraphNodeKind::For, false, TEXT("int _i = 0; _i <= 9; _i++"), TEXT("For (Generic) | Var (x int): `_i` | First <int>: `0` | Last <int>: `9`") },

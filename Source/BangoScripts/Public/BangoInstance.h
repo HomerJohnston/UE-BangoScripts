@@ -43,7 +43,7 @@ enum class EBangoConditionResult : uint8
 	False,
 	/**
 	 * It couldn't answer yet: it read a global that doesn't exist or is nil (`gold > 3` before anything has set gold).
-	 * Usually not a mistake, so a caller can treat it as false without reporting it. (IsNil(gold) gives true instead.)
+	 * Usually not a mistake, so a caller can treat it as false without reporting it. (isNil(gold) gives true instead.)
 	 */
 	Unset,
 	/**

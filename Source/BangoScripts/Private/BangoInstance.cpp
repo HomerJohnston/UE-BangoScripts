@@ -767,7 +767,7 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 
 	if (bNilOk && Place.Part == -1)
 	{
-		// Like IsNil: nil anywhere along the way (or a global nobody made, or past the end) gives nil.
+		// Like isNil: nil anywhere along the way (or a global nobody made, or past the end) gives nil.
 		const FBangoValue* Root = nullptr;
 		if (Place.Kind == EBangoPlaceKind::Local)
 		{
@@ -857,7 +857,7 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 			{
 				return RuntimeFail(FString::Printf(TEXT("Index %lld for '%s' is negative."), Index, *Path));
 			}
-			return RuntimeFail(FString::Printf(TEXT("'%s[%lld]' is past the end of '%s', which has %lld element(s). Check with IsNil first."),
+			return RuntimeFail(FString::Printf(TEXT("'%s[%lld]' is past the end of '%s', which has %lld element(s). Check with isNil first."),
 				*Path, Index, *Path, Current->ArrayCount()));
 		}
 		Path += FString::Printf(TEXT("[%lld]"), Index);
@@ -874,9 +874,9 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 		}
 		if (Place.Kind == EBangoPlaceKind::Global && Indexes.Num() == 0)
 		{
-			return UnsetGlobalFail(FString::Printf(TEXT("Global '%s' is nil. Give it a value before reading it, or check it with IsNil(%s)."), *Path, *Path), Globals);
+			return UnsetGlobalFail(FString::Printf(TEXT("Global '%s' is nil. Give it a value before reading it, or check it with isNil(%s)."), *Path, *Path), Globals);
 		}
-		return RuntimeFail(FString::Printf(TEXT("'%s' is nil. Give it a value before reading it, or check it with IsNil(%s)."), *Path, *Path));
+		return RuntimeFail(FString::Printf(TEXT("'%s' is nil. Give it a value before reading it, or check it with isNil(%s)."), *Path, *Path));
 	}
 	if (Place.Part >= 0)
 	{

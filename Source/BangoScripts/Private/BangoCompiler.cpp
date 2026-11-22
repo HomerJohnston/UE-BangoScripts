@@ -127,7 +127,7 @@ namespace BangoCompilerPrivate
 	{
 		Read,
 		Write,
-		Check,  // IsNil
+		Check,  // isNil
 	};
 
 	class FCompiler
@@ -458,7 +458,7 @@ namespace BangoCompilerPrivate
 			case ETypeKind::Void:
 				return Fail(Loc, FString::Printf(TEXT("This call doesn't return a value, so it can't be used %s."), Where));
 			case ETypeKind::Nil:
-				return Fail(Loc, FString::Printf(TEXT("nil can't be used %s. To check whether something is nil, use IsNil(...)."), Where));
+				return Fail(Loc, FString::Printf(TEXT("nil can't be used %s. To check whether something is nil, use isNil(...)."), Where));
 			case ETypeKind::EmptyArray:
 				return Fail(Loc, FString::Printf(TEXT("An array can't be used %s."), Where));
 			default:
@@ -516,7 +516,7 @@ namespace BangoCompilerPrivate
 			{
 				if (bEquality)
 				{
-					return Fail(Loc, TEXT("Comparing with nil isn't allowed, because comparing reads the value. Use IsNil(...) instead."));
+					return Fail(Loc, TEXT("Comparing with nil isn't allowed, because comparing reads the value. Use isNil(...) instead."));
 				}
 				return Fail(Loc, FString::Printf(TEXT("nil can't be used with '%s'."), OpText));
 			}
@@ -2752,7 +2752,7 @@ namespace BangoCompilerPrivate
 				}
 				if (Place.bElement)
 				{
-					return Fail(Expr.Loc, TEXT("A vector's part or a string's character is never nil (an index outside it is an error), so IsNil can't check it. Check the vector or string itself, and its Count."));
+					return Fail(Expr.Loc, TEXT("A vector's part or a string's character is never nil (an index outside it is an error), so isNil can't check it. Check the vector or string itself, and its Count."));
 				}
 				Emit(EBangoOp::IsNilPlace, Place.PlaceIndex);
 				OutType = FExprType::MakeKnown(FBangoType::Bool());
@@ -3152,7 +3152,7 @@ namespace BangoCompilerPrivate
 				}
 				if (NilOk && NilOk->IsValidIndex(i) && (*NilOk)[i] && IsPlaceExpr(*Call.Args[i]))
 				{
-					// Like IsNil: a nil variable, a global nobody made or an element past the end is passed on as nil.
+					// Like isNil: a nil variable, a global nobody made or an element past the end is passed on as nil.
 					FPlaceInfo Place;
 					bArgOk = ResolvePlace(*Call.Args[i], EPlaceUse::Read, Place);
 					if (bArgOk)

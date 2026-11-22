@@ -16,7 +16,6 @@ enum class EBangoCompletionKind : uint8
 	Global,
 	Function,
 	Command,
-	Builtin,
 	/** A keyword or type name, like `while`, `switch`, `int` or `nil`. */
 	Keyword,
 };
@@ -71,9 +70,6 @@ public:
 	 */
 	static bool FindWordBeforeCursor(const FString& Line, int32 CursorColumn, int32& OutWordStart);
 
-	/** The compiler's built-in calls, as items. */
-	static void GetBuiltinItems(TArray<FBangoCompletionItem>& OutItems);
-
 	/**
 	 * The language's keywords and type names, as items (Detail says what kind of word it is). With bValuesOnly, just
 	 * the ones that can be part of an expression (true, false, nil), for a node's fields.
@@ -123,11 +119,17 @@ public:
 	/**
 	 * For the info popup shown when the mouse rests on a name (SBangoTextEditor): the item for the name at Column of
 	 * line LineIndex, from the same items the autocomplete list has for that line (GatherItems), and where the name is
-	 * on the line. False for anything else: a keyword, a number, a string or a comment, an @entity, a vector part, a
-	 * label, a `call`'s Blueprint function, or a name nothing is known about (a global declared elsewhere).
+	 * on the line; or, for a word of the language (a keyword, a type, `true`, `nil`, `player`, a waitUntil's `timeout`),
+	 * its keyword item. False for anything else: a number, a string or a comment, an @entity, a vector part, a label,
+	 * a `call`'s Blueprint function, or a name nothing is known about (a global declared elsewhere).
 	 */
 	static bool FindHoverItem(const FBangoScriptNames& Names, const FString& Line, int32 LineIndex, int32 Column,
 		const TArray<FBangoCompletionItem>& CommandItems, FBangoCompletionItem& OutItem, int32& OutStart, int32& OutEnd);
+	/**
+	 * The info popup's first line for an item: a call's signature (`Abort(string reason)`, `isNil(x) -> bool`), a
+	 * variable's kind, type and name (`local int _count`), or a word's kind and itself (`keyword if`, `type int`).
+	 */
+	static FString GetHoverTitle(const FBangoCompletionItem& Item);
 
 	/** The items starting with Prefix, ignoring case, in their order. */
 	static void Filter(const TArray<FBangoCompletionItem>& Items, const FString& Prefix, TArray<int32>& OutIndices);
