@@ -514,6 +514,10 @@ struct FBangoReturnStmt : FBangoStmt
 /**
  * `waitUntil (Condition);`: carries on at once if Condition is true, else pauses the script until it is. Rechecked when
  * a global it reads changes, or every frame if it calls a command (the compiler's FBangoWaitSet says which).
+ *
+ * `waitUntil (Condition) timeout (Seconds) { ... }`: the same, but it waits no longer than Seconds (worked out once,
+ * before the first check): once they've passed with the condition still false, TimeoutBlock runs, then what follows.
+ * `timeout` isn't a keyword: it's only read as one here, after the condition's `)`.
  */
 struct FBangoWaitUntilStmt : FBangoStmt
 {
@@ -521,6 +525,11 @@ struct FBangoWaitUntilStmt : FBangoStmt
 	FBangoWaitUntilStmt() : FBangoStmt(StaticKind) {}
 
 	FBangoExprPtr Condition;
+	bool bHasTimeout = false;
+	/** The seconds to wait at most (a number). Only with bHasTimeout. */
+	FBangoExprPtr Timeout;
+	/** What runs if the time is up first. Only with bHasTimeout. */
+	FBangoBlock TimeoutBlock;
 };
 
 struct FBangoLabelStmt : FBangoStmt

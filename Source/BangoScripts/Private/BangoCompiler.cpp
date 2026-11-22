@@ -180,6 +180,18 @@ namespace BangoCompilerPrivate
 				FBangoDependencies Found = Bango::FindDependencies(Program, Set.Function, Set.CondBegin, Set.CondEnd);
 				Set.Globals = MoveTemp(Found.Globals);
 				Set.PollReason = MoveTemp(Found.PollReason);
+				if (Set.Globals.Num() == 0 && Set.PollReason.IsEmpty())
+				{
+					// Nothing it reads can change while the script waits there: it would carry on at once, or never.
+					FBangoSourceLocation Loc;
+					Loc.Line = Set.Line;
+					Loc.Column = Set.Column;
+					Fail(Loc, Set.TimeoutIP >= 0
+						? TEXT("This waitUntil's condition can't change while the script waits: it reads no global, and calls no command that could answer differently later (locals and inputs don't change while a script waits). So it would carry on at once, or always wait for its whole timeout. Read a global in it, or use Sleep.")
+						: TEXT("This waitUntil's condition can't change while the script waits: it reads no global, and calls no command that could answer differently later (locals and inputs don't change while a script waits). So it would carry on at once, or wait forever. Read a global in it, or use an if."));
+					Error.NodeID = Set.NodeID;
+					return false;
+				}
 			}
 			if (bCondition && Program.Functions.Num() > 0)
 			{
@@ -766,6 +778,8 @@ namespace BangoCompilerPrivate
 				return true;
 			case EBangoStmtKind::Spawn:
 				return CheckNoDeclsInBlock(Stmt.As<FBangoSpawnStmt>()->Body, bInFunction);
+			case EBangoStmtKind::WaitUntil:
+				return CheckNoDeclsInBlock(Stmt.As<FBangoWaitUntilStmt>()->TimeoutBlock, bInFunction);
 			case EBangoStmtKind::Switch:
 			{
 				const FBangoSwitchStmt& Switch = *Stmt.As<FBangoSwitchStmt>();
@@ -990,6 +1004,8 @@ namespace BangoCompilerPrivate
 				return true;
 			case EBangoStmtKind::Spawn:
 				return CollectGlobalsInBlock(Stmt.As<FBangoSpawnStmt>()->Body);
+			case EBangoStmtKind::WaitUntil:
+				return CollectGlobalsInBlock(Stmt.As<FBangoWaitUntilStmt>()->TimeoutBlock);
 			case EBangoStmtKind::Switch:
 			{
 				const FBangoSwitchStmt& Switch = *Stmt.As<FBangoSwitchStmt>();
@@ -1455,6 +1471,9 @@ namespace BangoCompilerPrivate
 				CollectGraphLocals(Spawn.Body, bDisabled);
 				break;
 			}
+			case EBangoStmtKind::WaitUntil:
+				CollectGraphLocals(Stmt.As<FBangoWaitUntilStmt>()->TimeoutBlock, bDisabled);
+				break;
 			case EBangoStmtKind::Switch:
 				for (const FBangoSwitchCase& Case : Stmt.As<FBangoSwitchStmt>()->Cases)
 				{
@@ -1594,6 +1613,10 @@ namespace BangoCompilerPrivate
 			else if (const FBangoSpawnStmt* Spawn = Stmt.As<FBangoSpawnStmt>())
 			{
 				NoteBlock(Spawn->Body);
+			}
+			else if (const FBangoWaitUntilStmt* Wait = Stmt.As<FBangoWaitUntilStmt>())
+			{
+				NoteBlock(Wait->TimeoutBlock);
 			}
 		}
 
@@ -2101,6 +2124,16 @@ namespace BangoCompilerPrivate
 		 *        WaitResult #n -> L
 		 * WaitResult carries on if c is true; else the script pauses there, and runs from L again once something c reads
 		 * has changed (FBangoWaitSet, filled in by Bango::FindDependencies when every function has been compiled).
+		 *
+		 * `waitUntil (c) timeout (s) { block }` is
+		 *        <s>
+		 *        WaitBegin #n          (starts the timeout: s seconds)
+		 *     L: WaitCheck #n
+		 *        <c>
+		 *        WaitResult #n -> L    (false with the time up: goes to T)
+		 *        Jump E
+		 *     T: block                 (the set's TimeoutIP)
+		 *     E:
 		 */
 		bool CompileWaitUntil(const FBangoWaitUntilStmt& Wait)
 		{
@@ -2112,7 +2145,21 @@ namespace BangoCompilerPrivate
 			Set.Function = FnIndex;
 			Set.Line = Wait.Loc.Line;
 			Set.Column = Wait.Loc.Column;
+			Set.NodeID = Wait.Node.bHasMetadata ? Wait.Node.NodeID : -1;
 			const int32 SetIndex = Program.WaitSets.Add(Set);
+
+			if (Wait.bHasTimeout)
+			{
+				const FBangoType Seconds = FBangoType::Double();
+				FExprType TimeoutType;
+				if (!CompileExpr(*Wait.Timeout, &Seconds, TimeoutType)
+					|| !CanAssign(Seconds, TimeoutType, Wait.Timeout->Loc, TEXT("A timeout's seconds")))
+				{
+					return false;
+				}
+				EmitConvertIfNeeded(Seconds, TimeoutType);
+				Emit(EBangoOp::WaitBegin, SetIndex);
+			}
 
 			const int32 Check = Emit(EBangoOp::WaitCheck, SetIndex);
 			const int32 CondBegin = Here();
@@ -2134,6 +2181,16 @@ namespace BangoCompilerPrivate
 				Range.Begin = Check;
 				Range.End = Check;
 				Fn->Statements.Add(Range);
+			}
+			if (Wait.bHasTimeout)
+			{
+				const int32 JumpOver = Emit(EBangoOp::Jump);
+				Program.WaitSets[SetIndex].TimeoutIP = Here();
+				if (!CompileBlock(Wait.TimeoutBlock))
+				{
+					return false;
+				}
+				PatchJump(JumpOver, Here());
 			}
 			return true;
 		}

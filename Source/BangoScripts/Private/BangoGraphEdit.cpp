@@ -108,7 +108,14 @@ namespace Bango
 		case EBangoGraphNodeKind::Return:  Source = Text.IsEmpty() ? FString(TEXT("return;")) : FString(TEXT("return ")) + Text + TEXT(";"); break;
 		case EBangoGraphNodeKind::Label:   Source = FString(TEXT("label ")) + Text + TEXT(";"); break;
 		case EBangoGraphNodeKind::Goto:    Source = FString(TEXT("goto ")) + Text + TEXT(";"); break;
-		case EBangoGraphNodeKind::WaitUntil: Source = FString(TEXT("waitUntil (")) + Text + TEXT(");"); break;
+		case EBangoGraphNodeKind::WaitUntil:
+		{
+			int32 ConditionEnd = 0;
+			int32 SecondsBegin = 0;
+			Source = Bango::FindWaitUntilTimeout(Text, ConditionEnd, SecondsBegin)
+				? Bango::MakeWaitUntilHeader(Text, true) + TEXT("\n{\n};") : Bango::MakeWaitUntilHeader(Text, false);
+			break;
+		}
 		case EBangoGraphNodeKind::Spawn:
 			if (Text.IsEmpty())
 			{
@@ -277,11 +284,12 @@ namespace Bango
 		FString NewText;
 		if (NewValue.IsEmpty())
 		{
-			if (!Field.bPresent)
+			if (!Field.bPresent && Field.OuterEnd <= Field.OuterBegin)
 			{
 				return true; // already empty
 			}
-			// Clearing removes the field with its separators.
+			// Clearing removes the field with its separators (for one that's only separators, like a Wait Until's
+			// `) timeout (` without its seconds, those).
 			NewText = Node.Text.Left(Field.OuterBegin) + Node.Text.Mid(Field.OuterEnd, Node.Text.Len() - Field.OuterEnd);
 		}
 		else if (Field.bPresent)
@@ -1073,6 +1081,10 @@ namespace Bango
 				else if (const FBangoSpawnStmt* Spawn = Stmt.As<FBangoSpawnStmt>())
 				{
 					CollectGlobalDecls(Spawn->Body, 0, Out);
+				}
+				else if (const FBangoWaitUntilStmt* Wait = Stmt.As<FBangoWaitUntilStmt>())
+				{
+					CollectGlobalDecls(Wait->TimeoutBlock, 0, Out);
 				}
 				else if (const FBangoSwitchStmt* Switch = Stmt.As<FBangoSwitchStmt>())
 				{

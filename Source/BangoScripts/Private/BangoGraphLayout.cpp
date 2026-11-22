@@ -800,6 +800,7 @@ namespace BangoGraphLayoutPrivate
 				case EBangoGraphNodeKind::Sequence:
 				case EBangoGraphNodeKind::Switch:
 				case EBangoGraphNodeKind::Spawn:
+				case EBangoGraphNodeKind::WaitUntil: // its Timeout block
 					for (const int32 Output : Node.Branches)
 					{
 						Chain(Output, Scope);
@@ -1155,9 +1156,45 @@ namespace BangoGraphLayoutPrivate
 			return;
 		}
 
+		case EBangoGraphNodeKind::WaitUntil:
+		{
+			// The condition, then the optional timeout's seconds: the text is `condition`, or `condition) timeout (seconds`.
+			int32 ConditionEnd = Node.Text.Len();
+			int32 SecondsBegin = Node.Text.Len();
+			const bool bTimeout = Bango::FindWaitUntilTimeout(Node.Text, ConditionEnd, SecondsBegin);
+			FBangoNodeField Condition = WholeText(TEXT("Condition"), TEXT("bool"), Node.Text.Left(ConditionEnd), false);
+			Condition.bHideLabel = true;
+			Condition.bHideIcon = true;
+			Out.Fields.Add(Condition);
+
+			// Without `timeout (`, it's optional, and filling it in adds that. With it but no seconds (`timeout ()`,
+			// as a node whose Timeout output is wired is written until it has some), they're missing; clearing the
+			// field then takes the timeout away.
+			int32 Begin = SecondsBegin;
+			int32 End = Node.Text.Len();
+			while (Begin < End && (Node.Text[Begin] == TEXT(' ') || Node.Text[Begin] == TEXT('\t')))
+			{
+				++Begin;
+			}
+			while (End > Begin && (Node.Text[End - 1] == TEXT(' ') || Node.Text[End - 1] == TEXT('\t')))
+			{
+				--End;
+			}
+			FBangoNodeField Timeout = WholeText(TEXT("Timeout"), TEXT("float"), Node.Text.Mid(Begin, End - Begin), !bTimeout || End > Begin);
+			Timeout.Begin = Begin;
+			Timeout.End = End;
+			Timeout.OuterBegin = ConditionEnd;
+			Timeout.OuterEnd = Node.Text.Len();
+			if (!bTimeout)
+			{
+				Timeout.InsertPrefix = TEXT(") timeout (");
+			}
+			Out.Fields.Add(Timeout);
+			return;
+		}
+
 		case EBangoGraphNodeKind::If:
 		case EBangoGraphNodeKind::While:
-		case EBangoGraphNodeKind::WaitUntil:
 		{
 			FBangoNodeField Condition = WholeText(TEXT("Condition"), TEXT("bool"), Node.Text, false);
 			Condition.bHideLabel = true; // the node's one row needs no name

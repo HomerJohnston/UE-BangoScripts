@@ -1006,6 +1006,17 @@ void SBangoTextEditor::GatherCompletionItems(int32 Line, const FString& LineText
 		return;
 	}
 
+	// After a waitUntil's condition: only `timeout` can follow.
+	if (FBangoCompletion::IsTimeoutPlace(LineText, WordStart))
+	{
+		CompletionItems.Reset();
+		CompletionItems.Add(FBangoCompletion::GetTimeoutItem());
+		CompletionItemPtrs.Reset();
+		CompletionItemPtrs.Add(MakeShared<FBangoCompletionItem>(CompletionItems[0]));
+		MeasureCompletionNames();
+		return;
+	}
+
 	// The registered commands, asked for each time the list opens (game modules may add commands after this widget is made).
 	TArray<FBangoCompletionItem> Commands;
 	GetCommandItems(Commands);

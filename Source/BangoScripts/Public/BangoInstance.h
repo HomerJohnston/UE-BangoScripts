@@ -361,6 +361,15 @@ private:
 	/** The global store's change stamp when it paused there. Not saved: 0 after loading, so it's checked again. */
 	uint64 WaitStamp = 0;
 	/**
+	 * A waitUntil with a timeout: the seconds it has left, from its WaitBegin until its condition is true or the time
+	 * is up (0); below 0 otherwise. Saved. Resume counts it down by its context's DeltaSeconds while it's paused there.
+	 */
+	double WaitTimeLeft = -1.0;
+	/** PauseAtWait went on at the timeout's block instead of pausing (Resume then carries on, if Execute had stopped). */
+	bool bWaitTimedOut = false;
+	/** Whether what its condition reads may have changed since it paused (IsWaitDue without the timeout). */
+	bool IsWaitConditionDue(const FBangoGlobalStore& Globals) const;
+	/**
 	 * While a waitUntil's condition is being worked out (WaitCheck to WaitResult): its wait set, and where to go back
 	 * to if a global it reads is unset. Never saved, since a script can't pause then.
 	 */

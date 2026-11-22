@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.80)
+# Bango Language Spec (draft v0.81)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.81:** **`waitUntil` can have a timeout**: `waitUntil (condition) timeout (seconds) { ... }` waits no longer than that many seconds; if the condition still isn't true then, its block runs, then what follows (section 8). `timeout` is only a word of the language there: elsewhere it's an ordinary name. In the graph, the Wait Until node has an optional **Timeout** row and a **Timeout** output above **Then** (section 12). **A `waitUntil` whose condition can't change while the script waits is a compile error**: one that reads no global and calls no command that could answer differently later (`waitUntil (_count > 3);`). Save data from earlier versions can't be loaded.
 
 **Changes in v0.80:** **fixed values outside scripts**: `Bango::ParseFixedValue(TypeName, Text, OutValue, OutError)` reads a value written as text, checked exactly as a script variable's starting value is, in the editor and in packaged games (section 4, Fixed values), and `Bango::GetValueTypeNames()` lists the types a value can have, in menu order. The script editor's **type picker** and **value box** are public widgets (`SBangoTypePicker`, `SBangoValueBox`, in `BangoValueWidgets.h`), for other editor modules to use (section 15, Value widgets); SCRIPT VARS and GLOBAL VARS use the same ones, so their value box now shows a value's error as it's typed.
 
@@ -242,7 +244,7 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
 | `forEach (_x in arr)` | exec in → Do, Then |
 | `sequence { ... } { ... }` | exec in → Scope 0, Scope 1, Scope 2, ... (one per block), Then |
 | `spawn { ... }` | exec in → Run, Then |
-| `waitUntil (cond);` | exec in → exec out ("Wait Until", showing the condition) |
+| `waitUntil (cond);` or `waitUntil (cond) timeout (seconds) { ... }` | exec in → Timeout (its block), Then ("Wait Until", showing the condition and the timeout's seconds) |
 | `switch (value) { case ...: { } default: { } }` | exec in → one output per case (beside a box with its values), Default, Then |
 | `break;` / `continue;` | exec in → exec out |
 | `return [expr];` | exec in → exec out |
@@ -265,7 +267,7 @@ A `goto` node **does not draw a wire** to its label. It shows the target label's
 
 ## 2. Blocks and semicolons
 
-- A block that ends a statement (`if`, `while`, `for`, `forEach`, `sequence`, `spawn`, `switch` and `function`) closes with `}`. A `;` after it is allowed (`};`, as earlier versions required) but not needed; the graph editor writes `}`. The next statement starts on a new line.
+- A block that ends a statement (`if`, `while`, `for`, `forEach`, `sequence`, `spawn`, `switch`, a `waitUntil`'s `timeout` and `function`) closes with `}`. A `;` after it is allowed (`};`, as earlier versions required) but not needed; the graph editor writes `}`. The next statement starts on a new line.
 - A `}` that is followed by `else` has no semicolon.
 - `else if` is allowed. A whole `if / else if / else` chain ends with a single `}`. In the graph, the inner `if` is the node on the outer if's Else pin.
 - A `{` block on its own, not belonging to one of the statements above, is a compile error. (To group statements, use a `sequence`, section 8.)
@@ -1015,9 +1017,31 @@ waitUntil (stage == 3 && soldierIsDead);    //@4(0, 2)
 - **Not set up yet:** a global the condition reads that's nil or doesn't exist yet makes the condition false, and the script keeps waiting quietly, as a condition gives Unset (section 10, Conditions). Any other error stops the script, as it would in an `if`.
 - **The condition must answer at once:** a command in it that waits (like a `Sleep`, or a choice) stops the script with an error, and so does a `waitUntil` in a function the condition calls.
 - The condition must be a bool. A condition script (section 10) can't use `waitUntil`: a condition must answer at once.
-- The `//@` metadata goes on its line. In the graph, it's a **Wait Until** node, with the condition as its one row.
+- **A condition that can't change is a compile error.** While a script waits, its locals, script variables and inputs don't change, so a condition that reads no global (itself, or in the script's functions it calls) and calls no command that could answer differently later would carry on at once or wait forever: `waitUntil (_count > 3);`, `waitUntil (Count(_list) > 0);`, `waitUntil (true);`. *"This waitUntil's condition can't change while the script waits: it reads no global, and calls no command that could answer differently later ... Read a global in it, or use an if."* A global the script doesn't declare counts as one that can change.
+- The `//@` metadata goes on its line. In the graph, it's a **Wait Until** node, with the condition as its first row (section 12).
 - In the debugger, a script waiting here is shown on the `waitUntil`'s node, waiting on "waitUntil".
 - It's saved like a `Sleep`: after loading, the condition is checked again at the end of the first frame. Hot reload can switch the script to the new version while it waits here (section 11), and the new version's condition is checked straight away.
+
+#### Timeout
+`waitUntil (condition) timeout (seconds)` and a block waits **no longer than that many seconds**. If the condition is true by then, the block is skipped, as if it weren't there. If it still isn't, the block runs, and then the script carries on with what follows it, like an `if`'s block:
+
+```
+waitUntil (stage == 3 && soldierIsDead) timeout (20)    //@4(0, 2)
+{
+	@guard Speak("Hurry up.");
+}
+@gate OpenDoor();          // after the condition came true, or after the block
+```
+
+- To do something else instead when the time is up, leave from the block: `return;`, `break;` or `continue;` in a loop, or a `goto` (to wait again: `label Wait;` above it and `goto Wait;` in the block).
+- **The seconds** are a number (an `int` or a `float`), worked out **once**, when the script gets there, before the condition is first checked. A negative or `nil` one stops the script. `timeout (0)` doesn't wait at all: the condition is checked once, and if it's false the block runs.
+- The time is the world's, like `Sleep`'s: it stops while the game is paused, and follows time dilation.
+- The condition is checked as without a timeout (when a global it reads changes, or every frame if it's polled). In the frame the time runs out it's checked once more, and true then still counts as in time.
+- **`timeout` is not a keyword.** It's only read as one here, between the condition's `)` and a `(`; anywhere else it's an ordinary name (`int timeout = 5;`, even `timeout (timeout)`).
+- The block is a block like any other: locals declared in it end with it, and a `goto` can't jump into it. It can be empty (`{` then `}`): the wait just ends. The header, to the `)` after the seconds, must be on one line; it ends with its block's `}`, not a `;`. A `waitUntil` without a timeout has no block.
+- A condition that can't change is still an error with a timeout (it would always wait the whole time: use `Sleep`).
+- The time left is saved with the script, and kept when it's hot reloaded while waiting there (the new version's seconds aren't worked out until it gets there again). In a loop, the time starts again each time round.
+- The `//@` metadata goes on the `waitUntil` line. Disabling it disables its block.
 
 ### switch
 `switch (value)` is followed by `{`, then its cases, each `case` and its values, a `:` and a block, then an optional `default:` and a block, then `}`:
@@ -1390,7 +1414,7 @@ How a running copy switches:
 ### Save and load
 A save stores:
 - Every running instance: script path (or, for a script spawned from text, its name and its whole text), call stack (function, resume point, locals including script parameters), and value stack, so a script paused in the middle of a function or an expression resumes exactly where it was.
-- The pending state of whatever latent command each instance is waiting on, or the `waitUntil` it's paused at.
+- The pending state of whatever latent command each instance is waiting on, or the `waitUntil` it's paused at (and the time its timeout has left).
 - All global values.
 
 On load, each saved script is loaded and compiled from its path (or from its saved text), and its saved state is checked against it. If a script was changed so that the saved state no longer fits (or the file is missing), that script isn't restored and an error is shown. Other scripts still load. Beyond that check, loading state into a changed script is **undefined behaviour** (not supported).
@@ -1434,6 +1458,7 @@ The graph editor shows a script as nodes and wires and saves it back as text. Th
 ### Pins and wires
 - Every node except the entry has one **exec input**, and each input can have **only one wire** into it.
 - Every node has one main **exec output**. On `if`, loops, sequences and switches it is called **Then**; it leads to the statement after the block (a sequence's last block).
+- A **Wait Until** has **Timeout** above **Then**: Timeout leads to the nodes run if its timeout's time runs out (and then on to Then); Then is where it carries on once the condition is true. Its rows are the condition and **Timeout**, the seconds (a float), which is optional: empty, it waits as long as it takes, and the node is written `waitUntil (condition);`. With seconds, or with something wired to Timeout, it's written with `timeout (seconds)` and its block; wired without seconds, that's `timeout ()`, which doesn't compile until they're filled in (the row then shows *missing*). Clearing the seconds takes the timeout away, unless Timeout is still wired.
 - `if` also has **Do** and **Else** outputs; `while`, `for` and `forEach` have **Do**; a **Spawn** has **Run** (its block, started as a separate copy of the script) and **Then**, which goes on straight away, and an optional **Var** field, shown as **Var** [name] = *New Handle*: the `int` variable the copy's id goes in. A **Sequence** has an output per block, named **Scope 0**, **Scope 1**, **Scope 2**, ..., above **Then** (for what follows its blocks). Its **Add pin** button (under its outputs, as on Blueprint's Sequence node) or right-click > **Add Output** adds one at the end; right-clicking one > **Remove Scope N** removes it and its wire (the nodes on it stay, unwired), and the later outputs move up. A Sequence always keeps at least one output. In the add-node menu it's under Flow Control, and starts with two.
 - A **Switch** has its **On** field (the value it switches on), then an output per case, each with a box just inside the node showing that case's values (the first labelled **Case**) (click it to edit them; Enter or Tab goes on to the next case's box, Shift goes back). Then come **Default** and **Then**. Its **Add pin** button or right-click > **Add Case** adds a case, with no value yet, before Default; right-clicking a case's output > **Remove Case** removes it and its wire, and the later cases move up. **Default** is only written to the text when something is wired to it. A compile error in a case's values outlines that case's box in red. In the add-node menu it's under Flow Control, and starts with one case.
 - A block is the chain of nodes along those wires: the Do chain is the `if` block, the Else chain the `else` block, and so on.
@@ -1573,7 +1598,7 @@ This covers registered commands (the array commands are some of them) and this s
 
 **Set nodes know their variable's type** when they can see its declaration: the graph's parameters and locals, the file's globals, or the variable of a `for` or `forEach` loop the node is inside (For Each's typed from the array). The Var's `(x)` icon is then tinted for that type, an array element like `_grid[1]` takes off one `[]` per index, and the To (Add To and Subtract From's Value, Multiply and Divide's By) takes the same type: it gets that type's icon, and for a `string` or `text` variable it's typed as text. A variable it can't see (a global declared by another script, a loop variable outside its loop, a name being typed) stays grey. The same goes for For Each's Variable. Changing a local's or global's type, or renaming a Var, updates the types on every node within a moment.
 
-Anything that isn't a single call is a generic node: **Set** (Var, To), **Add To** / **Subtract From** (Var, Value), **Multiply** / **Divide** (Var, By), **Increment** / **Decrement** (Var), **If** / **While** (the condition, in one row with no label), **For** (see below), **For Each** (Variable, Array), **Return** (see below), **Label** and **Go To** (a name). The **Script Start** node has a row per parameter (its name and type; defaults are in the Inputs list); a function's start node shows its return type and parameters.
+Anything that isn't a single call is a generic node: **Set** (Var, To), **Add To** / **Subtract From** (Var, Value), **Multiply** / **Divide** (Var, By), **Increment** / **Decrement** (Var), **If** / **While** (the condition, in one row with no label), **Wait Until** (the condition, with no label, and an optional Timeout), **For** (see below), **For Each** (Variable, Array), **Return** (see below), **Label** and **Go To** (a name). The **Script Start** node has a row per parameter (its name and type; defaults are in the Inputs list); a function's start node shows its return type and parameters.
 
 **Return** nodes know where they are. In the main graph, Return ends the script and has no Value row. In a `void` function it ends the function, with no Value row. In a function with a return type, it has a **Value** row of that type (with its icon; for a `string` or `text` function it's typed as text). Changing the function's return type updates its Return nodes within a moment. A value where none belongs (`return 5;` in the main graph) still shows a Value row, so it can be cleared; compiling says why it's wrong.
 
@@ -1592,7 +1617,7 @@ Problems visible from the line alone show Blueprint's **ERROR!** banner on the n
     Which rows are open isn't saved.
   - A text field can hold a variable or expression instead: type it after a `=`, like `=_name` or `=Format("{0}", _n)`. Such a field shows `=` and the expression. To start the text itself with `=`, type `\=`. Clearing an optional text field removes it; type `=""` for an empty text.
 - **Adding nodes:** right-click the graph, or drag a wire off a pin and let go, for the **add-node menu**: Blueprint's searchable menu, with the nodes grouped by category and sorted by name in each.
-  - **Flow Control:** If, While, For, For Each, Break, Continue, Return, Label, Go To, Reroute.
+  - **Flow Control:** If, While, For, For Each, Sequence, Switch, Spawn, Wait Until, Break, Continue, Return, Label, Go To, Reroute.
   - **Variables:** **Local Bool**, **Local Int**, **Local Float**, **Local String**, **Local Entity**, **Local Text**, **Local Vector2**, **Local Vector3** and an **Array** of each (like **Local Int Array**), each declaring a new local (named `_newInt` and the like, not clashing with the graph's names) with a **Name** row and a **Value** row of its type; then **Set Global Bool**, **Set Global Int** and so on, and an **Array** of each, each setting a new global (named `newBool` and the like) with a **Name** row and a **To** row; then Set, Add To, Subtract From, Multiply, Divide, Increment, Decrement. (Globals declared at the top, and script variables, are added in the Global Vars and Script Vars lists.) A node's variable rows know a local's type only where the local is visible: after its Local node, in that chain and the blocks inside it.
   - **Arrays:** Push, InsertAt, Pop, RemoveAt. Then a group per command category (commands without one are under **Commands**), and **This Script** for the script's own functions. Commands whose value must be used aren't offered.
   - A new node's **fields start empty**, and it doesn't compile until they're filled in (section 5): nothing runs with a made-up value. The only things filled in are names a node needs to read at all, chosen not to clash with any name in the graph: a For's Var (`_i`) and For Each's Variable (`_item`). Compile puts the error on the first empty field.

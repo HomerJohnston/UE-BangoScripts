@@ -78,6 +78,7 @@ namespace BangoProgramPrivate
 				I.C & Bango::InPlaceArgCountMask, ((I.C >> Bango::InPlaceFlagShift) & Bango::CallResultUsed) ? TEXT(" +result") : TEXT(""));
 		case EBangoOp::ForEachNext:
 			return FString::Printf(TEXT("%s %s -> %d"), *DescribeSlot(Function, I.A), *DescribeSlot(Function, I.B), I.C);
+		case EBangoOp::WaitBegin:
 		case EBangoOp::WaitCheck:
 			return FString::Printf(TEXT("#%d"), I.A);
 		case EBangoOp::WaitResult:
@@ -134,6 +135,7 @@ namespace Bango
 		case EBangoOp::SpawnBlock:         return TEXT("SpawnBlock");
 		case EBangoOp::CallCommandInPlace: return TEXT("CallCommandInPlace");
 		case EBangoOp::ForEachNext:        return TEXT("ForEachNext");
+		case EBangoOp::WaitBegin:          return TEXT("WaitBegin");
 		case EBangoOp::WaitCheck:          return TEXT("WaitCheck");
 		case EBangoOp::WaitResult:         return TEXT("WaitResult");
 		default:                           return TEXT("?");

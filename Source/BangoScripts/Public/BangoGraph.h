@@ -63,7 +63,11 @@ enum class EBangoGraphNodeKind : uint8
 	Goto,
 	/** A bend in a wire: no text, one input, one output. Written as a line with only its //@ comment. */
 	Reroute,
-	/** `waitUntil (condition);`: pauses until the condition (Text) is true; then Next. */
+	/**
+	 * `waitUntil (condition);`: pauses until the condition (Text) is true; then Next. With a timeout, Text is
+	 * `condition) timeout (seconds` (Bango::FindWaitUntilTimeout splits it), and Branches[0] ("Timeout") is the block
+	 * run when the time is up, before Next. It's written with a timeout if Text has one or Timeout is wired.
+	 */
 	WaitUntil,
 	/**
 	 * `global bool opened = true;` in the code: sets a global each time this runs (and declares it for the whole file,
@@ -231,6 +235,16 @@ namespace Bango
 	BANGOSCRIPTS_API FString GetGraphNodeBranchName(EBangoGraphNodeKind Kind, int32 Branch);
 	/** As above, for this node: a switch's case outputs are named by their values, and its last is "Default". */
 	BANGOSCRIPTS_API FString GetGraphNodeBranchName(const FBangoGraphNode& Node, int32 Branch);
+
+	/**
+	 * A Wait Until node's text is its condition, or, with a timeout, `condition) timeout (seconds`. True if Text has
+	 * the timeout: the condition is then [0, OutConditionEnd) and the seconds [OutSecondsBegin, Text.Len()).
+	 */
+	BANGOSCRIPTS_API bool FindWaitUntilTimeout(const FString& Text, int32& OutConditionEnd, int32& OutSecondsBegin);
+	/** True if a Wait Until node is written with a timeout and its block: its text has one, or its Timeout output is wired. */
+	BANGOSCRIPTS_API bool HasWaitUntilTimeout(const FBangoGraphNode& Node);
+	/** A Wait Until node's line of code: `waitUntil (condition);`, or `waitUntil (condition) timeout (seconds)` before its block. */
+	BANGOSCRIPTS_API FString MakeWaitUntilHeader(const FString& Text, bool bWithTimeout);
 
 	/**
 	 * The order functions are written in: depth-first by first use. Walking the main graph in the order

@@ -380,5 +380,13 @@ static const FBangoParserTestCase GBangoParserTestCases[] =
 	{ TEXT("waitUntil needs brackets"), TEXT("waitUntil stage == 3;"), nullptr, TEXT("(1:11)"), TEXT("Expected '(' after 'waitUntil'") },
 	{ TEXT("waitUntil with an empty condition (a compile error)"), TEXT("waitUntil ();"), TEXT("(waitUntil <empty>)"), nullptr, nullptr },
 	{ TEXT("waitUntil ends with ;"), TEXT("waitUntil (a)\nb();"), nullptr, TEXT("(2:1)"), TEXT("Expected ';' at the end of the statement") },
+	{ TEXT("waitUntil with a timeout"), TEXT("waitUntil (stage == 3) timeout (20)\n{\n\tNag();\n}\nb();"), TEXT("(waitUntil (== stage 3) (timeout 20 ((call Nag)))) (call b)"), nullptr, nullptr },
+	{ TEXT("waitUntil with a timeout, on one line, its seconds worked out, its block empty"), TEXT("waitUntil (a) timeout (_t * 2) { } b();"), TEXT("(waitUntil a (timeout (* _t 2) ())) (call b)"), nullptr, nullptr },
+	{ TEXT("waitUntil with an empty timeout (a compile error)"), TEXT("waitUntil (a) timeout ()\n{\n}"), TEXT("(waitUntil a (timeout <empty> ()))"), nullptr, nullptr },
+	{ TEXT("timeout is an ordinary name elsewhere"), TEXT("int timeout = 3;\ntimeout = timeout + 1;\nwaitUntil (a) timeout (timeout)\n{\n}"), TEXT("(decl int timeout 3) (= timeout (+ timeout 1)) (waitUntil a (timeout timeout ()))"), nullptr, nullptr },
+	{ TEXT("a timeout needs its block"), TEXT("waitUntil (a) timeout (5);"), nullptr, TEXT("(1:26)"), TEXT("Expected '{' after 'timeout (...)'") },
+	{ TEXT("a timeout needs brackets"), TEXT("waitUntil (a) timeout 5\n{\n}"), nullptr, TEXT("(1:23)"), TEXT("Expected '(' after 'timeout'") },
+	{ TEXT("a timeout's header fits on one line"), TEXT("waitUntil (a) timeout (\n5)\n{\n}"), nullptr, TEXT("(2:2)"), TEXT("Each statement must be on one line") },
+	{ TEXT("waitUntil has a block only with a timeout"), TEXT("waitUntil (a)\n{\n}"), nullptr, TEXT("(2:1)"), TEXT("It has a block only with a timeout") },
 	{ TEXT("junk after a reroute run"), TEXT("//@3(1, 2) @4(2, 2) x"), nullptr, TEXT("(1:21)"), TEXT("Unexpected text after node metadata") },
 };

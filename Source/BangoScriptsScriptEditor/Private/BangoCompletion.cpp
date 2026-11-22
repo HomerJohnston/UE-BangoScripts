@@ -162,19 +162,19 @@ void FBangoCompletion::GetBuiltinItems(TArray<FBangoCompletionItem>& OutItems)
 void FBangoCompletion::GetKeywordItems(TArray<FBangoCompletionItem>& OutItems, bool bValuesOnly)
 {
 	using namespace BangoCompletionPrivate;
-	struct FKeyword { const TCHAR* Name; const TCHAR* Detail; const TCHAR* Description; bool bValue; };
+	struct FKeyword { const TCHAR* Name; const TCHAR* Detail; const TCHAR* Description; bool bValue; bool bHeader = false; };
 	static const FKeyword Keywords[] =
 	{
-		{ TEXT("if"),       TEXT("flow"),        TEXT("if (condition) { ... } runs its block when the condition is true."), false },
+		{ TEXT("if"),       TEXT("flow"),        TEXT("if (condition) { ... } runs its block when the condition is true."), false, true },
 		{ TEXT("else"),     TEXT("flow"),        TEXT("After an if block: else { ... } or else if (...) { ... }."), false },
-		{ TEXT("while"),    TEXT("flow"),        TEXT("while (condition) { ... } runs its block again and again while the condition is true."), false },
-		{ TEXT("for"),      TEXT("flow"),        TEXT("for (int _i = 0; _i < 3; _i++) { ... }: a counting loop."), false },
-		{ TEXT("forEach"),  TEXT("flow"),        TEXT("forEach (_x in _array) { ... } runs its block once for each element."), false },
+		{ TEXT("while"),    TEXT("flow"),        TEXT("while (condition) { ... } runs its block again and again while the condition is true."), false, true },
+		{ TEXT("for"),      TEXT("flow"),        TEXT("for (int _i = 0; _i < 3; _i++) { ... }: a counting loop."), false, true },
+		{ TEXT("forEach"),  TEXT("flow"),        TEXT("forEach (_x in _array) { ... } runs its block once for each element."), false, true },
 		{ TEXT("in"),       TEXT("flow"),        TEXT("In a forEach header: forEach (_x in _array)."), false },
 		{ TEXT("sequence"), TEXT("flow"),        TEXT("sequence { ... } { ... } runs its blocks one after another, each to its end."), false },
 		{ TEXT("spawn"),    TEXT("flow"),        TEXT("spawn { ... } starts its block as a separate running copy of the script, and carries on straight away."), false },
-		{ TEXT("waitUntil"), TEXT("flow"),       TEXT("waitUntil (condition); pauses the script until the condition is true (carries on at once if it already is)."), false },
-		{ TEXT("switch"),   TEXT("flow"),        TEXT("switch (value) { case 1: { ... } default: { ... } } runs the case whose value matches."), false },
+		{ TEXT("waitUntil"), TEXT("flow"),       TEXT("waitUntil (condition); pauses the script until the condition is true (carries on at once if it already is). With a timeout, it waits no longer than that, then runs the block: waitUntil (condition) timeout (seconds) { ... }"), false, true },
+		{ TEXT("switch"),   TEXT("flow"),        TEXT("switch (value) { case 1: { ... } default: { ... } } runs the case whose value matches."), false, true },
 		{ TEXT("case"),     TEXT("flow"),        TEXT("In a switch: case 1, 2: { ... }."), false },
 		{ TEXT("default"),  TEXT("flow"),        TEXT("In a switch, last: default: { ... } runs when no case matches."), false },
 		{ TEXT("break"),    TEXT("jump"),        TEXT("Leaves the loop it's in."), false },
@@ -205,7 +205,10 @@ void FBangoCompletion::GetKeywordItems(TArray<FBangoCompletionItem>& OutItems, b
 	{
 		if (!bValuesOnly || Keyword.bValue)
 		{
-			OutItems.Add(MakeItem(Keyword.Name, EBangoCompletionKind::Keyword, Keyword.Detail, Keyword.Description, false));
+			FBangoCompletionItem Item = MakeItem(Keyword.Name, EBangoCompletionKind::Keyword, Keyword.Detail, Keyword.Description, false);
+			Item.bHeader = Keyword.bHeader;
+			Item.bSemicolonsInHeader = Item.Name == TEXT("for"); // `for (a; b; c)`
+			OutItems.Add(Item);
 		}
 	}
 }
@@ -336,29 +339,31 @@ FBangoCompletionInsert FBangoCompletion::MakeInsert(const FBangoCompletionItem& 
 {
 	FBangoCompletionInsert Insert;
 	Insert.Text = Item.Name;
-	WordEnd = FMath::Clamp(WordEnd, 0, Line.Len());
-	if (!Item.bCallable || (WordEnd < Line.Len() && Line[WordEnd] == TEXT('(')))
+	if (!Item.bCallable && !Item.bHeader)
 	{
 		return Insert;
 	}
-	bool bRestBlank = true;
-	for (int32 I = WordEnd; I < Line.Len(); ++I)
+
+	// One path for everything that's followed by a bracket: a call's `Name(`, and a keyword's header, `if (`.
+	WordEnd = FMath::Clamp(WordEnd, 0, Line.Len());
+	int32 Next = WordEnd;
+	while (Next < Line.Len() && (Line[Next] == TEXT(' ') || Line[Next] == TEXT('\t')))
 	{
-		if (Line[I] != TEXT(' ') && Line[I] != TEXT('\t'))
-		{
-			bRestBlank = false;
-			break;
-		}
+		++Next;
+	}
+	const bool bRestBlank = Next >= Line.Len();
+	// A bracket there already: straight after a call's name, or after a keyword and any spaces.
+	if ((WordEnd < Line.Len() && Line[WordEnd] == TEXT('(')) || (Item.bHeader && !bRestBlank && Line[Next] == TEXT('(')))
+	{
+		return Insert;
 	}
 	if (Item.bNoArgs)
 	{
 		Insert.Text += TEXT("()");
+		return Insert;
 	}
-	else
-	{
-		Insert.Text += TEXT("(");
-		Insert.bOpenParen = bRestBlank;
-	}
+	Insert.Text += Item.bHeader ? TEXT(" (") : TEXT("(");
+	Insert.bOpenParen = bRestBlank && !Item.bSemicolonsInHeader;
 	return Insert;
 }
 
@@ -442,6 +447,48 @@ void FBangoCompletion::KeepOpenParens(const FString& Line, int32 CursorColumn, T
 		}
 		return false;
 	});
+}
+
+bool FBangoCompletion::IsTimeoutPlace(const FString& Line, int32 WordStart)
+{
+	// `waitUntil`, `(`, the condition, and the `)` that closes it as the last thing before the word.
+	const FString Before = Line.Left(FMath::Clamp(WordStart, 0, Line.Len()));
+	TArray<FBangoSyntaxToken> Tokens;
+	FBangoLineTokenizer::TokenizeLine(FStringView(Before), Tokens);
+	auto Is = [&Before, &Tokens](int32 Index, EBangoSyntaxKind Kind, const TCHAR* Text)
+	{
+		return Tokens.IsValidIndex(Index) && Tokens[Index].Kind == Kind && Before.Mid(Tokens[Index].Start, Tokens[Index].Len).Equals(Text, ESearchCase::CaseSensitive);
+	};
+	for (int32 I = 0; I + 1 < Tokens.Num(); ++I)
+	{
+		if (!Is(I, EBangoSyntaxKind::Keyword, TEXT("waitUntil")) || !Is(I + 1, EBangoSyntaxKind::Punctuation, TEXT("(")))
+		{
+			continue;
+		}
+		int32 Depth = 0;
+		for (int32 J = I + 1; J < Tokens.Num(); ++J)
+		{
+			if (Is(J, EBangoSyntaxKind::Punctuation, TEXT("(")))
+			{
+				++Depth;
+			}
+			else if (Is(J, EBangoSyntaxKind::Punctuation, TEXT(")")) && --Depth == 0)
+			{
+				return J == Tokens.Num() - 1; // its condition's `)`: the word must come straight after it
+			}
+		}
+		return false;
+	}
+	return false;
+}
+
+FBangoCompletionItem FBangoCompletion::GetTimeoutItem()
+{
+	using namespace BangoCompletionPrivate;
+	FBangoCompletionItem Item = MakeItem(TEXT("timeout"), EBangoCompletionKind::Keyword, TEXT("flow"),
+		TEXT("waitUntil (condition) timeout (seconds) { ... } waits no longer than that many seconds: if the condition still isn't true then, its block runs, then what follows."), false);
+	Item.bHeader = true; // `timeout (`
+	return Item;
 }
 
 bool FBangoCompletion::IsInStringOrComment(const FString& Line, int32 Column)

@@ -258,7 +258,12 @@ namespace BangoDumpPrivate
 			return S.Value ? FString::Printf(TEXT("(return %s)"), *Bango::DumpExpr(*S.Value)) : FString(TEXT("(return)"));
 		}
 		case EBangoStmtKind::WaitUntil:
-			return FString::Printf(TEXT("(waitUntil %s)"), *Bango::DumpExpr(*Stmt.As<FBangoWaitUntilStmt>()->Condition));
+		{
+			const FBangoWaitUntilStmt& S = *Stmt.As<FBangoWaitUntilStmt>();
+			return S.bHasTimeout
+				? FString::Printf(TEXT("(waitUntil %s (timeout %s %s))"), *Bango::DumpExpr(*S.Condition), *Bango::DumpExpr(*S.Timeout), *DumpBlock(S.TimeoutBlock))
+				: FString::Printf(TEXT("(waitUntil %s)"), *Bango::DumpExpr(*S.Condition));
+		}
 		case EBangoStmtKind::Label:
 			return FString::Printf(TEXT("(label %s)"), *Stmt.As<FBangoLabelStmt>()->Name);
 		case EBangoStmtKind::Goto:

@@ -1720,6 +1720,133 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			FString ReloadMessage;
 			Expect(Run.Instance.TakeReloadResult(ReloadMessage) == EBangoReloadResult::Reloaded, *(FString(TEXT("waitUntil reload: it switched: ")) + ReloadMessage));
 		}
+		// ---- waitUntil with a timeout ----
+		{
+			const float DeltaBefore = Context.DeltaSeconds;
+			const TCHAR* Timed = TEXT("global int score;\nwaitUntil (score > 10) timeout (2)\n{\n\tTalk(\"late\");\n}\nTalk(\"after\");");
+			// The time runs out while the global it reads isn't set: its block runs, then what follows.
+			{
+				FReloadRun Run;
+				Expect(StartRun(Run, Compile(Timed)) && Log.Num() == 0 && Run.Instance.GetWaitingCommandName() == TEXT("waitUntil"), TEXT("waitUntil timeout: waits"));
+				Expect(Run.Instance.IsWaitDue(Run.Globals), TEXT("waitUntil timeout: resumed every frame, to count its time"));
+				Context.DeltaSeconds = 1.0f;
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting && Log.Num() == 0, TEXT("waitUntil timeout: one second in, still waiting"));
+				Context.DeltaSeconds = 1.5f;
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && Log.Num() == 2 && Log[0] == TEXT("late") && Log[1] == TEXT("after"),
+					TEXT("waitUntil timeout: time up (the global unset), its block runs, then what follows"));
+			}
+			// The same with the global set, but the condition false.
+			{
+				FReloadRun Run;
+				StartRun(Run, Compile(Timed));
+				Set(Run.Globals, TEXT("score"), FBangoValue::MakeInt(5));
+				Context.DeltaSeconds = 0.5f;
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting && Log.Num() == 0, TEXT("waitUntil timeout: a change, still false, it waits on"));
+				Context.DeltaSeconds = 1.5f;
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && Log.Num() == 2 && Log[0] == TEXT("late") && Log[1] == TEXT("after"),
+					TEXT("waitUntil timeout: time up (the condition false), its block runs, then what follows"));
+			}
+			// True in time: the block is skipped. True in the very frame the time runs out counts as in time.
+			{
+				FReloadRun Run;
+				StartRun(Run, Compile(Timed));
+				Context.DeltaSeconds = 1.0f;
+				Run.Instance.Resume(Context);
+				Set(Run.Globals, TEXT("score"), FBangoValue::MakeInt(20));
+				Context.DeltaSeconds = 5.0f;
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && Log.Num() == 1 && Log[0] == TEXT("after"), TEXT("waitUntil timeout: true in time, its block is skipped"));
+			}
+			// Already true: no wait, no block. A timeout of 0 with it false: straight to the block.
+			{
+				FReloadRun Run;
+				Log.Reset();
+				BangoMakeRuntimeTestGlobals(Run.Globals);
+				Context.Globals = &Run.Globals;
+				Set(Run.Globals, TEXT("score"), FBangoValue::MakeInt(20));
+				FBangoRuntimeError StartError;
+				Run.Instance.Start(Compile(Timed), Commands, Run.Globals, 1, StartError);
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && Log.Num() == 1 && Log[0] == TEXT("after"), TEXT("waitUntil timeout: already true, no wait"));
+
+				FReloadRun Zero;
+				Log.Reset();
+				BangoMakeRuntimeTestGlobals(Zero.Globals);
+				Context.Globals = &Zero.Globals;
+				Zero.Instance.Start(Compile(TEXT("global int score;\nwaitUntil (score > 10) timeout (0)\n{\n\tTalk(\"late\");\n}\nTalk(\"after\");")), Commands, Zero.Globals, 1, StartError);
+				Expect(Zero.Instance.Resume(Context) == EBangoInstanceStatus::Finished && Log.Num() == 2 && Log[0] == TEXT("late"), TEXT("waitUntil timeout: 0 seconds and false, straight to its block"));
+			}
+			// Only as long as it's waiting there: a waitUntil without one, after it, waits as long as it takes.
+			{
+				FReloadRun Run;
+				StartRun(Run, Compile(TEXT("global int score;\nint _t = 1;\nwaitUntil (score > 10) timeout (_t * 2)\n{\n}\nwaitUntil (score > 10);\nTalk(\"after\");")));
+				Context.DeltaSeconds = 3.0f;
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting && !Run.Instance.IsWaitDue(Run.Globals), TEXT("waitUntil timeout: the next waitUntil has none"));
+				Context.DeltaSeconds = 100.0f;
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting && Log.Num() == 0, TEXT("waitUntil timeout: and waits as long as it takes"));
+				Set(Run.Globals, TEXT("score"), FBangoValue::MakeInt(20));
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && LastLog() == TEXT("after"), TEXT("waitUntil timeout: until it's true"));
+			}
+			// In a loop, the time starts again each time round. The block can leave the loop.
+			{
+				FReloadRun Run;
+				StartRun(Run, Compile(TEXT("global int score;\nint _n = 0;\nwhile (true)\n{\n\twaitUntil (score > 10) timeout (1)\n\t{\n\t\t_n++;\n\t\tif (_n == 2)\n\t\t{\n\t\t\tbreak;\n\t\t}\n\t\tTalk(\"again\");\n\t}\n}\nTalk(\"out\");")));
+				Context.DeltaSeconds = 1.0f;
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting && Log.Num() == 1 && Log[0] == TEXT("again"), TEXT("waitUntil timeout in a loop: timed out once, waiting again"));
+				Context.DeltaSeconds = 0.5f;
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting && Log.Num() == 1, TEXT("waitUntil timeout in a loop: its time started again"));
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && LastLog() == TEXT("out"), TEXT("waitUntil timeout in a loop: the block's break leaves the loop"));
+			}
+			// A negative or nil timeout stops the script.
+			{
+				FReloadRun Run;
+				StartRun(Run, Compile(TEXT("global bool go;\nfloat _t = -1;\nwaitUntil (go) timeout (_t)\n{\n}")));
+				Expect(Run.Instance.GetStatus() == EBangoInstanceStatus::Failed && Run.Instance.GetError().Message.Contains(TEXT("A timeout can't be negative")), TEXT("waitUntil timeout: negative is an error"));
+				FReloadRun Nil;
+				StartRun(Nil, Compile(TEXT("global bool go;\nfloat _t;\nwaitUntil (go) timeout (_t)\n{\n}")));
+				Expect(Nil.Instance.GetStatus() == EBangoInstanceStatus::Failed && Nil.Instance.GetError().Message.Contains(TEXT("'_t' is nil")), TEXT("waitUntil timeout: nil is an error"));
+			}
+			// Saved and loaded while waiting: the time it has left is kept.
+			{
+				FReloadRun Run;
+				TSharedPtr<FBangoProgram> TimedProgram = Compile(Timed);
+				StartRun(Run, TimedProgram);
+				Context.DeltaSeconds = 1.5f;
+				Run.Instance.Resume(Context);
+				TArray<uint8> Bytes;
+				{
+					FMemoryWriter Writer(Bytes);
+					Run.Globals.Serialize(Writer);
+					Run.Instance.Serialize(Writer);
+				}
+				FBangoGlobalStore LoadedGlobals;
+				FBangoInstance Loaded;
+				{
+					FMemoryReader Reader(Bytes);
+					LoadedGlobals.Serialize(Reader);
+					Loaded.Serialize(Reader);
+				}
+				FString BindError;
+				Expect(Loaded.Bind(TimedProgram, Commands, BindError) && Loaded.GetWaitSet() && Loaded.IsWaitDue(LoadedGlobals), TEXT("waitUntil timeout save/load: waiting after loading"));
+				Context.Globals = &LoadedGlobals;
+				Log.Reset();
+				Context.DeltaSeconds = 0.25f;
+				Expect(Loaded.Resume(Context) == EBangoInstanceStatus::Waiting && Log.Num() == 0, TEXT("waitUntil timeout save/load: not up yet (0.25 s left)"));
+				Context.DeltaSeconds = 0.5f;
+				Expect(Loaded.Resume(Context) == EBangoInstanceStatus::Finished && Log.Num() == 2 && Log[0] == TEXT("late"), TEXT("waitUntil timeout save/load: its time left was kept"));
+			}
+			// Hot reload while waiting there: the time it has left is kept, and the new version's block runs.
+			{
+				FReloadRun Run;
+				StartRun(Run, Compile(TEXT("global int score;\nwaitUntil (score > 10) timeout (2)    //@1(0, 0)\n{\n\tTalk(\"v1\");    //@2(0, 2)\n}")));
+				FString ReloadError;
+				Run.Instance.RequestReload(Compile(TEXT("global int score;\nwaitUntil (score > 50) timeout (99)    //@1(0, 0)\n{\n\tTalk(\"v2\");    //@2(0, 2)\n}")), Commands, ReloadError);
+				Context.DeltaSeconds = 1.0f;
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting && Log.Num() == 0, TEXT("waitUntil timeout reload: switched, still waiting"));
+				FString ReloadMessage;
+				Expect(Run.Instance.TakeReloadResult(ReloadMessage) == EBangoReloadResult::Reloaded, *(FString(TEXT("waitUntil timeout reload: it switched: ")) + ReloadMessage));
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && LastLog() == TEXT("v2"), TEXT("waitUntil timeout reload: the time left was kept, the new block runs"));
+			}
+			Context.DeltaSeconds = DeltaBefore;
+		}
 		// Not in a condition.
 		{
 			FBangoProgram ConditionProgram;

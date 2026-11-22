@@ -38,6 +38,15 @@ struct FBangoCompletionItem
 
 	/** A callable that takes no arguments at all: accepting it types `Name()`. */
 	bool bNoArgs = false;
+
+	/**
+	 * A keyword whose bracketed header follows it (if, while, for, forEach, switch, waitUntil, and a waitUntil's
+	 * timeout): accepting it types `name (`, by the same code as a callable's bracket (FBangoCompletion::MakeInsert).
+	 */
+	bool bHeader = false;
+
+	/** A header with `;`s of its own inside its brackets (for): it gets no faint `)`, which a `;` would close. */
+	bool bSemicolonsInHeader = false;
 };
 
 /** What accepting an autocomplete entry types in place of the word (FBangoCompletion::MakeInsert). */
@@ -87,9 +96,18 @@ public:
 	static bool FindCallTarget(const FString& Line, int32 WordStart, FString& OutTargetEntity);
 
 	/**
+	 * Whether the word starting at WordStart is where a waitUntil's `timeout` goes: right after the `)` that closes its
+	 * condition (`waitUntil (ready) ti|`). Nothing else can be written there, so the list then holds only GetTimeoutItem.
+	 */
+	static bool IsTimeoutPlace(const FString& Line, int32 WordStart);
+	/** `timeout`, as an item: a word of the language only in that place. */
+	static FBangoCompletionItem GetTimeoutItem();
+
+	/**
 	 * What accepting Item for the word that ends at WordEnd of Line types. A name that isn't callable, or one with a
 	 * `(` straight after it already: the name. One with no arguments: `Name()`. One with arguments: `Name(`, with
-	 * bOpenParen when the rest of the line is blank.
+	 * bOpenParen when the rest of the line is blank. A keyword with a header (bHeader) is the same with a space before
+	 * its bracket, `if (`, unless a `(` follows it already (spaces aside).
 	 */
 	static FBangoCompletionInsert MakeInsert(const FBangoCompletionItem& Item, const FString& Line, int32 WordEnd);
 

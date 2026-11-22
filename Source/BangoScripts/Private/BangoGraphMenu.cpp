@@ -181,8 +181,8 @@ namespace Bango
 			.Description = TEXT("Runs the output of the first case whose value equals the switch's value (an int, a string or an entity), or Default if none does; then carries on from Then. Add a case with Add pin; a case can list several values, like 1, 2.");
 		Menu.Add(Flow, EBangoGraphNodeKind::Spawn, FString(), TEXT("spawn async fork parallel background run start detach"))
 			.Description = TEXT("Starts the nodes on Run as a separate running copy of this script, with copies of its variables as they are now, and carries on from Then straight away. Good for small fire-and-forget jobs, like waiting a bit and then opening a door. In the copy, Return ends it.");
-		Menu.Add(Flow, EBangoGraphNodeKind::WaitUntil, FString(), TEXT("wait until condition await pause event when"))
-			.Description = TEXT("Pauses the script until the condition is true, then carries on (straight away if it already is). It's checked again when a global it reads changes, or every frame if it calls a command.");
+		Menu.Add(Flow, EBangoGraphNodeKind::WaitUntil, FString(), TEXT("wait until condition await pause event when timeout deadline"))
+			.Description = TEXT("Pauses the script until the condition is true, then carries on from Then (straight away if it already is). It's checked again when a global it reads changes, or every frame if it calls a command. With a Timeout (seconds), it waits no longer than that: if the condition still isn't true then, the nodes on Timeout run, then Then.");
 		Menu.Add(Flow, EBangoGraphNodeKind::Break, FString(), TEXT("loop exit"))
 			.Description = TEXT("Leaves the loop it's in, carrying on from the loop's Then.");
 		Menu.Add(Flow, EBangoGraphNodeKind::Continue, FString(), TEXT("loop next"))

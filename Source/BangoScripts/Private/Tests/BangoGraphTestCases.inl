@@ -295,6 +295,9 @@ static const TCHAR* const GBangoGraphRoundTripSources[] =
 	// waitUntil: a node with a condition and one way on, in a loop, disabled, and disconnected.
 	TEXT("while (true)    //@1(0, 0)\n{\n\twaitUntil (stage == 3 && Count(found) > 0);    //@2(2, 0)\n\tTalk(\"go\");    //@3(4, 0)\n\t/* waitUntil (false); */    //@4(6, 0)\n}\n//~ waitUntil (ready);    //@5(0, 4)\n"),
 
+	// waitUntil with a timeout: its block is its Timeout output. Empty, in a function, disabled, and disconnected.
+	TEXT("waitUntil (stage == 3) timeout (20)    //@1(0, 0)\n{\n\tTalk(\"late\");    //@2(2, 2)\n\tgoto Again;    //@3(4, 2)\n}\nlabel Again;    //@4(2, 0)\nwaitUntil (ready) timeout (_t * 2)    //@5(4, 0)\n{\n}\n/*\nwaitUntil (ready) timeout (1)    //@6(6, 0)\n{\n\tTalk(\"off\");    //@7(8, 2)\n}\n*/\nfunction void F()\n{\n\twaitUntil (ready) timeout (0.5)    //@8(0, 0)\n\t{\n\t\treturn;    //@9(2, 2)\n\t}\n}\n//~ waitUntil (ready) timeout (3)    //@10(0, 6)\n//~ {\n//~ \tTalk(\"x\");    //@11(2, 8)\n//~ }\n"),
+
 	// Disabled nodes, among comments and reroutes, in a function and a disconnected chain.
 	TEXT("// first\n/* Talk(\"b\"); */ //@2(4, 0)\n/*\n// a loop\nwhile (true) //@3(1, 1)\n{\n\t/* break; */ //@4(2, 2)\n\t//@5(3, 3)\n}\n*/\nfunction void F()\n{\n\t/* return; */\n}\n//~ /*\n//~ if (a) //@6(9, 9)\n//~ {\n//~ \t/* /* b(); */ */\n//~ }\n//~ */\n"),
 };
@@ -317,6 +320,73 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		const FBangoGraphNode* Wait = bBuilt && Doc.Main.Nodes.Num() > 1 ? &Doc.Main.Nodes[1] : nullptr;
 		Expect(Wait && Wait->Kind == EBangoGraphNodeKind::WaitUntil && Wait->Text == TEXT("stage == 3") && Wait->Next != INDEX_NONE
 			&& Bango::GetGraphNodeKindName(Wait->Kind) == TEXT("Wait Until"), FString(TEXT("waitUntil: a Wait Until node with its condition: ")) + Error.ToString());
+	}
+
+	// ---- waitUntil with a timeout: its text holds both, and its Timeout output is its block ----
+	{
+		FBangoGraphDocument Doc;
+		FBangoCompileError Error;
+		const bool bBuilt = Bango::BuildGraph(TEXT("waitUntil (stage == 3) timeout (20)    //@1(0, 0)\n{\n\tTalk(\"late\");    //@2(2, 2)\n}\nTalk(\"go\");    //@3(4, 0)\nwaitUntil (ready);    //@4(6, 0)"), TEXT("wait.bango"), Doc, Error);
+		Expect(bBuilt && Doc.Main.Nodes.Num() == 5, FString(TEXT("waitUntil timeout: builds: ")) + Error.ToString());
+		if (bBuilt && Doc.Main.Nodes.Num() == 5)
+		{
+			FBangoGraphNode* Wait = nullptr;
+			FBangoGraphNode* Plain = nullptr;
+			for (FBangoGraphNode& Node : Doc.Main.Nodes)
+			{
+				Wait = Node.NodeID == 1 ? &Node : Wait;
+				Plain = Node.NodeID == 4 ? &Node : Plain;
+			}
+			Expect(Wait && Wait->Kind == EBangoGraphNodeKind::WaitUntil && Wait->Text == TEXT("stage == 3) timeout (20") && Bango::GetGraphNodeBranchCount(*Wait) == 1
+				&& Doc.Main.Nodes.IsValidIndex(Wait->Branches[0]) && Doc.Main.Nodes[Wait->Branches[0]].NodeID == 2
+				&& Doc.Main.Nodes.IsValidIndex(Wait->Next) && Doc.Main.Nodes[Wait->Next].NodeID == 3, TEXT("waitUntil timeout: its text, its Timeout block and what follows"));
+			Expect(Bango::GetGraphNodeBranchCount(EBangoGraphNodeKind::WaitUntil) == 1 && Bango::GetGraphNodeBranchName(EBangoGraphNodeKind::WaitUntil, 0) == FString(TEXT("Timeout"))
+				&& Bango::GetGraphNodeNextName(EBangoGraphNodeKind::WaitUntil) == FString(TEXT("Then")), TEXT("waitUntil timeout: outputs Timeout and Then"));
+			Expect(Plain && Plain->Text == TEXT("ready") && Bango::GetGraphNodeBranchCount(*Plain) == 1 && Plain->Branches[0] == INDEX_NONE && !Bango::HasWaitUntilTimeout(*Plain) && Bango::HasWaitUntilTimeout(*Wait),
+				TEXT("waitUntil timeout: one without has the output, unwired"));
+
+			const FBangoNodeLayoutContext Context = Bango::MakeNodeLayoutContext(Doc, nullptr);
+			FBangoNodeLayout Layout = Bango::GetNodeLayout(*Wait, false, Context);
+			Expect(Layout.Fields.Num() == 2 && Layout.Fields[0].Text == TEXT("stage == 3") && Layout.Fields[0].bHideLabel
+				&& Layout.Fields[1].Label == TEXT("Timeout") && Layout.Fields[1].Text == TEXT("20") && Layout.Fields[1].bPresent && Layout.Fields[1].bOptional && Layout.Fields[1].TypeHint == TEXT("float"),
+				TEXT("waitUntil timeout: fields are the condition and Timeout"));
+			FString EditError;
+			Expect(Bango::SetNodeField(*Wait, false, Context, 1, TEXT("_t * 2"), EditError) && Wait->Text == TEXT("stage == 3) timeout (_t * 2"), FString(TEXT("waitUntil timeout: changing the seconds: ")) + EditError);
+			Expect(Bango::SetNodeField(*Wait, false, Context, 0, TEXT("Ready(1)"), EditError) && Wait->Text == TEXT("Ready(1)) timeout (_t * 2"), FString(TEXT("waitUntil timeout: changing the condition: ")) + EditError);
+			Expect(!Bango::SetNodeField(*Wait, false, Context, 1, TEXT("1 2"), EditError) && Wait->Text == TEXT("Ready(1)) timeout (_t * 2"), TEXT("waitUntil timeout: seconds that don't read are refused"));
+
+			// Its Timeout output still wired, without seconds: written `timeout ()`, to fill in.
+			Expect(Bango::SetNodeField(*Wait, false, Context, 1, FString(), EditError) && Wait->Text == TEXT("Ready(1)"), FString(TEXT("waitUntil timeout: clearing the seconds leaves the condition: ")) + EditError);
+			FString Text;
+			FString WriteError;
+			Expect(Bango::WriteGraphText(Doc, Text, WriteError) && Text.Contains(TEXT("waitUntil (Ready(1)) timeout ()")) && Text.Contains(TEXT("Talk(\"late\");")),
+				FString(TEXT("waitUntil timeout: wired without seconds, written with an empty timeout: ")) + Text);
+			FBangoGraphDocument Again;
+			Expect(Bango::BuildGraph(Text, TEXT("wait.bango"), Again, Error), FString(TEXT("waitUntil timeout: that reads again: ")) + Error.ToString());
+			for (const FBangoGraphNode& Node : Again.Main.Nodes)
+			{
+				if (Node.NodeID == 1)
+				{
+					Expect(Node.Text == TEXT("Ready(1)) timeout (") && Node.Branches[0] != INDEX_NONE, TEXT("waitUntil timeout: an empty timeout reads back, its block wired"));
+					const FBangoNodeLayout EmptyLayout = Bango::GetNodeLayout(Node, false, Context);
+					FBangoGraphNode Copy = Node;
+					Expect(EmptyLayout.Fields.Num() == 2 && EmptyLayout.Fields[0].Text == TEXT("Ready(1)") && !EmptyLayout.Fields[1].bPresent && !EmptyLayout.Fields[1].bOptional,
+						TEXT("waitUntil timeout: its seconds are missing, not optional"));
+					Expect(Bango::SetNodeField(Copy, false, Context, 1, TEXT("3"), EditError) && Copy.Text == TEXT("Ready(1)) timeout (3"), FString(TEXT("waitUntil timeout: filling missing seconds in: ")) + Copy.Text);
+					Copy = Node;
+					Expect(Bango::SetNodeField(Copy, false, Context, 1, FString(), EditError) && Copy.Text == TEXT("Ready(1)"), FString(TEXT("waitUntil timeout: clearing missing seconds takes the timeout away: ")) + Copy.Text);
+				}
+			}
+
+			// Unwired too, it's a plain waitUntil again. Filling Timeout in on a plain one adds the timeout.
+			Wait->Branches[0] = INDEX_NONE;
+			Expect(Bango::WriteGraphText(Doc, Text, WriteError) && Text.Contains(TEXT("waitUntil (Ready(1));")), FString(TEXT("waitUntil timeout: unwired and without seconds, a plain waitUntil: ")) + Text);
+			Layout = Bango::GetNodeLayout(*Plain, false, Context);
+			Expect(Layout.Fields.Num() == 2 && Layout.Fields[0].Text == TEXT("ready") && !Layout.Fields[1].bPresent && Layout.Fields[1].bOptional, TEXT("waitUntil timeout: a plain one has an empty Timeout field"));
+			Expect(Bango::SetNodeField(*Plain, false, Context, 1, TEXT("5"), EditError) && Plain->Text == TEXT("ready) timeout (5"), FString(TEXT("waitUntil timeout: filling Timeout in: ")) + EditError);
+			Expect(Bango::WriteGraphText(Doc, Text, WriteError) && Text.Contains(TEXT("waitUntil (ready) timeout (5)")), FString(TEXT("waitUntil timeout: written with its (empty) block: ")) + Text);
+			Expect(Bango::BuildGraph(Text, TEXT("wait.bango"), Again, Error), FString(TEXT("waitUntil timeout: and that reads again: ")) + Error.ToString());
+		}
 	}
 
 	// ---- Large Script Threshold: below it, written compact (no headings, no metadata) ----

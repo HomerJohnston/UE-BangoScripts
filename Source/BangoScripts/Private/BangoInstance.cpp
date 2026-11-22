@@ -4,7 +4,7 @@
 
 namespace BangoInstancePrivate
 {
-	constexpr int32 InstanceSaveVersion = 4; // 2: waitUntil. 3: a pending command's type arguments. 4: and whether its result is used. Raise it when the save format changes: data in another format is refused, not misread
+	constexpr int32 InstanceSaveVersion = 5; // 2: waitUntil. 3: a pending command's type arguments. 4: and whether its result is used. 5: a waitUntil's timeout. Raise it when the save format changes: data in another format is refused, not misread
 
 	static FString TypeText(const FBangoType& Type)
 	{
@@ -532,6 +532,12 @@ const FBangoWaitSet* FBangoInstance::GetWaitSet() const
 
 bool FBangoInstance::IsWaitDue(const FBangoGlobalStore& Globals) const
 {
+	// One with a timeout is resumed every frame, to count its time down (Resume only checks the condition if it's due).
+	return GetWaitSet() && (WaitTimeLeft >= 0.0 || IsWaitConditionDue(Globals));
+}
+
+bool FBangoInstance::IsWaitConditionDue(const FBangoGlobalStore& Globals) const
+{
 	const FBangoWaitSet* Set = GetWaitSet();
 	if (!Set)
 	{
@@ -554,6 +560,19 @@ bool FBangoInstance::IsWaitDue(const FBangoGlobalStore& Globals) const
 void FBangoInstance::PauseAtWait(int32 Set, int32 CheckIP, const FBangoGlobalStore& Globals)
 {
 	WaitGuard = FWaitGuard();
+	const int32 TimeoutIP = Program->WaitSets.IsValidIndex(Set) ? Program->WaitSets[Set].TimeoutIP : -1;
+	if (TimeoutIP < 0)
+	{
+		WaitTimeLeft = -1.0; // no timeout (or a reloaded version took it away)
+	}
+	else if (WaitTimeLeft >= 0.0 && WaitTimeLeft <= 0.0)
+	{
+		// Still false, and its time is up: on to its timeout block instead of waiting.
+		WaitTimeLeft = -1.0;
+		Frames.Last().IP = TimeoutIP;
+		bWaitTimedOut = true;
+		return;
+	}
 	Frames.Last().IP = CheckIP; // when it carries on, it works the condition out again
 	Status = EBangoInstanceStatus::Waiting;
 	WaitSet = Set;
@@ -583,7 +602,18 @@ EBangoInstanceStatus FBangoInstance::Resume(const FBangoExecContext& Context)
 
 	if (Status == EBangoInstanceStatus::Waiting && WaitSet >= 0)
 	{
-		// At a waitUntil: check its condition again (from its WaitCheck). If it's still false, it pauses there again.
+		if (WaitTimeLeft >= 0.0)
+		{
+			// One with a timeout: its time runs while it's paused there, and nothing else happens until the time is
+			// up or its condition may have changed.
+			WaitTimeLeft = FMath::Max(0.0, WaitTimeLeft - (double)FMath::Max(Context.DeltaSeconds, 0.0f));
+			if (WaitTimeLeft > 0.0 && !IsWaitConditionDue(*Context.Globals))
+			{
+				return Status;
+			}
+		}
+		// At a waitUntil: check its condition again (from its WaitCheck). If it's still false, it pauses there again
+		// (or, with its timeout's time up, goes on at its timeout block).
 		WaitSet = -1;
 		Status = EBangoInstanceStatus::Ready;
 	}
@@ -612,7 +642,13 @@ EBangoInstanceStatus FBangoInstance::Resume(const FBangoExecContext& Context)
 		}
 	}
 
-	Execute(Context);
+	do
+	{
+		// (A waitUntil that timed out while a global it read was unset stops Execute, ready to go on at its timeout block.)
+		bWaitTimedOut = false;
+		Execute(Context);
+	}
+	while (bWaitTimedOut && Status == EBangoInstanceStatus::Ready);
 	return Status;
 }
 
@@ -1853,6 +1889,30 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 			Frames.Last().IP = I.A;
 			break;
 
+		case EBangoOp::WaitBegin:
+		{
+			const FBangoValue Seconds = PopValue();
+			if (Status == EBangoInstanceStatus::Failed)
+			{
+				return false;
+			}
+			if (Seconds.IsNil())
+			{
+				return RuntimeFail(TEXT("This waitUntil's timeout is nil. It needs a number of seconds."));
+			}
+			if (!IsScalar(Seconds, EBangoBaseType::Double) && !IsScalar(Seconds, EBangoBaseType::Int))
+			{
+				return RuntimeFail(FString::Printf(TEXT("A timeout needs a number of seconds, but this is %s."), *ValueTypeText(Seconds)));
+			}
+			const double Time = IsScalar(Seconds, EBangoBaseType::Int) ? (double)Seconds.GetInt() : Seconds.GetDouble();
+			if (!(Time >= 0.0))
+			{
+				return RuntimeFail(FString::Printf(TEXT("A timeout can't be negative, but this is %s seconds."), *Seconds.ToDebugString()));
+			}
+			WaitTimeLeft = Time;
+			break;
+		}
+
 		case EBangoOp::WaitCheck:
 			if (WaitGuard.Set >= 0)
 			{
@@ -1879,6 +1939,10 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 			if (!Condition.GetBool())
 			{
 				PauseAtWait(I.A, I.B, Globals);
+			}
+			else
+			{
+				WaitTimeLeft = -1.0; // true in time
 			}
 			break;
 		}
@@ -2427,6 +2491,7 @@ void FBangoInstance::Serialize(FArchive& Ar)
 	Ar << PendingCall.TypeArgs; // what a pending command's result must be
 	Ar << PendingCall.bResultUsed;
 	Ar << WaitSet;
+	Ar << WaitTimeLeft;
 
 	if (Ar.IsLoading())
 	{
@@ -2437,6 +2502,7 @@ void FBangoInstance::Serialize(FArchive& Ar)
 		PendingCall.Error.Reset();
 		WaitStamp = 0;
 		WaitGuard = FWaitGuard();
+		bWaitTimedOut = false;
 		Program.Reset();
 		BoundCommands.Reset();
 	}

@@ -526,7 +526,7 @@ namespace BangoGraphWriterPrivate
 			}
 
 			const bool bDisabled = !bElseIf && IsWrittenDisabled(Node);
-			if (bDisabled && IsBlockKind(Node.Kind))
+			if (bDisabled && (IsBlockKind(Node.Kind) || Bango::HasWaitUntilTimeout(Node)))
 			{
 				AddCode(Indent, Detached, TEXT("/*"), nullptr);
 				if (!WriteNodeCode(Graph, Index, Indent, Detached, Depth, false))
@@ -584,8 +584,20 @@ namespace BangoGraphWriterPrivate
 				AddCode(Indent, Detached, FString(TEXT("goto ")) + Text + TEXT(";"), &Node);
 				return true;
 			case EBangoGraphNodeKind::WaitUntil:
-				AddCode(Indent, Detached, FString(TEXT("waitUntil (")) + Text + TEXT(");"), &Node);
+			{
+				// With a timeout (in its text, or because its Timeout output is wired), its block follows.
+				const bool bTimeout = Bango::HasWaitUntilTimeout(Node);
+				AddCode(Indent, Detached, Bango::MakeWaitUntilHeader(Text, bTimeout), &Node);
+				if (bTimeout)
+				{
+					if (!WriteBlock(Graph, Node.Branches.Num() > 0 ? Node.Branches[0] : INDEX_NONE, Indent, Detached, Depth))
+					{
+						return false;
+					}
+					AddCode(Indent, Detached, TEXT("}"), nullptr);
+				}
 				return true;
+			}
 			case EBangoGraphNodeKind::Reroute:
 				AddCode(Indent, Detached, FString(), &Node); // only the //@ comment
 				return true;

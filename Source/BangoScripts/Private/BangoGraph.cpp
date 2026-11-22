@@ -99,6 +99,7 @@ namespace Bango
 		case EBangoGraphNodeKind::Sequence: return 2;
 		case EBangoGraphNodeKind::Switch:   return 2; // a new one: one case and Default
 		case EBangoGraphNodeKind::Spawn:    return 1;
+		case EBangoGraphNodeKind::WaitUntil: return 1; // Timeout
 		default:                           return 0;
 		}
 	}
@@ -118,7 +119,8 @@ namespace Bango
 		case EBangoGraphNodeKind::ForEach:
 		case EBangoGraphNodeKind::Sequence:
 		case EBangoGraphNodeKind::Switch:
-		case EBangoGraphNodeKind::Spawn:    return TEXT("Then");
+		case EBangoGraphNodeKind::Spawn:
+		case EBangoGraphNodeKind::WaitUntil: return TEXT("Then");
 		default:                           return FString();
 		}
 	}
@@ -141,7 +143,68 @@ namespace Bango
 		{
 			return Branch == 0 ? TEXT("Run") : TEXT("");
 		}
+		if (Kind == EBangoGraphNodeKind::WaitUntil)
+		{
+			return Branch == 0 ? TEXT("Timeout") : TEXT("");
+		}
 		return GetGraphNodeBranchCount(Kind) > Branch ? TEXT("Do") : TEXT("");
+	}
+
+	bool FindWaitUntilTimeout(const FString& Text, int32& OutConditionEnd, int32& OutSecondsBegin)
+	{
+		// `condition) timeout (seconds`: the first `)` that closes nothing in the text, then `timeout` and `(`.
+		FBangoLexResult Lexed;
+		FBangoCompileError Error;
+		if (!Bango::Lex(Text, Lexed, Error))
+		{
+			return false;
+		}
+		const TArray<FBangoToken>& T = Lexed.Tokens;
+		int32 Depth = 0;
+		for (int32 i = 0; i + 2 < T.Num(); ++i)
+		{
+			const EBangoTokenKind Kind = T[i].Kind;
+			if (Kind == EBangoTokenKind::LParen || Kind == EBangoTokenKind::LBracket)
+			{
+				++Depth;
+			}
+			else if (Kind == EBangoTokenKind::RBracket || (Kind == EBangoTokenKind::RParen && Depth > 0))
+			{
+				--Depth;
+			}
+			else if (Kind == EBangoTokenKind::RParen)
+			{
+				if (T[i].Loc.Line == 1 && T[i + 1].Kind == EBangoTokenKind::Identifier && T[i + 1].Text.Equals(TEXT("timeout"), ESearchCase::CaseSensitive)
+					&& T[i + 2].Kind == EBangoTokenKind::LParen && T[i + 2].Loc.Line == 1)
+				{
+					OutConditionEnd = T[i].Loc.Column - 1;
+					OutSecondsBegin = T[i + 2].EndColumn - 1;
+					return true;
+				}
+				return false;
+			}
+		}
+		return false;
+	}
+
+	bool HasWaitUntilTimeout(const FBangoGraphNode& Node)
+	{
+		int32 ConditionEnd = 0;
+		int32 SecondsBegin = 0;
+		return Node.Kind == EBangoGraphNodeKind::WaitUntil
+			&& ((Node.Branches.Num() > 0 && Node.Branches[0] != INDEX_NONE) || FindWaitUntilTimeout(Node.Text, ConditionEnd, SecondsBegin));
+	}
+
+	FString MakeWaitUntilHeader(const FString& Text, bool bWithTimeout)
+	{
+		int32 ConditionEnd = 0;
+		int32 SecondsBegin = 0;
+		if (FindWaitUntilTimeout(Text, ConditionEnd, SecondsBegin))
+		{
+			return FString(TEXT("waitUntil (")) + Text + TEXT(")");
+		}
+		// Its Timeout output is wired, but it has no seconds yet: an empty value, to fill in (it doesn't compile until then).
+		return FString(TEXT("waitUntil (")) + Text + (bWithTimeout ? TEXT(") timeout ()") : TEXT(");"));
 	}
 
 	FString GetGraphNodeBranchName(const FBangoGraphNode& Node, int32 Branch)
@@ -750,6 +813,14 @@ namespace BangoGraphPrivate
 			{
 				const int32 Body = BuildChain(Graph, Spawn->Body, 0, Targets);
 				GraphAt(Graph).Nodes[Index].Branches[0] = Body;
+			}
+			else if (const FBangoWaitUntilStmt* Wait = Stmt.As<FBangoWaitUntilStmt>())
+			{
+				if (Wait->bHasTimeout)
+				{
+					const int32 Body = BuildChain(Graph, Wait->TimeoutBlock, 0, Targets);
+					GraphAt(Graph).Nodes[Index].Branches[0] = Body;
+				}
 			}
 			else if (const FBangoSwitchStmt* Switch = Stmt.As<FBangoSwitchStmt>())
 			{

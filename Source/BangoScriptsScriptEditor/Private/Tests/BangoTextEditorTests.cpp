@@ -532,6 +532,42 @@ bool FBangoCompletionTest::RunTest(const FString& Parameters)
 	Word(TEXT("questLog Pu"), 11, 9);            // a targeted command
 	Word(TEXT("//~ Lo"), 6, 4);                  // a disconnected line
 
+	// Where a waitUntil's `timeout` goes: straight after its condition's `)`, and nowhere else.
+	TestTrue(TEXT("timeout is offered after a waitUntil's condition"), FBangoCompletion::IsTimeoutPlace(TEXT("waitUntil (ready) ti"), 18));
+	TestTrue(TEXT("timeout is offered after a condition with brackets in it"), FBangoCompletion::IsTimeoutPlace(TEXT("\twaitUntil (Count(found) > (2 + 1))ti"), 35));
+	TestFalse(TEXT("timeout isn't offered inside the condition"), FBangoCompletion::IsTimeoutPlace(TEXT("waitUntil (ready && t"), 20));
+	TestFalse(TEXT("timeout isn't offered after the ';'"), FBangoCompletion::IsTimeoutPlace(TEXT("waitUntil (ready); t"), 19));
+	TestFalse(TEXT("timeout isn't offered after an if"), FBangoCompletion::IsTimeoutPlace(TEXT("if (ready) t"), 11));
+	TestEqual(TEXT("the timeout item"), FBangoCompletion::GetTimeoutItem().Name, FString(TEXT("timeout")));
+	{
+		const FBangoCompletionInsert TimeoutInsert = FBangoCompletion::MakeInsert(FBangoCompletion::GetTimeoutItem(), TEXT("waitUntil (ready) ti"), 20);
+		TestTrue(TEXT("timeout goes in with its bracket, left open"), TimeoutInsert.Text == TEXT("timeout (") && TimeoutInsert.bOpenParen);
+		const FBangoCompletionInsert TimeoutBefore = FBangoCompletion::MakeInsert(FBangoCompletion::GetTimeoutItem(), TEXT("waitUntil (ready) ti (5)"), 20);
+		TestTrue(TEXT("timeout goes in alone before what's already there"), TimeoutBefore.Text == TEXT("timeout") && !TimeoutBefore.bOpenParen);
+
+		// Keywords with a header go in the same way; `for` without the faint bracket, and the others as they are.
+		TArray<FBangoCompletionItem> KeywordItems;
+		FBangoCompletion::GetKeywordItems(KeywordItems);
+		int32 NumHeaders = 0;
+		for (const FBangoCompletionItem& Keyword : KeywordItems)
+		{
+			const FBangoCompletionInsert KeywordInsert = FBangoCompletion::MakeInsert(Keyword, Keyword.Name.Left(1), 1);
+			if (Keyword.bHeader)
+			{
+				++NumHeaders;
+				TestTrue(*FString::Printf(TEXT("'%s' goes in with its bracket"), *Keyword.Name),
+					KeywordInsert.Text == Keyword.Name + TEXT(" (") && KeywordInsert.bOpenParen == (Keyword.Name != TEXT("for")));
+				TestTrue(*FString::Printf(TEXT("'%s' goes in alone before a bracket"), *Keyword.Name),
+					FBangoCompletion::MakeInsert(Keyword, Keyword.Name.Left(1) + TEXT("  (x)"), 1).Text == Keyword.Name);
+			}
+			else
+			{
+				TestTrue(*FString::Printf(TEXT("'%s' goes in as it is"), *Keyword.Name), KeywordInsert.Text == Keyword.Name && !KeywordInsert.bOpenParen);
+			}
+		}
+		TestEqual(TEXT("keywords with a header: if, while, for, forEach, waitUntil, switch"), NumHeaders, 6);
+	}
+
 	FBangoMetadataTracker Tracker;
 	Tracker.Reset(UV(TEXT("#inputs (entity speaker, int rounds = 3)|global int foundThings;|global string count;|int count = 0;|fo|function int AddScore(int amount,|>entity who)|{|>am|};")));
 	TArray<TArray<FBangoSyntaxToken>> Tokens;

@@ -887,6 +887,7 @@ namespace BangoParserPrivate
 			case EBangoTokenKind::KwSequence: return ParseSequence();
 			case EBangoTokenKind::KwSwitch:  return ParseSwitch();
 			case EBangoTokenKind::KwSpawn:   return ParseSpawn();
+			case EBangoTokenKind::KwWaitUntil: return ParseWaitUntil();
 			case EBangoTokenKind::KwCase:
 			case EBangoTokenKind::KwDefault:
 				Fail(First.Loc, FString::Printf(TEXT("'%s' can only be used directly inside the braces of a switch."), *First.Text));
@@ -924,7 +925,6 @@ namespace BangoParserPrivate
 			case EBangoTokenKind::KwBreak:    Advance(); Stmt = MakeUnique<FBangoBreakStmt>(); break;
 			case EBangoTokenKind::KwContinue: Advance(); Stmt = MakeUnique<FBangoContinueStmt>(); break;
 			case EBangoTokenKind::KwReturn:   Stmt = ParseReturn(); break;
-			case EBangoTokenKind::KwWaitUntil: Stmt = ParseWaitUntil(); break;
 			case EBangoTokenKind::KwLabel:    Stmt = ParseLabelOrGoto(true); break;
 			case EBangoTokenKind::KwGoto:     Stmt = ParseLabelOrGoto(false); break;
 			case EBangoTokenKind::Directive:
@@ -965,9 +965,6 @@ namespace BangoParserPrivate
 			case EBangoStmtKind::Label:
 			case EBangoStmtKind::Goto:
 				SetTextSpan(*Stmt, StartTok + 1, SemicolonTok);
-				break;
-			case EBangoStmtKind::WaitUntil:
-				SetTextSpan(*Stmt, StartTok + 2, SemicolonTok - 1); // the condition, without its brackets
 				break;
 			default:
 				SetTextSpan(*Stmt, StartTok, SemicolonTok);
@@ -1213,16 +1210,60 @@ namespace BangoParserPrivate
 			return MoveTemp(Stmt);
 		}
 
-		/** `waitUntil (condition)`, without the ';'. */
+		/** `waitUntil (condition);`, or `waitUntil (condition) timeout (seconds) { ... }`. */
 		FBangoStmtPtr ParseWaitUntil()
 		{
-			const FBangoToken& Keyword = Advance();
+			const int32 KeywordTok = Pos;
+			const FBangoSourceLocation KeywordLoc = Advance().Loc;
 			TUniquePtr<FBangoWaitUntilStmt> Stmt = MakeUnique<FBangoWaitUntilStmt>();
-			Stmt->Condition = ParseParenCondition(Keyword.Loc.Line, TEXT("after 'waitUntil'"));
+			Stmt->Loc = KeywordLoc;
+			Stmt->Condition = ParseParenCondition(KeywordLoc.Line, TEXT("after 'waitUntil'"));
 			if (!Stmt->Condition)
 			{
 				return nullptr;
 			}
+
+			// `timeout` is only a word of the language here, right after the condition: elsewhere it's an ordinary name.
+			if (Check(EBangoTokenKind::Identifier) && Cur().Text.Equals(TEXT("timeout"), ESearchCase::CaseSensitive))
+			{
+				Advance();
+				if (!Expect(EBangoTokenKind::LParen, TEXT("after 'timeout'")))
+				{
+					return nullptr;
+				}
+				Stmt->bHasTimeout = true;
+				Stmt->Timeout = ParseExpression();
+				if (!Stmt->Timeout || !Expect(EBangoTokenKind::RParen, TEXT("after the timeout's seconds"))
+					|| !RequireOneLine(KeywordLoc.Line, Previous().Loc) || !RegisterNode(*Stmt, KeywordLoc.Line))
+				{
+					return nullptr;
+				}
+				SetTextSpan(*Stmt, KeywordTok + 2, Pos - 1); // `condition) timeout (seconds`: all but the outer brackets
+				if (!Check(EBangoTokenKind::LBrace))
+				{
+					Fail(Cur().Loc, FString::Printf(TEXT("Expected '{' after 'timeout (...)', but found %s. A timeout is followed by the block to run when the time is up: waitUntil (...) timeout (5) { ... }"),
+						*Bango::DescribeToken(Cur())));
+					return nullptr;
+				}
+				if (!ParseBlock(Stmt->TimeoutBlock) || !ExpectBlockTerminator())
+				{
+					return nullptr;
+				}
+				return MoveTemp(Stmt);
+			}
+
+			if (Check(EBangoTokenKind::LBrace))
+			{
+				Fail(Cur().Loc, TEXT("A waitUntil ends with ';': waitUntil (...);  It has a block only with a timeout, run when the time is up: waitUntil (...) timeout (5) { ... }"));
+				return nullptr;
+			}
+			if (!Expect(EBangoTokenKind::Semicolon, TEXT("at the end of the statement"))
+				|| !RequireOneLine(KeywordLoc.Line, Previous().Loc)
+				|| !RegisterNode(*Stmt, KeywordLoc.Line))
+			{
+				return nullptr;
+			}
+			SetTextSpan(*Stmt, KeywordTok + 2, Pos - 2); // the condition, without its brackets
 			return MoveTemp(Stmt);
 		}
 

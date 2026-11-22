@@ -76,8 +76,9 @@ enum class EBangoOp : uint8
 	SpawnBlock,         // A = target: starts another instance at A with a copy of this frame's slots (a spawn block); this one carries on. B = 1: push the new instance's id
 
 	// ---- waitUntil (Program.WaitSets) ----
+	WaitBegin,          // A = wait set (one with a timeout).  seconds -> : starts its timeout, before its first WaitCheck
 	WaitCheck,          // A = wait set. Its condition follows: while it's worked out, a global that's unset makes it false, and it can't wait
-	WaitResult,         // A = wait set, B = its WaitCheck.  bool -> : true carries on; false pauses until one of the set's globals changes (every frame, if it polls), then runs from B again
+	WaitResult,         // A = wait set, B = its WaitCheck.  bool -> : true carries on; false pauses until one of the set's globals changes (every frame, if it polls), then runs from B again. With a timeout whose time is up, false goes on at the set's TimeoutIP instead
 
 	Count               // not an op
 };
@@ -284,6 +285,10 @@ struct FBangoWaitSet
 	/** Where the waitUntil is. */
 	int32 Line = 0;
 	int32 Column = 0;
+	/** Its node in the graph, or -1. */
+	int64 NodeID = -1;
+	/** `timeout (seconds) { ... }`: where that block's code starts (in Function), or -1 without a timeout. */
+	int32 TimeoutIP = -1;
 };
 
 /** A Blueprint function `call` can reach (Bango::GetBangoCallableFunctions), for the editor. */
