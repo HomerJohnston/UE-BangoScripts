@@ -1158,38 +1158,71 @@ namespace BangoGraphLayoutPrivate
 
 		case EBangoGraphNodeKind::WaitUntil:
 		{
-			// The condition, then the optional timeout's seconds: the text is `condition`, or `condition) timeout (seconds`.
-			int32 ConditionEnd = Node.Text.Len();
-			int32 SecondsBegin = Node.Text.Len();
-			const bool bTimeout = Bango::FindWaitUntilTimeout(Node.Text, ConditionEnd, SecondsBegin);
-			FBangoNodeField Condition = WholeText(TEXT("Condition"), TEXT("bool"), Node.Text.Left(ConditionEnd), false);
+			// The condition, then what's optional: heldFor's seconds, the timeout's seconds, and the timeout's
+			// IgnoreHold. The text is `condition`, up to `condition) heldFor (seconds) timeout (seconds, ignoreHold`.
+			const Bango::FBangoWaitUntilText Parts = Bango::SplitWaitUntilText(Node.Text);
+			FBangoNodeField Condition = WholeText(TEXT("Condition"), TEXT("bool"), Node.Text.Left(Parts.ConditionEnd), false);
 			Condition.bHideLabel = true;
 			Condition.bHideIcon = true;
 			Out.Fields.Add(Condition);
 
-			// Without `timeout (`, it's optional, and filling it in adds that. With it but no seconds (`timeout ()`,
-			// as a node whose Timeout output is wired is written until it has some), they're missing; clearing the
-			// field then takes the timeout away.
-			int32 Begin = SecondsBegin;
-			int32 End = Node.Text.Len();
-			while (Begin < End && (Node.Text[Begin] == TEXT(' ') || Node.Text[Begin] == TEXT('\t')))
+			// A part of the text without the spaces around it. Without its word (`timeout (`), it's optional, and
+			// filling it in adds that. With the word but no value (`timeout ()`, as a node whose Timeout output is
+			// wired is written until it has its seconds), the value is missing; clearing the field then takes the word away.
+			const auto Part = [&Node](const TCHAR* Label, const TCHAR* Type, bool bThere, int32 Begin, int32 End) -> FBangoNodeField
 			{
-				++Begin;
-			}
-			while (End > Begin && (Node.Text[End - 1] == TEXT(' ') || Node.Text[End - 1] == TEXT('\t')))
+				while (Begin < End && (Node.Text[Begin] == TEXT(' ') || Node.Text[Begin] == TEXT('\t')))
+				{
+					++Begin;
+				}
+				while (End > Begin && (Node.Text[End - 1] == TEXT(' ') || Node.Text[End - 1] == TEXT('\t')))
+				{
+					--End;
+				}
+				FBangoNodeField Field = WholeText(Label, Type, Node.Text.Mid(Begin, End - Begin), !bThere || End > Begin);
+				Field.Begin = Begin;
+				Field.End = End;
+				return Field;
+			};
+
+			FBangoNodeField Hold = Part(TEXT("Held For"), TEXT("float"), Parts.bHold, Parts.HoldBegin, Parts.HoldEnd);
+			Hold.Description = TEXT("The seconds the condition must stay true for, without a break, before the script carries on. If it turns false first, the count starts over the next time it's true.");
+			if (Parts.bHold)
 			{
-				--End;
+				Hold.OuterBegin = Parts.ConditionEnd;
+				Hold.OuterEnd = Parts.HoldEnd;
 			}
-			FBangoNodeField Timeout = WholeText(TEXT("Timeout"), TEXT("float"), Node.Text.Mid(Begin, End - Begin), !bTimeout || End > Begin);
-			Timeout.Begin = Begin;
-			Timeout.End = End;
-			Timeout.OuterBegin = ConditionEnd;
+			else
+			{
+				// It goes right after the condition, before a timeout.
+				Hold.Begin = Hold.End = Hold.OuterBegin = Hold.OuterEnd = Parts.ConditionEnd;
+				Hold.InsertPrefix = TEXT(") heldFor (");
+			}
+			Out.Fields.Add(Hold);
+
+			FBangoNodeField Timeout = Part(TEXT("Timeout"), TEXT("float"), Parts.bTimeout, Parts.SecondsBegin, Parts.SecondsEnd);
+			Timeout.Description = TEXT("The seconds to wait at most. If the condition still isn't true then, the nodes on Timeout run, then Then.");
+			Timeout.OuterBegin = Parts.bTimeout ? Parts.TimeoutOuterBegin : Node.Text.Len();
 			Timeout.OuterEnd = Node.Text.Len();
-			if (!bTimeout)
+			if (!Parts.bTimeout)
 			{
 				Timeout.InsertPrefix = TEXT(") timeout (");
 			}
 			Out.Fields.Add(Timeout);
+
+			if (Parts.bHold && Parts.bTimeout)
+			{
+				// Only with both: it says what the timeout does to a hold.
+				FBangoNodeField Ignore = Part(TEXT("Ignore Hold"), TEXT("bool"), Parts.bIgnoreHold, Parts.IgnoreHoldBegin, Node.Text.Len());
+				Ignore.Description = TEXT("What happens if the time is up while the condition is true and being held. false (or empty): the hold is let finish, and Timeout runs only if the condition turns false first. true: Timeout runs at once.");
+				Ignore.OuterBegin = Parts.bIgnoreHold ? Parts.SecondsEnd : Node.Text.Len();
+				Ignore.OuterEnd = Node.Text.Len();
+				if (!Parts.bIgnoreHold)
+				{
+					Ignore.InsertPrefix = TEXT(", ");
+				}
+				Out.Fields.Add(Ignore);
+			}
 			return;
 		}
 

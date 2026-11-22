@@ -35,7 +35,7 @@ namespace BangoLineTokenizerPrivate
 	static const TCHAR* const TypeNames[]      = { TEXT("bool"), TEXT("int"), TEXT("float"), TEXT("string"), TEXT("entity"), TEXT("text"), TEXT("vector2"), TEXT("vector3"), TEXT("void") };
 	static const TCHAR* const Constants[]      = { TEXT("true"), TEXT("false") };
 	static const TCHAR* const NilWord[]        = { TEXT("nil") };
-	static const TCHAR* const TimeoutWord[]    = { TEXT("timeout") }; // a keyword only in `waitUntil (...) timeout (...)`: after a `)`, before a `(`
+	static const TCHAR* const WaitWords[]      = { TEXT("timeout"), TEXT("heldFor") }; // keywords only in `waitUntil (...) heldFor (...) timeout (...)`: after a `)`, before a `(`
 	static const TCHAR* const PlayerWord[]     = { TEXT("player"), TEXT("self") }; // the first local player's pawn, and the script's owner: entities, coloured like @john
 	static const TCHAR* const OtherKeywords[]  = { TEXT("isNil"), TEXT("call") }; // keywords that aren't flow control: coloured like it
 	static const TCHAR* const VectorParts[]    = { TEXT("x"), TEXT("y"), TEXT("z") };
@@ -283,7 +283,7 @@ namespace BangoLineTokenizerPrivate
 
 			EBangoSyntaxKind Kind;
 			if (IsOneOf(Line, Start, WordLen, FlowKeywords))        { Kind = EBangoSyntaxKind::Keyword; }
-			else if (IsOneOf(Line, Start, WordLen, TimeoutWord) && IsFollowedByOpenParen() && IsAfterCloseParen(Start)) { Kind = EBangoSyntaxKind::Keyword; }
+			else if (IsOneOf(Line, Start, WordLen, WaitWords) && IsFollowedByOpenParen() && IsAfterCloseParen(Start)) { Kind = EBangoSyntaxKind::Keyword; }
 			else if (IsOneOf(Line, Start, WordLen, JumpKeywords))   { Kind = EBangoSyntaxKind::JumpKeyword; }
 			else if (IsOneOf(Line, Start, WordLen, LabelKeywords))  { Kind = EBangoSyntaxKind::LabelKeyword; bExpectLabelName = true; }
 			else if (IsOneOf(Line, Start, WordLen, DeclKeywords))   { Kind = EBangoSyntaxKind::DeclKeyword; }

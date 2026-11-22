@@ -1210,7 +1210,16 @@ namespace BangoParserPrivate
 			return MoveTemp(Stmt);
 		}
 
-		/** `waitUntil (condition);`, or `waitUntil (condition) timeout (seconds) { ... }`. */
+		/** True at a word that's only one of the language's after a waitUntil's condition (`heldFor`, `timeout`): elsewhere it's an ordinary name. */
+		bool CheckWaitWord(const TCHAR* Word) const
+		{
+			return Check(EBangoTokenKind::Identifier) && Cur().Text.Equals(Word, ESearchCase::CaseSensitive);
+		}
+
+		/**
+		 * `waitUntil (condition);`, with after the condition, both optional and in this order: `heldFor (seconds)`, and
+		 * `timeout (seconds) { ... }` or `timeout (seconds, ignoreHold) { ... }` in place of the `;`.
+		 */
 		FBangoStmtPtr ParseWaitUntil()
 		{
 			const int32 KeywordTok = Pos;
@@ -1223,8 +1232,27 @@ namespace BangoParserPrivate
 				return nullptr;
 			}
 
-			// `timeout` is only a word of the language here, right after the condition: elsewhere it's an ordinary name.
-			if (Check(EBangoTokenKind::Identifier) && Cur().Text.Equals(TEXT("timeout"), ESearchCase::CaseSensitive))
+			if (CheckWaitWord(TEXT("heldFor")))
+			{
+				Advance();
+				if (!Expect(EBangoTokenKind::LParen, TEXT("after 'heldFor'")))
+				{
+					return nullptr;
+				}
+				Stmt->bHasHold = true;
+				Stmt->Hold = ParseExpression();
+				if (!Stmt->Hold || !Expect(EBangoTokenKind::RParen, TEXT("after heldFor's seconds")))
+				{
+					return nullptr;
+				}
+				if (CheckWaitWord(TEXT("heldFor")))
+				{
+					Fail(Cur().Loc, TEXT("A waitUntil has one heldFor."));
+					return nullptr;
+				}
+			}
+
+			if (CheckWaitWord(TEXT("timeout")))
 			{
 				Advance();
 				if (!Expect(EBangoTokenKind::LParen, TEXT("after 'timeout'")))
@@ -1233,12 +1261,41 @@ namespace BangoParserPrivate
 				}
 				Stmt->bHasTimeout = true;
 				Stmt->Timeout = ParseExpression();
-				if (!Stmt->Timeout || !Expect(EBangoTokenKind::RParen, TEXT("after the timeout's seconds"))
+				if (!Stmt->Timeout)
+				{
+					return nullptr;
+				}
+				if (Match(EBangoTokenKind::Comma))
+				{
+					// Its second value, IgnoreHold: whether the time being up cuts a hold short.
+					const FBangoSourceLocation IgnoreLoc = Cur().Loc;
+					Stmt->IgnoreHold = ParseExpression();
+					if (!Stmt->IgnoreHold)
+					{
+						return nullptr;
+					}
+					if (!Stmt->bHasHold)
+					{
+						Fail(IgnoreLoc, TEXT("A timeout's second value (IgnoreHold) says whether the timeout cuts short a heldFor that's under way, and this waitUntil has no heldFor. Remove it, or add one: waitUntil (...) heldFor (2) timeout (5, true) { ... }"));
+						return nullptr;
+					}
+					if (Check(EBangoTokenKind::Comma))
+					{
+						Fail(Cur().Loc, TEXT("A timeout takes two values at most: its seconds, and IgnoreHold (true or false)."));
+						return nullptr;
+					}
+				}
+				if (!Expect(EBangoTokenKind::RParen, Stmt->IgnoreHold ? TEXT("after the timeout's values") : TEXT("after the timeout's seconds"))
 					|| !RequireOneLine(KeywordLoc.Line, Previous().Loc) || !RegisterNode(*Stmt, KeywordLoc.Line))
 				{
 					return nullptr;
 				}
 				SetTextSpan(*Stmt, KeywordTok + 2, Pos - 1); // `condition) timeout (seconds`: all but the outer brackets
+				if (CheckWaitWord(TEXT("heldFor")))
+				{
+					Fail(Cur().Loc, TEXT("heldFor comes before the timeout: waitUntil (...) heldFor (2) timeout (5) { ... }"));
+					return nullptr;
+				}
 				if (!Check(EBangoTokenKind::LBrace))
 				{
 					Fail(Cur().Loc, FString::Printf(TEXT("Expected '{' after 'timeout (...)', but found %s. A timeout is followed by the block to run when the time is up: waitUntil (...) timeout (5) { ... }"),

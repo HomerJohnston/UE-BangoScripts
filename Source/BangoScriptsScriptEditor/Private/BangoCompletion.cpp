@@ -166,7 +166,7 @@ void FBangoCompletion::GetKeywordItems(TArray<FBangoCompletionItem>& OutItems, b
 		{ TEXT("in"),       TEXT("flow"),        TEXT("In a forEach header: forEach (_x in _array)."), false },
 		{ TEXT("sequence"), TEXT("flow"),        TEXT("sequence { ... } { ... } runs its blocks one after another, each to its end."), false },
 		{ TEXT("spawn"),    TEXT("flow"),        TEXT("spawn { ... } starts its block as a separate running copy of the script, and carries on straight away."), false },
-		{ TEXT("waitUntil"), TEXT("flow"),       TEXT("waitUntil (condition); pauses the script until the condition is true (carries on at once if it already is). With a timeout, it waits no longer than that, then runs the block: waitUntil (condition) timeout (seconds) { ... }"), false, true },
+		{ TEXT("waitUntil"), TEXT("flow"),       TEXT("waitUntil (condition); pauses the script until the condition is true (carries on at once if it already is). With heldFor, the condition must stay true that long: waitUntil (condition) heldFor (seconds); With a timeout, it waits no longer than that, then runs the block: waitUntil (condition) timeout (seconds) { ... }"), false, true },
 		{ TEXT("switch"),   TEXT("flow"),        TEXT("switch (value) { case 1: { ... } default: { ... } } runs the case whose value matches."), false, true },
 		{ TEXT("case"),     TEXT("flow"),        TEXT("In a switch: case 1, 2: { ... }."), false },
 		{ TEXT("default"),  TEXT("flow"),        TEXT("In a switch, last: default: { ... } runs when no case matches."), false },
@@ -318,7 +318,8 @@ bool FBangoCompletion::FindHoverItem(const FBangoScriptNames& Names, const FStri
 		}
 		TArray<FBangoCompletionItem> Words;
 		GetKeywordItems(Words);
-		Words.Add(GetTimeoutItem()); // coloured as a keyword only where it is one
+		Words.Add(GetTimeoutItem()); // coloured as keywords only where they are
+		Words.Add(GetHoldItem());
 		for (const FBangoCompletionItem& Item : Words)
 		{
 			if (Item.Name.Equals(Word, ESearchCase::CaseSensitive))
@@ -499,45 +500,107 @@ void FBangoCompletion::KeepOpenParens(const FString& Line, int32 CursorColumn, T
 	});
 }
 
+namespace BangoCompletionPrivate
+{
+	/**
+	 * Where the word starting at WordStart is, after a waitUntil's condition: 1 straight after the `)` that closes it,
+	 * 2 straight after the `)` of the `heldFor (...)` that follows it, else 0.
+	 */
+	static int32 FindWaitWordPlace(const FString& Line, int32 WordStart)
+	{
+		const FString Before = Line.Left(FMath::Clamp(WordStart, 0, Line.Len()));
+		TArray<FBangoSyntaxToken> Tokens;
+		FBangoLineTokenizer::TokenizeLine(FStringView(Before), Tokens);
+		auto IsText = [&Before, &Tokens](int32 Index, const TCHAR* Text)
+		{
+			return Tokens.IsValidIndex(Index) && Before.Mid(Tokens[Index].Start, Tokens[Index].Len).Equals(Text, ESearchCase::CaseSensitive);
+		};
+		auto Is = [&Tokens, &IsText](int32 Index, EBangoSyntaxKind Kind, const TCHAR* Text)
+		{
+			return IsText(Index, Text) && Tokens[Index].Kind == Kind;
+		};
+		// From the `(` at Open: the `)` that closes it, or -1.
+		auto FindClose = [&Tokens, &Is](int32 Open)
+		{
+			int32 Depth = 0;
+			for (int32 J = Open; J < Tokens.Num(); ++J)
+			{
+				if (Is(J, EBangoSyntaxKind::Punctuation, TEXT("(")))
+				{
+					++Depth;
+				}
+				else if (Is(J, EBangoSyntaxKind::Punctuation, TEXT(")")) && --Depth == 0)
+				{
+					return J;
+				}
+			}
+			return -1;
+		};
+		for (int32 I = 0; I + 1 < Tokens.Num(); ++I)
+		{
+			if (!Is(I, EBangoSyntaxKind::Keyword, TEXT("waitUntil")) || !Is(I + 1, EBangoSyntaxKind::Punctuation, TEXT("(")))
+			{
+				continue;
+			}
+			const int32 Close = FindClose(I + 1); // its condition's `)`: the word must come straight after it
+			if (Close < 0)
+			{
+				return 0;
+			}
+			if (Close == Tokens.Num() - 1)
+			{
+				return 1;
+			}
+			// ... or straight after `heldFor (...)`.
+			if (IsText(Close + 1, TEXT("heldFor")) && Is(Close + 2, EBangoSyntaxKind::Punctuation, TEXT("(")))
+			{
+				const int32 HoldClose = FindClose(Close + 2);
+				return HoldClose >= 0 && HoldClose == Tokens.Num() - 1 ? 2 : 0;
+			}
+			return 0;
+		}
+		return 0;
+	}
+}
+
 bool FBangoCompletion::IsTimeoutPlace(const FString& Line, int32 WordStart)
 {
-	// `waitUntil`, `(`, the condition, and the `)` that closes it as the last thing before the word.
-	const FString Before = Line.Left(FMath::Clamp(WordStart, 0, Line.Len()));
-	TArray<FBangoSyntaxToken> Tokens;
-	FBangoLineTokenizer::TokenizeLine(FStringView(Before), Tokens);
-	auto Is = [&Before, &Tokens](int32 Index, EBangoSyntaxKind Kind, const TCHAR* Text)
+	return BangoCompletionPrivate::FindWaitWordPlace(Line, WordStart) != 0;
+}
+
+bool FBangoCompletion::IsHoldPlace(const FString& Line, int32 WordStart)
+{
+	return BangoCompletionPrivate::FindWaitWordPlace(Line, WordStart) == 1;
+}
+
+void FBangoCompletion::GetWaitWordItems(const FString& Line, int32 WordStart, TArray<FBangoCompletionItem>& OutItems)
+{
+	const int32 Place = BangoCompletionPrivate::FindWaitWordPlace(Line, WordStart);
+	if (Place == 1)
 	{
-		return Tokens.IsValidIndex(Index) && Tokens[Index].Kind == Kind && Before.Mid(Tokens[Index].Start, Tokens[Index].Len).Equals(Text, ESearchCase::CaseSensitive);
-	};
-	for (int32 I = 0; I + 1 < Tokens.Num(); ++I)
-	{
-		if (!Is(I, EBangoSyntaxKind::Keyword, TEXT("waitUntil")) || !Is(I + 1, EBangoSyntaxKind::Punctuation, TEXT("(")))
-		{
-			continue;
-		}
-		int32 Depth = 0;
-		for (int32 J = I + 1; J < Tokens.Num(); ++J)
-		{
-			if (Is(J, EBangoSyntaxKind::Punctuation, TEXT("(")))
-			{
-				++Depth;
-			}
-			else if (Is(J, EBangoSyntaxKind::Punctuation, TEXT(")")) && --Depth == 0)
-			{
-				return J == Tokens.Num() - 1; // its condition's `)`: the word must come straight after it
-			}
-		}
-		return false;
+		OutItems.Add(GetHoldItem());
 	}
-	return false;
+	if (Place != 0)
+	{
+		OutItems.Add(GetTimeoutItem());
+	}
 }
 
 FBangoCompletionItem FBangoCompletion::GetTimeoutItem()
 {
 	using namespace BangoCompletionPrivate;
 	FBangoCompletionItem Item = MakeItem(TEXT("timeout"), EBangoCompletionKind::Keyword, TEXT("flow"),
-		TEXT("waitUntil (condition) timeout (seconds) { ... } waits no longer than that many seconds: if the condition still isn't true then, its block runs, then what follows."), false);
+		TEXT("waitUntil (condition) timeout (seconds) { ... } waits no longer than that many seconds: if the condition still isn't true then, its block runs, then what follows. After a heldFor, a hold that's under way when the time is up is let finish, unless the timeout's second value (IgnoreHold) is true: timeout (seconds, true)"), false);
 	Item.bHeader = true; // `timeout (`
+	return Item;
+}
+
+FBangoCompletionItem FBangoCompletion::GetHoldItem()
+{
+	using namespace BangoCompletionPrivate;
+	FBangoCompletionItem Item = MakeItem(TEXT("heldFor"), EBangoCompletionKind::Keyword, TEXT("flow"),
+		TEXT("waitUntil (condition) heldFor (seconds); carries on once the condition has stayed true for that many seconds without a break. If it turns false first, the count starts over the next time it's true. A timeout can follow it."), false);
+	Item.bHeader = true; // `heldFor (`
 	return Item;
 }
 

@@ -14,6 +14,10 @@ namespace Bango
 	/** A CallCommandInPlace instruction's C: its argument count is the low bits, and CallIsPure and CallResultUsed are shifted up past it. */
 	constexpr int32 InPlaceArgCountMask = 0xFFFF;
 	constexpr int32 InPlaceFlagShift = 16;
+	/** A WaitBegin instruction's B: which values it takes off the stack (pushed in this order). */
+	constexpr int32 WaitHasHold = 1;
+	constexpr int32 WaitHasTimeout = 2;
+	constexpr int32 WaitHasIgnoreHold = 4;
 }
 
 /**
@@ -76,9 +80,9 @@ enum class EBangoOp : uint8
 	SpawnBlock,         // A = target: starts another instance at A with a copy of this frame's slots (a spawn block); this one carries on. B = 1: push the new instance's id
 
 	// ---- waitUntil (Program.WaitSets) ----
-	WaitBegin,          // A = wait set (one with a timeout).  seconds -> : starts its timeout, before its first WaitCheck
+	WaitBegin,          // A = wait set (one with a heldFor or a timeout), B = which of the Bango::WaitHas... values are there.  [hold seconds] [timeout seconds] [ignoreHold] -> : notes them, before its first WaitCheck
 	WaitCheck,          // A = wait set. Its condition follows: while it's worked out, a global that's unset makes it false, and it can't wait
-	WaitResult,         // A = wait set, B = its WaitCheck.  bool -> : true carries on; false pauses until one of the set's globals changes (every frame, if it polls), then runs from B again. With a timeout whose time is up, false goes on at the set's TimeoutIP instead
+	WaitResult,         // A = wait set, B = its WaitCheck.  bool -> : true carries on; false pauses until one of the set's globals changes (every frame, if it polls), then runs from B again. With a timeout whose time is up, false goes on at the set's TimeoutIP instead. With a heldFor, true pauses too until it has been true that long (FBangoInstance::HoldAtWait)
 
 	Count               // not an op
 };
@@ -289,7 +293,10 @@ struct FBangoWaitSet
 	int64 NodeID = -1;
 	/** `timeout (seconds) { ... }`: where that block's code starts (in Function), or -1 without a timeout. */
 	int32 TimeoutIP = -1;
+	/** `heldFor (seconds)`: its condition must stay true that long. */
+	bool bHold = false;
 };
+
 
 /** A Blueprint function `call` can reach (Bango::GetBangoCallableFunctions), for the editor. */
 struct FBangoCallableFunction

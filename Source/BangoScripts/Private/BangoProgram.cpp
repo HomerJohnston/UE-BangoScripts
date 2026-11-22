@@ -79,6 +79,8 @@ namespace BangoProgramPrivate
 		case EBangoOp::ForEachNext:
 			return FString::Printf(TEXT("%s %s -> %d"), *DescribeSlot(Function, I.A), *DescribeSlot(Function, I.B), I.C);
 		case EBangoOp::WaitBegin:
+			return FString::Printf(TEXT("#%d%s%s%s"), I.A, (I.B & Bango::WaitHasHold) ? TEXT(" +hold") : TEXT(""),
+				(I.B & Bango::WaitHasTimeout) ? TEXT(" +timeout") : TEXT(""), (I.B & Bango::WaitHasIgnoreHold) ? TEXT(" +ignoreHold") : TEXT(""));
 		case EBangoOp::WaitCheck:
 			return FString::Printf(TEXT("#%d"), I.A);
 		case EBangoOp::WaitResult:

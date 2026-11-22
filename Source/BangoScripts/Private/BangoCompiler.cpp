@@ -2125,13 +2125,13 @@ namespace BangoCompilerPrivate
 		 * WaitResult carries on if c is true; else the script pauses there, and runs from L again once something c reads
 		 * has changed (FBangoWaitSet, filled in by Bango::FindDependencies when every function has been compiled).
 		 *
-		 * `waitUntil (c) timeout (s) { block }` is
-		 *        <s>
-		 *        WaitBegin #n          (starts the timeout: s seconds)
+		 * `waitUntil (c) heldFor (h) timeout (s, i) { block }` (each part optional) is
+		 *        <h> <s> <i>           (those it has)
+		 *        WaitBegin #n          (notes them: the hold's seconds, and starts the timeout)
 		 *     L: WaitCheck #n
 		 *        <c>
-		 *        WaitResult #n -> L    (false with the time up: goes to T)
-		 *        Jump E
+		 *        WaitResult #n -> L    (false with the time up: goes to T. True, but not for h seconds yet: pauses too)
+		 *        Jump E                (from here on, only with a timeout)
 		 *     T: block                 (the set's TimeoutIP)
 		 *     E:
 		 */
@@ -2148,9 +2148,22 @@ namespace BangoCompilerPrivate
 			Set.NodeID = Wait.Node.bHasMetadata ? Wait.Node.NodeID : -1;
 			const int32 SetIndex = Program.WaitSets.Add(Set);
 
+			int32 BeginFlags = 0;
+			const FBangoType Seconds = FBangoType::Double();
+			if (Wait.bHasHold)
+			{
+				FExprType HoldType;
+				if (!CompileExpr(*Wait.Hold, &Seconds, HoldType)
+					|| !CanAssign(Seconds, HoldType, Wait.Hold->Loc, TEXT("heldFor's seconds")))
+				{
+					return false;
+				}
+				EmitConvertIfNeeded(Seconds, HoldType);
+				Program.WaitSets[SetIndex].bHold = true;
+				BeginFlags |= Bango::WaitHasHold;
+			}
 			if (Wait.bHasTimeout)
 			{
-				const FBangoType Seconds = FBangoType::Double();
 				FExprType TimeoutType;
 				if (!CompileExpr(*Wait.Timeout, &Seconds, TimeoutType)
 					|| !CanAssign(Seconds, TimeoutType, Wait.Timeout->Loc, TEXT("A timeout's seconds")))
@@ -2158,7 +2171,23 @@ namespace BangoCompilerPrivate
 					return false;
 				}
 				EmitConvertIfNeeded(Seconds, TimeoutType);
-				Emit(EBangoOp::WaitBegin, SetIndex);
+				BeginFlags |= Bango::WaitHasTimeout;
+				if (Wait.IgnoreHold)
+				{
+					const FBangoType Flag = FBangoType::Bool();
+					FExprType IgnoreType;
+					if (!CompileExpr(*Wait.IgnoreHold, &Flag, IgnoreType)
+						|| !CanAssign(Flag, IgnoreType, Wait.IgnoreHold->Loc, TEXT("A timeout's second value (IgnoreHold)")))
+					{
+						return false;
+					}
+					EmitConvertIfNeeded(Flag, IgnoreType);
+					BeginFlags |= Bango::WaitHasIgnoreHold;
+				}
+			}
+			if (BeginFlags != 0)
+			{
+				Emit(EBangoOp::WaitBegin, SetIndex, BeginFlags);
 			}
 
 			const int32 Check = Emit(EBangoOp::WaitCheck, SetIndex);

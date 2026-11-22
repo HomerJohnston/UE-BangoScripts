@@ -539,6 +539,25 @@ bool FBangoCompletionTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("timeout isn't offered after the ';'"), FBangoCompletion::IsTimeoutPlace(TEXT("waitUntil (ready); t"), 19));
 	TestFalse(TEXT("timeout isn't offered after an if"), FBangoCompletion::IsTimeoutPlace(TEXT("if (ready) t"), 11));
 	TestEqual(TEXT("the timeout item"), FBangoCompletion::GetTimeoutItem().Name, FString(TEXT("timeout")));
+	// heldFor goes straight after the condition, and timeout can follow it.
+	TestTrue(TEXT("timeout is offered after a heldFor"), FBangoCompletion::IsTimeoutPlace(TEXT("waitUntil (ready) heldFor (2) ti"), 30));
+	TestFalse(TEXT("timeout isn't offered inside a heldFor"), FBangoCompletion::IsTimeoutPlace(TEXT("waitUntil (ready) heldFor (t"), 27));
+	TestFalse(TEXT("nothing is offered after the timeout"), FBangoCompletion::IsTimeoutPlace(TEXT("waitUntil (ready) heldFor (2) timeout (3) "), 42));
+	TestTrue(TEXT("heldFor is offered after a waitUntil's condition"), FBangoCompletion::IsHoldPlace(TEXT("waitUntil (ready) he"), 18));
+	TestFalse(TEXT("heldFor isn't offered after a heldFor"), FBangoCompletion::IsHoldPlace(TEXT("waitUntil (ready) heldFor (2) he"), 30));
+	{
+		TArray<FBangoCompletionItem> Both;
+		TArray<FBangoCompletionItem> One;
+		TArray<FBangoCompletionItem> None;
+		FBangoCompletion::GetWaitWordItems(TEXT("waitUntil (ready) "), 18, Both);
+		FBangoCompletion::GetWaitWordItems(TEXT("waitUntil (ready) heldFor (2) "), 30, One);
+		FBangoCompletion::GetWaitWordItems(TEXT("waitUntil (ready && "), 19, None);
+		TestTrue(TEXT("after the condition, the list is heldFor and timeout"), Both.Num() == 2 && Both[0].Name == TEXT("heldFor") && Both[1].Name == TEXT("timeout"));
+		TestTrue(TEXT("after a heldFor, the list is timeout"), One.Num() == 1 && One[0].Name == TEXT("timeout"));
+		TestEqual(TEXT("elsewhere, there are no such words"), None.Num(), 0);
+		const FBangoCompletionInsert HoldInsert = FBangoCompletion::MakeInsert(FBangoCompletion::GetHoldItem(), TEXT("waitUntil (ready) he"), 20);
+		TestTrue(TEXT("heldFor goes in with its bracket, left open"), HoldInsert.Text == TEXT("heldFor (") && HoldInsert.bOpenParen);
+	}
 	{
 		const FBangoCompletionInsert TimeoutInsert = FBangoCompletion::MakeInsert(FBangoCompletion::GetTimeoutItem(), TEXT("waitUntil (ready) ti"), 20);
 		TestTrue(TEXT("timeout goes in with its bracket, left open"), TimeoutInsert.Text == TEXT("timeout (") && TimeoutInsert.bOpenParen);
@@ -660,6 +679,8 @@ bool FBangoCompletionTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Hovering player"), HoverTitle(TEXT("player SetHidden(true);"), 2), FString(TEXT("entity player")));
 	TestEqual(TEXT("Hovering an @name"), HoverTitle(TEXT("@light call TurnOn();"), 2), FString());
 	TestEqual(TEXT("Hovering a waitUntil's timeout"), HoverTitle(TEXT("waitUntil (ready) timeout (5)"), 20), FString(TEXT("keyword timeout")));
+	TestEqual(TEXT("Hovering a waitUntil's heldFor"), HoverTitle(TEXT("waitUntil (ready) heldFor (2) timeout (5, true)"), 20), FString(TEXT("keyword heldFor")));
+	TestEqual(TEXT("Hovering a timeout after a heldFor"), HoverTitle(TEXT("waitUntil (ready) heldFor (2) timeout (5, true)"), 32), FString(TEXT("keyword timeout")));
 
 	return true;
 }

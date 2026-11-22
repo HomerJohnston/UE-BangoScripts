@@ -499,7 +499,14 @@ private:
 	bool IsTextPaneShown() const { return bTextPaneOpen || !bGraphShown; }
 	/** The toolbar's Graph switch, at its far right: slid right, the graph is shown; slid left, it's hidden. */
 	TSharedRef<SWidget> MakeGraphSwitch();
-	void SetGraphShown(bool bShown);
+	/** bRemember: it's the user's choice, kept for the next session. Not when a script sets it as it's opened. */
+	void SetGraphShown(bool bShown, bool bRemember = true);
+	/**
+	 * Set while OpenScriptAsset or OpenInlineScript loads its script: LoadScript then sets the Graph switch from the
+	 * script, on if it has a #USES_GRAPH_EDITOR line and off if not. Not when a script is loaded again (Reload, a
+	 * change on disk), and not for a script whose text doesn't read, which leave the switch as it is.
+	 */
+	bool bOpeningScript = false;
 	/** The Command Palette tab on the graph's right edge, and the reference pane (COMMANDS and NODES tabs) it pulls out. */
 	TSharedRef<SWidget> MakeCommandsTab();
 	TSharedRef<SWidget> MakeCommandsPane();

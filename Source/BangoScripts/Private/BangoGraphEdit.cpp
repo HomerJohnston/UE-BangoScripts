@@ -110,9 +110,7 @@ namespace Bango
 		case EBangoGraphNodeKind::Goto:    Source = FString(TEXT("goto ")) + Text + TEXT(";"); break;
 		case EBangoGraphNodeKind::WaitUntil:
 		{
-			int32 ConditionEnd = 0;
-			int32 SecondsBegin = 0;
-			Source = Bango::FindWaitUntilTimeout(Text, ConditionEnd, SecondsBegin)
+			Source = Bango::SplitWaitUntilText(Text).bTimeout
 				? Bango::MakeWaitUntilHeader(Text, true) + TEXT("\n{\n};") : Bango::MakeWaitUntilHeader(Text, false);
 			break;
 		}
@@ -312,6 +310,16 @@ namespace Bango
 
 		// Clearing the first field (`_x = 5` to `= 5`) would leave a space in front.
 		NewText = Trimmed(NewText);
+
+		if (Node.Kind == EBangoGraphNodeKind::WaitUntil)
+		{
+			// A timeout's IgnoreHold goes with the hold it's about: taking the hold away takes it too.
+			const FBangoWaitUntilText Parts = SplitWaitUntilText(NewText);
+			if (Parts.bIgnoreHold && !Parts.bHold)
+			{
+				NewText = Trimmed(NewText.Left(Parts.SecondsEnd));
+			}
+		}
 
 		EBangoGraphNodeKind NewKind = Node.Kind;
 		if (IsStatementKind(Node.Kind) && !GetStatementKind(NewText, NewKind))

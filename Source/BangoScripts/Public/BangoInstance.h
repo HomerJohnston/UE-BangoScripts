@@ -302,8 +302,21 @@ private:
 	 * waitUntil's condition is worked out, it's no failure: the condition is false, and it pauses there (returning false).
 	 */
 	bool UnsetGlobalFail(const FString& Message, const FBangoGlobalStore& Globals);
-	/** Pauses at the waitUntil whose WaitCheck is CheckIP, in the current frame, until Set's globals change. */
+	/**
+	 * A waitUntil's condition was false: pauses at it (its WaitCheck is CheckIP, in the current frame) until Set's
+	 * globals change. With a timeout whose time is up, goes on at its timeout block instead.
+	 */
 	void PauseAtWait(int32 Set, int32 CheckIP, const FBangoGlobalStore& Globals);
+	/**
+	 * A waitUntil's condition was true: carries on, unless it has a heldFor it hasn't been true for yet. Then it
+	 * pauses there too, to be checked again as the seconds pass (or goes on at its timeout block, if the time is up
+	 * and the timeout ignores holds).
+	 */
+	void HoldAtWait(int32 Set, int32 CheckIP, const FBangoGlobalStore& Globals);
+	/** The pause itself, for both. */
+	void EnterWait(int32 Set, int32 CheckIP, const FBangoGlobalStore& Globals);
+	/** Forgets a waitUntil's timeout and hold: it's done with (or has neither). */
+	void ClearWaitTimes();
 	/** Why `self` can't be used here (the owner's Problem, or that there's no owner). */
 	FString GetSelfProblem() const;
 	/**
@@ -365,6 +378,15 @@ private:
 	 * is up (0); below 0 otherwise. Saved. Resume counts it down by its context's DeltaSeconds while it's paused there.
 	 */
 	double WaitTimeLeft = -1.0;
+	/** A waitUntil with a heldFor: the seconds its condition must stay true for, from its WaitBegin; below 0 otherwise. Saved. */
+	double WaitHoldTime = -1.0;
+	/**
+	 * While that condition is true, the seconds it must still stay so (0: long enough); below 0 while it's false.
+	 * Saved. Resume counts it down like WaitTimeLeft, and a false answer throws it away.
+	 */
+	double WaitHoldLeft = -1.0;
+	/** `timeout (seconds, true)`: the time being up cuts a hold short. Saved. */
+	bool bWaitIgnoreHold = false;
 	/** PauseAtWait went on at the timeout's block instead of pausing (Resume then carries on, if Execute had stopped). */
 	bool bWaitTimedOut = false;
 	/** Whether what its condition reads may have changed since it paused (IsWaitDue without the timeout). */

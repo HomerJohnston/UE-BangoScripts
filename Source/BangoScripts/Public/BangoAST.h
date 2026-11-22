@@ -517,7 +517,15 @@ struct FBangoReturnStmt : FBangoStmt
  *
  * `waitUntil (Condition) timeout (Seconds) { ... }`: the same, but it waits no longer than Seconds (worked out once,
  * before the first check): once they've passed with the condition still false, TimeoutBlock runs, then what follows.
- * `timeout` isn't a keyword: it's only read as one here, after the condition's `)`.
+ *
+ * `waitUntil (Condition) heldFor (Seconds);`: the condition must stay true for Seconds (worked out once, before the
+ * first check) without a break. If it turns false first, the count starts over the next time it's true.
+ *
+ * Both together, `heldFor (...)` first. The timeout's time runs from the start, hold or not. If it's up while the
+ * condition is true and being held, the hold is let finish (and the timeout block runs if the condition turns false
+ * first), unless the timeout's second value, IgnoreHold, is true: `timeout (Seconds, true)` runs its block then.
+ *
+ * `timeout` and `heldFor` aren't reserved: they're only read as words of the language here, after a `)`.
  */
 struct FBangoWaitUntilStmt : FBangoStmt
 {
@@ -525,9 +533,14 @@ struct FBangoWaitUntilStmt : FBangoStmt
 	FBangoWaitUntilStmt() : FBangoStmt(StaticKind) {}
 
 	FBangoExprPtr Condition;
+	bool bHasHold = false;
+	/** The seconds the condition must stay true for (a number). Only with bHasHold. */
+	FBangoExprPtr Hold;
 	bool bHasTimeout = false;
 	/** The seconds to wait at most (a number). Only with bHasTimeout. */
 	FBangoExprPtr Timeout;
+	/** Whether the timeout cuts a hold short (a bool), or null (it doesn't). Only with bHasTimeout and bHasHold. */
+	FBangoExprPtr IgnoreHold;
 	/** What runs if the time is up first. Only with bHasTimeout. */
 	FBangoBlock TimeoutBlock;
 };

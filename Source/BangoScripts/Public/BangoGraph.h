@@ -64,9 +64,10 @@ enum class EBangoGraphNodeKind : uint8
 	/** A bend in a wire: no text, one input, one output. Written as a line with only its //@ comment. */
 	Reroute,
 	/**
-	 * `waitUntil (condition);`: pauses until the condition (Text) is true; then Next. With a timeout, Text is
-	 * `condition) timeout (seconds` (Bango::FindWaitUntilTimeout splits it), and Branches[0] ("Timeout") is the block
-	 * run when the time is up, before Next. It's written with a timeout if Text has one or Timeout is wired.
+	 * `waitUntil (condition);`: pauses until the condition (Text) is true; then Next. With a heldFor or a timeout,
+	 * Text is all between the statement's outer brackets, like `condition) heldFor (seconds) timeout (seconds, true`
+	 * (Bango::SplitWaitUntilText splits it), and Branches[0] ("Timeout") is the block run when the time is up,
+	 * before Next. It's written with a timeout if Text has one or Timeout is wired.
 	 */
 	WaitUntil,
 	/**
@@ -237,13 +238,32 @@ namespace Bango
 	BANGOSCRIPTS_API FString GetGraphNodeBranchName(const FBangoGraphNode& Node, int32 Branch);
 
 	/**
-	 * A Wait Until node's text is its condition, or, with a timeout, `condition) timeout (seconds`. True if Text has
-	 * the timeout: the condition is then [0, OutConditionEnd) and the seconds [OutSecondsBegin, Text.Len()).
+	 * Where the parts of a Wait Until node's text are. The text is its condition, then optionally
+	 * `) heldFor (seconds`, then optionally `) timeout (seconds` or `) timeout (seconds, ignoreHold`:
+	 * what's between the outer brackets of `waitUntil (condition) heldFor (2) timeout (5, true)`.
+	 * A part that isn't there is empty, at the end of the text.
 	 */
-	BANGOSCRIPTS_API bool FindWaitUntilTimeout(const FString& Text, int32& OutConditionEnd, int32& OutSecondsBegin);
+	struct FBangoWaitUntilText
+	{
+		/** The condition is [0, ConditionEnd): up to the `)` that closes it, or the whole text. */
+		int32 ConditionEnd = 0;
+		/** `heldFor (`: its seconds are [HoldBegin, HoldEnd), HoldEnd being its `)` (or the end of the text). */
+		bool bHold = false;
+		int32 HoldBegin = 0;
+		int32 HoldEnd = 0;
+		/** `timeout (`: the `)` before the word is at TimeoutOuterBegin, and its seconds are [SecondsBegin, SecondsEnd). */
+		bool bTimeout = false;
+		int32 TimeoutOuterBegin = 0;
+		int32 SecondsBegin = 0;
+		int32 SecondsEnd = 0;
+		/** The timeout's second value: its `,` is at SecondsEnd, and the value is from IgnoreHoldBegin to the end of the text. */
+		bool bIgnoreHold = false;
+		int32 IgnoreHoldBegin = 0;
+	};
+	BANGOSCRIPTS_API FBangoWaitUntilText SplitWaitUntilText(const FString& Text);
 	/** True if a Wait Until node is written with a timeout and its block: its text has one, or its Timeout output is wired. */
 	BANGOSCRIPTS_API bool HasWaitUntilTimeout(const FBangoGraphNode& Node);
-	/** A Wait Until node's line of code: `waitUntil (condition);`, or `waitUntil (condition) timeout (seconds)` before its block. */
+	/** A Wait Until node's line of code: `waitUntil (...);`, or `waitUntil (...) timeout (seconds)` before its block. */
 	BANGOSCRIPTS_API FString MakeWaitUntilHeader(const FString& Text, bool bWithTimeout);
 
 	/**

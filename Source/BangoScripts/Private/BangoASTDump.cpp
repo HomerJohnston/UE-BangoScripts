@@ -260,9 +260,17 @@ namespace BangoDumpPrivate
 		case EBangoStmtKind::WaitUntil:
 		{
 			const FBangoWaitUntilStmt& S = *Stmt.As<FBangoWaitUntilStmt>();
-			return S.bHasTimeout
-				? FString::Printf(TEXT("(waitUntil %s (timeout %s %s))"), *Bango::DumpExpr(*S.Condition), *Bango::DumpExpr(*S.Timeout), *DumpBlock(S.TimeoutBlock))
-				: FString::Printf(TEXT("(waitUntil %s)"), *Bango::DumpExpr(*S.Condition));
+			FString Result = FString::Printf(TEXT("(waitUntil %s"), *Bango::DumpExpr(*S.Condition));
+			if (S.bHasHold)
+			{
+				Result += FString::Printf(TEXT(" (heldFor %s)"), *Bango::DumpExpr(*S.Hold));
+			}
+			if (S.bHasTimeout)
+			{
+				Result += FString::Printf(TEXT(" (timeout %s %s%s)"), *Bango::DumpExpr(*S.Timeout),
+					S.IgnoreHold ? *FString::Printf(TEXT("(ignoreHold %s) "), *Bango::DumpExpr(*S.IgnoreHold)) : TEXT(""), *DumpBlock(S.TimeoutBlock));
+			}
+			return Result + TEXT(")");
 		}
 		case EBangoStmtKind::Label:
 			return FString::Printf(TEXT("(label %s)"), *Stmt.As<FBangoLabelStmt>()->Name);

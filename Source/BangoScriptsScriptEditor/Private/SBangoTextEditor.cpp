@@ -902,6 +902,13 @@ void SBangoTextEditor::UpdateCompletion(bool bMayOpen, bool bMayOpenForCall)
 		return;
 	}
 	const FString& Line = Lines[Cursor.GetLineIndex()];
+	if (Cursor.GetOffset() > Line.Len())
+	{
+		// The cursor is from the text box and the lines from our own copy of the text, which can be a change behind
+		// (this runs from Tick): the cursor may still be where it was on a line that has just got shorter.
+		CloseCompletion();
+		return;
+	}
 
 	int32 WordStart = INDEX_NONE;
 	if (!FBangoCompletion::FindWordBeforeCursor(Line, Cursor.GetOffset(), WordStart))
@@ -1006,13 +1013,17 @@ void SBangoTextEditor::GatherCompletionItems(int32 Line, const FString& LineText
 		return;
 	}
 
-	// After a waitUntil's condition: only `timeout` can follow.
-	if (FBangoCompletion::IsTimeoutPlace(LineText, WordStart))
+	// After a waitUntil's condition: only `heldFor` and `timeout` can follow (after a heldFor, only `timeout`).
+	TArray<FBangoCompletionItem> WaitWords;
+	FBangoCompletion::GetWaitWordItems(LineText, WordStart, WaitWords);
+	if (WaitWords.Num() > 0)
 	{
-		CompletionItems.Reset();
-		CompletionItems.Add(FBangoCompletion::GetTimeoutItem());
+		CompletionItems = MoveTemp(WaitWords);
 		CompletionItemPtrs.Reset();
-		CompletionItemPtrs.Add(MakeShared<FBangoCompletionItem>(CompletionItems[0]));
+		for (const FBangoCompletionItem& Item : CompletionItems)
+		{
+			CompletionItemPtrs.Add(MakeShared<FBangoCompletionItem>(Item));
+		}
 		MeasureCompletionNames();
 		return;
 	}

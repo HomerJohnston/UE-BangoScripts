@@ -298,6 +298,9 @@ static const TCHAR* const GBangoGraphRoundTripSources[] =
 	// waitUntil with a timeout: its block is its Timeout output. Empty, in a function, disabled, and disconnected.
 	TEXT("waitUntil (stage == 3) timeout (20)    //@1(0, 0)\n{\n\tTalk(\"late\");    //@2(2, 2)\n\tgoto Again;    //@3(4, 2)\n}\nlabel Again;    //@4(2, 0)\nwaitUntil (ready) timeout (_t * 2)    //@5(4, 0)\n{\n}\n/*\nwaitUntil (ready) timeout (1)    //@6(6, 0)\n{\n\tTalk(\"off\");    //@7(8, 2)\n}\n*/\nfunction void F()\n{\n\twaitUntil (ready) timeout (0.5)    //@8(0, 0)\n\t{\n\t\treturn;    //@9(2, 2)\n\t}\n}\n//~ waitUntil (ready) timeout (3)    //@10(0, 6)\n//~ {\n//~ \tTalk(\"x\");    //@11(2, 8)\n//~ }\n"),
 
+	// waitUntil with heldFor, alone and with a timeout (and its IgnoreHold): in a function, disabled, disconnected.
+	TEXT("waitUntil (stage == 3) heldFor (2);    //@1(0, 0)\nwaitUntil (ready) heldFor (_h * 2) timeout (20)    //@2(2, 0)\n{\n\tTalk(\"late\");    //@3(4, 2)\n}\nwaitUntil (Count(found) > 0) heldFor (Max(1, _h)) timeout (Max(2, _t), true)    //@4(4, 0)\n{\n}\n/* waitUntil (ready) heldFor (1); */    //@5(6, 0)\nfunction void F()\n{\n\twaitUntil (ready) heldFor (0.5) timeout (3, false)    //@6(0, 0)\n\t{\n\t\treturn;    //@7(2, 2)\n\t}\n}\n//~ waitUntil (ready) heldFor (3);    //@8(0, 6)\n"),
+
 	// Disabled nodes, among comments and reroutes, in a function and a disconnected chain.
 	TEXT("// first\n/* Talk(\"b\"); */ //@2(4, 0)\n/*\n// a loop\nwhile (true) //@3(1, 1)\n{\n\t/* break; */ //@4(2, 2)\n\t//@5(3, 3)\n}\n*/\nfunction void F()\n{\n\t/* return; */\n}\n//~ /*\n//~ if (a) //@6(9, 9)\n//~ {\n//~ \t/* /* b(); */ */\n//~ }\n//~ */\n"),
 };
@@ -347,16 +350,16 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 
 			const FBangoNodeLayoutContext Context = Bango::MakeNodeLayoutContext(Doc, nullptr);
 			FBangoNodeLayout Layout = Bango::GetNodeLayout(*Wait, false, Context);
-			Expect(Layout.Fields.Num() == 2 && Layout.Fields[0].Text == TEXT("stage == 3") && Layout.Fields[0].bHideLabel
-				&& Layout.Fields[1].Label == TEXT("Timeout") && Layout.Fields[1].Text == TEXT("20") && Layout.Fields[1].bPresent && Layout.Fields[1].bOptional && Layout.Fields[1].TypeHint == TEXT("float"),
+			Expect(Layout.Fields.Num() == 3 && Layout.Fields[0].Text == TEXT("stage == 3") && Layout.Fields[0].bHideLabel
+				&& Layout.Fields[2].Label == TEXT("Timeout") && Layout.Fields[2].Text == TEXT("20") && Layout.Fields[2].bPresent && Layout.Fields[2].bOptional && Layout.Fields[2].TypeHint == TEXT("float"),
 				TEXT("waitUntil timeout: fields are the condition and Timeout"));
 			FString EditError;
-			Expect(Bango::SetNodeField(*Wait, false, Context, 1, TEXT("_t * 2"), EditError) && Wait->Text == TEXT("stage == 3) timeout (_t * 2"), FString(TEXT("waitUntil timeout: changing the seconds: ")) + EditError);
+			Expect(Bango::SetNodeField(*Wait, false, Context, 2, TEXT("_t * 2"), EditError) && Wait->Text == TEXT("stage == 3) timeout (_t * 2"), FString(TEXT("waitUntil timeout: changing the seconds: ")) + EditError);
 			Expect(Bango::SetNodeField(*Wait, false, Context, 0, TEXT("Ready(1)"), EditError) && Wait->Text == TEXT("Ready(1)) timeout (_t * 2"), FString(TEXT("waitUntil timeout: changing the condition: ")) + EditError);
-			Expect(!Bango::SetNodeField(*Wait, false, Context, 1, TEXT("1 2"), EditError) && Wait->Text == TEXT("Ready(1)) timeout (_t * 2"), TEXT("waitUntil timeout: seconds that don't read are refused"));
+			Expect(!Bango::SetNodeField(*Wait, false, Context, 2, TEXT("1 2"), EditError) && Wait->Text == TEXT("Ready(1)) timeout (_t * 2"), TEXT("waitUntil timeout: seconds that don't read are refused"));
 
 			// Its Timeout output still wired, without seconds: written `timeout ()`, to fill in.
-			Expect(Bango::SetNodeField(*Wait, false, Context, 1, FString(), EditError) && Wait->Text == TEXT("Ready(1)"), FString(TEXT("waitUntil timeout: clearing the seconds leaves the condition: ")) + EditError);
+			Expect(Bango::SetNodeField(*Wait, false, Context, 2, FString(), EditError) && Wait->Text == TEXT("Ready(1)"), FString(TEXT("waitUntil timeout: clearing the seconds leaves the condition: ")) + EditError);
 			FString Text;
 			FString WriteError;
 			Expect(Bango::WriteGraphText(Doc, Text, WriteError) && Text.Contains(TEXT("waitUntil (Ready(1)) timeout ()")) && Text.Contains(TEXT("Talk(\"late\");")),
@@ -370,11 +373,11 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 					Expect(Node.Text == TEXT("Ready(1)) timeout (") && Node.Branches[0] != INDEX_NONE, TEXT("waitUntil timeout: an empty timeout reads back, its block wired"));
 					const FBangoNodeLayout EmptyLayout = Bango::GetNodeLayout(Node, false, Context);
 					FBangoGraphNode Copy = Node;
-					Expect(EmptyLayout.Fields.Num() == 2 && EmptyLayout.Fields[0].Text == TEXT("Ready(1)") && !EmptyLayout.Fields[1].bPresent && !EmptyLayout.Fields[1].bOptional,
+					Expect(EmptyLayout.Fields.Num() == 3 && EmptyLayout.Fields[0].Text == TEXT("Ready(1)") && !EmptyLayout.Fields[2].bPresent && !EmptyLayout.Fields[2].bOptional,
 						TEXT("waitUntil timeout: its seconds are missing, not optional"));
-					Expect(Bango::SetNodeField(Copy, false, Context, 1, TEXT("3"), EditError) && Copy.Text == TEXT("Ready(1)) timeout (3"), FString(TEXT("waitUntil timeout: filling missing seconds in: ")) + Copy.Text);
+					Expect(Bango::SetNodeField(Copy, false, Context, 2, TEXT("3"), EditError) && Copy.Text == TEXT("Ready(1)) timeout (3"), FString(TEXT("waitUntil timeout: filling missing seconds in: ")) + Copy.Text);
 					Copy = Node;
-					Expect(Bango::SetNodeField(Copy, false, Context, 1, FString(), EditError) && Copy.Text == TEXT("Ready(1)"), FString(TEXT("waitUntil timeout: clearing missing seconds takes the timeout away: ")) + Copy.Text);
+					Expect(Bango::SetNodeField(Copy, false, Context, 2, FString(), EditError) && Copy.Text == TEXT("Ready(1)"), FString(TEXT("waitUntil timeout: clearing missing seconds takes the timeout away: ")) + Copy.Text);
 				}
 			}
 
@@ -382,10 +385,57 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			Wait->Branches[0] = INDEX_NONE;
 			Expect(Bango::WriteGraphText(Doc, Text, WriteError) && Text.Contains(TEXT("waitUntil (Ready(1));")), FString(TEXT("waitUntil timeout: unwired and without seconds, a plain waitUntil: ")) + Text);
 			Layout = Bango::GetNodeLayout(*Plain, false, Context);
-			Expect(Layout.Fields.Num() == 2 && Layout.Fields[0].Text == TEXT("ready") && !Layout.Fields[1].bPresent && Layout.Fields[1].bOptional, TEXT("waitUntil timeout: a plain one has an empty Timeout field"));
-			Expect(Bango::SetNodeField(*Plain, false, Context, 1, TEXT("5"), EditError) && Plain->Text == TEXT("ready) timeout (5"), FString(TEXT("waitUntil timeout: filling Timeout in: ")) + EditError);
+			Expect(Layout.Fields.Num() == 3 && Layout.Fields[0].Text == TEXT("ready") && !Layout.Fields[2].bPresent && Layout.Fields[2].bOptional, TEXT("waitUntil timeout: a plain one has an empty Timeout field"));
+			Expect(Bango::SetNodeField(*Plain, false, Context, 2, TEXT("5"), EditError) && Plain->Text == TEXT("ready) timeout (5"), FString(TEXT("waitUntil timeout: filling Timeout in: ")) + EditError);
 			Expect(Bango::WriteGraphText(Doc, Text, WriteError) && Text.Contains(TEXT("waitUntil (ready) timeout (5)")), FString(TEXT("waitUntil timeout: written with its (empty) block: ")) + Text);
 			Expect(Bango::BuildGraph(Text, TEXT("wait.bango"), Again, Error), FString(TEXT("waitUntil timeout: and that reads again: ")) + Error.ToString());
+
+			// ---- heldFor: a Held For row, and with a timeout too, an Ignore Hold row ----
+			FBangoGraphDocument HeldDoc;
+			const bool bHeldBuilt = Bango::BuildGraph(TEXT("waitUntil (stage == 3) heldFor (2) timeout (20, true)    //@1(0, 0)\n{\n}\nwaitUntil (ready);    //@2(2, 0)\n"), TEXT("held.bango"), HeldDoc, Error);
+			Expect(bHeldBuilt, FString(TEXT("heldFor: builds: ")) + Error.ToString());
+			FBangoGraphNode* Held = nullptr;
+			FBangoGraphNode* Bare = nullptr;
+			for (FBangoGraphNode& Node : HeldDoc.Main.Nodes)
+			{
+				Held = Node.NodeID == 1 ? &Node : Held;
+				Bare = Node.NodeID == 2 ? &Node : Bare;
+			}
+			if (bHeldBuilt && Held && Bare)
+			{
+				const FBangoNodeLayoutContext HeldContext = Bango::MakeNodeLayoutContext(HeldDoc, nullptr);
+				Expect(Held->Text == TEXT("stage == 3) heldFor (2) timeout (20, true"), FString(TEXT("heldFor: the node's text holds it all: ")) + Held->Text);
+				Layout = Bango::GetNodeLayout(*Held, false, HeldContext);
+				Expect(Layout.Fields.Num() == 4 && Layout.Fields[0].Text == TEXT("stage == 3")
+					&& Layout.Fields[1].Label == TEXT("Held For") && Layout.Fields[1].Text == TEXT("2") && Layout.Fields[1].bPresent && Layout.Fields[1].bOptional && Layout.Fields[1].TypeHint == TEXT("float")
+					&& Layout.Fields[2].Label == TEXT("Timeout") && Layout.Fields[2].Text == TEXT("20") && Layout.Fields[2].bPresent
+					&& Layout.Fields[3].Label == TEXT("Ignore Hold") && Layout.Fields[3].Text == TEXT("true") && Layout.Fields[3].bPresent && Layout.Fields[3].bOptional && Layout.Fields[3].TypeHint == TEXT("bool"),
+					TEXT("heldFor: fields are the condition, Held For, Timeout and Ignore Hold"));
+				Expect(Bango::SetNodeField(*Held, false, HeldContext, 3, FString(), EditError) && Held->Text == TEXT("stage == 3) heldFor (2) timeout (20"), FString(TEXT("heldFor: clearing Ignore Hold: ")) + Held->Text);
+				Layout = Bango::GetNodeLayout(*Held, false, HeldContext);
+				Expect(Layout.Fields.Num() == 4 && !Layout.Fields[3].bPresent && Layout.Fields[3].bOptional && Layout.Fields[2].Text == TEXT("20"), TEXT("heldFor: Ignore Hold is there to fill in, with both"));
+				Expect(Bango::SetNodeField(*Held, false, HeldContext, 3, TEXT("_cut"), EditError) && Held->Text == TEXT("stage == 3) heldFor (2) timeout (20, _cut"), FString(TEXT("heldFor: filling Ignore Hold in: ")) + EditError);
+				Expect(Bango::SetNodeField(*Held, false, HeldContext, 2, TEXT("Max(1, 2)"), EditError) && Held->Text == TEXT("stage == 3) heldFor (2) timeout (Max(1, 2), _cut"), FString(TEXT("heldFor: Timeout's seconds end at the comma: ")) + Held->Text);
+				Expect(Bango::SetNodeField(*Held, false, HeldContext, 1, TEXT("_h + 1"), EditError) && Held->Text == TEXT("stage == 3) heldFor (_h + 1) timeout (Max(1, 2), _cut"), FString(TEXT("heldFor: editing Held For: ")) + Held->Text);
+				Expect(Bango::SetNodeField(*Held, false, HeldContext, 0, TEXT("Ready(1)"), EditError) && Held->Text == TEXT("Ready(1)) heldFor (_h + 1) timeout (Max(1, 2), _cut"), FString(TEXT("heldFor: editing the condition: ")) + Held->Text);
+				Expect(Bango::SetNodeField(*Held, false, HeldContext, 1, FString(), EditError) && Held->Text == TEXT("Ready(1)) timeout (Max(1, 2)"), FString(TEXT("heldFor: clearing Held For takes Ignore Hold with it: ")) + Held->Text);
+				Layout = Bango::GetNodeLayout(*Held, false, HeldContext);
+				Expect(Layout.Fields.Num() == 3 && !Layout.Fields[1].bPresent && Layout.Fields[1].bOptional && Layout.Fields[2].Text == TEXT("Max(1, 2)"), TEXT("heldFor: without it, no Ignore Hold row"));
+				Expect(Bango::SetNodeField(*Held, false, HeldContext, 1, TEXT("1.5"), EditError) && Held->Text == TEXT("Ready(1)) heldFor (1.5) timeout (Max(1, 2)"), FString(TEXT("heldFor: filling Held For in before a timeout: ")) + Held->Text);
+				Expect(Bango::SetNodeField(*Held, false, HeldContext, 2, FString(), EditError) && Held->Text == TEXT("Ready(1)) heldFor (1.5"), FString(TEXT("heldFor: clearing Timeout leaves the hold: ")) + Held->Text);
+				Expect(Bango::SetNodeField(*Bare, false, HeldContext, 1, TEXT("4"), EditError) && Bare->Text == TEXT("ready) heldFor (4"), FString(TEXT("heldFor: filling Held For in on a plain one: ")) + EditError);
+				FString HeldText;
+				Expect(Bango::WriteGraphText(HeldDoc, HeldText, WriteError) && HeldText.Contains(TEXT("waitUntil (Ready(1)) heldFor (1.5);")) && HeldText.Contains(TEXT("waitUntil (ready) heldFor (4);")),
+					FString(TEXT("heldFor: written without a block: ")) + HeldText);
+				Expect(Bango::SetNodeField(*Bare, false, HeldContext, 2, TEXT("9"), EditError) && Bare->Text == TEXT("ready) heldFor (4) timeout (9"), FString(TEXT("heldFor: filling Timeout in after it: ")) + Bare->Text);
+				Expect(Bango::WriteGraphText(HeldDoc, HeldText, WriteError) && HeldText.Contains(TEXT("waitUntil (ready) heldFor (4) timeout (9)")) && Bango::BuildGraph(HeldText, TEXT("held.bango"), Again, Error),
+					FString(TEXT("heldFor: written with its timeout's block, and read again: ")) + HeldText + Error.ToString());
+				const Bango::FBangoWaitUntilText Parts = Bango::SplitWaitUntilText(TEXT("F(a, b)) heldFor (G(1)[0]) timeout (Max(1, 2), _x"));
+				Expect(Parts.ConditionEnd == 7 && Parts.bHold && Parts.HoldBegin == 18 && Parts.HoldEnd == 25 && Parts.bTimeout && Parts.TimeoutOuterBegin == 25 && Parts.SecondsBegin == 36
+					&& Parts.bIgnoreHold && Parts.SecondsEnd == 45 && Parts.IgnoreHoldBegin == 46, TEXT("heldFor: the parts of a Wait Until's text"));
+				const Bango::FBangoWaitUntilText None = Bango::SplitWaitUntilText(TEXT("heldFor(a) && timeout(b)"));
+				Expect(!None.bHold && !None.bTimeout && None.ConditionEnd == 24, TEXT("heldFor: only after the condition's bracket"));
+			}
 		}
 	}
 

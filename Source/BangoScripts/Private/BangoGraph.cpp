@@ -150,56 +150,89 @@ namespace Bango
 		return GetGraphNodeBranchCount(Kind) > Branch ? TEXT("Do") : TEXT("");
 	}
 
-	bool FindWaitUntilTimeout(const FString& Text, int32& OutConditionEnd, int32& OutSecondsBegin)
+	FBangoWaitUntilText SplitWaitUntilText(const FString& Text)
 	{
-		// `condition) timeout (seconds`: the first `)` that closes nothing in the text, then `timeout` and `(`.
+		FBangoWaitUntilText Out;
+		Out.ConditionEnd = Out.HoldBegin = Out.HoldEnd = Out.TimeoutOuterBegin = Out.SecondsBegin = Out.SecondsEnd = Out.IgnoreHoldBegin = Text.Len();
+
 		FBangoLexResult Lexed;
 		FBangoCompileError Error;
 		if (!Bango::Lex(Text, Lexed, Error))
 		{
-			return false;
+			return Out;
 		}
 		const TArray<FBangoToken>& T = Lexed.Tokens;
-		int32 Depth = 0;
-		for (int32 i = 0; i + 2 < T.Num(); ++i)
+		// From token From on: the first `)` that closes nothing in the text (or a `,` outside brackets, if asked), else -1.
+		const auto FindClose = [&T](int32 From, bool bOrComma) -> int32
 		{
-			const EBangoTokenKind Kind = T[i].Kind;
-			if (Kind == EBangoTokenKind::LParen || Kind == EBangoTokenKind::LBracket)
+			int32 Depth = 0;
+			for (int32 i = From; i < T.Num(); ++i)
 			{
-				++Depth;
-			}
-			else if (Kind == EBangoTokenKind::RBracket || (Kind == EBangoTokenKind::RParen && Depth > 0))
-			{
-				--Depth;
-			}
-			else if (Kind == EBangoTokenKind::RParen)
-			{
-				if (T[i].Loc.Line == 1 && T[i + 1].Kind == EBangoTokenKind::Identifier && T[i + 1].Text.Equals(TEXT("timeout"), ESearchCase::CaseSensitive)
-					&& T[i + 2].Kind == EBangoTokenKind::LParen && T[i + 2].Loc.Line == 1)
+				const EBangoTokenKind Kind = T[i].Kind;
+				if (Kind == EBangoTokenKind::LParen || Kind == EBangoTokenKind::LBracket)
 				{
-					OutConditionEnd = T[i].Loc.Column - 1;
-					OutSecondsBegin = T[i + 2].EndColumn - 1;
-					return true;
+					++Depth;
 				}
-				return false;
+				else if (Kind == EBangoTokenKind::RBracket || (Kind == EBangoTokenKind::RParen && Depth > 0))
+				{
+					--Depth;
+				}
+				else if (Kind == EBangoTokenKind::RParen || (bOrComma && Kind == EBangoTokenKind::Comma && Depth == 0))
+				{
+					return i;
+				}
+			}
+			return -1;
+		};
+		// `) word (` on the text's one line, at the `)` that's token Close.
+		const auto IsWordAt = [&T](int32 Close, const TCHAR* Word) -> bool
+		{
+			return Close >= 0 && Close + 2 < T.Num() && T[Close].Loc.Line == 1
+				&& T[Close + 1].Kind == EBangoTokenKind::Identifier && T[Close + 1].Text.Equals(Word, ESearchCase::CaseSensitive)
+				&& T[Close + 2].Kind == EBangoTokenKind::LParen && T[Close + 2].Loc.Line == 1;
+		};
+
+		int32 Close = FindClose(0, false);
+		const int32 ConditionClose = Close;
+		if (IsWordAt(Close, TEXT("heldFor")))
+		{
+			Out.bHold = true;
+			Out.HoldBegin = T[Close + 2].EndColumn - 1;
+			Close = FindClose(Close + 3, false);
+			if (Close >= 0)
+			{
+				Out.HoldEnd = T[Close].Loc.Column - 1;
 			}
 		}
-		return false;
+		if (IsWordAt(Close, TEXT("timeout")))
+		{
+			Out.bTimeout = true;
+			Out.TimeoutOuterBegin = T[Close].Loc.Column - 1;
+			Out.SecondsBegin = T[Close + 2].EndColumn - 1;
+			const int32 End = FindClose(Close + 3, true);
+			if (End >= 0 && T[End].Kind == EBangoTokenKind::Comma)
+			{
+				Out.bIgnoreHold = true;
+				Out.SecondsEnd = T[End].Loc.Column - 1;
+				Out.IgnoreHoldBegin = T[End].EndColumn - 1;
+			}
+		}
+		if (Out.bHold || Out.bTimeout)
+		{
+			Out.ConditionEnd = T[ConditionClose].Loc.Column - 1;
+		}
+		return Out;
 	}
 
 	bool HasWaitUntilTimeout(const FBangoGraphNode& Node)
 	{
-		int32 ConditionEnd = 0;
-		int32 SecondsBegin = 0;
 		return Node.Kind == EBangoGraphNodeKind::WaitUntil
-			&& ((Node.Branches.Num() > 0 && Node.Branches[0] != INDEX_NONE) || FindWaitUntilTimeout(Node.Text, ConditionEnd, SecondsBegin));
+			&& ((Node.Branches.Num() > 0 && Node.Branches[0] != INDEX_NONE) || SplitWaitUntilText(Node.Text).bTimeout);
 	}
 
 	FString MakeWaitUntilHeader(const FString& Text, bool bWithTimeout)
 	{
-		int32 ConditionEnd = 0;
-		int32 SecondsBegin = 0;
-		if (FindWaitUntilTimeout(Text, ConditionEnd, SecondsBegin))
+		if (SplitWaitUntilText(Text).bTimeout)
 		{
 			return FString(TEXT("waitUntil (")) + Text + TEXT(")");
 		}

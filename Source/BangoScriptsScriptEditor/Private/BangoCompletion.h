@@ -93,11 +93,19 @@ public:
 
 	/**
 	 * Whether the word starting at WordStart is where a waitUntil's `timeout` goes: right after the `)` that closes its
-	 * condition (`waitUntil (ready) ti|`). Nothing else can be written there, so the list then holds only GetTimeoutItem.
+	 * condition (`waitUntil (ready) ti|`), or the one that closes the `heldFor (...)` after it.
 	 */
 	static bool IsTimeoutPlace(const FString& Line, int32 WordStart);
-	/** `timeout`, as an item: a word of the language only in that place. */
+	/** The same for its `heldFor`: only right after its condition. */
+	static bool IsHoldPlace(const FString& Line, int32 WordStart);
+	/**
+	 * The words that can be written at WordStart after a waitUntil's condition (heldFor and timeout, or timeout
+	 * alone after a heldFor); none anywhere else. Nothing else can be written there, so the list then holds only these.
+	 */
+	static void GetWaitWordItems(const FString& Line, int32 WordStart, TArray<FBangoCompletionItem>& OutItems);
+	/** `timeout` and `heldFor`, as items: words of the language only in those places. */
 	static FBangoCompletionItem GetTimeoutItem();
+	static FBangoCompletionItem GetHoldItem();
 
 	/**
 	 * What accepting Item for the word that ends at WordEnd of Line types. A name that isn't callable, or one with a
@@ -119,7 +127,7 @@ public:
 	/**
 	 * For the info popup shown when the mouse rests on a name (SBangoTextEditor): the item for the name at Column of
 	 * line LineIndex, from the same items the autocomplete list has for that line (GatherItems), and where the name is
-	 * on the line; or, for a word of the language (a keyword, a type, `true`, `nil`, `player`, a waitUntil's `timeout`),
+	 * on the line; or, for a word of the language (a keyword, a type, `true`, `nil`, `player`, a waitUntil's `timeout` and `heldFor`),
 	 * its keyword item. False for anything else: a number, a string or a comment, an @entity, a vector part, a label,
 	 * a `call`'s Blueprint function, or a name nothing is known about (a global declared elsewhere).
 	 */

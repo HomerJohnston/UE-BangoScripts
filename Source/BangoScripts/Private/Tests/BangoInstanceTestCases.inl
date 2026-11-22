@@ -1799,7 +1799,7 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			{
 				FReloadRun Run;
 				StartRun(Run, Compile(TEXT("global bool go;\nfloat _t = -1;\nwaitUntil (go) timeout (_t)\n{\n}")));
-				Expect(Run.Instance.GetStatus() == EBangoInstanceStatus::Failed && Run.Instance.GetError().Message.Contains(TEXT("A timeout can't be negative")), TEXT("waitUntil timeout: negative is an error"));
+				Expect(Run.Instance.GetStatus() == EBangoInstanceStatus::Failed && Run.Instance.GetError().Message.Contains(TEXT("timeout can't be negative")), TEXT("waitUntil timeout: negative is an error"));
 				FReloadRun Nil;
 				StartRun(Nil, Compile(TEXT("global bool go;\nfloat _t;\nwaitUntil (go) timeout (_t)\n{\n}")));
 				Expect(Nil.Instance.GetStatus() == EBangoInstanceStatus::Failed && Nil.Instance.GetError().Message.Contains(TEXT("'_t' is nil")), TEXT("waitUntil timeout: nil is an error"));
@@ -1844,6 +1844,151 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				FString ReloadMessage;
 				Expect(Run.Instance.TakeReloadResult(ReloadMessage) == EBangoReloadResult::Reloaded, *(FString(TEXT("waitUntil timeout reload: it switched: ")) + ReloadMessage));
 				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && LastLog() == TEXT("v2"), TEXT("waitUntil timeout reload: the time left was kept, the new block runs"));
+			}
+			// ---- heldFor: the condition must stay true that long ----
+			const TCHAR* Held = TEXT("global int score;\nwaitUntil (score > 10) heldFor (2);\nTalk(\"after\");");
+			{
+				FReloadRun Run;
+				Context.DeltaSeconds = 1.0f;
+				Expect(StartRun(Run, Compile(Held)) && !Run.Instance.IsWaitDue(Run.Globals), TEXT("heldFor: false, it waits for a change like any waitUntil"));
+				Set(Run.Globals, TEXT("score"), FBangoValue::MakeInt(20));
+				Expect(Run.Instance.IsWaitDue(Run.Globals) && Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting && Log.Num() == 0, TEXT("heldFor: true now, the hold starts"));
+				Expect(Run.Instance.IsWaitDue(Run.Globals), TEXT("heldFor: resumed every frame while it's held, to count the time"));
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting && Log.Num() == 0, TEXT("heldFor: one second held, one to go"));
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && LastLog() == TEXT("after"), TEXT("heldFor: held long enough, it carries on"));
+			}
+			// Turning false throws the hold away: it starts over the next time it's true.
+			{
+				FReloadRun Run;
+				Context.DeltaSeconds = 1.0f;
+				StartRun(Run, Compile(Held));
+				Set(Run.Globals, TEXT("score"), FBangoValue::MakeInt(20));
+				Run.Instance.Resume(Context);
+				Context.DeltaSeconds = 1.5f;
+				Run.Instance.Resume(Context);
+				Set(Run.Globals, TEXT("score"), FBangoValue::MakeInt(5));
+				Context.DeltaSeconds = 1.0f;
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting && Log.Num() == 0 && !Run.Instance.IsWaitDue(Run.Globals), TEXT("heldFor: false before the hold was over, it waits again"));
+				Set(Run.Globals, TEXT("score"), FBangoValue::MakeInt(20));
+				Context.DeltaSeconds = 1.9f;
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting, TEXT("heldFor: true again, the hold starts over"));
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting && Log.Num() == 0, TEXT("heldFor: 1.9 s of the new hold isn't enough"));
+				Context.DeltaSeconds = 0.2f;
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && LastLog() == TEXT("after"), TEXT("heldFor: the new hold ran its whole time"));
+			}
+			// A hold of 0 is no hold. A negative one stops the script.
+			{
+				FReloadRun Run;
+				StartRun(Run, Compile(TEXT("global int score;\nwaitUntil (score > 10) heldFor (0);\nTalk(\"after\");")));
+				Set(Run.Globals, TEXT("score"), FBangoValue::MakeInt(20));
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && LastLog() == TEXT("after"), TEXT("heldFor: 0 seconds carries on as soon as it's true"));
+				FReloadRun Bad;
+				StartRun(Bad, Compile(TEXT("global bool go;\nfloat _h = -1;\nwaitUntil (go) heldFor (_h);")));
+				Expect(Bad.Instance.GetStatus() == EBangoInstanceStatus::Failed && Bad.Instance.GetError().Message.Contains(TEXT("heldFor can't be negative")), TEXT("heldFor: negative is an error"));
+			}
+			// With a timeout whose time is up during a hold: the hold is let finish.
+			const TCHAR* HeldTimed = TEXT("global int score;\nwaitUntil (score > 10) heldFor (2) timeout (3)\n{\n\tTalk(\"late\");\n}\nTalk(\"after\");");
+			{
+				FReloadRun Run;
+				StartRun(Run, Compile(HeldTimed));
+				Context.DeltaSeconds = 2.0f;
+				Run.Instance.Resume(Context);
+				Set(Run.Globals, TEXT("score"), FBangoValue::MakeInt(20));
+				Context.DeltaSeconds = 0.5f;
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting, TEXT("heldFor with a timeout: true with half a second left, the hold starts"));
+				Context.DeltaSeconds = 1.0f;
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting && Log.Num() == 0, TEXT("heldFor with a timeout: the time is up during the hold, which goes on"));
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && Log.Num() == 1 && Log[0] == TEXT("after"), TEXT("heldFor with a timeout: the hold finished, the timeout block is skipped"));
+			}
+			// ... and if the condition turns false before the hold is over, the timeout block runs then.
+			{
+				FReloadRun Run;
+				StartRun(Run, Compile(HeldTimed));
+				Context.DeltaSeconds = 2.0f;
+				Run.Instance.Resume(Context);
+				Set(Run.Globals, TEXT("score"), FBangoValue::MakeInt(20));
+				Context.DeltaSeconds = 0.5f;
+				Run.Instance.Resume(Context);
+				Context.DeltaSeconds = 1.0f;
+				Run.Instance.Resume(Context);
+				Set(Run.Globals, TEXT("score"), FBangoValue::MakeInt(5));
+				Context.DeltaSeconds = 0.1f;
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && Log.Num() == 2 && Log[0] == TEXT("late") && Log[1] == TEXT("after"),
+					TEXT("heldFor with a timeout: false after the time was up, its block runs"));
+			}
+			// False when the time is up: the block, as without a hold.
+			{
+				FReloadRun Run;
+				StartRun(Run, Compile(HeldTimed));
+				Context.DeltaSeconds = 3.5f;
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && Log.Num() == 2 && Log[0] == TEXT("late"), TEXT("heldFor with a timeout: never true, its block runs when the time is up"));
+			}
+			// IgnoreHold: the time being up cuts the hold short.
+			const TCHAR* HeldIgnored = TEXT("global int score;\nbool _ignore = true;\nwaitUntil (score > 10) heldFor (2) timeout (3, _ignore)\n{\n\tTalk(\"late\");\n}\nTalk(\"after\");");
+			{
+				FReloadRun Run;
+				StartRun(Run, Compile(HeldIgnored));
+				Context.DeltaSeconds = 2.0f;
+				Run.Instance.Resume(Context);
+				Set(Run.Globals, TEXT("score"), FBangoValue::MakeInt(20));
+				Context.DeltaSeconds = 0.5f;
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting && Log.Num() == 0, TEXT("IgnoreHold: true with half a second left, the hold starts"));
+				Context.DeltaSeconds = 1.0f;
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && Log.Num() == 2 && Log[0] == TEXT("late") && Log[1] == TEXT("after"),
+					TEXT("IgnoreHold: the time is up during the hold, its block runs"));
+			}
+			// ... but a hold that finishes in time does carry on, also in the very frame the time runs out.
+			{
+				FReloadRun Run;
+				StartRun(Run, Compile(HeldIgnored));
+				Set(Run.Globals, TEXT("score"), FBangoValue::MakeInt(20));
+				Context.DeltaSeconds = 1.0f;
+				Run.Instance.Resume(Context);
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting && Log.Num() == 0, TEXT("IgnoreHold: held for a second, a second of both left"));
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && Log.Num() == 1 && Log[0] == TEXT("after"), TEXT("IgnoreHold: the hold and the time end together, the hold wins"));
+			}
+			// Saved and loaded during a hold: the time it has left is kept.
+			{
+				FReloadRun Run;
+				TSharedPtr<FBangoProgram> HeldProgram = Compile(Held);
+				StartRun(Run, HeldProgram);
+				Set(Run.Globals, TEXT("score"), FBangoValue::MakeInt(20));
+				Context.DeltaSeconds = 0.5f;
+				Run.Instance.Resume(Context);
+				Context.DeltaSeconds = 1.5f;
+				Run.Instance.Resume(Context);
+				TArray<uint8> Bytes;
+				{
+					FMemoryWriter Writer(Bytes);
+					Run.Globals.Serialize(Writer);
+					Run.Instance.Serialize(Writer);
+				}
+				FBangoGlobalStore LoadedGlobals;
+				FBangoInstance Loaded;
+				{
+					FMemoryReader Reader(Bytes);
+					LoadedGlobals.Serialize(Reader);
+					Loaded.Serialize(Reader);
+				}
+				FString BindError;
+				Expect(Loaded.Bind(HeldProgram, Commands, BindError) && Loaded.GetWaitSet() && Loaded.IsWaitDue(LoadedGlobals), TEXT("heldFor save/load: waiting after loading"));
+				Context.Globals = &LoadedGlobals;
+				Log.Reset();
+				Context.DeltaSeconds = 0.25f;
+				Expect(Loaded.Resume(Context) == EBangoInstanceStatus::Waiting && Log.Num() == 0, TEXT("heldFor save/load: not held long enough yet (0.25 s left)"));
+				Context.DeltaSeconds = 0.5f;
+				Expect(Loaded.Resume(Context) == EBangoInstanceStatus::Finished && LastLog() == TEXT("after"), TEXT("heldFor save/load: the hold's time left was kept"));
+			}
+			// Hot reload during a hold, to a version without it: true is enough then.
+			{
+				FReloadRun Run;
+				StartRun(Run, Compile(TEXT("global int score;\nwaitUntil (score > 10) heldFor (5);    //@1(0, 0)\nTalk(\"v1\");    //@2(2, 0)")));
+				Set(Run.Globals, TEXT("score"), FBangoValue::MakeInt(20));
+				Context.DeltaSeconds = 1.0f;
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Waiting, TEXT("heldFor reload: holding"));
+				FString ReloadError;
+				Run.Instance.RequestReload(Compile(TEXT("global int score;\nwaitUntil (score > 10);    //@1(0, 0)\nTalk(\"v2\");    //@2(2, 0)")), Commands, ReloadError);
+				Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && LastLog() == TEXT("v2"), TEXT("heldFor reload: the new version has no hold, so it carries on"));
 			}
 			Context.DeltaSeconds = DeltaBefore;
 		}

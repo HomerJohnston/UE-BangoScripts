@@ -2534,6 +2534,7 @@ void SBangoScriptEditor::OpenInlineScript(const TSharedPtr<FBangoInlineScriptTar
 	}
 	if (Target.IsValid())
 	{
+		TGuardValue<bool> Opening(bOpeningScript, true);
 		LoadScript(Target->GetScriptName());
 	}
 	else
@@ -2552,6 +2553,7 @@ void SBangoScriptEditor::OpenScriptAsset(UBangoScriptAsset* Asset)
 	}
 	if (Asset)
 	{
+		TGuardValue<bool> Opening(bOpeningScript, true);
 		LoadScript(Asset->GetScriptName());
 	}
 	else
@@ -2646,6 +2648,12 @@ void SBangoScriptEditor::LoadScript(const FString& Script)
 	SavedVerbatimText = VerbatimText;
 	bDirty = false;
 	UpdateScriptText(&SavedDocument);
+	if (bOpeningScript && bGraphShown != Document.bUsesGraphEditor)
+	{
+		// A script laid out in the graph editor opens with its graph; one that isn't opens as its text. Whatever the
+		// switch was left at last time: that's remembered, but only decides for a script that can't say (above).
+		SetGraphShown(Document.bUsesGraphEditor, /*bRemember*/ false);
+	}
 	CompileQuietly(); // so the Compile Test icon starts with the script's real status
 }
 
@@ -3465,10 +3473,13 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeGraphSwitch()
 		];
 }
 
-void SBangoScriptEditor::SetGraphShown(bool bShown)
+void SBangoScriptEditor::SetGraphShown(bool bShown, bool bRemember)
 {
 	bGraphShown = bShown;
-	GConfig->SetBool(TEXT("BangoScriptEditor"), TEXT("GraphShown"), bGraphShown, GEditorPerProjectIni);
+	if (bRemember)
+	{
+		GConfig->SetBool(TEXT("BangoScriptEditor"), TEXT("GraphShown"), bGraphShown, GEditorPerProjectIni);
+	}
 	if (!bShown)
 	{
 		UpdateScriptText(nullptr); // the text pane is shown now: up to date with the graphs
@@ -3480,7 +3491,10 @@ void SBangoScriptEditor::SetGraphShown(bool bShown)
 	if (ReferenceMode != ReferenceAuto)
 	{
 		ReferenceMode = bShown ? 1 : 0;
-		GConfig->SetInt(TEXT("BangoScriptEditor"), TEXT("ReferenceTab"), ReferenceMode, GEditorPerProjectIni);
+		if (bRemember)
+		{
+			GConfig->SetInt(TEXT("BangoScriptEditor"), TEXT("ReferenceTab"), ReferenceMode, GEditorPerProjectIni);
+		}
 	}
 	ShowReferenceTab(bShown ? 1 : 0);
 }
