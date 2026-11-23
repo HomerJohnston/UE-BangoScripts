@@ -3611,6 +3611,88 @@ public:
 	}
 };
 
+/**
+ * The same marks across the script text itself: laid over the text pane's text (never hit, so the text works as
+ * always), it tints the whole line of each mark SBangoLineMarkers shows beside the numbers. It reads where the text is
+ * scrolled to while painting (the text's scrollbar, as a fraction of the numbers' height, which is the text's), so
+ * the bands move with the text in the same frame.
+ */
+class SBangoLineBands : public SLeafWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SBangoLineBands) {}
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs)
+	{
+		SetVisibility(EVisibility::HitTestInvisible);
+		SetClipping(EWidgetClipping::ClipToBounds);
+	}
+
+	/** Whose marks it shows, and what says where the text is: its scrollbar, and the line numbers (one line per line of text). */
+	TWeakPtr<SBangoLineMarkers> Marks;
+	TWeakPtr<SScrollBar> ScrollBar;
+	TWeakPtr<STextBlock> Numbers;
+	/** The space above the text's first line. */
+	float TopPadding = 0.0f;
+
+	virtual FVector2D ComputeDesiredSize(float) const override
+	{
+		return FVector2D::ZeroVector;
+	}
+
+	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect,
+		FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
+	{
+		const TSharedPtr<SBangoLineMarkers> Source = Marks.Pin();
+		const TSharedPtr<SScrollBar> Bar = ScrollBar.Pin();
+		const TSharedPtr<STextBlock> NumberText = Numbers.Pin();
+		if (!Source.IsValid() || !Bar.IsValid() || !NumberText.IsValid())
+		{
+			return LayerId;
+		}
+		const int32 Rows = FMath::Max(Source->LineStates.Num(), Source->LinePings.Num());
+		const float TextHeight = (float)NumberText->GetDesiredSize().Y;
+		if (Rows == 0 || TextHeight <= 0.0f)
+		{
+			return LayerId;
+		}
+		const FSlateBrush* RowBrush = FAppStyle::GetBrush("WhiteBrush");
+		const FVector2D Size = FVector2D(AllottedGeometry.GetLocalSize());
+		const float RowHeight = TextHeight / FMath::Max(1, Source->NumLines);
+		const float Top = TopPadding - Bar->DistanceFromTop() * TextHeight;
+		const double Now = FPlatformTime::Seconds();
+		const float Pulse = 0.5f + 0.5f * FMath::Sin((float)Now * 5.0f);
+		for (int32 Line = 0; Line < Rows; ++Line)
+		{
+			const float RowTop = Top + Line * RowHeight;
+			if (RowTop + RowHeight < 0.0f || RowTop > (float)Size.Y)
+			{
+				continue; // scrolled out of sight
+			}
+			const FPaintGeometry RowGeometry = AllottedGeometry.ToPaintGeometry(FVector2D(Size.X, RowHeight), FSlateLayoutTransform(FVector2D(0.0f, RowTop)));
+			// The trail: a fading blue band. (Fainter than beside the numbers: the text is read through it.)
+			const double SincePing = Source->LinePings.IsValidIndex(Line) && Source->LinePings[Line] > 0.0 ? Now - Source->LinePings[Line] : 1.0;
+			if (SincePing < 1.0)
+			{
+				const float Fade = 1.0f - (float)SincePing;
+				FSlateDrawElement::MakeBox(OutDrawElements, LayerId, RowGeometry, RowBrush, ESlateDrawEffect::None, FLinearColor(0.55f, 0.85f, 1.0f, 0.22f * Fade * Fade));
+			}
+			const EBangoNodeDebugState State = Source->LineStates.IsValidIndex(Line) ? Source->LineStates[Line] : EBangoNodeDebugState::None;
+			FLinearColor Color;
+			switch (State)
+			{
+			case EBangoNodeDebugState::None:      continue;
+			case EBangoNodeDebugState::Paused:    Color = FLinearColor(1.0f, 0.85f, 0.1f, 0.10f + 0.10f * Pulse); break;
+			case EBangoNodeDebugState::CallStack: Color = FLinearColor(1.0f, 0.85f, 0.1f, 0.06f); break;
+			default:                              Color = FLinearColor(1.0f, 0.25f, 0.2f, 0.18f); break;
+			}
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId, RowGeometry, RowBrush, ESlateDrawEffect::None, Color);
+		}
+		return LayerId;
+	}
+};
+
 namespace BangoScriptEditorPrivate
 {
 	/** Shows its content turned a quarter turn anticlockwise, so it reads from bottom to top, and takes up the turned size in
@@ -4295,7 +4377,12 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeTextPane()
 			return FReply::Unhandled();
 		});
 
-	return SNew(SBorder)
+	// The debugger's marks as bands across the text's lines; it's told whose marks once those are made, below.
+	const TSharedRef<SBangoLineBands> LineBands = SNew(SBangoLineBands);
+	LineBands->ScrollBar = TextVScrollBar;
+	LineBands->TopPadding = BangoScriptEditorPrivate::ScriptTextTopPadding;
+
+	const TSharedRef<SWidget> Pane = SNew(SBorder)
 		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
 		.Padding(FMargin(4.0f))
 		[
@@ -4377,10 +4464,19 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeTextPane()
 					]
 				]
 
+				// The text, and over it the debugger's marks as bands across its lines (the same marks as beside the numbers).
 				+ SHorizontalBox::Slot()
 				.FillWidth(1.0f)
 				[
-					TextBox.ToSharedRef()
+					SNew(SOverlay)
+					+ SOverlay::Slot()
+					[
+						TextBox.ToSharedRef()
+					]
+					+ SOverlay::Slot()
+					[
+						LineBands
+					]
 				]
 
 				+ SHorizontalBox::Slot()
@@ -4393,6 +4489,9 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeTextPane()
 			// underlined, with its message under the text (SetTextError). That the text has been edited is shown
 			// beside the heading.
 		];
+	LineBands->Marks = LineMarkers;
+	LineBands->Numbers = LineNumbers;
+	return Pane;
 }
 
 void SBangoScriptEditor::SetTextError(const FBangoCompileError& Error, bool bFocusText)

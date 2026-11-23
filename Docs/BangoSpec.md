@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.100)
+# Bango Language Spec (draft v0.101)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.101:** **the text pane's debugger marks are drawn across the whole line**, not only beside its number: a fainter band of the same colour over the line's text (section 12).
 
 **Changes in v0.100:** **the text pane's debugger marks work for scripts without node metadata** (compact scripts, and inline scripts typed as text): the running copy reports the lines it's at and the lines it just ran, and the gutter marks those (section 12). Before, the marks were only found by a line's `//@` metadata, so a compact script showed none. `FBangoInstance::GetLineTrail` and `UBangoScriptSubsystem::GetScriptLineTrail` give the lines.
 
@@ -1700,7 +1702,7 @@ The graph editor is the **Bango Scripts** tab (Tools menu). It doesn't need the 
 
     Nodes are found by their NodeID, so this works in every graph of the script, and still after the graph has been edited (or the script reloaded while running, section 11).
 
-    The **script text pane** shows the same in its gutter, on the line of each node (found by the line's `//@` metadata, in the text as it is, even while it's being typed in): a dot in a column left of the line numbers and a tint behind the number, pulsing yellow where the copy is, dim yellow along its calls and red where it failed, and a fading blue tint on the lines it just ran. A reroute line shows the strongest of its reroutes. **A text without any metadata** (a compact script) is marked by line instead: the copy says which lines it's at, along its calls, where it failed and which it just ran, and those lines of the text are marked the same way. That only holds while the text shown is the text the copy was compiled from, so with anything unsaved (typed and not applied, or changed and not saved) nothing is marked until it's saved. **Show Where It Is**, and picking a copy, also moves the text's cursor to its line when the pane is open.
+    The **script text pane** shows the same in its gutter, on the line of each node (found by the line's `//@` metadata, in the text as it is, even while it's being typed in): a dot in a column left of the line numbers and a tint behind the number, pulsing yellow where the copy is, dim yellow along its calls and red where it failed, and a fading blue tint on the lines it just ran. **The same marks are drawn across the whole line of the text**, as a fainter band of the same colour over the text (the pulsing yellow, the dim yellow, the red, the fading blue), so where the copy is can be read without looking at the numbers. A reroute line shows the strongest of its reroutes. **A text without any metadata** (a compact script) is marked by line instead: the copy says which lines it's at, along its calls, where it failed and which it just ran, and those lines of the text are marked the same way. That only holds while the text shown is the text the copy was compiled from, so with anything unsaved (typed and not applied, or changed and not saved) nothing is marked until it's saved. **Show Where It Is**, and picking a copy, also moves the text's cursor to its line when the pane is open.
   - **Graph view**: a Blueprint-style graph of the selected graph.
     - A function's graph has a **Back to Script Graph** button in its top-left corner, which shows the main graph again.
     - Pins are Blueprint exec pins; wires have no arrowheads. There are no data pins: values are text in fields.
