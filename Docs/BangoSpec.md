@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.93)
+# Bango Language Spec (draft v0.94)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.94:** **an actor picker for entities written as text**: an `entity` (or `entity[]`) row of SCRIPT VARS and GLOBAL VARS, and an entity field on a graph node (a command's target, an entity argument), has a small button beside its box that lists the actors in the open level with a named Bango ID and writes the picked one's `@name` (section 15, Value widgets). It's a public widget, `SBangoActorNamePicker`. Actors without a named Bango ID can't be written as `@name`, so they aren't listed: a constant's row picks any actor (section 15, Constants).
 
 **Changes in v0.93:** **constants**: any class with inline scripts can give them named values that are set in the details panel, one list per placed object (section 15, Constants). `FBangoConstant` is a name, a type and a value on one row, with the script editor's type picker and value box; **an `entity` constant is an actor picked in the level, and an `entity[]` a list of picked actors**, so actors without a Bango ID can be used. `Bango::SetConstantInputs` gives an object's scripts its constants as their instance inputs, and `Bango::GetConstantValues` gives their values to pass when a script is spawned. This is the trigger plugin's constants system, moved into the base plugin for any owner to use.
 
@@ -1936,6 +1938,9 @@ SNew(SBangoValueBox)
   - **Committing** (Enter, or the focus leaving): a value that passes is reported as Bango text (`OnValueCommitted`; empty for none); one that doesn't is dropped, the box goes back to the value it had, and `OnValueRejected` gets why. Escape goes back too.
   - A **`text`** typed as plain words is written `INVTEXT("words")`, or, with a `TextNamespace`, `NSLOCTEXT("Namespace", "<a new key>", "words")` (retyping it keeps its key). `UseScriptNamespace` is for values inside a script, where it's a `LOCTEXT`.
   - It's a plain text box: no autocomplete or colouring (SCRIPT VARS has none either). For an entity, a caller can show an actor picker instead, as a constant's row does (Constants, below).
+- **`SBangoActorNamePicker`**: a small button, with the entity icon, whose menu lists **the actors in the open level that have a Bango ID component with a name**, as `@name`, sorted, with each actor's level label as its tooltip; typing in the open menu searches it. It reports the name picked (`OnActorNamePicked`) and changes nothing itself. It's for an entity kept as text, which only a named Bango ID can be: an actor without one isn't listed (a constant's row picks any actor, Constants below). While no level is open in the editor, or none of its actors has a name, the menu says so.
+  - **A value box shows one beside the box when its type is `entity` or `entity[]`**: picking an actor makes an `entity`'s value `@name`, and adds `@name` to the end of an `entity[]`'s list (`[@mary]` becomes `[@mary, @john]`; none or `nil` becomes `[@john]`), reported like a typed value (`OnValueCommitted`). So SCRIPT VARS and GLOBAL VARS rows of those types have it.
+  - **A graph node's entity fields have one too** (a command's target, an argument of type `entity`): picking an actor fills the field with `@name`, as if it had been typed. A field that takes a variable's name has none.
 - **When the type changes, the value is cleared** (none, so `nil`), since a value made for the old type rarely fits the new one; a value of `nil` stays. The widgets don't hold both, so whoever does applies it: `SBangoValueBox::GetValueAfterTypeChange(Value)`. The name isn't touched.
 
 ### Constants
