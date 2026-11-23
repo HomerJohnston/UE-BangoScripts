@@ -92,6 +92,8 @@ namespace BangoProgramPrivate
 		case EBangoOp::WaitCheck:
 			return FString::Printf(TEXT("#%d"), I.A);
 		case EBangoOp::WaitResult:
+		case EBangoOp::WaitTimeoutCheck:
+		case EBangoOp::WaitTimeoutResult:
 			return FString::Printf(TEXT("#%d -> %d"), I.A, I.B);
 		default:
 			return FString();
@@ -151,6 +153,8 @@ namespace Bango
 		case EBangoOp::WaitBegin:          return TEXT("WaitBegin");
 		case EBangoOp::WaitCheck:          return TEXT("WaitCheck");
 		case EBangoOp::WaitResult:         return TEXT("WaitResult");
+		case EBangoOp::WaitTimeoutCheck:   return TEXT("WaitTimeoutCheck");
+		case EBangoOp::WaitTimeoutResult:  return TEXT("WaitTimeoutResult");
 		default:                           return TEXT("?");
 		}
 	}

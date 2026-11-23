@@ -1206,8 +1206,9 @@ namespace BangoGraphLayoutPrivate
 			}
 			Out.Fields.Add(Hold);
 
-			FBangoNodeField Timeout = Part(TEXT("Timeout"), TEXT("float"), Parts.bTimeout, Parts.SecondsBegin, Parts.SecondsEnd);
-			Timeout.Description = TEXT("The seconds to wait at most. If the condition still isn't true then, the nodes on Timeout run, then Then.");
+			// Seconds (a number) or a condition (a bool): either, so it has no type of its own.
+			FBangoNodeField Timeout = Part(TEXT("Timeout"), TEXT(""), Parts.bTimeout, Parts.SecondsBegin, Parts.SecondsEnd);
+			Timeout.Description = TEXT("When to give up waiting: a number of seconds to wait at most, or a condition that ends the wait when it's true (like alarmRaised, or Time() - _start > 5 || alarmRaised). If the condition above still isn't true then, the nodes on Timeout run, then Then.");
 			Timeout.OuterBegin = Parts.bTimeout ? Parts.TimeoutOuterBegin : Node.Text.Len();
 			Timeout.OuterEnd = Node.Text.Len();
 			if (!Parts.bTimeout)
@@ -1220,7 +1221,7 @@ namespace BangoGraphLayoutPrivate
 			{
 				// Only with both: it says what the timeout does to a hold.
 				FBangoNodeField Ignore = Part(TEXT("Ignore Hold"), TEXT("bool"), Parts.bIgnoreHold, Parts.IgnoreHoldBegin, Node.Text.Len());
-				Ignore.Description = TEXT("What happens if the time is up while the condition is true and being held. false (or empty): the hold is let finish, and Timeout runs only if the condition turns false first. true: Timeout runs at once.");
+				Ignore.Description = TEXT("What happens if the time is up (or the Timeout's condition is true) while the condition is true and being held. false (or empty): the hold is let finish, and Timeout runs only if the condition turns false first. true: Timeout runs at once.");
 				Ignore.OuterBegin = Parts.bIgnoreHold ? Parts.SecondsEnd : Node.Text.Len();
 				Ignore.OuterEnd = Node.Text.Len();
 				if (!Parts.bIgnoreHold)

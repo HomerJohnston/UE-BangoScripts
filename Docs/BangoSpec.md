@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.90)
+# Bango Language Spec (draft v0.91)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.91:** **a `waitUntil`'s timeout can be a condition** instead of a number of seconds: `waitUntil (doorOpen) timeout (alarmRaised) { ... }` ends the wait and runs the block when `alarmRaised` is true while `doorOpen` isn't (section 8). Its value's type says which it is: a number is seconds, a bool is a condition. It's checked like the `waitUntil`'s own condition, so a time and a condition can be mixed: `timeout (Time() - _start > 5 || alarmRaised)`. A timeout whose type isn't known when the script is compiled (an undeclared global on its own) is now a compile error. In the graph, the Wait Until node's Timeout row takes either.
 
 **Changes in v0.90:** **`goto` can jump into a block**: an `if`'s or `else`'s, a `while`'s, a `switch` case's or a timeout's, from outside it or from a sibling block (section 8). The block runs on from the label, then the script carries on as it would have. It still can't jump into a `for` or `forEach` loop, whose start gives the loop's variable its value, or into a spawn block, which a separate copy of the script runs; each has its own compile error. It still can't jump past a local's declaration.
 
@@ -1085,6 +1087,29 @@ waitUntil (stage == 3 && soldierIsDead) timeout (20)    //@4(0, 2)
 - **`timeout` is not a reserved word.** It's only read as a keyword here, between a `)` and a `(` after the condition; anywhere else it's an ordinary name (`int timeout = 5;`, even `timeout (timeout)`). The same goes for `heldFor` (below).
 - The block is a block like any other: locals declared in it end with it, and a `goto` can jump into it (Labels and goto, below). It can be empty (`{` then `}`): the wait just ends. The header, to the `)` after the seconds, must be on one line; it ends with its block's `}`, not a `;`. A `waitUntil` without a timeout has no block.
 - A condition that can't change is still an error with a timeout (it would always wait the whole time: use `Sleep`).
+- **A condition instead of seconds:** `timeout (otherCondition)`. The value's type says which it is: a number is seconds, a `bool` is a condition. The wait then ends when either condition is true: the `waitUntil`'s own, and the script carries on, skipping the block; or the timeout's, and the block runs.
+  ```
+  waitUntil (doorOpen) timeout (alarmRaised)    //@4(0, 2)
+  {
+  	@guard Speak("Too late.");
+  	return;
+  }
+  @gate OpenDoor();
+  ```
+  - The timeout's condition is checked **only while the `waitUntil`'s own is false**, right after it, each time that one is checked: when a global either of them reads changes, or every frame if either calls a command that could answer differently later. So if both are true at once, the `waitUntil`'s own wins, and the block is skipped.
+  - It isn't remembered: the block runs only if the timeout's condition is true at a moment the other is false. One that was true for a while and is false again has done nothing.
+  - A global it reads that's `nil` or doesn't exist yet makes it not true yet, as for the `waitUntil`'s own condition; it can't wait either (no `Sleep` or other waiting command in it).
+  - **A time and a condition together:** note the time before waiting, and compare. This one is checked every frame, because of `Time()`:
+    ```
+    float _start = Time();
+    waitUntil (doorOpen) timeout (Time() - _start > 5 || alarmRaised)
+    {
+    	...
+    }
+    ```
+  - Its type must be known when the script is compiled: an undeclared global on its own (`timeout (alarm)`) is a compile error that says to declare it. Anything but a number or a bool is one too: *"A timeout is a number of seconds, or a condition (a bool) that ends the wait when it's true, but this is a string."*
+  - One that can't change while the script waits (it reads no global and calls no command that could answer differently later) is a compile error, like the `waitUntil`'s own.
+  - Nothing of it is saved: after loading, or a hot reload, it's simply checked again.
 - The time left is saved with the script, and kept when it's hot reloaded while waiting there (the new version's seconds aren't worked out until it gets there again). In a loop, the time starts again each time round.
 - The `//@` metadata goes on the `waitUntil` line. Disabling it disables its block.
 
@@ -1106,6 +1131,7 @@ waitUntil (playerInZone) heldFor (3);    //@4(0, 2)
 
 - Time up while the condition is **false**: the block runs, as without a hold.
 - Time up **during a hold**: the hold is **let finish**. If the condition stays true for the rest of its seconds, the script carries on and the block is skipped. If it turns false first, the block runs then, at once.
+- **A timeout that's a condition** follows the same two rules: it isn't looked at during a hold, which is let finish; if the hold breaks, it's checked then, and the block runs if it's true at that moment. With IgnoreHold, it's checked during the hold too, and true runs the block at once.
 - **IgnoreHold**, the timeout's optional second value (a bool, `false` if left out), changes that: with `timeout (20, true)`, the block runs as soon as the time is up, hold or not. A hold that ends in the very frame the time runs out still counts as in time.
 - IgnoreHold is worked out once, with the seconds. Without a `heldFor` it has nothing to ignore, and is a compile error: *"A timeout's second value (IgnoreHold) says whether the timeout cuts short a heldFor that's under way, and this waitUntil has no heldFor."*
 
@@ -1549,7 +1575,7 @@ The graph editor shows a script as nodes and wires and saves it back as text. Th
 ### Pins and wires
 - Every node except the entry has one **exec input**, and each input can have **only one wire** into it.
 - Every node has one main **exec output**. On `if`, loops, sequences and switches it is called **Then**; it leads to the statement after the block (a sequence's last block).
-- A **Wait Until** has **Timeout** above **Then**: Timeout leads to the nodes run if its timeout's time runs out (and then on to Then); Then is where it carries on once the condition is true. Its rows are the condition, **Held For** and **Timeout**. Held For is the seconds of its `heldFor` (a float), optional: empty, true is enough. Timeout is its timeout's seconds (a float), also optional: empty, it waits as long as it takes, and the node is written `waitUntil (condition);`. With both filled in, a fourth row, **Ignore Hold** (a bool, optional), is the timeout's second value; clearing Held For takes it away too. With seconds, or with something wired to Timeout, it's written with `timeout (seconds)` and its block; wired without seconds, that's `timeout ()`, which doesn't compile until they're filled in (the row then shows *missing*). Clearing the seconds takes the timeout away, unless Timeout is still wired.
+- A **Wait Until** has **Timeout** above **Then**: Timeout leads to the nodes run if its timeout's time runs out (and then on to Then); Then is where it carries on once the condition is true. Its rows are the condition, **Held For** and **Timeout**. Held For is the seconds of its `heldFor` (a float), optional: empty, true is enough. Timeout is its timeout's seconds (a number), or its condition (a bool), also optional: empty, it waits as long as it takes, and the node is written `waitUntil (condition);`. With both filled in, a fourth row, **Ignore Hold** (a bool, optional), is the timeout's second value; clearing Held For takes it away too. With seconds, or with something wired to Timeout, it's written with `timeout (seconds)` and its block; wired without seconds, that's `timeout ()`, which doesn't compile until they're filled in (the row then shows *missing*). Clearing the seconds takes the timeout away, unless Timeout is still wired.
 - `if` also has **Do** and **Else** outputs; `while`, `for` and `forEach` have **Do**; a **Spawn** has **Run** (its block, started as a separate copy of the script) and **Then**, which goes on straight away, and an optional **Var** field, shown as **Var** [name] = *New Handle*: the `int` variable the copy's id goes in. A **Sequence** has an output per block, named **Scope 0**, **Scope 1**, **Scope 2**, ..., above **Then** (for what follows its blocks). Its **Add pin** button (under its outputs, as on Blueprint's Sequence node) or right-click > **Add Output** adds one at the end; right-clicking one > **Remove Scope N** removes it and its wire (the nodes on it stay, unwired), and the later outputs move up. A Sequence always keeps at least one output. In the add-node menu it's under Flow Control, and starts with two.
 - A **Switch** has its **On** field (the value it switches on), then an output per case, each with a box just inside the node showing that case's values (the first labelled **Case**) (click it to edit them; Enter or Tab goes on to the next case's box, Shift goes back). Then come **Default** and **Then**. Its **Add pin** button or right-click > **Add Case** adds a case, with no value yet, before Default; right-clicking a case's output > **Remove Case** removes it and its wire, and the later cases move up. **Default** is only written to the text when something is wired to it. A compile error in a case's values outlines that case's box in red. In the add-node menu it's under Flow Control, and starts with one case.
 - A block is the chain of nodes along those wires: the Do chain is the `if` block, the Else chain the `else` block, and so on.

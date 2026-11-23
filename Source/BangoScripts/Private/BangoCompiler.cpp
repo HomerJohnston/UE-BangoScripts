@@ -180,7 +180,31 @@ namespace BangoCompilerPrivate
 				FBangoDependencies Found = Bango::FindDependencies(Program, Set.Function, Set.CondBegin, Set.CondEnd);
 				Set.Globals = MoveTemp(Found.Globals);
 				Set.PollReason = MoveTemp(Found.PollReason);
-				if (Set.Globals.Num() == 0 && Set.PollReason.IsEmpty())
+				const bool bCanChange = Set.Globals.Num() > 0 || !Set.PollReason.IsEmpty();
+				if (bCanChange && Set.TimeoutCondIP >= 0)
+				{
+					// A timeout that's a condition: what it reads wakes the script too.
+					FBangoDependencies Timeout = Bango::FindDependencies(Program, Set.Function, Set.TimeoutCondBegin, Set.TimeoutCondEnd);
+					if (Timeout.Globals.Num() == 0 && Timeout.PollReason.IsEmpty())
+					{
+						FBangoSourceLocation Loc;
+						Loc.Line = Set.Line;
+						Loc.Column = Set.Column;
+						Fail(Loc, TEXT("This waitUntil's timeout is a condition that can't change while the script waits: it reads no global, and calls no command that could answer differently later (locals and inputs don't change while a script waits). So its block would run at once, or never. Read a global in it, call a command like Time(), or give the timeout a number of seconds."));
+						Error.NodeID = Set.NodeID;
+						return false;
+					}
+					for (const FString& Global : Timeout.Globals)
+					{
+						Set.Globals.AddUnique(Global);
+					}
+					Set.Globals.Sort();
+					if (Set.PollReason.IsEmpty())
+					{
+						Set.PollReason = MoveTemp(Timeout.PollReason);
+					}
+				}
+				if (!bCanChange)
 				{
 					// Nothing it reads can change while the script waits there: it would carry on at once, or never.
 					FBangoSourceLocation Loc;
@@ -2223,16 +2247,46 @@ namespace BangoCompilerPrivate
 				Program.WaitSets[SetIndex].bHold = true;
 				BeginFlags |= Bango::WaitHasHold;
 			}
-			if (Wait.bHasTimeout)
+			// A timeout is a number of seconds, or a condition that ends the wait when it's true: its value's type
+			// says which, so it's compiled once just to learn that (and that code thrown away).
+			bool bTimeoutIsCondition = false;
+			if (Wait.bHasTimeout && !IsNilLiteral(*Wait.Timeout))
 			{
-				FExprType TimeoutType;
-				if (!CompileExpr(*Wait.Timeout, &Seconds, TimeoutType)
-					|| !CanAssign(Seconds, TimeoutType, Wait.Timeout->Loc, TEXT("A timeout's seconds")))
+				const int32 Mark = Here();
+				const bool bWasInferring = bInferring;
+				bInferring = true;
+				FExprType Probe;
+				const bool bProbed = CompileExpr(*Wait.Timeout, nullptr, Probe);
+				bInferring = bWasInferring;
+				Fn->Code.SetNum(Mark);
+				Fn->Debug.SetNum(Mark);
+				if (!bProbed)
 				{
 					return false;
 				}
-				EmitConvertIfNeeded(Seconds, TimeoutType);
-				BeginFlags |= Bango::WaitHasTimeout;
+				if (Probe.IsUnknown())
+				{
+					return Fail(Wait.Timeout->Loc, TEXT("A timeout is a number of seconds, or a condition (a bool) that ends the wait when it's true, and this value's type is only known when the script runs (an undeclared global, or a 'call'). Declare the global in this script, like 'global bool alarmRaised;' or 'global float patience;'."));
+				}
+				bTimeoutIsCondition = Probe.Is(FBangoType::Bool());
+				if (!bTimeoutIsCondition && !Probe.IsNumber())
+				{
+					return Fail(Wait.Timeout->Loc, FString::Printf(TEXT("A timeout is a number of seconds, or a condition (a bool) that ends the wait when it's true, but this is %s."), *Probe.Describe()));
+				}
+			}
+			if (Wait.bHasTimeout)
+			{
+				if (!bTimeoutIsCondition)
+				{
+					FExprType TimeoutType;
+					if (!CompileExpr(*Wait.Timeout, &Seconds, TimeoutType)
+						|| !CanAssign(Seconds, TimeoutType, Wait.Timeout->Loc, TEXT("A timeout's seconds")))
+					{
+						return false;
+					}
+					EmitConvertIfNeeded(Seconds, TimeoutType);
+					BeginFlags |= Bango::WaitHasTimeout;
+				}
 				if (Wait.IgnoreHold)
 				{
 					const FBangoType Flag = FBangoType::Bool();
@@ -2275,6 +2329,22 @@ namespace BangoCompilerPrivate
 			if (Wait.bHasTimeout)
 			{
 				const int32 JumpOver = Emit(EBangoOp::Jump);
+				if (bTimeoutIsCondition)
+				{
+					// Reached from WaitResult while the waitUntil's own condition is false: true runs on into the
+					// block, false pauses.
+					CurrentStmt = &Wait;
+					CurrentLoc = Wait.Timeout->Loc;
+					Program.WaitSets[SetIndex].TimeoutCondIP = Emit(EBangoOp::WaitTimeoutCheck, SetIndex, Check);
+					Program.WaitSets[SetIndex].TimeoutCondBegin = Here();
+					FExprType TimeoutType;
+					if (!CompileExpr(*Wait.Timeout, nullptr, TimeoutType) || !CheckCondition(TimeoutType, Wait.Timeout->Loc))
+					{
+						return false;
+					}
+					Program.WaitSets[SetIndex].TimeoutCondEnd = Here();
+					Emit(EBangoOp::WaitTimeoutResult, SetIndex, Check);
+				}
 				Program.WaitSets[SetIndex].TimeoutIP = Here();
 				if (!CompileBlock(Wait.TimeoutBlock))
 				{

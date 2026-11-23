@@ -85,6 +85,8 @@ enum class EBangoOp : uint8
 	// ---- waitUntil (Program.WaitSets) ----
 	WaitBegin,          // A = wait set (one with a heldFor or a timeout), B = which of the Bango::WaitHas... values are there.  [hold seconds] [timeout seconds] [ignoreHold] -> : notes them, before its first WaitCheck
 	WaitCheck,          // A = wait set. Its condition follows: while it's worked out, a global that's unset makes it false, and it can't wait
+	WaitTimeoutCheck,   // A = wait set, B = its WaitCheck. Its timeout's condition follows (`timeout (condition)`): reached from WaitResult, never by running into it. While it's worked out, a global that's unset makes it false
+	WaitTimeoutResult,  // A = wait set, B = its WaitCheck.  bool -> : true goes on (into the timeout's block, which follows); false pauses, to run from B again
 	WaitResult,         // A = wait set, B = its WaitCheck.  bool -> : true carries on; false pauses until one of the set's globals changes (every frame, if it polls), then runs from B again. With a timeout whose time is up, false goes on at the set's TimeoutIP instead. With a heldFor, true pauses too until it has been true that long (FBangoInstance::HoldAtWait)
 
 	Count               // not an op
@@ -297,6 +299,15 @@ struct FBangoWaitSet
 	int64 NodeID = -1;
 	/** `timeout (seconds) { ... }`: where that block's code starts (in Function), or -1 without a timeout. */
 	int32 TimeoutIP = -1;
+	/**
+	 * `timeout (condition) { ... }`: where the code that checks that condition starts (its WaitTimeoutCheck), or -1
+	 * for a timeout in seconds (or none). It's checked whenever the waitUntil's own condition is false (and, with
+	 * IgnoreHold, while that one is true and being held); true runs the timeout's block.
+	 */
+	int32 TimeoutCondIP = -1;
+	/** That condition's code, from TimeoutCondBegin to before TimeoutCondEnd (what it reads is in Globals and PollReason too). */
+	int32 TimeoutCondBegin = 0;
+	int32 TimeoutCondEnd = 0;
 	/** `heldFor (seconds)`: its condition must stay true that long. */
 	bool bHold = false;
 };

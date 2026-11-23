@@ -447,6 +447,14 @@ bool FBangoInstance::UnsetGlobalFail(const FString& Message, const FBangoGlobalS
 		{
 			PendingUnknowns.Pop();
 		}
+		if (WaitGuard.bTimeout)
+		{
+			// In its timeout's condition: not true yet either, so it waits (a hold under way carries on).
+			const FWaitGuard Guard = WaitGuard;
+			WaitGuard = FWaitGuard();
+			EnterWait(Guard.Set, Guard.CheckIP, Globals);
+			return false;
+		}
 		PauseAtWait(WaitGuard.Set, WaitGuard.CheckIP, Globals);
 		return false;
 	}
@@ -600,6 +608,16 @@ void FBangoInstance::PauseAtWait(int32 Set, int32 CheckIP, const FBangoGlobalSto
 	WaitGuard = FWaitGuard();
 	WaitHoldLeft = -1.0; // false: a hold starts over the next time it's true
 	const int32 TimeoutIP = Program->WaitSets.IsValidIndex(Set) ? Program->WaitSets[Set].TimeoutIP : -1;
+	const int32 TimeoutCondIP = Program->WaitSets.IsValidIndex(Set) ? Program->WaitSets[Set].TimeoutCondIP : -1;
+	if (TimeoutCondIP >= 0)
+	{
+		// Still false, and its timeout is a condition: on to that, which pauses if it's false too. (The same flag as
+		// below: Execute may have been stopped by an unset global, and goes on from there.)
+		WaitTimeLeft = -1.0;
+		Frames.Last().IP = TimeoutCondIP;
+		bWaitTimedOut = true;
+		return;
+	}
 	if (TimeoutIP < 0)
 	{
 		WaitTimeLeft = -1.0; // no timeout (or a reloaded version took it away)
@@ -635,6 +653,17 @@ void FBangoInstance::HoldAtWait(int32 Set, int32 CheckIP, const FBangoGlobalStor
 	if (Info->TimeoutIP < 0)
 	{
 		WaitTimeLeft = -1.0;
+	}
+	else if (Info->TimeoutCondIP >= 0)
+	{
+		WaitTimeLeft = -1.0;
+		if (bWaitIgnoreHold)
+		{
+			// Its timeout is a condition that doesn't let a hold finish: it's checked during the hold too. True
+			// runs its block; false pauses, with the hold carrying on (Execute carries on there).
+			Frames.Last().IP = Info->TimeoutCondIP;
+			return;
+		}
 	}
 	else if (bWaitIgnoreHold && WaitTimeLeft >= 0.0 && WaitTimeLeft <= 0.0)
 	{
@@ -2074,6 +2103,41 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 			WaitGuard.StackSize = Stack.Num();
 			WaitGuard.CheckIP = IP;
 			break;
+
+		case EBangoOp::WaitTimeoutCheck:
+			if (WaitGuard.Set >= 0)
+			{
+				return RuntimeFail(TEXT("A waitUntil can't be used while working out another waitUntil's condition (in a function it calls)."));
+			}
+			WaitGuard.Set = I.A;
+			WaitGuard.NumFrames = Frames.Num();
+			WaitGuard.StackSize = Stack.Num();
+			WaitGuard.CheckIP = I.B;
+			WaitGuard.bTimeout = true;
+			break;
+
+		case EBangoOp::WaitTimeoutResult:
+		{
+			const FBangoValue Condition = PopValue();
+			WaitGuard = FWaitGuard();
+			if (Status == EBangoInstanceStatus::Failed)
+			{
+				return false;
+			}
+			if (!IsScalar(Condition, EBangoBaseType::Bool))
+			{
+				return RuntimeFail(FString::Printf(TEXT("A timeout's condition must be a bool, but this is %s."), *ValueTypeText(Condition)));
+			}
+			if (Condition.GetBool())
+			{
+				ClearWaitTimes(); // the wait is over: on into the timeout's block
+			}
+			else
+			{
+				EnterWait(I.A, I.B, Globals);
+			}
+			break;
+		}
 
 		case EBangoOp::WaitResult:
 		{

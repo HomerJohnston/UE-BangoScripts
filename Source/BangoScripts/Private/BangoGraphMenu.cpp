@@ -182,7 +182,7 @@ namespace Bango
 		Menu.Add(Flow, EBangoGraphNodeKind::Spawn, FString(), TEXT("spawn async fork parallel background run start detach"))
 			.Description = TEXT("Starts the nodes on Run as a separate running copy of this script, with copies of its variables as they are now, and carries on from Then straight away. Good for small fire-and-forget jobs, like waiting a bit and then opening a door. In the copy, Return ends it.");
 		Menu.Add(Flow, EBangoGraphNodeKind::WaitUntil, FString(), TEXT("wait until condition await pause event when timeout deadline hold held for stay"))
-			.Description = TEXT("Pauses the script until the condition is true, then carries on from Then (straight away if it already is). It's checked again when a global it reads changes, or every frame if it calls a command. With Held For (seconds), the condition must stay true that long without a break. With a Timeout (seconds), it waits no longer than that: if the condition still isn't true then, the nodes on Timeout run, then Then.");
+			.Description = TEXT("Pauses the script until the condition is true, then carries on from Then (straight away if it already is). It's checked again when a global it reads changes, or every frame if it calls a command. With Held For (seconds), the condition must stay true that long without a break. With a Timeout, it gives up after that many seconds, or when the Timeout's own condition is true: if the condition still isn't true then, the nodes on Timeout run, then Then.");
 		Menu.Add(Flow, EBangoGraphNodeKind::Break, FString(), TEXT("loop exit"))
 			.Description = TEXT("Leaves the loop it's in, carrying on from the loop's Then.");
 		Menu.Add(Flow, EBangoGraphNodeKind::Continue, FString(), TEXT("loop next"))

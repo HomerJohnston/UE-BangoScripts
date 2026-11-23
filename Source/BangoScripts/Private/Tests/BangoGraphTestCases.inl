@@ -351,7 +351,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			const FBangoNodeLayoutContext Context = Bango::MakeNodeLayoutContext(Doc, nullptr);
 			FBangoNodeLayout Layout = Bango::GetNodeLayout(*Wait, false, Context);
 			Expect(Layout.Fields.Num() == 3 && Layout.Fields[0].Text == TEXT("stage == 3") && Layout.Fields[0].bHideLabel
-				&& Layout.Fields[2].Label == TEXT("Timeout") && Layout.Fields[2].Text == TEXT("20") && Layout.Fields[2].bPresent && Layout.Fields[2].bOptional && Layout.Fields[2].TypeHint == TEXT("float"),
+				&& Layout.Fields[2].Label == TEXT("Timeout") && Layout.Fields[2].Text == TEXT("20") && Layout.Fields[2].bPresent && Layout.Fields[2].bOptional && Layout.Fields[2].TypeHint.IsEmpty(),
 				TEXT("waitUntil timeout: fields are the condition and Timeout"));
 			FString EditError;
 			Expect(Bango::SetNodeField(*Wait, false, Context, 2, TEXT("_t * 2"), EditError) && Wait->Text == TEXT("stage == 3) timeout (_t * 2"), FString(TEXT("waitUntil timeout: changing the seconds: ")) + EditError);

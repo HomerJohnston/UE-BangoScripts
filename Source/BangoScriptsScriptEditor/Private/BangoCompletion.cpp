@@ -590,7 +590,7 @@ FBangoCompletionItem FBangoCompletion::GetTimeoutItem()
 {
 	using namespace BangoCompletionPrivate;
 	FBangoCompletionItem Item = MakeItem(TEXT("timeout"), EBangoCompletionKind::Keyword, TEXT("flow"),
-		TEXT("waitUntil (condition) timeout (seconds) { ... } waits no longer than that many seconds: if the condition still isn't true then, its block runs, then what follows. After a heldFor, a hold that's under way when the time is up is let finish, unless the timeout's second value (IgnoreHold) is true: timeout (seconds, true)"), false);
+		TEXT("waitUntil (condition) timeout (seconds) { ... } waits no longer than that many seconds: if the condition still isn't true then, its block runs, then what follows. With a condition instead of seconds, timeout (otherCondition), the wait ends and the block runs when that's true while the first isn't. After a heldFor, a hold that's under way when the time is up is let finish, unless the timeout's second value (IgnoreHold) is true: timeout (seconds, true)"), false);
 	Item.bHeader = true; // `timeout (`
 	return Item;
 }

@@ -411,6 +411,8 @@ private:
 		int32 NumFrames = 0;
 		int32 StackSize = 0;
 		int32 CheckIP = 0;
+		/** It's the timeout's condition being worked out (`timeout (condition)`), not the waitUntil's own. */
+		bool bTimeout = false;
 	};
 	FWaitGuard WaitGuard;
 
