@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.89)
+# Bango Language Spec (draft v0.90)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.90:** **`goto` can jump into a block**: an `if`'s or `else`'s, a `while`'s, a `switch` case's or a timeout's, from outside it or from a sibling block (section 8). The block runs on from the label, then the script carries on as it would have. It still can't jump into a `for` or `forEach` loop, whose start gives the loop's variable its value, or into a spawn block, which a separate copy of the script runs; each has its own compile error. It still can't jump past a local's declaration.
 
 **Changes in v0.89:** **a script's functions see its inputs and script variables**, and can change them: the main graph's `scriptVar`s and its `#inputs` (or the inputs an inline script is given) are visible in every function of the file (section 4). The main graph's locals and loop variables still aren't, and using one in a function is now a compile error that says so. A function can't declare a parameter, script variable, local or loop variable with the name of one of the script's inputs or script variables. A block spawned in a function, and a function called from a spawn block, use the copy's own copies. In the graph editor, a function's **Script Vars** list shows the script's inputs and script variables greyed, and renaming one in the main graph renames its uses in the functions too (section 12). Save data from earlier versions can't be loaded (section 11).
 
@@ -1081,7 +1083,7 @@ waitUntil (stage == 3 && soldierIsDead) timeout (20)    //@4(0, 2)
 - The time is the world's, like `Sleep`'s: it stops while the game is paused, and follows time dilation.
 - The condition is checked as without a timeout (when a global it reads changes, or every frame if it's polled). In the frame the time runs out it's checked once more, and true then still counts as in time.
 - **`timeout` is not a reserved word.** It's only read as a keyword here, between a `)` and a `(` after the condition; anywhere else it's an ordinary name (`int timeout = 5;`, even `timeout (timeout)`). The same goes for `heldFor` (below).
-- The block is a block like any other: locals declared in it end with it, and a `goto` can't jump into it. It can be empty (`{` then `}`): the wait just ends. The header, to the `)` after the seconds, must be on one line; it ends with its block's `}`, not a `;`. A `waitUntil` without a timeout has no block.
+- The block is a block like any other: locals declared in it end with it, and a `goto` can jump into it (Labels and goto, below). It can be empty (`{` then `}`): the wait just ends. The header, to the `)` after the seconds, must be on one line; it ends with its block's `}`, not a `;`. A `waitUntil` without a timeout has no block.
 - A condition that can't change is still an error with a timeout (it would always wait the whole time: use `Sleep`).
 - The time left is saved with the script, and kept when it's hot reloaded while waiting there (the new version's seconds aren't worked out until it gets there again). In a loop, the time starts again each time round.
 - The `//@` metadata goes on the `waitUntil` line. Disabling it disables its block.
@@ -1155,7 +1157,22 @@ goto Hub;
 ```
 - Label names are unique within their function, or within the top level of the script. A duplicate is a compile error.
 - `goto` can only jump within the same function or the same top level. Jumping to a label that doesn't exist there is a compile error.
-- `goto` can jump **out of** blocks, including loops, and to a label later in the same block, but not **into** a block that doesn't contain it (including a sibling block). Breaking this rule is a compile error.
+- `goto` can jump **out of** blocks, including loops, and forward or back in its own block.
+- It can jump **into** an `if`'s or `else`'s block, a `while`'s, a `switch` case's or a timeout's (section 8, waitUntil), from outside it or from a sibling block. Nothing is set up on the way into one of those, so the block just runs on from the label to its end, and then the script carries on as it would have: after the `if`, back to the `while`'s condition, after the `switch`. The `if`'s condition isn't checked, and a `switch`'s value isn't looked at.
+  ```
+  if (playerHasKey)
+  {
+  	goto Open;
+  }
+  if (leverPulled)
+  {
+  	WriteScreen("The lever clicks.");
+  	label Open;
+  	@gate OpenDoor();
+  }
+  ```
+- It can't jump **into a `for` or `forEach` loop** from outside it (into a block inside the loop either): the loop's start, which gives its variable its value (and a `forEach` its copy of the array), wouldn't have run. *"'goto In' jumps into a for or forEach loop (label 'In' is on line 4, inside a loop this goto is not in), which would skip the loop's start, where its variable gets its value. ..."* Inside the loop, jumping around is fine.
+- It can't jump **into a spawn block**, or out of one (spawn, above): a separate copy of the script runs it.
 - `goto` can't jump forward past a local's declaration to a label where that local is visible (section 4, Locals).
 
 ---

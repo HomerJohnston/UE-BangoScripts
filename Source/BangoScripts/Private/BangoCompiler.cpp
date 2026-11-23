@@ -270,8 +270,10 @@ namespace BangoCompilerPrivate
 		TArray<FScope> Scopes;
 		TArray<FLoop> Loops;
 		TArray<int32> BlockParents;
-		/** The blocks (BlockParents indexes) that are spawn blocks: a goto can't jump out of one. */
+		/** The blocks (BlockParents indexes) that are spawn blocks: a goto can't jump out of one, or into one. */
 		TArray<int32> SpawnBlockIds;
+		/** The blocks that are a for or forEach loop (its header's scope, which holds its body): a goto can't jump into one. */
+		TArray<int32> LoopBlockIds;
 		/** For each spawn block being compiled, inside each other: how many loops were open when it started. */
 		TArray<int32> SpawnLoopBases;
 		TBangoNameMap<FLabel> Labels;
@@ -1109,6 +1111,7 @@ namespace BangoCompilerPrivate
 			Loops.Reset();
 			BlockParents.Reset();
 			SpawnBlockIds.Reset();
+			LoopBlockIds.Reset();
 			SpawnLoopBases.Reset();
 			Labels = TBangoNameMap<FLabel>();
 			DisabledLabels = TBangoNameMap<int32>();
@@ -1347,26 +1350,46 @@ namespace BangoCompilerPrivate
 					}
 					return Fail(Goto.Loc, FString::Printf(TEXT("There is no label '%s' in this %s."), *Goto.Name, FnAst ? TEXT("function") : TEXT("script's top level")));
 				}
-				// The label's block must contain the goto: jumping out of blocks is fine, jumping into one isn't.
-				bool bReachable = false;
-				bool bLeavesSpawn = false;
+				// The blocks the jump leaves (the goto's, out to the innermost block that holds both) and the ones it
+				// enters (from there in to the label's). Leaving blocks is fine, except a spawn block. Entering an if's,
+				// a while's, a switch's or a timeout's block is fine too: nothing is set up on the way in. Not a for or
+				// forEach loop (its header gives its variable, and a forEach its array, their values), or a spawn block
+				// (it's a separate copy's code).
+				TArray<int32> GotoBlocks;
 				for (int32 Block = Goto.BlockId; Block >= 0; Block = BlockParents[Block])
 				{
-					if (Block == Label->BlockId)
+					GotoBlocks.Add(Block);
+				}
+				int32 Shared = Label->BlockId;
+				bool bEntersLoop = false;
+				bool bEntersSpawn = false;
+				for (; Shared >= 0 && !GotoBlocks.Contains(Shared); Shared = BlockParents[Shared])
+				{
+					bEntersLoop |= LoopBlockIds.Contains(Shared);
+					bEntersSpawn |= SpawnBlockIds.Contains(Shared);
+				}
+				bool bLeavesSpawn = false;
+				for (const int32 Block : GotoBlocks)
+				{
+					if (Block == Shared)
 					{
-						bReachable = true;
 						break;
 					}
 					bLeavesSpawn |= SpawnBlockIds.Contains(Block);
 				}
-				if (bReachable && bLeavesSpawn)
+				if (bLeavesSpawn)
 				{
 					return Fail(Goto.Loc, FString::Printf(TEXT("'goto %s' would jump out of a spawn block (label '%s' is on line %d, outside it). The spawned copy runs on its own: use 'return;' to end it."),
 						*Goto.Name, *Goto.Name, Label->Line));
 				}
-				if (!bReachable)
+				if (bEntersSpawn)
 				{
-					return Fail(Goto.Loc, FString::Printf(TEXT("'goto %s' jumps into a block (label '%s' is on line %d, inside a block this goto is not in). goto can jump out of blocks, but not into them."),
+					return Fail(Goto.Loc, FString::Printf(TEXT("'goto %s' jumps into a spawn block (label '%s' is on line %d, inside a spawn block this goto is not in). A spawn block is run by a separate copy of the script, so nothing outside it can jump into it."),
+						*Goto.Name, *Goto.Name, Label->Line));
+				}
+				if (bEntersLoop)
+				{
+					return Fail(Goto.Loc, FString::Printf(TEXT("'goto %s' jumps into a for or forEach loop (label '%s' is on line %d, inside a loop this goto is not in), which would skip the loop's start, where its variable gets its value. goto can jump into an if's, a while's, a switch's or a timeout's block, but not into a for or forEach loop."),
 						*Goto.Name, *Goto.Name, Label->Line));
 				}
 				// A local in scope at the label but not at the goto is declared between them: the jump would skip
@@ -2265,6 +2288,7 @@ namespace BangoCompilerPrivate
 		bool CompileFor(const FBangoForStmt& For)
 		{
 			PushScope();  // holds a variable declared in the header
+			LoopBlockIds.Add(Scopes.Last().BlockId);
 
 			LoopNodeForSlots = LoopSlotNode(For);
 			const bool bInitOk = !For.Init || CompileStmtBody(*For.Init);
@@ -2353,6 +2377,7 @@ namespace BangoCompilerPrivate
 			}
 
 			PushScope();
+			LoopBlockIds.Add(Scopes.Last().BlockId);
 			LoopNodeForSlots = LoopSlotNode(ForEach);
 			const int32 ArraySlot = AllocSlot(ArrayType.Type, TEXT("(forEach array)"));
 			const int32 PositionSlot = AllocSlot(FBangoType::Int(), TEXT("(forEach position)"));
