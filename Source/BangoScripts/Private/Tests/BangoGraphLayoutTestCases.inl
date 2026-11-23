@@ -196,7 +196,7 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 				{
 					const TCHAR* Kind = V.Kind == FBangoGraphVariable::EKind::Param ? TEXT("param") : V.Kind == FBangoGraphVariable::EKind::ScriptVar ? TEXT("scriptVar")
 						: V.Kind == FBangoGraphVariable::EKind::Local ? TEXT("local")
-						: V.Kind == FBangoGraphVariable::EKind::Loop ? TEXT("loop") : TEXT("global");
+						: V.Kind == FBangoGraphVariable::EKind::Loop ? TEXT("loop") : V.Kind == FBangoGraphVariable::EKind::Script ? TEXT("script") : TEXT("global");
 					Out += FString::Printf(TEXT("%s %s:%s @%d/%d; "), Kind, *V.Name, *V.Type, V.DeclGraph, V.Index);
 				}
 				return Out;
@@ -211,13 +211,14 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 				OutFailures.Add(TEXT("variables (main): expected ") + ExpectedMain + TEXT("\n got ") + Describe(Vars));
 			}
 			Bango::GetGraphVariables(VarDoc, 0, VarContext, Vars);
-			const FString ExpectedF = TEXT("param _n:int @0/0; scriptVar _done:bool @0/0; global gold:int @-1/0; global names:string[] @-1/1; ");
+			// A function also sees the script's inputs and script variables (not its locals or loop variables).
+			const FString ExpectedF = TEXT("param _n:int @0/0; scriptVar _done:bool @0/0; script _who:string @-1/-1; script _times:int @-1/-1; script _count:int @-1/-1; script _rounds:int @-1/-1; global gold:int @-1/0; global names:string[] @-1/1; ");
 			if (Describe(Vars) != ExpectedF)
 			{
 				OutFailures.Add(TEXT("variables (F): expected ") + ExpectedF + TEXT("\n got ") + Describe(Vars));
 			}
 
-			// An inline script's given inputs (its inputs signature's): the main graph's first parameters, not a function's.
+			// An inline script's given inputs (its inputs signature's): the main graph's first parameters, which a function sees too.
 			FBangoGraphDocument GivenDoc = VarDoc;
 			FBangoGraphDecl Given;
 			Given.Type = TEXT("entity");
@@ -230,7 +231,7 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 				OutFailures.Add(TEXT("variables (main, given inputs): got ") + Describe(Vars));
 			}
 			Bango::GetGraphVariables(GivenDoc, 0, GivenContext, Vars);
-			if (Describe(Vars) != ExpectedF)
+			if (Describe(Vars) != ExpectedF.Replace(TEXT("script _who"), TEXT("script _trigger:entity @-1/-1; script _who"), ESearchCase::CaseSensitive))
 			{
 				OutFailures.Add(TEXT("variables (F, given inputs): got ") + Describe(Vars));
 			}
@@ -679,7 +680,7 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 			{ 30, TEXT("Set (Generic) | Var (x int): `_count` | To <int>: `5`") },
 			{ 20, TEXT("Set (Generic) | Var (x int[]): `_g[0]` | To <int[]>: `[1]`") },
 			{ 21, TEXT("Set (Generic) | Var (x float): `speed` | To <float>: `2.0`") },
-			{ 22, TEXT("Set (Generic) | Var (x): `_title` | To: `\"no\"`") },
+			{ 22, TEXT("Set (Generic) | Var (x string): `_title` | To <string>: `\"no\"`") },   // the script's script variable, seen in the function
 		};
 		FBangoGraphDocument VarDoc;
 		if (!Bango::BuildGraph(Source, TEXT("vars.bango"), VarDoc, Error))

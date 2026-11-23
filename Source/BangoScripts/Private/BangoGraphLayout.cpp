@@ -934,11 +934,17 @@ namespace BangoGraphLayoutPrivate
 		for (const FBangoGraph* Graph : Graphs)
 		{
 			FVarScope Base = Globals;
-			if (Graph == &Document.Main)
+			// The script's inputs and script variables are seen in its functions too (not its locals).
+			for (const FBangoGraphDecl& Input : Document.GivenInputs)
 			{
-				for (const FBangoGraphDecl& Input : Document.GivenInputs)
+				DeclareVariable(Base, Input.Name, Input.Type);
+			}
+			if (Graph != &Document.Main)
+			{
+				AddEntryParams(Document.Main, Base);
+				for (const FBangoGraphDecl& ScriptVar : Document.Main.ScriptVars)
 				{
-					DeclareVariable(Base, Input.Name, Input.Type);
+					DeclareVariable(Base, ScriptVar.Name, ScriptVar.Type);
 				}
 			}
 			AddEntryParams(*Graph, Base);
@@ -1450,6 +1456,29 @@ namespace Bango
 			}
 		}
 
+		// In a function: the script's inputs and script variables, which it sees too.
+		TArray<FBangoGraphVariable> ScriptsOwn;
+		if (GraphIndex != INDEX_NONE)
+		{
+			for (const FBangoGraphDecl& Input : Document.GivenInputs)
+			{
+				Add(ScriptsOwn, Input.Name, Input.Type, FBangoGraphVariable::EKind::Script, INDEX_NONE, INDEX_NONE);
+			}
+			TArray<FBangoEntryParam> ScriptParams;
+			if (Document.Main.Nodes.Num() > 0)
+			{
+				Bango::ReadEntryParams(Document.Main.Nodes[0].Text, false, ScriptParams);
+			}
+			for (const FBangoEntryParam& Param : ScriptParams)
+			{
+				Add(ScriptsOwn, Param.Name, Param.Type, FBangoGraphVariable::EKind::Script, INDEX_NONE, INDEX_NONE);
+			}
+			for (const FBangoGraphDecl& ScriptVar : Document.Main.ScriptVars)
+			{
+				Add(ScriptsOwn, ScriptVar.Name, ScriptVar.Type, FBangoGraphVariable::EKind::Script, INDEX_NONE, INDEX_NONE);
+			}
+		}
+
 		// The file's globals, in order, then the ones this graph uses but the file doesn't declare: names that
 		// aren't the graph's parameters, locals or loop variables (already seen), calls (followed by `(`), vector parts
 		// (after `.`), or labels (Label and Go To nodes hold only a label's name).
@@ -1489,6 +1518,7 @@ namespace Bango
 		OutVariables.Append(Params);
 		OutVariables.Append(Locals);
 		OutVariables.Append(Loops);
+		OutVariables.Append(ScriptsOwn);
 		OutVariables.Append(Globals);
 		OutVariables.Append(Undeclared);
 	}

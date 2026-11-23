@@ -110,6 +110,7 @@ enum class EBangoPlaceKind : uint8
 {
 	Local,   // Index = slot
 	Global,  // Index = name
+	Script,  // Index = slot of the main graph's frame: one of the script's inputs or script variables, used in a function
 };
 
 /** A variable reference, optionally indexed and ending in a vector part: `_x`, `gold`, `_grid[i][j]`, `_path[i].x`. The indexes are on the stack. */

@@ -1390,6 +1390,55 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		}
 	}
 
+	// ---- Functions see the script's inputs and script variables (not its locals) ----
+	{
+		const TCHAR* Source =
+			TEXT("#inputs (string[] _names)\n")
+			TEXT("scriptVar int _score = 0;\n")
+			TEXT("int _plain = 1;    //@1(4, 0)\n")
+			TEXT("Tally();    //@2(8, 0)\n")
+			TEXT("function void Tally()\n")
+			TEXT("{\n")
+			TEXT("\tscriptVar bool _own = true;\n")
+			TEXT("\t_score = _plain;    //@4(4, 0)\n")
+			TEXT("\tforEach (_name in _names)    //@5(8, 0)\n")
+			TEXT("\t{\n")
+			TEXT("\t}\n")
+			TEXT("}\n");
+		FBangoGraphDocument Doc;
+		FBangoCompileError Error;
+		const bool bBuilt = Bango::BuildGraph(Source, TEXT("shared.bango"), Doc, Error);
+		Expect(bBuilt && Doc.Functions.Num() == 1, FString(TEXT("script variables in functions: build: ")) + Error.ToString());
+		if (bBuilt && Doc.Functions.Num() == 1)
+		{
+			const FBangoNodeLayoutContext Context = Bango::MakeNodeLayoutContext(Doc, nullptr);
+			TArray<FBangoGraphVariable> Variables;
+			Bango::GetGraphVariables(Doc, 0, Context, Variables);
+			FString Listed;
+			for (const FBangoGraphVariable& V : Variables)
+			{
+				Listed += FString::Printf(TEXT("%s:%s:%d "), *V.Name, *V.Type, (int32)V.Kind);
+			}
+			const int32 ScriptVarKind = (int32)FBangoGraphVariable::EKind::ScriptVar;
+			const int32 LoopKind = (int32)FBangoGraphVariable::EKind::Loop;
+			const int32 GlobalKind = (int32)FBangoGraphVariable::EKind::Global;
+			const int32 ScriptKind = (int32)FBangoGraphVariable::EKind::Script;
+			const FString Want = FString::Printf(TEXT("_own:bool:%d _name:string:%d _names:string[]:%d _score:int:%d _plain::%d "), ScriptVarKind, LoopKind, ScriptKind, ScriptKind, GlobalKind);
+			Expect(Listed == Want, FString(TEXT("script variables in functions: the function's variables: ")) + Listed);
+			Bango::GetGraphVariables(Doc, INDEX_NONE, Context, Variables);
+			Expect(!Variables.ContainsByPredicate([](const FBangoGraphVariable& V) { return V.Kind == FBangoGraphVariable::EKind::Script || V.Name == FString(TEXT("_own")); }),
+				TEXT("script variables in functions: the main graph lists none of the function's"));
+			// The function's nodes know the script variables' types.
+			const TArray<FBangoGraphNode>& F = Doc.Functions[0].Nodes;
+			if (F.Num() >= 2)
+			{
+				const FBangoNodeLayout SetLayout = Bango::GetNodeLayout(F[1], true, Context);
+				Expect(SetLayout.Fields.Num() == 2 && SetLayout.Fields[0].VariableType == FString(TEXT("int")),
+					FString(TEXT("script variables in functions: a Set node knows the type: ")) + (SetLayout.Fields.Num() > 0 ? SetLayout.Fields[0].VariableType : FString()));
+			}
+		}
+	}
+
 	// ---- Globals declared below the top of the file (HoistLateGlobals, the text pane's Apply) ----
 	{
 		struct FHoistCase { const TCHAR* Name; const TCHAR* Source; const TCHAR* Want; const TCHAR* Error; };

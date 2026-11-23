@@ -135,6 +135,12 @@ public:
 	/** Takes away an error shown with ShowError (not one compiling as you type found). */
 	void ClearOutsideError();
 
+	/**
+	 * Types a script's path at the cursor (over the selection, if there is one), in quotes unless the cursor is
+	 * already inside a string, and puts the keyboard focus in the text. False, doing nothing, if the text is read-only.
+	 */
+	bool InsertScriptPath(const FString& Path);
+
 	/** Puts the cursor at a line and column (both from 0) of the whole text, scrolling it into view. */
 	void GoTo(const FTextLocation& Location);
 

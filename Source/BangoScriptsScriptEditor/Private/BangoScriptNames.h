@@ -11,7 +11,8 @@
 //    `}` that closes their block (C-style block scope; a graph's top level runs to the end of the graph);
 //  - loop variables: `for (<type> name = ...` and `forEach (name in ...)`, visible in their loop's header and block;
 //  - a spawn's declared id: `int _t = spawn`, visible from the `}` that closes the spawn's block.
-// A function's graph is the lines from its `function` line to the `};` that closes its body.
+// A function's graph is the lines from its `function` line to the `};` that closes its body. A function also sees the
+// main graph's parameters and script variables (not its locals), and can't declare anything with one's name.
 // Brace matching is by line tokens only, so text being typed with unbalanced braces just gives looser scopes.
 //
 // Depends only on FString, TArray and the line tokenizer, so it can be unit-tested without Slate.
@@ -57,7 +58,8 @@ public:
 	void SetGivenInputs(const TArray<FBangoVisibleName>& Inputs) { GivenInputs = Inputs; }
 
 	/**
-	 * What a name on a line is: Parameter, Local (a local, script variable or loop variable visible on that line),
+	 * What a name on a line is: Parameter (in a function, the script's too), Local (a local, script variable or loop
+	 * variable visible on that line; in a function, the script's script variables too),
 	 * Global (declared in this file), or UndeclaredGlobal (used here, declared elsewhere, a misspelling, or a local
 	 * used outside its block).
 	 */
@@ -85,8 +87,8 @@ public:
 
 	/**
 	 * The names a line can use: its graph's parameters and the locals visible on it (script variables and loop
-	 * variables included; of two visible with one name, the inner one), the file's globals that aren't hidden by them,
-	 * and the file's functions. In that order.
+	 * variables included; of two visible with one name, the inner one), in a function the script's parameters and script
+	 * variables, the file's globals that aren't hidden by them, and the file's functions. In that order.
 	 */
 	void GetVisibleNames(int32 LineIndex, TArray<FBangoVisibleName>& OutNames) const;
 
@@ -124,12 +126,17 @@ private:
 		int32 StartLine = 0;
 		/** The line of the `}` that closes its block, or MAX_int32 (a graph's top level, or a block not closed yet). */
 		int32 EndLine = MAX_int32;
+		/** Declared with `scriptVar`: the main graph's are seen by the functions too. */
+		bool bScriptVar = false;
 
 		bool IsVisible(int32 InGraph, int32 LineIndex) const { return Graph == InGraph && StartLine <= LineIndex && LineIndex <= EndLine; }
 	};
 
 	/** The visible local of that name on the line (the innermost: the latest declared), or nullptr. */
 	const FLocalName* FindVisibleLocal(int32 LineIndex, const FString& Name) const;
+
+	/** The main graph's script variable of that name (its index in Locals), which every function sees, or INDEX_NONE. */
+	int32 FindScriptVar(const FString& Name) const;
 
 	TArray<FLocalName> Locals;
 

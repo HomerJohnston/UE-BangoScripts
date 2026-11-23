@@ -4,7 +4,7 @@
 
 namespace BangoInstancePrivate
 {
-	constexpr int32 InstanceSaveVersion = 7; // 2: waitUntil. 3: a pending command's type arguments. 4: and whether its result is used. 5: a waitUntil's timeout. 6: and its hold. 7: unknown sides of && and ||. Raise it when the save format changes: data in another format is refused, not misread
+	constexpr int32 InstanceSaveVersion = 8; // 2: waitUntil. 3: a pending command's type arguments. 4: and whether its result is used. 5: a waitUntil's timeout. 6: and its hold. 7: unknown sides of && and ||. 8: the script's variables, for a spawn block's copy made in a function. Raise it when the save format changes: data in another format is refused, not misread
 
 	static FString TypeText(const FBangoType& Type)
 	{
@@ -150,6 +150,7 @@ bool FBangoInstance::Start(const TSharedPtr<const FBangoProgram>& InProgram, con
 	Id = InId;
 	Error = FBangoRuntimeError();
 	Frames.Reset();
+	ScriptSlots.Reset();
 	Stack.Reset();
 	PendingCommandName = -1;
 	PendingCall = FBangoCommandCall();
@@ -211,6 +212,7 @@ bool FBangoInstance::StartSpawned(const FBangoInstance& Parent, int32 BlockIP, i
 	Id = InId;
 	Error = FBangoRuntimeError();
 	Frames.Reset();
+	ScriptSlots.Reset();
 	Stack.Reset();
 	PendingCommandName = -1;
 	PendingCall = FBangoCommandCall();
@@ -236,6 +238,12 @@ bool FBangoInstance::StartSpawned(const FBangoInstance& Parent, int32 BlockIP, i
 	Frame.IP = BlockIP;
 	Frame.StackBase = 0;
 	Frame.Slots = From.Slots;
+	if (From.Function != 0)
+	{
+		// A block spawned in a function: the copy has no main graph frame, so it keeps its copies of the script's
+		// inputs and script variables (which the function sees) here.
+		ScriptSlots = Parent.GetScriptSlots();
+	}
 	Frames.Add(MoveTemp(Frame));
 	Status = EBangoInstanceStatus::Ready;
 	return true;
@@ -775,8 +783,27 @@ bool FBangoInstance::PopIndexes(int32 Count, TArray<int64>& OutIndexes)
 	return true;
 }
 
+const TArray<FBangoValue>& FBangoInstance::GetScriptSlots() const
+{
+	return Frames.Num() > 0 && Frames[0].Function == 0 ? Frames[0].Slots : ScriptSlots;
+}
+
+TArray<FBangoValue>& FBangoInstance::GetPlaceSlots(const FBangoPlace& Place)
+{
+	if (Place.Kind == EBangoPlaceKind::Script)
+	{
+		return Frames.Num() > 0 && Frames[0].Function == 0 ? Frames[0].Slots : ScriptSlots;
+	}
+	return Frames.Last().Slots;
+}
+
 FString FBangoInstance::DescribePlace(const FBangoPlace& Place) const
 {
+	if (Place.Kind == EBangoPlaceKind::Script)
+	{
+		const FBangoFunctionCode& Main = Program->Functions[0];
+		return Main.SlotNames.IsValidIndex(Place.Index) ? Main.SlotNames[Place.Index] : FString(TEXT("<script variable>"));
+	}
 	if (Place.Kind == EBangoPlaceKind::Local)
 	{
 		const FBangoFunctionCode& Function = Program->Functions[Frames.Last().Function];
@@ -858,14 +885,14 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 	{
 		// Like isNil: nil anywhere along the way (or a global nobody made, or past the end) gives nil.
 		const FBangoValue* Root = nullptr;
-		if (Place.Kind == EBangoPlaceKind::Local)
+		if (Place.Kind != EBangoPlaceKind::Global)
 		{
-			FBangoFrame& Frame = Frames.Last();
-			if (!Frame.Slots.IsValidIndex(Place.Index))
+			TArray<FBangoValue>& Slots = GetPlaceSlots(Place);
+			if (!Slots.IsValidIndex(Place.Index))
 			{
 				return RuntimeFail(TEXT("Internal error: bad local slot."));
 			}
-			Root = &Frame.Slots[Place.Index];
+			Root = &Slots[Place.Index];
 		}
 		else
 		{
@@ -882,14 +909,14 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 
 	const FString RootName = DescribePlace(Place);
 	const FBangoValue* Current = nullptr;
-	if (Place.Kind == EBangoPlaceKind::Local)
+	if (Place.Kind != EBangoPlaceKind::Global)
 	{
-		FBangoFrame& Frame = Frames.Last();
-		if (!Frame.Slots.IsValidIndex(Place.Index))
+		TArray<FBangoValue>& Slots = GetPlaceSlots(Place);
+		if (!Slots.IsValidIndex(Place.Index))
 		{
 			return RuntimeFail(TEXT("Internal error: bad local slot."));
 		}
-		Current = &Frame.Slots[Place.Index];
+		Current = &Slots[Place.Index];
 	}
 	else
 	{
@@ -961,6 +988,10 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 			const FString ParamOf = Function.Name.IsEmpty() ? FString(TEXT("this script")) : FString::Printf(TEXT("function '%s'"), *Function.Name);
 			return RuntimeFail(FString::Printf(TEXT("'%s' is nil. It's a parameter of %s; check what the caller passed."), *Path, *ParamOf));
 		}
+		if (Place.Kind == EBangoPlaceKind::Script && Indexes.Num() == 0 && Place.Index < Program->Functions[0].NumParams)
+		{
+			return RuntimeFail(FString::Printf(TEXT("'%s' is nil. It's a parameter of this script; check what the caller passed."), *Path));
+		}
 		if (Place.Kind == EBangoPlaceKind::Global && Indexes.Num() == 0)
 		{
 			return UnsetGlobalFail(FString::Printf(TEXT("Global '%s' is nil. Give it a value before reading it, or check it with isNil(%s)."), *Path, *Path), Globals);
@@ -991,14 +1022,14 @@ bool FBangoInstance::StorePlace(const FBangoPlace& Place, FBangoGlobalStore& Glo
 
 	const FString RootName = DescribePlace(Place);
 	FBangoValue* Root = nullptr;
-	if (Place.Kind == EBangoPlaceKind::Local)
+	if (Place.Kind != EBangoPlaceKind::Global)
 	{
-		FBangoFrame& Frame = Frames.Last();
-		if (!Frame.Slots.IsValidIndex(Place.Index))
+		TArray<FBangoValue>& Slots = GetPlaceSlots(Place);
+		if (!Slots.IsValidIndex(Place.Index))
 		{
 			return RuntimeFail(TEXT("Internal error: bad local slot."));
 		}
-		Root = &Frame.Slots[Place.Index];
+		Root = &Slots[Place.Index];
 	}
 	else
 	{
@@ -1102,14 +1133,14 @@ bool FBangoInstance::IsNilPlace(const FBangoPlace& Place, FBangoGlobalStore& Glo
 	}
 
 	const FBangoValue* Root = nullptr;
-	if (Place.Kind == EBangoPlaceKind::Local)
+	if (Place.Kind != EBangoPlaceKind::Global)
 	{
-		FBangoFrame& Frame = Frames.Last();
-		if (!Frame.Slots.IsValidIndex(Place.Index))
+		TArray<FBangoValue>& Slots = GetPlaceSlots(Place);
+		if (!Slots.IsValidIndex(Place.Index))
 		{
 			return RuntimeFail(TEXT("Internal error: bad local slot."));
 		}
-		Root = &Frame.Slots[Place.Index];
+		Root = &Slots[Place.Index];
 	}
 	else
 	{
@@ -1373,14 +1404,14 @@ FBangoValue* FBangoInstance::FindPlaceToChange(const FBangoPlace& Place, TConstA
 {
 	const FString RootName = DescribePlace(Place);
 	FBangoValue* Target = nullptr;
-	if (Place.Kind == EBangoPlaceKind::Local)
+	if (Place.Kind != EBangoPlaceKind::Global)
 	{
-		if (Frames.Num() == 0 || !Frames.Last().Slots.IsValidIndex(Place.Index))
+		if (Frames.Num() == 0 || !GetPlaceSlots(Place).IsValidIndex(Place.Index))
 		{
 			RuntimeFail(TEXT("Internal error: bad local slot."));
 			return nullptr;
 		}
-		Target = &Frames.Last().Slots[Place.Index];
+		Target = &GetPlaceSlots(Place)[Place.Index];
 	}
 	else
 	{
@@ -1504,8 +1535,8 @@ bool FBangoInstance::CallCommandInPlace(const FBangoPlace& Place, int32 NameInde
 	// Found again, as the command may have changed other globals (never this instance's frames).
 	const bool bSameType = Call.Target.GetType() == TargetType;
 	FString Unused;
-	Target = Place.Kind == EBangoPlaceKind::Local
-		? (Frames.Num() > 0 && Frames.Last().Slots.IsValidIndex(Place.Index) ? &Frames.Last().Slots[Place.Index] : nullptr)
+	Target = Place.Kind != EBangoPlaceKind::Global
+		? (Frames.Num() > 0 && GetPlaceSlots(Place).IsValidIndex(Place.Index) ? &GetPlaceSlots(Place)[Place.Index] : nullptr)
 		: Globals.FindMutable(DescribePlace(Place));
 	Target = Target && Indexes.Num() > 0 ? Target->FindElementAtPath(Indexes, Unused) : Target;
 	if (Target && bSameType)
@@ -2448,8 +2479,9 @@ bool FBangoInstance::TryReload(FBangoGlobalStore& Globals)
 
 	bReloadTried = true;
 	TArray<FBangoFrame> NewFrames;
+	TArray<FBangoValue> NewScriptSlots;
 	FString Reason;
-	if (!MakeReloadedFrames(NewFrames, Reason))
+	if (!MakeReloadedFrames(NewFrames, NewScriptSlots, Reason))
 	{
 		ReloadFailure = Reason;
 		return false;
@@ -2470,6 +2502,7 @@ bool FBangoInstance::TryReload(FBangoGlobalStore& Globals)
 	Program = ReloadProgram;
 	BoundCommands = MoveTemp(ReloadCommands);
 	Frames = MoveTemp(NewFrames);
+	ScriptSlots = MoveTemp(NewScriptSlots);
 	Error.FileName = Program->FileName;
 	CurrentFunction = Frames.Last().Function;
 	CurrentIP = Frames.Last().IP;
@@ -2477,10 +2510,18 @@ bool FBangoInstance::TryReload(FBangoGlobalStore& Globals)
 	return true;
 }
 
-bool FBangoInstance::MakeReloadedFrames(TArray<FBangoFrame>& OutFrames, FString& OutReason) const
+bool FBangoInstance::MakeReloadedFrames(TArray<FBangoFrame>& OutFrames, TArray<FBangoValue>& OutScriptSlots, FString& OutReason) const
 {
 	using namespace BangoInstancePrivate;
 	const FBangoProgram& NewProgram = *ReloadProgram;
+	if (Frames.Num() > 0 && Frames[0].Function != 0)
+	{
+		// A spawn block's copy made in a function: its copies of the script's inputs and script variables.
+		if (!MakeReloadedSlots(Program->Functions[0], NewProgram.Functions[0], ScriptSlots, OutScriptSlots, OutReason))
+		{
+			return false;
+		}
+	}
 	for (int32 k = 0; k < Frames.Num(); ++k)
 	{
 		const FBangoFrame& Old = Frames[k];
@@ -2542,8 +2583,21 @@ bool FBangoInstance::MakeReloadedFrames(TArray<FBangoFrame>& OutFrames, FString&
 			NewFrame.IP = NewCallIP + 1;
 		}
 
+		if (!MakeReloadedSlots(OldFn, NewFn, Old.Slots, NewFrame.Slots, OutReason))
+		{
+			return false;
+		}
+		OutFrames.Add(MoveTemp(NewFrame));
+	}
+	return true;
+}
+
+bool FBangoInstance::MakeReloadedSlots(const FBangoFunctionCode& OldFn, const FBangoFunctionCode& NewFn, const TArray<FBangoValue>& OldSlots, TArray<FBangoValue>& OutSlots, FString& OutReason) const
+{
+	using namespace BangoInstancePrivate;
+	{
 		// Locals, parameters and loop variables, by name (and a loop's by its node).
-		NewFrame.Slots.SetNum(NewFn.SlotTypes.Num());
+		OutSlots.SetNum(NewFn.SlotTypes.Num());
 		for (int32 i = 0; i < NewFn.SlotTypes.Num(); ++i)
 		{
 			const FString& Name = NewFn.SlotNames[i];
@@ -2568,7 +2622,7 @@ bool FBangoInstance::MakeReloadedFrames(TArray<FBangoFrame>& OutFrames, FString&
 						*DescribeFunction(OldFn), *Name, *OldFn.SlotTypes[OldSlot].ToString(), *NewFn.SlotTypes[i].ToString());
 					return false;
 				}
-				NewFrame.Slots[i] = Old.Slots.IsValidIndex(OldSlot) ? Old.Slots[OldSlot] : FBangoValue::MakeNil(NewFn.SlotTypes[i]);
+				OutSlots[i] = OldSlots.IsValidIndex(OldSlot) ? OldSlots[OldSlot] : FBangoValue::MakeNil(NewFn.SlotTypes[i]);
 				continue;
 			}
 			if (i < NewFn.NumParams)
@@ -2598,12 +2652,11 @@ bool FBangoInstance::MakeReloadedFrames(TArray<FBangoFrame>& OutFrames, FString&
 				}
 			}
 			// A start value of self is the owner's Bango ID, as when the local's declaration runs (nil if there's no owner).
-			if (!NewFn.SlotStartValues.IsValidIndex(i) || !ResolveSelf(NewFn.SlotStartValues[i], NewFrame.Slots[i]))
+			if (!NewFn.SlotStartValues.IsValidIndex(i) || !ResolveSelf(NewFn.SlotStartValues[i], OutSlots[i]))
 			{
-				NewFrame.Slots[i] = FBangoValue::MakeNil(NewFn.SlotTypes[i]);
+				OutSlots[i] = FBangoValue::MakeNil(NewFn.SlotTypes[i]);
 			}
 		}
-		OutFrames.Add(MoveTemp(NewFrame));
 	}
 	return true;
 }
@@ -2648,6 +2701,7 @@ void FBangoInstance::Serialize(FArchive& Ar)
 		Ar << Frame.StackBase;
 		Ar << Frame.Slots;
 	}
+	Ar << ScriptSlots;
 
 	Ar << Stack;
 	Ar << PendingCommandName;
@@ -2730,6 +2784,11 @@ bool FBangoInstance::Bind(const TSharedPtr<const FBangoProgram>& InProgram, cons
 			return false;
 		}
 		PreviousBase = Frame.StackBase;
+	}
+	if (Frames.Num() > 0 && Frames[0].Function != 0 && ScriptSlots.Num() != Program->Functions[0].SlotTypes.Num())
+	{
+		OutError = TEXT("The saved script state doesn't match the script. Was the script changed since the game was saved?");
+		return false;
 	}
 	if (IsRunning() && Frames.Num() == 0)
 	{

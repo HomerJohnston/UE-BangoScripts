@@ -255,6 +255,13 @@ namespace BangoCompilerPrivate
 
 		TBangoNameMap<FBangoType> DeclaredGlobals;
 		TBangoNameMap<int32> FunctionIndexes;
+		/**
+		 * The main graph's inputs and script variables (their slots are in its frame), which the script's functions see
+		 * too. Filled while the main graph is compiled, which is before any function is.
+		 */
+		TArray<FLocalVar> ScriptVars;
+		/** The main graph's locals and loop variables, which functions don't see: for the error that says so. */
+		TBangoNameMap<FGraphLocal> MainGraphLocals;
 
 		// Per function
 		FBangoFunctionCode* Fn = nullptr;
@@ -1121,7 +1128,7 @@ namespace BangoCompilerPrivate
 			{
 				for (const FBangoParam& Param : Ast->Params)
 				{
-					if (!CheckNotAGlobal(Param.Name, Param.Loc))
+					if (!CheckNotAGlobal(Param.Name, Param.Loc) || !CheckNotAScriptVar(Param.Name, Param.Loc))
 					{
 						return false;
 					}
@@ -1142,6 +1149,10 @@ namespace BangoCompilerPrivate
 			}
 
 			CurrentStmt = nullptr;
+			if (!Ast)
+			{
+				MainGraphLocals = GraphLocals;
+			}
 			if (!Ast)
 			{
 				// A condition must say true or false; reaching the end is an error when it runs.
@@ -1268,6 +1279,7 @@ namespace BangoCompilerPrivate
 					}
 					check(Slot == i);
 					Program.Params.Add(Input);
+					ScriptVars.Add(Scopes.Last().Vars.Last());
 				}
 				bDeclaringSignature = false;
 				Fn->NumParams = InputsSignature->Params.Num();
@@ -1314,6 +1326,7 @@ namespace BangoCompilerPrivate
 				}
 				check(Slot == i);
 				Program.Params.Add(MoveTemp(Info));
+				ScriptVars.Add(Scopes.Last().Vars.Last());
 			}
 			Fn->NumParams = ParamsStmt->Params.Num();
 			return true;
@@ -1522,9 +1535,30 @@ namespace BangoCompilerPrivate
 			return true;
 		}
 
+		/** One of the script's inputs or script variables, if this is a function (which sees them). */
+		const FLocalVar* FindScriptVar(const FString& Name) const
+		{
+			if (!FnAst)
+			{
+				return nullptr; // the main graph's own are in its scopes
+			}
+			return ScriptVars.FindByPredicate([&Name](const FLocalVar& Var) { return Var.Name.Equals(Name, ESearchCase::CaseSensitive); });
+		}
+
+		/** A function sees the script's inputs and script variables, so it can't declare anything with one's name. */
+		bool CheckNotAScriptVar(const FString& Name, const FBangoSourceLocation& Loc)
+		{
+			if (const FLocalVar* Var = FindScriptVar(Name))
+			{
+				return Fail(Loc, FString::Printf(TEXT("'%s' is one of this script's %s, which its functions see too, so function '%s' can't declare its own '%s'. Rename one of them, or use the script's here."),
+					*Name, Var->Slot < Program.Functions[0].NumParams ? TEXT("inputs") : TEXT("script variables"), *FnAst->Name, *Name));
+			}
+			return true;
+		}
+
 		bool DeclareLocal(const FString& Name, const FBangoType& Type, const FBangoSourceLocation& Loc, int32& OutSlot)
 		{
-			if (!CheckNotAnInput(Name, Loc))
+			if (!CheckNotAnInput(Name, Loc) || !CheckNotAScriptVar(Name, Loc))
 			{
 				return false;
 			}
@@ -1712,7 +1746,7 @@ namespace BangoCompilerPrivate
 			}
 
 			// The new local isn't visible in its own initializer.
-			if (!CheckNotAnInput(Decl.Name, Decl.Loc))
+			if (!CheckNotAnInput(Decl.Name, Decl.Loc) || !CheckNotAScriptVar(Decl.Name, Decl.Loc))
 			{
 				return false;
 			}
@@ -1758,6 +1792,10 @@ namespace BangoCompilerPrivate
 					return false;
 				}
 				Fn->SlotStartValues[Slot] = StartValue;
+			}
+			if (Decl.bScriptVar && !FnAst)
+			{
+				ScriptVars.Add(Scopes.Last().Vars.Last());
 			}
 			return true;
 		}
@@ -2296,9 +2334,7 @@ namespace BangoCompilerPrivate
 				FString Why;
 				if (FnAst)
 				{
-					Why = InputsSignature && InputsSignature->Params.ContainsByPredicate([Named](const FBangoScriptParamInfo& Input) { return Input.Name.Equals(Named->Name, ESearchCase::CaseSensitive); })
-						? FString::Printf(TEXT("It's one of the script's inputs, but a function doesn't see those: give the function a parameter and pass it in, like '%s(%s)'. "), *FnAst->Name, *Named->Name)
-						: FString(TEXT("It isn't a local or a parameter of this function. "));
+					Why = TEXT("It isn't a local or a parameter of this function, or one of the script's inputs or script variables. ");
 				}
 				else if (InputsSignature && InputsSignature->Params.Num() > 0)
 				{
@@ -2514,6 +2550,13 @@ namespace BangoCompilerPrivate
 				Index = Local->Slot;
 				RootType = FExprType::MakeKnown(Local->Type);
 			}
+			else if (const FLocalVar* ScriptVar = FindScriptVar(Root->Name))
+			{
+				// In a function: one of the script's inputs or script variables, in the main graph's frame.
+				Kind = EBangoPlaceKind::Script;
+				Index = ScriptVar->Slot;
+				RootType = FExprType::MakeKnown(ScriptVar->Type);
+			}
 			else if (const FGraphLocal* Elsewhere = GraphLocals.Find(Root->Name))
 			{
 				// A local of this graph, but not visible here. Its name hides any global of that name in this graph.
@@ -2522,6 +2565,12 @@ namespace BangoCompilerPrivate
 					: Elsewhere->bLoopVar
 					? FString::Printf(TEXT("'%s' is the variable of the loop on line %d, and only exists inside that loop. (If you meant a global called '%s', rename one of them: in a graph, a local's name hides a global's.)"), *Root->Name, Elsewhere->Line, *Root->Name)
 					: FString::Printf(TEXT("'%s' is a local declared on line %d, and isn't visible here: a local exists from its declaration to the end of its block. Use it there, or declare it further out. (If you meant a global called '%s', rename one of them: in a graph, a local's name hides a global's.)"), *Root->Name, Elsewhere->Line, *Root->Name));
+			}
+			else if (const FGraphLocal* MainLocal = FnAst ? MainGraphLocals.Find(Root->Name) : nullptr)
+			{
+				// A local of the main graph: it only exists in its block there, so a function can't use it.
+				return Fail(Root->Loc, FString::Printf(TEXT("'%s' is %s on line %d of the script's main graph, which function '%s' doesn't see: functions see the script's inputs and script variables, not its locals. Make it a script variable ('scriptVar' at the top of the script), or pass it to the function as a parameter. (If you meant a global called '%s', rename one of them.)"),
+					*Root->Name, MainLocal->bLoopVar ? TEXT("the variable of the loop") : TEXT("a local declared"), MainLocal->Line, *FnAst->Name, *Root->Name));
 			}
 			else
 			{

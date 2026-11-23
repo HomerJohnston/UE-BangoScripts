@@ -452,6 +452,30 @@ void SBangoTextEditor::InsertNewLine()
 	TextBox->GoTo(FTextLocation(Cursor.GetLineIndex() + Edit.CursorLinesDown, Edit.CursorColumn));
 }
 
+bool SBangoTextEditor::InsertScriptPath(const FString& Path)
+{
+	if (!TextBox.IsValid() || TextBox->IsTextReadOnly() || Path.IsEmpty())
+	{
+		return false;
+	}
+	CloseCompletion();
+	{
+		SMultiLineEditableText::FScopedEditableTextTransaction Transaction(TextBox);
+		if (TextBox->AnyTextSelected())
+		{
+			TextBox->DeleteSelectedText();
+		}
+		// The cursor's line as it is now (the metadata tracker hears about changes only when the edit ends).
+		const FTextLocation Cursor = TextBox->GetCursorLocation();
+		TArray<FString> Lines;
+		FBangoMetadataTracker::SplitLines(TextBox->GetText().ToString(), Lines);
+		const FString Line = Lines.IsValidIndex(Cursor.GetLineIndex()) ? Lines[Cursor.GetLineIndex()] : FString();
+		TextBox->InsertTextAtCursor(FBangoCompletion::MakeScriptPathInsert(Line, FMath::Clamp(Cursor.GetOffset(), 0, Line.Len()), Path));
+	}
+	FSlateApplication::Get().SetKeyboardFocus(TextBox, EFocusCause::SetDirectly);
+	return true;
+}
+
 bool SBangoTextEditor::HandleIsTypedCharValid(const TCHAR Character)
 {
 	// The Tab that accepted an autocomplete entry isn't typed as well.

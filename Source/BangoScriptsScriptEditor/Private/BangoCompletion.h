@@ -121,6 +121,19 @@ public:
 	 */
 	static void KeepOpenParens(const FString& Line, int32 CursorColumn, TArray<int32>& InOutOpenColumns);
 
+	/**
+	 * How a script names another, as Exec takes it (Bango spec, section 15, Naming scripts): relative to the calling
+	 * script's folder when ToScript is in that folder or below it ("Intro", "Side/Intro"), and the full asset path
+	 * otherwise ("/Game/Shared/Greet": shorter to read than a row of "..", and still right if the caller moves).
+	 * Both are script names, like "/Game/Quests/Start". With no FromScript (an inline script has no folder), the full path.
+	 */
+	static FString MakeScriptPath(const FString& FromScript, const FString& ToScript);
+	/**
+	 * What to type at Column of Line to put a script path there: the path in quotes, or the path alone if the cursor
+	 * is already inside a string (`Exec("|")`) or a comment.
+	 */
+	static FString MakeScriptPathInsert(const FString& Line, int32 Column, const FString& Path);
+
 	/** Whether Column of Line is inside a string or a comment (or its end, for one left open). */
 	static bool IsInStringOrComment(const FString& Line, int32 Column);
 

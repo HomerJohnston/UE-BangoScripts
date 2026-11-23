@@ -26,6 +26,7 @@ class SInlineEditableTextBlock;
 class SMultiLineEditableTextBox;
 class SEditableTextBox;
 class SBangoTextEditor;
+class SBangoScriptAssetList;
 class SScrollBox;
 class SScrollBar;
 class STextBlock;
@@ -164,6 +165,8 @@ private:
 		bool bReadOnly = false;
 		/** A local declared by a node (a Local node, or a Spawn), rather than a loop variable. */
 		bool bNodeLocal = false;
+		/** In a function's graph: one of the script's inputs or script variables, which the function sees too. */
+		bool bScripts = false;
 		/** A loop variable or a node's local: the node that declares it, in the shown graph. */
 		int32 LoopNode = INDEX_NONE;
 		TWeakPtr<SInlineEditableTextBlock> NameWidget;
@@ -385,6 +388,8 @@ private:
 	void SetInputDefault(int32 Index, const FString& Typed);
 	/** Why NewName can't be the name of input Index, or empty if it can. */
 	FString CheckInputName(int32 Index, const FString& NewName) const;
+	/** Why a new parameter or script variable of the shown graph can't have this name because functions see the script's inputs and script variables; empty if it can. */
+	FString CheckSharedName(const FString& NewName) const;
 	/** Renames an input, and its uses in the graph, as one undoable edit. */
 	void RenameInput(int32 Index, const FString& NewName);
 	/**
@@ -507,6 +512,29 @@ private:
 	 * change on disk), and not for a script whose text doesn't read, which leave the switch as it is.
 	 */
 	bool bOpeningScript = false;
+	/**
+	 * The Script Assets pane, right of the reference pane: every Bango Script asset, to write one's path into the
+	 * script (SBangoScriptAssetList). Its tab sits on the pane's left edge, over whatever is beside it (the reference
+	 * pane when that's open, else the graph), just below where the Command Palette tab is; it's there with the graph
+	 * hidden too, so the pane works the same either way. Hidden to start with.
+	 */
+	TSharedRef<SWidget> MakeAssetsTab();
+	TSharedRef<SWidget> MakeAssetsPane();
+	void SetAssetsPaneOpen(bool bOpen, bool bAnimate);
+	EActiveTimerReturnType AnimateAssetsPane(double InCurrentTime, float InDeltaTime);
+	/** The tab's place in the overlay over the panes: its pane's width from the right, below the Command Palette tab. */
+	FMargin GetAssetsTabPadding() const;
+	/** How the open script would write another's path (Exec): relative to its folder, or full. */
+	FString GetWrittenScriptPath(const FString& ScriptName) const;
+	/** A script was double-clicked in the pane: its path is typed at the text cursor, or copied if the text isn't shown. */
+	void OnScriptAssetPicked(const FString& ScriptName);
+	bool bAssetsPaneOpen = false;
+	float AssetsPaneOpenness = 0.0f;
+	bool bAssetsPaneSliding = false;
+	float AssetsPaneWidth = 240.0f;
+	TSharedPtr<SButton> AssetsTabButton;
+	TSharedPtr<SBangoScriptAssetList> AssetList;
+
 	/** The Command Palette tab on the graph's right edge, and the reference pane (COMMANDS and NODES tabs) it pulls out. */
 	TSharedRef<SWidget> MakeCommandsTab();
 	TSharedRef<SWidget> MakeCommandsPane();

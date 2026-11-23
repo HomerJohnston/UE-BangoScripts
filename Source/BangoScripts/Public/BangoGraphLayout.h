@@ -187,6 +187,11 @@ struct BANGOSCRIPTS_API FBangoGraphVariable
 		Loop,
 		/** One of the file's globals (Index: into the document's Globals), or one the graph uses that the file doesn't declare (Index: INDEX_NONE). */
 		Global,
+		/**
+		 * In a function's graph: one of the script's inputs or script variables (the main graph's), which functions see
+		 * too. DeclGraph and Index are INDEX_NONE: it's edited in the main graph.
+		 */
+		Script,
 	};
 
 	FString Name;
@@ -225,8 +230,9 @@ namespace Bango
 
 	/**
 	 * The variables of one graph (INDEX_NONE for the main graph, else a function's index), each name once: its
-	 * parameters and its locals in order, its loop variables in node order, the file's globals in order, then the
-	 * globals the graph uses that the file doesn't declare, sorted by name. Context gives the loop variables' types
+	 * parameters and its locals in order, its loop variables in node order, for a function the script's inputs and
+	 * script variables (which it sees too), the file's globals in order, then the globals the graph uses that the file
+	 * doesn't declare, sorted by name. Context gives the loop variables' types
 	 * (from MakeNodeLayoutContext for the same document).
 	 */
 	BANGOSCRIPTS_API void GetGraphVariables(const FBangoGraphDocument& Document, int32 Graph, const FBangoNodeLayoutContext& Context, TArray<FBangoGraphVariable>& OutVariables);

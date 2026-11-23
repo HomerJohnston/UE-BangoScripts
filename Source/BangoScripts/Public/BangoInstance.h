@@ -291,7 +291,8 @@ private:
 	/** Switches to ReloadProgram if the script is at a point where it can (see RequestReload). True if it switched. */
 	bool TryReload(FBangoGlobalStore& Globals);
 	/** The frames as they'd be in ReloadProgram, or false with the reason they don't fit. */
-	bool MakeReloadedFrames(TArray<FBangoFrame>& OutFrames, FString& OutReason) const;
+	bool MakeReloadedFrames(TArray<FBangoFrame>& OutFrames, TArray<FBangoValue>& OutScriptSlots, FString& OutReason) const;
+	bool MakeReloadedSlots(const FBangoFunctionCode& OldFn, const FBangoFunctionCode& NewFn, const TArray<FBangoValue>& OldSlots, TArray<FBangoValue>& OutSlots, FString& OutReason) const;
 	/** Ends a pending reload with Result and Message. */
 	void FinishReload(EBangoReloadResult Result, const FString& Message);
 	bool CheckArguments(TConstArrayView<FBangoValue> Args, TArray<FBangoValue>& OutValues);
@@ -331,6 +332,10 @@ private:
 
 	// Places
 	FString DescribePlace(const FBangoPlace& Place) const;
+	/** The main graph's slots: the script's inputs and script variables, which its functions see (EBangoPlaceKind::Script). */
+	const TArray<FBangoValue>& GetScriptSlots() const;
+	/** The slots a local or script place is in. */
+	TArray<FBangoValue>& GetPlaceSlots(const FBangoPlace& Place);
 	/** Entities is only used to add a hint when a missing global is really a Bango ID written without its `@`. */
 	/** With bNilOk, a value that's nil or missing (a global nobody made, an element past the end) is loaded as nil instead of stopping the script. */
 	bool LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Globals, const IBangoEntityResolver* Entities, bool bNilOk = false);
@@ -363,6 +368,11 @@ private:
 	FBangoRuntimeError Error;
 
 	TArray<FBangoFrame> Frames;
+	/**
+	 * Only for a spawn block's copy that was made in a function, so whose first frame isn't the main graph's: its copy of
+	 * the main graph's slots. Otherwise they're in Frames[0] (GetScriptSlots).
+	 */
+	TArray<FBangoValue> ScriptSlots;
 	TArray<FBangoValue> Stack;
 
 	/** The latent command being waited on. */

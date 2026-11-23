@@ -58,6 +58,8 @@
 #include "Misc/ConfigCacheIni.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "SBangoTextEditor.h"
+#include "SBangoScriptAssetList.h"
+#include "BangoCompletion.h"
 #include "Framework/Text/TextLayout.h"
 #include "Styling/StyleColors.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
@@ -452,6 +454,10 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 			+ SSplitter::Slot()
 			.Value(1.0f)
 			[
+				// The panes, and over them the Script Assets tab, which belongs to no one pane's edge (below).
+				SNew(SOverlay)
+				+ SOverlay::Slot()
+				[
 				SNew(SSplitter)
 				.Orientation(Orient_Horizontal)
 
@@ -655,6 +661,40 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 					[
 						MakeCommandsPane()
 					]
+				]
+
+				// The Script Assets pane, right of the reference pane: hidden to start with, and slid out by its tab,
+				// with the graph shown or not. Its width stays put when the window is resized.
+				+ SSplitter::Slot()
+				.SizeRule(SSplitter::SizeToContent)
+				.Resizable(true)
+				.OnSlotResized_Lambda([this](float NewWidth)
+				{
+					if (AssetsPaneOpenness >= 1.0f)
+					{
+						AssetsPaneWidth = FMath::Max(NewWidth, MinSidePaneWidth);
+					}
+				})
+				[
+					SNew(SBox)
+					.WidthOverride_Lambda([this]() { return AssetsPaneWidth * FMath::InterpEaseInOut(0.0f, 1.0f, AssetsPaneOpenness, 2.0f); })
+					.Clipping(EWidgetClipping::ClipToBounds)
+					.Visibility_Lambda([this]() { return AssetsPaneOpenness > 0.0f ? EVisibility::Visible : EVisibility::Collapsed; })
+					[
+						MakeAssetsPane()
+					]
+				]
+				]
+
+				// The Script Assets tab, on its pane's left edge: over the right side of the reference pane when that's
+				// open (always, with the graph hidden), and on the graph's right edge just below the Command Palette
+				// tab when it isn't. Opening the pane pulls the tab out with it.
+				+ SOverlay::Slot()
+				.HAlign(HAlign_Right)
+				.VAlign(VAlign_Top)
+				.Padding(TAttribute<FMargin>::CreateSP(this, &SBangoScriptEditor::GetAssetsTabPadding))
+				[
+					MakeAssetsTab()
 				]
 			]
 		]
@@ -1747,6 +1787,39 @@ FString SBangoScriptEditor::CheckInputName(int32 Index, const FString& NewName) 
 			return FString::Printf(TEXT("This graph already has a variable called %s."), *NewName);
 		}
 	}
+	return CheckSharedName(NewName);
+}
+
+FString SBangoScriptEditor::CheckSharedName(const FString& NewName) const
+{
+	if (ShownGraph > 0)
+	{
+		// A function sees the script's inputs and script variables, so it can't have its own of that name.
+		for (const TSharedPtr<FBangoGraphVariable>& Variable : VariableItems)
+		{
+			if (Variable->Kind == FBangoGraphVariable::EKind::Script && Variable->Name.Equals(NewName, ESearchCase::CaseSensitive))
+			{
+				return FString::Printf(TEXT("%s is one of the script's inputs or script variables, which this function sees too."), *NewName);
+			}
+		}
+		return FString();
+	}
+	// The main graph's: no function can already have a parameter or script variable of that name.
+	for (int32 g = 1; g < EdGraphs.Num(); ++g)
+	{
+		const UBangoEdGraphNode* GraphEntry = BangoScriptEditor::FindEntryNode(EdGraphs[g].Get());
+		if (!GraphEntry)
+		{
+			continue;
+		}
+		TArray<FBangoEntryParam> GraphParams;
+		Bango::ReadEntryParams(GraphEntry->Text, true, GraphParams);
+		if (GraphEntry->ScriptVars.ContainsByPredicate([&NewName](const FBangoEdDecl& Decl) { return Decl.Name.Equals(NewName, ESearchCase::CaseSensitive); })
+			|| GraphParams.ContainsByPredicate([&NewName](const FBangoEntryParam& Param) { return Param.Name.Equals(NewName, ESearchCase::CaseSensitive); }))
+		{
+			return FString::Printf(TEXT("A function of this script already has a parameter or script variable called %s, and functions see the script's inputs and script variables too."), *NewName);
+		}
+	}
 	return FString();
 }
 
@@ -1788,20 +1861,29 @@ bool SBangoScriptEditor::ApplyInputs(const TArray<FBangoEntryParam>& Params, con
 	Graph->NotifyNodeChanged(Entry);
 	if (!RenamedFrom.IsEmpty())
 	{
-		// Parameters are locals of their graph, so only this graph's nodes use them.
-		for (UEdGraphNode* Node : Graph->Nodes)
+		// A function's parameters are used only by its own nodes; the script's inputs by the functions' nodes too.
+		for (int32 g = 0; g < EdGraphs.Num(); ++g)
 		{
-			UBangoEdGraphNode* BangoNode = Cast<UBangoEdGraphNode>(Node);
-			FString NodeText = BangoNode && BangoNode != Entry ? BangoNode->Text : FString();
-			if (BangoNode && BangoNode != Entry && Bango::RenameVariableInText(NodeText, RenamedFrom, RenamedTo))
+			if (g != ShownGraph && ShownGraph != 0)
 			{
-				FString Problem;
-				if (Bango::ValidateNodeText(BangoNode->GetKind(), ShownGraph > 0, NodeText, Problem))
+				continue;
+			}
+			UEdGraph* UsedIn = EdGraphs[g].Get();
+			for (UEdGraphNode* Node : UsedIn->Nodes)
+			{
+				UBangoEdGraphNode* BangoNode = Cast<UBangoEdGraphNode>(Node);
+				const bool bUses = BangoNode && !BangoNode->IsEntry();
+				FString NodeText = bUses ? BangoNode->Text : FString();
+				if (bUses && Bango::RenameVariableInText(NodeText, RenamedFrom, RenamedTo))
 				{
-					BangoNode->Modify();
-					BangoNode->Text = NodeText;
-					BangoNode->UpdateLayout();
-					Graph->NotifyNodeChanged(BangoNode);
+					FString Problem;
+					if (Bango::ValidateNodeText(BangoNode->GetKind(), g > 0, NodeText, Problem))
+					{
+						BangoNode->Modify();
+						BangoNode->Text = NodeText;
+						BangoNode->UpdateLayout();
+						UsedIn->NotifyNodeChanged(BangoNode);
+					}
 				}
 			}
 		}
@@ -1863,7 +1945,8 @@ void SBangoScriptEditor::UpdateVariables(const FBangoGraphDocument& Document, co
 		{
 			const bool bUndeclared = Variable.Kind == FBangoGraphVariable::EKind::Global && Variable.Index == INDEX_NONE;
 			const bool bNodeLocal = Variable.Kind == FBangoGraphVariable::EKind::Local;
-			if (!bUndeclared && !bNodeLocal && Variable.Kind != FBangoGraphVariable::EKind::Loop)
+			const bool bScripts = Variable.Kind == FBangoGraphVariable::EKind::Script;
+			if (!bUndeclared && !bNodeLocal && !bScripts && Variable.Kind != FBangoGraphVariable::EKind::Loop)
 			{
 				continue;
 			}
@@ -1871,9 +1954,10 @@ void SBangoScriptEditor::UpdateVariables(const FBangoGraphDocument& Document, co
 			Item->bGlobal = bUndeclared;
 			Item->bReadOnly = true;
 			Item->bNodeLocal = bNodeLocal;
+			Item->bScripts = bScripts;
 			Item->Decl.Name = Variable.Name;
 			Item->Decl.Type = Variable.Type;
-			Item->LoopNode = bUndeclared ? INDEX_NONE : Variable.Index;
+			Item->LoopNode = bUndeclared || bScripts ? INDEX_NONE : Variable.Index;
 			(bUndeclared ? Globals : Locals).Add(Item);
 		}
 	}
@@ -1884,8 +1968,8 @@ void SBangoScriptEditor::UpdateVariables(const FBangoGraphDocument& Document, co
 	{
 		for (const TSharedPtr<FDeclEntry>& Item : *List)
 		{
-			Shape += FString::Printf(TEXT("%d %d %d %s %s %d %s %s %d %d|"), Item->bGlobal ? 1 : 0, Item->Index, Item->bReadOnly ? 1 : 0, *Item->Decl.Type, *Item->Decl.Name,
-				Item->Decl.bHasValue ? 1 : 0, *Item->Decl.Value, *Item->Decl.Comment, Item->LoopNode, Item->bNodeLocal ? 1 : 0);
+			Shape += FString::Printf(TEXT("%d %d %d %s %s %d %s %s %d %d %d|"), Item->bGlobal ? 1 : 0, Item->Index, Item->bReadOnly ? 1 : 0, *Item->Decl.Type, *Item->Decl.Name,
+				Item->Decl.bHasValue ? 1 : 0, *Item->Decl.Value, *Item->Decl.Comment, Item->LoopNode, Item->bNodeLocal ? 1 : 0, Item->bScripts ? 1 : 0);
 		}
 		Shape += TEXT("#");
 	}
@@ -1950,10 +2034,11 @@ bool SBangoScriptEditor::ApplyDecls(bool bGlobal, const TArray<FBangoGraphDecl>&
 
 	if (!RenamedFrom.IsEmpty())
 	{
-		// A global is visible in every graph (except where a local or parameter has its name); a local only in its own.
+		// A global is visible in every graph (except where a local or parameter has its name); a function's script
+		// variable only in its own graph; the script's (the main graph's) in the functions too.
 		for (int32 g = 0; g < EdGraphs.Num(); ++g)
 		{
-			if (!bGlobal && g != ShownGraph)
+			if (!bGlobal && g != ShownGraph && ShownGraph != 0)
 			{
 				continue;
 			}
@@ -2166,6 +2251,11 @@ FString SBangoScriptEditor::CheckDeclName(bool bGlobal, int32 Index, const FStri
 					: Variable->Kind == FBangoGraphVariable::EKind::Loop ? TEXT("loop's variable") : TEXT("local, declared by a node"));
 			}
 		}
+		const FString SharedProblem = CheckSharedName(NewName);
+		if (!SharedProblem.IsEmpty())
+		{
+			return SharedProblem;
+		}
 		for (const FBangoGraphDecl& Global : GetDecls(true))
 		{
 			if (Global.Name.Equals(NewName, ESearchCase::CaseSensitive))
@@ -2249,6 +2339,8 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateDeclRow(TSharedPtr<FDeclEntr
 		.ToolTipText(Entry.bReadOnly
 			? (bGlobal
 				? LOCTEXT("UndeclaredGlobalTooltip", "Used here, but this script doesn't declare it: another script or a Blueprint may (or it's a typo). Click + to declare it here. Drag it onto the graph to use it.")
+				: Entry.bScripts
+				? LOCTEXT("ScriptsVariableTooltip", "One of the script's inputs or script variables. Functions see those too (not the main graph's locals), and can change them. It's edited in the main graph. Drag it onto the graph to use it.")
 				: Entry.bNodeLocal
 				? LOCTEXT("NodeLocalTooltip", "A local, declared by a Local node (or a Spawn that keeps its copy's id). It exists from that node to the end of its block. Click to show the node. Drag it onto the graph to use it.")
 				: LOCTEXT("LoopVariableTooltip", "A loop's variable, declared by its For or For Each node. Click to show the loop. Drag it onto the graph to use it."))
@@ -3762,6 +3854,149 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeCommandsPane()
 				]
 			]
 		];
+}
+
+TSharedRef<SWidget> SBangoScriptEditor::MakeAssetsTab()
+{
+	// Like the Command Palette tab: square on the right, rounded on the left, reading top to bottom.
+	static const FSlateRoundedBoxBrush TabBrush(FLinearColor::White, FVector4(6.0f, 0.0f, 0.0f, 6.0f), FSlateColor(FStyleColors::InputOutline), 1.0f);
+
+	return SAssignNew(AssetsTabButton, SButton)
+		.ButtonStyle(FAppStyle::Get(), "NoBorder")
+		.ContentPadding(FMargin(0.0f))
+		.ToolTipText_Lambda([this]()
+		{
+			return bAssetsPaneOpen
+				? LOCTEXT("HideAssetsTooltip", "Put the Script Assets list away.")
+				: LOCTEXT("ShowAssetsTooltip", "Pull out the list of every Bango Script asset in the project. Double-click one to write its path into the script.");
+		})
+		.OnClicked_Lambda([this]()
+		{
+			SetAssetsPaneOpen(!bAssetsPaneOpen, true);
+			return FReply::Handled();
+		})
+		[
+			SNew(SBorder)
+			.BorderImage(&TabBrush)
+			.Padding(FMargin(5.0f, 12.0f, 4.0f, 12.0f))
+			.BorderBackgroundColor_Lambda([this]() -> FSlateColor
+			{
+				if (bAssetsPaneOpen)
+				{
+					return FSlateColor(FStyleColors::Primary);
+				}
+				return AssetsTabButton.IsValid() && AssetsTabButton->IsHovered() ? FSlateColor(FStyleColors::Hover) : FSlateColor(FStyleColors::Dropdown);
+			})
+			[
+				SNew(BangoScriptEditorPrivate::SBangoSidewaysBox)
+				.bClockwise(true)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("AssetsTab", "Script Assets"))
+					.Font(FAppStyle::GetFontStyle("BoldFont"))
+					.ColorAndOpacity_Lambda([this]() -> FSlateColor
+					{
+						return bAssetsPaneOpen || (AssetsTabButton.IsValid() && AssetsTabButton->IsHovered()) ? FSlateColor::UseForeground() : FSlateColor::UseSubduedForeground();
+					})
+				]
+			]
+		];
+}
+
+FMargin SBangoScriptEditor::GetAssetsTabPadding() const
+{
+	// Below where the Command Palette tab is (90 down the graph's right edge, and as tall as its label), whether
+	// that tab is showing or not, so this one never moves up and down.
+	static constexpr float CommandsTabTop = 90.0f;
+	static constexpr float Gap = 6.0f;
+	const float CommandsTabHeight = CommandsTabButton.IsValid() ? CommandsTabButton->GetDesiredSize().Y : 130.0f;
+	const float PaneWidth = AssetsPaneWidth * FMath::InterpEaseInOut(0.0f, 1.0f, AssetsPaneOpenness, 2.0f);
+	return FMargin(0.0f, CommandsTabTop + CommandsTabHeight + Gap, PaneWidth, 0.0f);
+}
+
+TSharedRef<SWidget> SBangoScriptEditor::MakeAssetsPane()
+{
+	return SNew(SBorder)
+		.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+		.Padding(0.0f)
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(8.0f, 6.0f, 8.0f, 2.0f)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("AssetsPaneTitle", "SCRIPT ASSETS"))
+				.Font(FAppStyle::GetFontStyle("SmallFontBold"))
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+			]
+			+ SVerticalBox::Slot()
+			.FillHeight(1.0f)
+			[
+				SAssignNew(AssetList, SBangoScriptAssetList)
+				.OpenScript_Lambda([this]() { return OpenAsset.IsValid() ? OpenScript : FString(); })
+				.OnGetWrittenPath(FOnGetBangoWrittenPath::CreateSP(this, &SBangoScriptEditor::GetWrittenScriptPath))
+				.PickHint_Lambda([this]()
+				{
+					return IsTextPaneShown()
+						? LOCTEXT("AssetPickHintText", "Double-click to write its path at the cursor in the script text.")
+						: LOCTEXT("AssetPickHintCopy", "Double-click to copy its path, in quotes, to paste into a node's field. (With the script text showing, it's written at the cursor there.)");
+				})
+				.OnScriptPicked(FOnBangoScriptPicked::CreateSP(this, &SBangoScriptEditor::OnScriptAssetPicked))
+			]
+		];
+}
+
+FString SBangoScriptEditor::GetWrittenScriptPath(const FString& ScriptName) const
+{
+	// An inline script has no folder for a path to be relative to: its paths are full.
+	return FBangoCompletion::MakeScriptPath(OpenAsset.IsValid() ? OpenScript : FString(), ScriptName);
+}
+
+void SBangoScriptEditor::OnScriptAssetPicked(const FString& ScriptName)
+{
+	const FString Path = GetWrittenScriptPath(ScriptName);
+	if (IsTextPaneShown() && TextBox.IsValid() && TextBox->InsertScriptPath(Path))
+	{
+		return;
+	}
+	// No script text to write it in (or it's read-only): on the clipboard, as it would be written.
+	const FString Quoted = FString::Printf(TEXT("\"%s\""), *Path);
+	FPlatformApplicationMisc::ClipboardCopy(*Quoted);
+	Notify(FText::Format(LOCTEXT("ScriptPathCopied", "Copied {0}"), FText::FromString(Quoted)), true);
+}
+
+void SBangoScriptEditor::SetAssetsPaneOpen(bool bOpen, bool bAnimate)
+{
+	bAssetsPaneOpen = bOpen;
+	if (bOpen && AssetList.IsValid())
+	{
+		AssetList->Refresh();
+	}
+	if (!bAnimate)
+	{
+		AssetsPaneOpenness = bOpen ? 1.0f : 0.0f;
+		return;
+	}
+	if (!bAssetsPaneSliding)
+	{
+		bAssetsPaneSliding = true;
+		RegisterActiveTimer(0.0f, FWidgetActiveTimerDelegate::CreateSP(this, &SBangoScriptEditor::AnimateAssetsPane));
+	}
+}
+
+EActiveTimerReturnType SBangoScriptEditor::AnimateAssetsPane(double, float InDeltaTime)
+{
+	static constexpr float SlideSeconds = 0.18f;
+	const float Target = bAssetsPaneOpen ? 1.0f : 0.0f;
+	AssetsPaneOpenness = FMath::FInterpConstantTo(AssetsPaneOpenness, Target, InDeltaTime, 1.0f / SlideSeconds);
+	if (FMath::IsNearlyEqual(AssetsPaneOpenness, Target))
+	{
+		AssetsPaneOpenness = Target;
+		bAssetsPaneSliding = false;
+		return EActiveTimerReturnType::Stop;
+	}
+	return EActiveTimerReturnType::Continue;
 }
 
 void SBangoScriptEditor::SetCommandsPaneOpen(bool bOpen, bool bAnimate)

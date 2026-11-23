@@ -482,6 +482,13 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 	{ TEXT("spawn: the copy's id, kept before it runs"), TEXT("int _id = 0;\nint[] _ids = [0, 0];\n_id = spawn\n{\n\tTalk(\"copy sees {0}\", _id);\n}\n_ids[1] = spawn\n{\n}\nTalk(\"{0} {1}\", _id > 0, _ids[1] > _id);"), TEXT("copy sees 0|true true"), nullptr, nullptr },
 	{ TEXT("spawn: return ends only the copy"), TEXT("spawn\n{\n\tTalk(\"in\");\n\treturn;\n\tTalk(\"never\");\n}\nTalk(\"out\");"), TEXT("in|out"), nullptr, nullptr },
 	{ TEXT("spawn: in a function, the copy doesn't go back to the caller"), TEXT("function void F(int _n)\n{\n\tspawn\n\t{\n\t\tTalk(\"spawned {0}\", _n);\n\t}\n\tTalk(\"F done\");\n}\nF(7);\nTalk(\"main\");"), TEXT("spawned 7|F done|main"), nullptr, nullptr },
+	// Functions see the script's inputs and script variables (not its locals).
+	{ TEXT("script variables: a function reads and changes one"), TEXT("scriptVar int _n = 1;\nfunction void AddUp()\n{\n\t_n += 1;\n}\nAddUp();\nAddUp();\nTalk(\"{0}\", _n);"), TEXT("3"), nullptr, nullptr },
+	{ TEXT("script variables: through nested calls, beside a function's own"), TEXT("scriptVar int _n = 1;\nfunction int Inner(int _by)\n{\n\tscriptVar int _calls = 0;\n\t_calls++;\n\t_n += _by;\n\treturn _calls;\n}\nfunction void Outer()\n{\n\tTalk(\"{0} {1}\", Inner(2), _n);\n\tTalk(\"{0} {1}\", Inner(3), _n);\n}\nOuter();\nTalk(\"{0}\", _n);"), TEXT("1 3|1 6|6"), nullptr, nullptr },
+	{ TEXT("script variables: arrays, parts and isNil in a function"), TEXT("scriptVar int[] _a = [1];\nscriptVar vector3 _v = [0, 0, 1];\nscriptVar string _s;\nfunction void F()\n{\n\t_a Push(2);\n\t_a[0] = 5;\n\t_v.x = 4;\n\t_a[1]++;\n\tTalk(\"{0} {1}\", isNil(_s), isNil(_a[7]));\n\t_s = \"set\";\n}\nF();\nTalk(\"{0} {1} {2}\", _a, _v.x, _s);"), TEXT("true true|[5, 3] 4.0 set"), nullptr, nullptr },
+	{ TEXT("script variables: a nil one read in a function"), TEXT("scriptVar int _n;\nfunction int F()\n{\n\treturn _n + 1;\n}\nTalk(\"{0}\", F());"), TEXT(""), TEXT("(4:9)"), TEXT("'_n' is nil. Give it a value before reading it") },
+	{ TEXT("script variables: a block spawned in a function has copies"), TEXT("scriptVar int _n = 1;\nfunction void F()\n{\n\tspawn\n\t{\n\t\tSleep(1);\n\t\tTalk(\"copy {0}\", _n);\n\t\t_n = 9;\n\t\tG();\n\t}\n}\nfunction void G()\n{\n\tTalk(\"G {0}\", _n);\n}\nF();\n_n = 2;\nSleep(2);\nTalk(\"parent {0}\", _n);"), TEXT("copy 1|G 9|parent 2"), nullptr, nullptr },
+	{ TEXT("script variables: a function called from a spawn block changes the copy's"), TEXT("scriptVar int _n = 1;\nfunction void AddUp()\n{\n\t_n += 10;\n}\nspawn\n{\n\tSleep(1);\n\tAddUp();\n\tTalk(\"copy {0}\", _n);\n}\n_n = 2;\nSleep(2);\nTalk(\"parent {0}\", _n);"), TEXT("copy 11|parent 2"), nullptr, nullptr },
 	{ TEXT("spawn: a disabled one"), TEXT("/*\nspawn\n{\n\tTalk(\"no\");\n}\n*/\nTalk(\"yes\");"), TEXT("yes"), nullptr, nullptr },
 	{ TEXT("switch: int cases, several values, default"), TEXT("for (int _i = 0; _i < 5; _i++)\n{\n\tswitch (_i)\n\t{\n\t\tcase 0:\n\t\t{\n\t\t\tTalk(\"zero\");\n\t\t}\n\t\tcase 1, -1, 3:\n\t\t{\n\t\t\tTalk(\"odd {0}\", _i);\n\t\t}\n\t\tdefault:\n\t\t{\n\t\t\tTalk(\"other {0}\", _i);\n\t\t}\n\t}\n}\nTalk(\"end\");"), TEXT("zero|odd 1|other 2|odd 3|other 4|end"), nullptr, nullptr },
 	{ TEXT("switch: strings, no default, no match"), TEXT("string _s = \"b\";\nswitch (_s)\n{\n\tcase \"a\":\n\t{\n\t\tTalk(\"a\");\n\t}\n\tcase \"B\":\n\t{\n\t\tTalk(\"B\");\n\t}\n}\nTalk(\"after\");"), TEXT("after"), nullptr, nullptr },
@@ -821,6 +828,53 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 		Loaded.Resume(Context);
 		Loaded.Resume(Context);
 		Expect(Loaded.GetStatus() == EBangoInstanceStatus::Finished && Log.Num() == 1 && Log[0] == TEXT("john: back"), TEXT("self save: self is still the owner after loading"));
+	}
+
+	// ---- Save and load keep a spawn block's copies of the script's variables, when it was spawned in a function ----
+	{
+		Log.Reset();
+		TSharedPtr<FBangoProgram> CopyProgram = MakeShared<FBangoProgram>();
+		Expect(Bango::CompileSource(TEXT("scriptVar int _n = 1;\nfunction void F()\n{\n\tspawn\n\t{\n\t\t_n += 5;\n\t\tSleep(1);\n\t\tTalk(\"copy {0}\", _n);\n\t}\n}\nF();\n_n = 2;"), TEXT("copy.bango"), Commands, *CopyProgram, CompileError),
+			*(FString(TEXT("script copy save: compiles: ")) + CompileError.ToString()));
+		FBangoGlobalStore Globals;
+		Context.Globals = &Globals;
+		FBangoInstance Child;
+		const auto PreviousSpawnBlock = Context.SpawnBlock;
+		Context.SpawnBlock = [&Child, &Context](const FBangoInstance& Parent, int32 BlockIP, int64& OutId, FString& OutError)
+		{
+			FBangoRuntimeError ChildError;
+			if (!Child.StartSpawned(Parent, BlockIP, 77, ChildError))
+			{
+				OutError = ChildError.Message;
+				return false;
+			}
+			OutId = 77;
+			Child.Resume(Context);
+			return true;
+		};
+		FBangoInstance Instance;
+		FBangoRuntimeError Error;
+		Instance.Start(CopyProgram, Commands, Globals, 6, Error);
+		Instance.Resume(Context);
+		Context.SpawnBlock = PreviousSpawnBlock;
+		Expect(Instance.GetStatus() == EBangoInstanceStatus::Finished && Child.GetStatus() == EBangoInstanceStatus::Waiting, TEXT("script copy save: the parent finished, its copy waits"));
+
+		TArray<uint8> Bytes;
+		{
+			FMemoryWriter Writer(Bytes);
+			Child.Serialize(Writer);
+		}
+		FBangoInstance Loaded;
+		{
+			FMemoryReader Reader(Bytes);
+			Loaded.Serialize(Reader);
+			Expect(!Reader.IsError(), TEXT("script copy save: reads back"));
+		}
+		FString BindError;
+		Expect(Loaded.Bind(CopyProgram, Commands, BindError), *(FString(TEXT("script copy save: binds: ")) + BindError));
+		Loaded.Resume(Context);
+		Loaded.Resume(Context);
+		Expect(Loaded.GetStatus() == EBangoInstanceStatus::Finished && Log.Num() == 1 && Log[0] == TEXT("copy 6"), TEXT("script copy save: the copy still has its own value after loading"));
 	}
 
 	// ---- Save and load keep a pending command's type arguments (what its result must be) ----
@@ -1316,7 +1370,8 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				{ TEXT("as a script"), TEXT("int _more = _count + 1;\nreturn _more == 4;"), 1, nullptr },
 				{ TEXT("no #inputs line"), TEXT("#inputs (int _n = 1)\n_n > 0"), -1, TEXT("This script's inputs are given by BangoTrigger's 'Activation': _trigger, _count, _inside. Remove the #inputs line") },
 				{ TEXT("a local can't have an input's name"), TEXT("int _count = 1;\nreturn true;"), -1, TEXT("'_count' is an input given by BangoTrigger's 'Activation'") },
-				{ TEXT("a function's own local can"), TEXT("function bool F()\n{\n\tint _count = 1;\n\treturn _count > 0;\n};\nreturn F();"), 1, nullptr },
+				{ TEXT("a function's own local can't either"), TEXT("function bool F()\n{\n\tint _count = 1;\n\treturn _count > 0;\n};\nreturn F();"), -1, TEXT("'_count' is one of this script's inputs, which its functions see too, so function 'F' can't declare its own '_count'") },
+				{ TEXT("a function reads its inputs"), TEXT("function bool F()\n{\n\treturn _count == 3 && Count(_inside) == 0;\n};\nreturn F();"), 1, nullptr },
 			};
 			for (const FSignatureCase& Case : SignatureCases)
 			{
@@ -2292,6 +2347,8 @@ static void BangoRunArgumentTests(TArray<FString>& OutFailures)
 		{ TEXT("nil of any type fits any parameter"), TEXT("#inputs (int _n)\nTalk(\"{0}\", !isNil(_n));"), { FBangoValue::MakeNil(FBangoType::String()) }, TEXT("false"), nullptr },
 		{ TEXT("array argument"), TEXT("#inputs (int[] _list)\n_list Push(3);\nTalk(\"{0}\", _list);"), { FBangoValue::MakeArray(FBangoType::Int(), { FBangoValue::MakeInt(1), FBangoValue::MakeInt(2) }) }, TEXT("[1, 2, 3]"), nullptr },
 		{ TEXT("array default is fresh each spawn"), TEXT("#inputs (int[] _a = [1, 2])\n_a Push(3);\nTalk(\"{0}\", _a);"), {}, TEXT("[1, 2, 3]"), nullptr },
+		{ TEXT("a function reads and changes the script's inputs"), TEXT("#inputs (int _n = 4, int[] _list = [1])\nfunction int Twice()\n{\n\t_list Push(_n);\n\treturn _n * 2;\n}\nTalk(\"{0} {1}\", Twice(), _list);"), {}, TEXT("8 [1, 4]"), nullptr },
+		{ TEXT("a nil input read in a function"), TEXT("#inputs (int _n)\nfunction int F()\n{\n\treturn _n;\n}\nTalk(\"{0}\", F());"), { FBangoValue::MakeNil(FBangoType::Int()) }, nullptr, TEXT("'_n' is nil. It's a parameter of this script; check what the caller passed.") },
 		{ TEXT("no inputs, no arguments"), TEXT("Talk(\"ok\");"), {}, TEXT("ok"), nullptr },
 		{ TEXT("empty inputs line"), TEXT("#inputs ()\nTalk(\"ok\");"), {}, TEXT("ok"), nullptr },
 

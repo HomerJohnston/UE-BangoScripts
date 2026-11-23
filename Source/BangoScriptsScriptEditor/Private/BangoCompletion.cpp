@@ -604,6 +604,22 @@ FBangoCompletionItem FBangoCompletion::GetHoldItem()
 	return Item;
 }
 
+FString FBangoCompletion::MakeScriptPath(const FString& FromScript, const FString& ToScript)
+{
+	int32 Slash = INDEX_NONE;
+	if (FromScript.IsEmpty() || FromScript[0] != TEXT('/') || !FromScript.FindLastChar(TEXT('/'), Slash) || Slash <= 0)
+	{
+		return ToScript;
+	}
+	const FString Folder = FromScript.Left(Slash + 1); // "/Game/Quests/"
+	return ToScript.Len() > Folder.Len() && ToScript.Left(Folder.Len()).Equals(Folder, ESearchCase::CaseSensitive) ? ToScript.Mid(Folder.Len()) : ToScript;
+}
+
+FString FBangoCompletion::MakeScriptPathInsert(const FString& Line, int32 Column, const FString& Path)
+{
+	return IsInStringOrComment(Line, Column) ? Path : FString::Printf(TEXT("\"%s\""), *Path);
+}
+
 bool FBangoCompletion::IsInStringOrComment(const FString& Line, int32 Column)
 {
 	using namespace BangoCompletionPrivate;

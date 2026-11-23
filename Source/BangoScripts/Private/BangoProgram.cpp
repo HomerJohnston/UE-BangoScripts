@@ -14,6 +14,11 @@ namespace BangoProgramPrivate
 		{
 			Result = Function.SlotNames.IsValidIndex(Place.Index) ? Function.SlotNames[Place.Index] : FString(TEXT("<bad slot>"));
 		}
+		else if (Place.Kind == EBangoPlaceKind::Script)
+		{
+			Result = Program.Functions.Num() > 0 && Program.Functions[0].SlotNames.IsValidIndex(Place.Index)
+				? FString::Printf(TEXT("script:%s"), *Program.Functions[0].SlotNames[Place.Index]) : FString(TEXT("<bad script slot>"));
+		}
 		else
 		{
 			Result = Program.Names.IsValidIndex(Place.Index) ? Program.Names[Place.Index] : FString(TEXT("<bad name>"));
@@ -185,6 +190,11 @@ namespace Bango
 						else if (Place.Kind == EBangoPlaceKind::Local && FunctionIndex == 0 && Place.Index < Code.NumParams && Code.SlotNames.IsValidIndex(Place.Index))
 						{
 							Result.Inputs.AddUnique(Code.SlotNames[Place.Index]);
+						}
+						else if (Place.Kind == EBangoPlaceKind::Script && Program.Functions[0].SlotNames.IsValidIndex(Place.Index) && Place.Index < Program.Functions[0].NumParams)
+						{
+							// A function the condition calls reads one of the script's inputs.
+							Result.Inputs.AddUnique(Program.Functions[0].SlotNames[Place.Index]);
 						}
 					}
 					break;

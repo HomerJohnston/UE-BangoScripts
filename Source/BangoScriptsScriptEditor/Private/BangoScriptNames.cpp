@@ -127,6 +127,7 @@ void FBangoScriptNames::Build(const TArray<FString>& Lines, const TArray<TArray<
 		const bool bParamsLine = Code.Num() >= 1
 			&& TokenIs(Line, Code[0], EBangoSyntaxKind::Preprocessor, TEXT("#inputs"));
 		const bool bGlobalLine = Code.Num() >= 1 && TokenIs(Line, Code[0], EBangoSyntaxKind::DeclKeyword, TEXT("global"));
+		const bool bScriptVarLine = Code.Num() >= 1 && TokenIs(Line, Code[0], EBangoSyntaxKind::DeclKeyword, TEXT("scriptVar"));
 		if (bParamsLine && Graphs[0].EntryLine == INDEX_NONE)
 		{
 			Graphs[0].EntryLine = LineIndex;
@@ -228,6 +229,7 @@ void FBangoScriptNames::Build(const TArray<FString>& Lines, const TArray<TArray<
 				else
 				{
 					const int32 Local = AddLocal(Name, Type, Graph, LineIndex);
+					Locals[Local].bScriptVar = bScriptVarLine;
 					bool bSpawn = false;
 					for (int32 J = I + 2; J < Code.Num(); ++J)
 					{
@@ -281,6 +283,15 @@ EBangoSyntaxKind FBangoScriptNames::Classify(int32 LineIndex, const FString& Nam
 		{
 			return EBangoSyntaxKind::Local;
 		}
+		// A function sees the script's parameters and script variables.
+		if (Graph != 0 && Contains(Graphs[0].Params, Name))
+		{
+			return EBangoSyntaxKind::Parameter;
+		}
+		if (Graph != 0 && FindScriptVar(Name) != INDEX_NONE)
+		{
+			return EBangoSyntaxKind::Local;
+		}
 	}
 	return Contains(Globals, Name) ? EBangoSyntaxKind::Global : EBangoSyntaxKind::UndeclaredGlobal;
 }
@@ -307,7 +318,28 @@ FString FBangoScriptNames::GetVariableKey(int32 LineIndex, const FString& Name) 
 			return FString::Printf(TEXT("local %d"), I);
 		}
 	}
+	// In a function: the script's parameter or script variable, the same one as in the main graph.
+	if (Graph != 0 && Graphs.Num() > 0 && Contains(Graphs[0].Params, Name))
+	{
+		return FString::Printf(TEXT("param 0 %s"), *Name);
+	}
+	if (Graph != 0 && FindScriptVar(Name) != INDEX_NONE)
+	{
+		return FString::Printf(TEXT("local %d"), FindScriptVar(Name));
+	}
 	return FString::Printf(TEXT("global %s"), *Name);
+}
+
+int32 FBangoScriptNames::FindScriptVar(const FString& Name) const
+{
+	for (int32 I = 0; I < Locals.Num(); ++I)
+	{
+		if (Locals[I].Graph == 0 && Locals[I].bScriptVar && Locals[I].Name.Equals(Name, ESearchCase::CaseSensitive))
+		{
+			return I;
+		}
+	}
+	return INDEX_NONE;
 }
 
 const FBangoScriptNames::FLocalName* FBangoScriptNames::FindVisibleLocal(int32 LineIndex, const FString& Name) const
@@ -399,6 +431,24 @@ void FBangoScriptNames::GetVisibleNames(int32 LineIndex, TArray<FBangoVisibleNam
 		if (Locals[I].IsVisible(Graph, LineIndex) && FindVisibleLocal(LineIndex, Locals[I].Name) == &Locals[I])
 		{
 			Add(Locals[I].Name, Locals[I].Type, EBangoSyntaxKind::Local);
+		}
+	}
+
+	// In a function: the script's parameters and script variables.
+	if (Graph != 0 && Graphs.Num() > 0)
+	{
+		const FGraphNames& Main = Graphs[0];
+		for (int32 I = 0; I < Main.Params.Num(); ++I)
+		{
+			Add(Main.Params[I], Main.ParamTypes.IsValidIndex(I) ? Main.ParamTypes[I] : FString(), EBangoSyntaxKind::Parameter,
+				Main.ParamTooltips.IsValidIndex(I) ? Main.ParamTooltips[I] : FString());
+		}
+		for (int32 I = 0; I < Locals.Num(); ++I)
+		{
+			if (Locals[I].Graph == 0 && Locals[I].bScriptVar)
+			{
+				Add(Locals[I].Name, Locals[I].Type, EBangoSyntaxKind::Local);
+			}
 		}
 	}
 

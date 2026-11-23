@@ -330,7 +330,7 @@ bool FBangoScriptNamesTest::RunTest(const FString& Parameters)
 	Check(22, TEXT("count"), K::Local);
 	Check(23, TEXT("amount"), K::Parameter);
 	Check(23, TEXT("foundThings"), K::Global);
-	Check(23, TEXT("speaker"), K::UndeclaredGlobal);      // functions can't see the script's parameters
+	Check(23, TEXT("speaker"), K::Parameter);             // functions see the script's parameters
 	Check(27, TEXT("count"), K::Local);
 	Check(29, TEXT("count"), K::Local);                   // the main graph again, after the function's };
 	Check(29, TEXT("amount"), K::UndeclaredGlobal);
@@ -399,6 +399,34 @@ bool FBangoScriptNamesTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("The local gold isn't the global gold"), SameVariable(6, 1, TEXT("gold")));
 	TestTrue(TEXT("The global gold, either side of the block that hides it"), SameVariable(1, 12, TEXT("gold")));
 	TestTrue(TEXT("A spawn's id: its declaration and its use after the block"), SameVariable(14, 18, TEXT("_t")));
+
+	// Functions see the script's parameters and script variables, not its locals.
+	const TCHAR* Shared =
+		TEXT("#inputs (int _in)\n")                 // 1
+		TEXT("scriptVar int _score = 0;\n")         // 2
+		TEXT("int _plain = 1;\n")                   // 3
+		TEXT("function void F(int _p)\n")           // 4
+		TEXT("{\n")                                 // 5
+		TEXT("\t_score += _in + _plain;\n")         // 6
+		TEXT("}\n");                                // 7
+	FBangoMetadataTracker::SplitLines(Shared, Lines);
+	Tokens.Reset();
+	Tokens.SetNum(Lines.Num());
+	for (int32 I = 0; I < Lines.Num(); ++I)
+	{
+		FBangoLineTokenizer::TokenizeLine(FStringView(Lines[I]), Tokens[I]);
+	}
+	Names.Build(Lines, Tokens);
+	Check(6, TEXT("_score"), K::Local);
+	Check(6, TEXT("_in"), K::Parameter);
+	Check(6, TEXT("_plain"), K::UndeclaredGlobal);
+	TestTrue(TEXT("A script variable in a function is the script's"), SameVariable(2, 6, TEXT("_score")));
+	TestTrue(TEXT("A script input in a function is the script's"), SameVariable(1, 6, TEXT("_in")));
+	Visible.Reset();
+	Names.GetVisibleNames(5, Visible);                    // line 6
+	TestTrue(TEXT("A function is offered the script's variables"), Visible.ContainsByPredicate([](const FBangoVisibleName& Name) { return Name.Name.Equals(TEXT("_score"), ESearchCase::CaseSensitive); })
+		&& Visible.ContainsByPredicate([](const FBangoVisibleName& Name) { return Name.Name.Equals(TEXT("_in"), ESearchCase::CaseSensitive); })
+		&& !Visible.ContainsByPredicate([](const FBangoVisibleName& Name) { return Name.Name.Equals(TEXT("_plain"), ESearchCase::CaseSensitive); }));
 
 	return true;
 }
@@ -539,6 +567,14 @@ bool FBangoCompletionTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("timeout isn't offered after the ';'"), FBangoCompletion::IsTimeoutPlace(TEXT("waitUntil (ready); t"), 19));
 	TestFalse(TEXT("timeout isn't offered after an if"), FBangoCompletion::IsTimeoutPlace(TEXT("if (ready) t"), 11));
 	TestEqual(TEXT("the timeout item"), FBangoCompletion::GetTimeoutItem().Name, FString(TEXT("timeout")));
+	// Script paths, as the Script Assets pane writes them: relative in the caller's folder or below, else full.
+	TestEqual(TEXT("a script beside the caller"), FBangoCompletion::MakeScriptPath(TEXT("/Game/Quests/Start"), TEXT("/Game/Quests/Intro")), FString(TEXT("Intro")));
+	TestEqual(TEXT("a script below the caller's folder"), FBangoCompletion::MakeScriptPath(TEXT("/Game/Quests/Start"), TEXT("/Game/Quests/Side/Intro")), FString(TEXT("Side/Intro")));
+	TestEqual(TEXT("a script elsewhere is a full path"), FBangoCompletion::MakeScriptPath(TEXT("/Game/Quests/Start"), TEXT("/Game/Shared/Greet")), FString(TEXT("/Game/Shared/Greet")));
+	TestEqual(TEXT("a folder whose name only starts the same"), FBangoCompletion::MakeScriptPath(TEXT("/Game/Quests/Start"), TEXT("/Game/QuestsOld/Intro")), FString(TEXT("/Game/QuestsOld/Intro")));
+	TestEqual(TEXT("from an inline script, a full path"), FBangoCompletion::MakeScriptPath(TEXT("Door.OnOpened"), TEXT("/Game/Quests/Intro")), FString(TEXT("/Game/Quests/Intro")));
+	TestEqual(TEXT("a script path goes in with quotes"), FBangoCompletion::MakeScriptPathInsert(TEXT("Exec("), 5, TEXT("Intro")), FString(TEXT("\"Intro\"")));
+	TestEqual(TEXT("a script path inside quotes goes in alone"), FBangoCompletion::MakeScriptPathInsert(TEXT("Exec(\"\")"), 6, TEXT("Intro")), FString(TEXT("Intro")));
 	// heldFor goes straight after the condition, and timeout can follow it.
 	TestTrue(TEXT("timeout is offered after a heldFor"), FBangoCompletion::IsTimeoutPlace(TEXT("waitUntil (ready) heldFor (2) ti"), 30));
 	TestFalse(TEXT("timeout isn't offered inside a heldFor"), FBangoCompletion::IsTimeoutPlace(TEXT("waitUntil (ready) heldFor (t"), 27));
