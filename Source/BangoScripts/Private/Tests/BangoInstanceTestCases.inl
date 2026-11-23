@@ -1194,6 +1194,32 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			Expect(Nodes == TArray<int64>({ 1, 2, 3, 4, 5 }) && Seen == 9, *FString::Printf(TEXT("trail: the second time round it is, and only the new nodes are given (%s)"), *TrailText(Nodes)));
 		}
 
+		// The same by line, for a script without NodeIDs: each line it moves on to.
+		{
+			FReloadRun Run;
+			Run.Instance.SetRecordTrail(true);
+			auto LinesText = [](const TArray<int32>& TrailLines)
+			{
+				FString Text;
+				for (const int32 TrailLine : TrailLines)
+				{
+					Text += FString::Printf(TEXT("%d "), TrailLine);
+				}
+				return Text;
+			};
+			StartRun(Run, Compile(TEXT("int _n = 0;\nwhile (true)\n{\n\t_n++;\n\tif (_n > 1)\n\t{\n\t\tTalk(\"x\");\n\t};\n\n\tSleep(0);\n};")));
+			TArray<int32> Lines;
+			uint64 Seen = Run.Instance.GetLineTrail(0, Lines);
+			Expect(Lines == TArray<int32>({ 1, 2, 4, 5, 10 }), *FString::Printf(TEXT("line trail: the first time round (%s)"), *LinesText(Lines)));
+			Run.Instance.Resume(Context);
+			Lines.Reset();
+			Seen = Run.Instance.GetLineTrail(Seen, Lines);
+			Expect(Lines == TArray<int32>({ 2, 4, 5, 7, 10 }), *FString::Printf(TEXT("line trail: the second time round, with the if's line, and only the new lines (%s)"), *LinesText(Lines)));
+			TArray<FBangoCallFrameInfo> CallStack;
+			Run.Instance.GetCallStack(CallStack);
+			Expect(CallStack.Num() == 1 && CallStack[0].Loc.Line == 10, TEXT("line trail: the call stack has the line it's paused at"));
+		}
+
 		// Conditions (Bango::CompileCondition): a script, or one expression, that returns true or false.
 		{
 			struct FConditionCase

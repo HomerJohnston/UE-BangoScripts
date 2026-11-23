@@ -239,6 +239,11 @@ public:
 	 * how many it has run in all, to pass as After next time.
 	 */
 	uint64 GetTrail(uint64 After, TArray<int64>& OutNodeIDs) const;
+	/**
+	 * The same by line, for a script whose text has no NodeIDs (a compact script): the lines it ran (from 1, as its
+	 * text has them), each time it moved on to another line. Recorded with the trail (SetRecordTrail).
+	 */
+	uint64 GetLineTrail(uint64 After, TArray<int32>& OutLines) const;
 	static constexpr int32 TrailSize = 256;
 
 	/**
@@ -457,6 +462,9 @@ private:
 	TArray<int64> Trail;
 	uint64 TrailCount = 0;
 	int64 LastTrailNode = -1;
+	TArray<int32> LineTrail;
+	uint64 LineTrailCount = 0;
+	int32 LastTrailLine = 0;
 
 	// Hot reload (RequestReload). Not saved: a reload that hasn't happened is forgotten by a save.
 	TSharedPtr<const FBangoProgram> ReloadProgram;

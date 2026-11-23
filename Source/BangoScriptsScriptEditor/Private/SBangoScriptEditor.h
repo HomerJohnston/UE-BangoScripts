@@ -725,13 +725,20 @@ private:
 	int32 TrailPIEInstance = INDEX_NONE;
 	int64 TrailId = 0;
 	uint64 TrailSeen = 0;
+	uint64 LineTrailSeen = 0;
 	/** The followed copy's node states (ApplyDebugStates) and trail pings (UpdateDebugTrail), by NodeID, for the text pane's gutter. */
 	TMap<int64, EBangoNodeDebugState> DebugNodeStates;
 	TMap<int64, double> DebugNodePings;
+	/**
+	 * The same by line (from 1), for a script whose text has no NodeIDs (a compact script): the gutter then marks
+	 * the lines the copy says it's at, as long as the text shown is the text it was compiled from (nothing unsaved).
+	 */
+	TMap<int32, EBangoNodeDebugState> DebugLineStates;
+	TMap<int32, double> DebugLinePings;
 	/** The script text the gutter's line-to-node map was made from, and the NodeIDs on each of its lines. */
 	FString MarkerText;
 	TArray<TArray<int64>> MarkerLineNodes;
-	/** Updates the gutter's marks from DebugNodeStates and DebugNodePings. */
+	/** Updates the gutter's marks from DebugNodeStates and DebugNodePings, or for a text without NodeIDs, from the lines'. */
 	void UpdateLineMarkers();
 	/** The line (from 0) of the text pane whose //@ metadata has this NodeID, or INDEX_NONE. */
 	int32 FindTextLineOfNode(int64 NodeID);

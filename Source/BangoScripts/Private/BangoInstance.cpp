@@ -543,6 +543,16 @@ void FBangoInstance::GetCallStack(TArray<FBangoCallFrameInfo>& OutFrames) const
 	}
 }
 
+uint64 FBangoInstance::GetLineTrail(uint64 After, TArray<int32>& OutLines) const
+{
+	const uint64 First = FMath::Max(After, LineTrailCount > (uint64)TrailSize ? LineTrailCount - TrailSize : (uint64)0);
+	for (uint64 n = First; n < LineTrailCount; ++n)
+	{
+		OutLines.Add(LineTrail[(int32)(n % TrailSize)]);
+	}
+	return LineTrailCount;
+}
+
 uint64 FBangoInstance::GetTrail(uint64 After, TArray<int64>& OutNodeIDs) const
 {
 	// The buffer holds the last TrailSize nodes: entry n (counting from 0) is at n % TrailSize.
@@ -1772,6 +1782,21 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 				}
 				++TrailCount;
 				LastTrailNode = NodeID;
+			}
+			// The same by line: each line it moves on to.
+			const int32 TrailLine = Function.Debug[IP].Line;
+			if (TrailLine > 0 && TrailLine != LastTrailLine)
+			{
+				if (LineTrail.Num() < TrailSize)
+				{
+					LineTrail.Add(TrailLine);
+				}
+				else
+				{
+					LineTrail[LineTrailCount % TrailSize] = TrailLine;
+				}
+				++LineTrailCount;
+				LastTrailLine = TrailLine;
 			}
 		}
 

@@ -412,6 +412,12 @@ uint64 UBangoScriptSubsystem::GetScriptTrail(int64 Id, uint64 After, TArray<int6
 	return Script ? (*Script)->Instance.GetTrail(After, OutNodeIDs) : 0;
 }
 
+uint64 UBangoScriptSubsystem::GetScriptLineTrail(int64 Id, uint64 After, TArray<int32>& OutLines) const
+{
+	const TSharedPtr<FRunningScript>* Script = Scripts.Find(Id);
+	return Script ? (*Script)->Instance.GetLineTrail(After, OutLines) : 0;
+}
+
 void UBangoScriptSubsystem::ReportFailure(const FRunningScript& Script)
 {
 #if WITH_EDITOR
@@ -423,6 +429,7 @@ void UBangoScriptSubsystem::ReportFailure(const FRunningScript& Script)
 	Ended.Status = EBangoInstanceStatus::Failed;
 	Ended.Error = Script.Instance.GetError();
 	Ended.TrailCount = Script.Instance.GetTrail(0, Ended.Trail); // the way it came to the error
+	Ended.LineTrailCount = Script.Instance.GetLineTrail(0, Ended.LineTrail);
 	if (EndedScripts.Num() > MaxEndedScripts)
 	{
 		EndedScripts.RemoveAt(0);

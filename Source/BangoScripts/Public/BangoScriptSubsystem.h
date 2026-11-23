@@ -50,6 +50,9 @@ struct FBangoScriptDebugInfo
 	 */
 	TArray<int64> Trail;
 	uint64 TrailCount = 0;
+	/** Failed only: the same by line (FBangoInstance::GetLineTrail), for a script whose text has no NodeIDs. */
+	TArray<int32> LineTrail;
+	uint64 LineTrailCount = 0;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FBangoScriptFailedEvent, FBangoScriptHandle, Handle, const FString&, Error);
@@ -220,6 +223,8 @@ public:
 	 * Returns how many it has run in all, or 0 if it isn't running.
 	 */
 	uint64 GetScriptTrail(int64 Id, uint64 After, TArray<int64>& OutNodeIDs) const;
+	/** The same by line (see FBangoInstance::GetLineTrail). */
+	uint64 GetScriptLineTrail(int64 Id, uint64 After, TArray<int32>& OutLines) const;
 
 	/** Forgets the scripts that stopped with an error (they're no longer listed by GetDebugInfo). */
 	void ForgetEndedScripts() { EndedScripts.Reset(); }

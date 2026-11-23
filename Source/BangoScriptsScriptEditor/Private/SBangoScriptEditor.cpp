@@ -4787,6 +4787,13 @@ EActiveTimerReturnType SBangoScriptEditor::UpdateDebugging(double CurrentTime, f
 			It.RemoveCurrent();
 		}
 	}
+	for (auto It = DebugLinePings.CreateIterator(); It; ++It)
+	{
+		if (Now - It.Value() > 1.5)
+		{
+			It.RemoveCurrent();
+		}
+	}
 	if (IsTextPaneShown())
 	{
 		UpdateLineMarkers();
@@ -4820,6 +4827,28 @@ void SBangoScriptEditor::UpdateDebugTrail()
 		return;
 	}
 	const bool bNewCopy = TrailPIEInstance != Entry->PIEInstance || TrailId != Entry->Info.Id;
+	// The same by line, for the gutter of a text without NodeIDs.
+	{
+		TArray<int32> RanLines;
+		if (Entry->Info.Status == EBangoInstanceStatus::Failed)
+		{
+			const TArray<int32>& KeptLines = Entry->Info.LineTrail;
+			const uint64 LineCount = Entry->Info.LineTrailCount;
+			const uint64 NumNewLines = bNewCopy ? (uint64)KeptLines.Num() : (LineCount > LineTrailSeen ? LineCount - LineTrailSeen : 0);
+			const int32 FirstLine = FMath::Max(0, KeptLines.Num() - (int32)FMath::Min(NumNewLines, (uint64)KeptLines.Num()));
+			RanLines.Append(KeptLines.GetData() + FirstLine, KeptLines.Num() - FirstLine);
+			LineTrailSeen = LineCount;
+		}
+		else if (UBangoScriptSubsystem* LineSubsystem = FindDebugSubsystem(Entry->PIEInstance))
+		{
+			LineTrailSeen = LineSubsystem->GetScriptLineTrail(Entry->Info.Id, bNewCopy ? MAX_uint64 : LineTrailSeen, RanLines);
+		}
+		const double LineNow = FPlatformTime::Seconds();
+		for (const int32 RanLine : RanLines)
+		{
+			DebugLinePings.Add(RanLine, LineNow);
+		}
+	}
 	TArray<int64> Ran;
 	uint64 Count = 0;
 	if (Entry->Info.Status == EBangoInstanceStatus::Failed)
@@ -4881,21 +4910,26 @@ int64 SBangoScriptEditor::GetDebugNodeID(const FDebugEntry& Entry)
 void SBangoScriptEditor::ApplyDebugStates()
 {
 	TMap<int64, EBangoNodeDebugState> States;
+	TMap<int32, EBangoNodeDebugState> LineStates; // the same by line, for the gutter of a text without NodeIDs
 	if (const FDebugEntry* Entry = FindDebugEntry())
 	{
 		if (Entry->Info.Status == EBangoInstanceStatus::Failed)
 		{
 			States.Add(Entry->Info.Error.NodeID, EBangoNodeDebugState::Failed);
+			LineStates.Add(Entry->Info.Error.Line, EBangoNodeDebugState::Failed);
 		}
 		else
 		{
 			const TArray<FBangoCallFrameInfo>& CallStack = Entry->Info.CallStack;
 			for (int32 k = 0; k < CallStack.Num(); ++k)
 			{
-				States.Add(CallStack[k].Loc.NodeID, k == CallStack.Num() - 1 ? EBangoNodeDebugState::Paused : EBangoNodeDebugState::CallStack);
+				const EBangoNodeDebugState State = k == CallStack.Num() - 1 ? EBangoNodeDebugState::Paused : EBangoNodeDebugState::CallStack;
+				States.Add(CallStack[k].Loc.NodeID, State);
+				LineStates.Add(CallStack[k].Loc.Line, State); // (a later frame on the same line is the stronger one)
 			}
 		}
 	}
+	DebugLineStates = MoveTemp(LineStates);
 	for (const TStrongObjectPtr<UEdGraph>& Graph : EdGraphs)
 	{
 		for (UEdGraphNode* GraphNode : Graph->Nodes)
@@ -5006,6 +5040,35 @@ void SBangoScriptEditor::UpdateLineMarkers()
 	LineMarkers->NumLines = NumLines;
 	LineMarkers->LineStates.Init(EBangoNodeDebugState::None, NumLines);
 	LineMarkers->LinePings.Init(0.0, NumLines);
+	// A text without NodeIDs (a compact script): the lines the copy says it's at, which are this text's lines as
+	// long as it's the text the copy was compiled from. With anything unsaved it may not be, so nothing is marked.
+	bool bAnyNodeIDs = false;
+	for (const TArray<int64>& LineNodes : MarkerLineNodes)
+	{
+		bAnyNodeIDs = bAnyNodeIDs || LineNodes.Num() > 0;
+	}
+	if (!bAnyNodeIDs)
+	{
+		if (HasUnsavedChanges())
+		{
+			return;
+		}
+		for (const TPair<int32, EBangoNodeDebugState>& LineState : DebugLineStates)
+		{
+			if (LineMarkers->LineStates.IsValidIndex(LineState.Key - 1))
+			{
+				LineMarkers->LineStates[LineState.Key - 1] = LineState.Value;
+			}
+		}
+		for (const TPair<int32, double>& LinePing : DebugLinePings)
+		{
+			if (LineMarkers->LinePings.IsValidIndex(LinePing.Key - 1))
+			{
+				LineMarkers->LinePings[LinePing.Key - 1] = LinePing.Value;
+			}
+		}
+		return;
+	}
 	if (DebugNodeStates.Num() == 0 && DebugNodePings.Num() == 0)
 	{
 		return;
