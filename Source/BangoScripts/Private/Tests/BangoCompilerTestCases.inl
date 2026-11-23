@@ -142,13 +142,16 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 		TEXT("  17 Add\n")
 		TEXT("  18 StorePlace _i\n")
 		TEXT("  19 Jump -> 7\n")
-		TEXT("  20 LoadPlace gold\n")
-		TEXT("  21 PushConst 1\n")
-		TEXT("  22 Greater\n")
-		TEXT("  23 JumpIfFalseOrPop -> 25\n")
-		TEXT("  24 IsNilPlace gold\n")
-		TEXT("  25 StorePlace _b\n")
-		TEXT("  26 Halt\n"),
+		TEXT("  20 TryUnknown -> 26\n")
+		TEXT("  21 LoadPlace gold\n")
+		TEXT("  22 PushConst 1\n")
+		TEXT("  23 Greater\n")
+		TEXT("  24 EndTryUnknown\n")
+		TEXT("  25 JumpIfFalseOrPop -> 28\n")
+		TEXT("  26 IsNilPlace gold\n")
+		TEXT("  27 ResolveUnknown 26 &&\n")
+		TEXT("  28 StorePlace _b\n")
+		TEXT("  29 Halt\n"),
 		nullptr, nullptr },
 	{ TEXT("listing: function with conversion"),
 		TEXT("float _h;\nfunction float Half(int _n)\n{\n\treturn _n / 2;\n};\n_h = Half(3);"),
@@ -594,10 +597,10 @@ static const FBangoCompilerTestCase GBangoCompilerTestCases[] =
 		TEXT("globals: int[] found; int stage;\nwait #0: found, stage\nfunction <main>:\n  0 Nop\n  1 Nop\n  2 WaitCheck #0\n  3 LoadPlace found\n  4 CallCommand Count 1\n  5 LoadPlace stage\n  6 PushConst 2\n  7 CallCommand Max 2\n  8 Greater\n  9 WaitResult #0 -> 2\n  10 Halt\n"), nullptr, nullptr },
 	{ TEXT("waitUntil: globals, in functions too"),
 		TEXT("global int stage;\nfunction bool Dead()\n{\n\treturn soldierIsDead;\n};\nwaitUntil (stage == 3 && Dead());"),
-		TEXT("globals: int stage;\nwait #0: soldierIsDead, stage\nfunction <main>:\n  0 Nop\n  1 WaitCheck #0\n  2 LoadPlace stage\n  3 PushConst 3\n  4 Equal\n  5 JumpIfFalseOrPop -> 7\n  6 CallFunction Dead 0\n  7 WaitResult #0 -> 1\n  8 Halt\nfunction Dead:\n  0 LoadPlace soldierIsDead\n  1 Convert bool\n  2 ReturnValue\n  3 ErrorMissingReturn\n"),
+		TEXT("globals: int stage;\nwait #0: soldierIsDead, stage\nfunction <main>:\n  0 Nop\n  1 WaitCheck #0\n  2 TryUnknown -> 8\n  3 LoadPlace stage\n  4 PushConst 3\n  5 Equal\n  6 EndTryUnknown\n  7 JumpIfFalseOrPop -> 10\n  8 CallFunction Dead 0\n  9 ResolveUnknown 8 &&\n  10 WaitResult #0 -> 1\n  11 Halt\nfunction Dead:\n  0 LoadPlace soldierIsDead\n  1 Convert bool\n  2 ReturnValue\n  3 ErrorMissingReturn\n"),
 		nullptr, nullptr },
 	{ TEXT("waitUntil: a command makes it polled"), TEXT("waitUntil (Random(0, 1) > 0.5 && isNil(boss));"),
-		TEXT("wait #0: boss; polled: it calls Random\nfunction <main>:\n  0 WaitCheck #0\n  1 PushConst 0\n  2 Convert float\n  3 PushConst 1\n  4 Convert float\n  5 CallCommand Random 2\n  6 PushConst 0.5\n  7 Greater\n  8 JumpIfFalseOrPop -> 10\n  9 IsNilPlace boss\n  10 WaitResult #0 -> 0\n  11 Halt\n"),
+		TEXT("wait #0: boss; polled: it calls Random\nfunction <main>:\n  0 WaitCheck #0\n  1 TryUnknown -> 11\n  2 PushConst 0\n  3 Convert float\n  4 PushConst 1\n  5 Convert float\n  6 CallCommand Random 2\n  7 PushConst 0.5\n  8 Greater\n  9 EndTryUnknown\n  10 JumpIfFalseOrPop -> 13\n  11 IsNilPlace boss\n  12 ResolveUnknown 11 &&\n  13 WaitResult #0 -> 0\n  14 Halt\n"),
 		nullptr, nullptr },
 	{ TEXT("waitUntil: its condition must be a bool"), TEXT("waitUntil (3);"), nullptr, TEXT("(1:12)"), TEXT("A condition must be a bool, but this is an int.") },
 	{ TEXT("waitUntil: its condition can't be left out"), TEXT("waitUntil ();"), nullptr, TEXT("(1:12)"), TEXT("This value is missing.") },

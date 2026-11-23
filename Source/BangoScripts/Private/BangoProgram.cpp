@@ -66,7 +66,10 @@ namespace BangoProgramPrivate
 		case EBangoOp::JumpIfFalseOrPop:
 		case EBangoOp::JumpIfTrueOrPop:
 		case EBangoOp::SpawnBlock:
+		case EBangoOp::TryUnknown:
 			return FString::Printf(TEXT("-> %d"), I.A);
+		case EBangoOp::ResolveUnknown:
+			return FString::Printf(TEXT("%d %s"), I.A, I.B ? TEXT("||") : TEXT("&&"));
 		case EBangoOp::CallFunction:
 			return FString::Printf(TEXT("%s %d"), Program.Functions.IsValidIndex(I.A) ? *Program.Functions[I.A].Name : TEXT("<bad function>"), I.B);
 		case EBangoOp::CallCommand:
@@ -127,6 +130,9 @@ namespace Bango
 		case EBangoOp::JumpIfFalse:        return TEXT("JumpIfFalse");
 		case EBangoOp::JumpIfFalseOrPop:   return TEXT("JumpIfFalseOrPop");
 		case EBangoOp::JumpIfTrueOrPop:    return TEXT("JumpIfTrueOrPop");
+		case EBangoOp::TryUnknown:         return TEXT("TryUnknown");
+		case EBangoOp::EndTryUnknown:      return TEXT("EndTryUnknown");
+		case EBangoOp::ResolveUnknown:     return TEXT("ResolveUnknown");
 		case EBangoOp::CallFunction:       return TEXT("CallFunction");
 		case EBangoOp::CallCommand:        return TEXT("CallCommand");
 		case EBangoOp::CallReflected:      return TEXT("CallReflected");

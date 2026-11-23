@@ -3060,7 +3060,21 @@ namespace BangoCompilerPrivate
 		{
 			if (Binary.Op == EBangoBinaryOp::And || Binary.Op == EBangoBinaryOp::Or)
 			{
+				// `a || b` is
+				//        TryUnknown -> R
+				//        <a>
+				//        EndTryUnknown
+				//        JumpIfTrueOrPop L     (true: that's the answer, b isn't worked out)
+				//   R:   <b>
+				//        ResolveUnknown R, ||
+				//   L:
+				// A global that isn't set (it doesn't exist, or is nil) is unknown, not an error straight away: if a
+				// reads one, the script goes on at R with a noted as unknown, and ResolveUnknown lets a true b settle
+				// it (unknown || true is true). If b doesn't, a's unset global stops the script as it would have (or
+				// makes a condition Unset, or keeps a waitUntil waiting). An unknown b isn't caught here: with a
+				// false, nothing can settle it. `&&` is the same with false: unknown && false is false.
 				const bool bAnd = Binary.Op == EBangoBinaryOp::And;
+				const int32 Try = Emit(EBangoOp::TryUnknown);
 				FExprType LeftType;
 				if (!CompileExpr(*Binary.Left, nullptr, LeftType))
 				{
@@ -3070,7 +3084,10 @@ namespace BangoCompilerPrivate
 				{
 					return Fail(Binary.Left->Loc, FString::Printf(TEXT("'%s' needs bools, but this is %s."), bAnd ? TEXT("&&") : TEXT("||"), *LeftType.Describe()));
 				}
+				Emit(EBangoOp::EndTryUnknown);
 				const int32 Jump = Emit(bAnd ? EBangoOp::JumpIfFalseOrPop : EBangoOp::JumpIfTrueOrPop);
+				const int32 Right = Here();
+				PatchJump(Try, Right);
 				FExprType RightType;
 				if (!CompileExpr(*Binary.Right, nullptr, RightType))
 				{
@@ -3085,6 +3102,7 @@ namespace BangoCompilerPrivate
 					// The result must be a bool either way.
 					Emit(EBangoOp::Convert, AddType(FBangoType::Bool()));
 				}
+				Emit(EBangoOp::ResolveUnknown, Right, bAnd ? 0 : 1);
 				PatchJump(Jump, Here());
 				OutType = FExprType::MakeKnown(FBangoType::Bool());
 				return true;

@@ -62,6 +62,9 @@ enum class EBangoOp : uint8
 	JumpIfFalse,        // A = target.  bool ->
 	JumpIfFalseOrPop,   // A = target.  bool -> bool (if false, jumps and keeps it; otherwise pops)    for &&
 	JumpIfTrueOrPop,    // A = target.  bool -> bool (if true, jumps and keeps it; otherwise pops)     for ||
+	TryUnknown,         // A = where the right side of an && or || starts. Until EndTryUnknown, reading a global that isn't set (unknown) doesn't stop the script: it goes on at A, the left side noted as unknown
+	EndTryUnknown,      // ends the TryUnknown before it: the left side has its value
+	ResolveUnknown,     // A = the same as its TryUnknown's, B = 1 for ||, 0 for &&.  bool -> bool : if the left side was unknown, the right side must settle it (true for ||, false for &&); otherwise the left side's unset global stops the script after all
 
 	// ---- Calls ----
 	CallFunction,       // A = function, B = argument count.  args... -> [result]

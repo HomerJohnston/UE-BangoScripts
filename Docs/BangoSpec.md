@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.86)
+# Bango Language Spec (draft v0.87)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.87:** **an unset global on one side of `&&` or `||` is unknown, and the other side can settle the answer**: unknown `||` true is true, unknown `&&` false is false, and `!` unknown is unknown (section 5). `doorOpen || leverPulled` used to be Unset (not satisfied) until `doorOpen` had been set at least once, even with `leverPulled` true, because the left side was read first. An answer still unknown at the end is what it was: a script stops with the unset global's error, a condition is Unset, a `waitUntil` waits. Saved scripts from earlier versions don't load (the save format changed).
 
 **Changes in v0.86:** **an inline script's instance inputs are kept on the script as a property**, so they survive Unreal making a Blueprint's component again (section 15). Before, the scripts of a trigger added in a Blueprint lost its constants whenever its placed actor was edited: they weren't offered by autocomplete, and a `forEach` over one failed to compile. A component that sets instance inputs should also set them in `PostApplyToComponent`. `GetInstanceInputs()` now returns the list by value. **`forEach`'s "needs to know the type" error names the variable** and lists the inputs the script is given (section 4).
 
@@ -388,7 +390,7 @@ WriteScreen(ToString(NSLOCTEXT("Shared.UI", "Continue", "Continue")));
 - A variable declared without a value holds `nil`.
 - A global that has never been created anywhere behaves as `nil`.
 - Array gaps created by resizing hold `nil` (see section 6).
-- **Reading `nil` stops the script with an error.** This applies to variables, globals and array elements alike.
+- **Reading `nil` stops the script with an error.** This applies to variables, globals and array elements alike. One exception: an unset global on one side of `&&` or `||` is unknown, and only stops the script if the other side doesn't settle the answer (section 5).
 - `nil` can be **assigned, passed or returned** wherever its type is known: assigning to a variable, passing it as a typed argument, returning it from a typed function, or putting it in a typed array.
   ```
   _name = nil;
@@ -609,6 +611,17 @@ All binary operators are left-associative: `a - b - c` is `(a - b) - c`.
 | unary `-` | number or vector | same type |
 
 - `&&` and `||` **short-circuit**, so `if (!isNil(x) && x)` is safe.
+- **An unset global on one side of `&&` or `||` is unknown, not an error straight away.** A global that doesn't exist yet or is `nil` can't be read, but if the other side settles the answer, the answer stands:
+
+  | | |
+  |---|---|
+  | unknown `\|\|` true | true |
+  | unknown `\|\|` false | unknown |
+  | unknown `&&` false | false |
+  | unknown `&&` true | unknown |
+  | `!` unknown | unknown |
+
+  So `doorOpen || leverPulled` is true as soon as either is true, whichever was set first, and in either order. An answer that's still **unknown** at the end is what reading the unset global always was: in a script it stops the script with that global's error (in an `if`, a `while`, an assignment, anywhere); a condition gives Unset (section 10); a `waitUntil` keeps waiting (section 8). The error names the unset global on the left where there are two. Only globals count: a `nil` local is still an error at once. It works the same through a function the left side calls. Comparisons aren't settled this way: `count > 3` with `count` unset is unknown.
 - `int / int` gives `int`, rounded toward zero. `%` on floats gives the floating-point remainder.
 - **Dividing by zero stops the script**, for both ints and floats, with `/` or `%`.
 - **Integer overflow stops the script.** An int result outside -2147483648 to 2147483647 is an error that points at the operator, e.g. `2147483647 + 1`, `65536 * 65536`, `(-2147483647 - 1) / -1`, or negating -2147483648. It never wraps around. Mixing in a float (`65536 * 65536.0`) gives a float instead.
@@ -1024,7 +1037,7 @@ waitUntil (stage == 3 && soldierIsDead);    //@4(0, 2)
 
 - **When it's checked again:** only when something it reads might have changed. While a script waits, its locals, parameters and script variables can't change (a `spawn` has copies of its own), so that's the **globals** the condition reads, and the globals read by the script's functions it calls. When one of them changes (it's set to a different value, changed in place like `found Push(1)`, created, or every global is reset or loaded), the condition is checked once, **at the end of that frame**, after the other scripts have run. A script that sets several globals one after another gets them all checked together, and a global set to the value it already has isn't a change.
 - **Commands:** a condition that calls a command (`waitUntil (IsAlive(@soldier) == false);`) or a Blueprint function (`call`) can change its answer without any global changing, so it's checked **every frame**, at the end of the frame. **Pure** commands don't count (section 7): `waitUntil (Count(found) >= Max(needed, 3));` is checked only when `found` or `needed` changes.
-- **Not set up yet:** a global the condition reads that's nil or doesn't exist yet makes the condition false, and the script keeps waiting quietly, as a condition gives Unset (section 10, Conditions). Any other error stops the script, as it would in an `if`.
+- **Not set up yet:** a global the condition reads that's nil or doesn't exist yet makes the condition unknown, and the script keeps waiting quietly, as a condition gives Unset (section 10, Conditions). Unknown isn't always the end of it: `waitUntil (doorOpen || leverPulled)` carries on as soon as either is true, even if the other has never been set (section 5). Any other error stops the script, as it would in an `if`.
 - **The condition must answer at once:** a command in it that waits (like a `Sleep`, or a choice) stops the script with an error, and so does a `waitUntil` in a function the condition calls.
 - The condition must be a bool. A condition script (section 10) can't use `waitUntil`: a condition must answer at once.
 - **A condition that can't change is a compile error.** While a script waits, its locals, script variables and inputs don't change, so a condition that reads no global (itself, or in the script's functions it calls) and calls no command that could answer differently later would carry on at once or wait forever: `waitUntil (_count > 3);`, `waitUntil (Count(_list) > 0);`, `waitUntil (true);`. *"This waitUntil's condition can't change while the script waits: it reads no global, and calls no command that could answer differently later ... Read a global in it, or use an if."* A global the script doesn't declare counts as one that can change.
@@ -1282,7 +1295,7 @@ Bango::UnregisterCondition(Condition); // and Condition is made invalid
 - **A condition must answer at once:** calling a command that waits (`Sleep`, a dialogue choice) is an error, and `waitUntil` in a condition is a compile error.
 - `EvaluateCondition` gives an **`EBangoConditionResult`** (`BangoInstance.h`):
   - **`True`** or **`False`**: what it returned.
-  - **`Unset`**: it read a global that **doesn't exist or is `nil`** (`foundThings >= 10` before anything has set `foundThings`, or indexing a `nil` global array), with the message in `Error`. That's usually not a mistake, just something not set up yet, so a caller can treat it as false without reporting it. `isNil(foundThings)` and `IsNull(...)` don't count: they give `true` for such a global. `&&` and `||` stop as soon as they know the answer, so `isNil(gold) || gold < 5` never reads a `nil` `gold`.
+  - **`Unset`**: it read a global that **doesn't exist or is `nil`** (`foundThings >= 10` before anything has set `foundThings`, or indexing a `nil` global array), with the message in `Error`. That's usually not a mistake, just something not set up yet, so a caller can treat it as false without reporting it. `isNil(foundThings)` and `IsNull(...)` don't count: they give `true` for such a global. `&&` and `||` stop as soon as they know the answer, so `isNil(gold) || gold < 5` never reads a `nil` `gold`. And an unset global on one side is unknown, not Unset straight away: `doorOpen || leverPulled` is True as soon as either is true, and Unset only while neither side settles it (section 5).
   - **`Error`**: it's broken, with the error in `Error`: the handle isn't registered (or the text doesn't compile), its arguments don't fit, it stopped with any other error, it didn't return a `bool`, or it waited.
   Nothing is shown or logged by it, so a caller asking often can show each once (`Bango::ReportError`).
 - A condition isn't a running script: it isn't listed in the debugger, saved or reloaded, and it has no handle. Globals it sets stay set.
@@ -1454,7 +1467,7 @@ How a running copy switches:
 ### Save and load
 A save stores:
 - Every running instance: script path (or, for a script spawned from text, its name and its whole text), call stack (function, resume point, locals including script parameters), and value stack, so a script paused in the middle of a function or an expression resumes exactly where it was.
-- The pending state of whatever latent command each instance is waiting on, or the `waitUntil` it's paused at (and the time its timeout and its hold have left).
+- The pending state of whatever latent command each instance is waiting on, or the `waitUntil` it's paused at (and the time its timeout and its hold have left), and which sides of the `&&`s and `||`s it's in the middle of were unknown.
 - All global values.
 
 On load, each saved script is loaded and compiled from its path (or from its saved text), and its saved state is checked against it. If a script was changed so that the saved state no longer fits (or the file is missing), that script isn't restored and an error is shown. Other scripts still load. Beyond that check, loading state into a changed script is **undefined behaviour** (not supported).

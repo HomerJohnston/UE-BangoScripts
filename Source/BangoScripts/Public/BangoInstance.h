@@ -404,6 +404,35 @@ private:
 	};
 	FWaitGuard WaitGuard;
 
+	/**
+	 * While the left side of an && or || is worked out (between its TryUnknown and EndTryUnknown), where to go on if
+	 * it reads a global that isn't set: the left side is then unknown, and the right side may still settle the
+	 * answer. Innermost last. Saved.
+	 */
+	struct FUnknownGuard
+	{
+		int32 NumFrames = 0;
+		int32 StackSize = 0;
+		int32 HandlerIP = 0; // where the right side starts (in the frame it was made in)
+		int32 NumPending = 0;
+	};
+	TArray<FUnknownGuard> UnknownGuards;
+	/**
+	 * The && and || whose left side was unknown and whose right side is being worked out, with the error the unset
+	 * global would have been: their ResolveUnknown raises it if the right side doesn't settle the answer. Saved.
+	 */
+	struct FPendingUnknown
+	{
+		int32 NumFrames = 0;
+		int32 HandlerIP = 0;
+		FString Message;
+		int32 Function = 0; // where it was read, for the error's place
+		int32 IP = 0;
+	};
+	TArray<FPendingUnknown> PendingUnknowns;
+	/** UnsetGlobalFail went on at an unknown guard's right side instead of stopping (Resume then carries on, as Execute had stopped). */
+	bool bUnknownCaught = false;
+
 	/** The instruction being run, for error locations. */
 	int32 CurrentFunction = 0;
 	int32 CurrentIP = 0;

@@ -1160,6 +1160,23 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				{ TEXT("&& stops at false"), TEXT("false && nothere > 1"), 0, nullptr, nullptr },
 				{ TEXT("|| stops at true"), TEXT("flag || nothere > 1"), 1, nullptr, nullptr },
 				{ TEXT("an unset global behind || is still read"), TEXT("!flag || nothere > 1"), 2, nullptr, TEXT("nothere") },
+				// An unset global on one side of && or || is unknown: the other side may settle the answer.
+				{ TEXT("unknown || true is true"), TEXT("nothere || flag"), 1, nullptr, nullptr },
+				{ TEXT("unknown || false is unknown"), TEXT("nothere || !flag"), 2, TEXT("(1:1)"), TEXT("nothere") },
+				{ TEXT("unknown && false is false"), TEXT("nothere && !flag"), 0, nullptr, nullptr },
+				{ TEXT("unknown && true is unknown"), TEXT("nothere && flag"), 2, TEXT("(1:1)"), TEXT("nothere") },
+				{ TEXT("an unknown comparison || true is true"), TEXT("nothere > 1 || flag"), 1, nullptr, nullptr },
+				{ TEXT("unknown || unknown is unknown"), TEXT("nothere || nothere2"), 2, nullptr, TEXT("nothere") },
+				{ TEXT("(unknown || unknown) || true is true"), TEXT("(nothere || nothere2) || flag"), 1, nullptr, nullptr },
+				{ TEXT("unknown || unknown || true is true"), TEXT("nothere || nothere2 || flag"), 1, nullptr, nullptr },
+				{ TEXT("true || unknown is still true"), TEXT("flag || nothere"), 1, nullptr, nullptr },
+				{ TEXT("false || unknown is unknown"), TEXT("!flag || nothere"), 2, TEXT("(1:10)"), TEXT("nothere") },
+				{ TEXT("not (unknown || true) is false"), TEXT("!(nothere || flag)"), 0, nullptr, nullptr },
+				{ TEXT("not unknown is unknown"), TEXT("!(nothere && flag)"), 2, nullptr, TEXT("nothere") },
+				{ TEXT("unknown || (unknown && false) is unknown, as its left side"), TEXT("nothere || (nothere2 && !flag)"), 2, TEXT("(1:1)"), TEXT("'nothere'") },
+				{ TEXT("unknown && (unknown || true) is unknown"), TEXT("nothere && (nothere2 || flag)"), 2, TEXT("(1:1)"), TEXT("'nothere'") },
+				{ TEXT("a nil global is unknown too"), TEXT("global bool empty;\nreturn empty || flag;"), 1, nullptr, nullptr },
+				{ TEXT("an unknown on the left of a wrong type on the right is still an error"), TEXT("nothere || lots"), -1, nullptr, TEXT("Expected a bool") },
 				{ TEXT("past the end of a local array is an error, not unset"), TEXT("int[] _a = [1];\nreturn _a[3] > 0;"), -1, nullptr, TEXT("past the end") },
 			};
 			for (const FConditionCase& Case : Cases)
@@ -1609,6 +1626,30 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			FString SetError;
 			Store.Set(Name, Value, SetError);
 		};
+		// && and || in a script: an unset global on the left is unknown, and the right side may settle it.
+		{
+			FReloadRun Run;
+			StartRun(Run, Compile(TEXT("global bool ua;\nif (ua || true)\n{\n\tTalk(\"yes\");\n}\nif (ua && false)\n{\n\tTalk(\"no\");\n}\nTalk(\"end\");")));
+			Expect(Run.Instance.GetStatus() == EBangoInstanceStatus::Finished && Log.Num() == 2 && Log[0] == TEXT("yes") && Log[1] == TEXT("end"), TEXT("unknown: || and && in an if are settled by the right side"));
+			FReloadRun Stopped;
+			StartRun(Stopped, Compile(TEXT("global bool ub;\nTalk(\"a\");\nif (ub || false)\n{\n\tTalk(\"no\");\n}\nTalk(\"end\");")));
+			Expect(Stopped.Instance.GetStatus() == EBangoInstanceStatus::Failed && Stopped.Instance.GetError().Message.Contains(TEXT("'ub' is nil")) && Stopped.Instance.GetError().Line == 3 && Log.Num() == 1,
+				TEXT("unknown: still unknown stops the script, at the unset global"));
+			FReloadRun Called;
+			StartRun(Called, Compile(TEXT("global bool uc;\nfunction bool F()\n{\n\tTalk(\"in\");\n\treturn uc;\n}\nif (F() || true)\n{\n\tTalk(\"yes\");\n}\nif (F() && false)\n{\n\tTalk(\"no\");\n}\nTalk(\"end\");")));
+			Expect(Called.Instance.GetStatus() == EBangoInstanceStatus::Finished && Log.Num() == 4 && Log[1] == TEXT("yes") && Log[2] == TEXT("in") && Log[3] == TEXT("end"), TEXT("unknown: an unset global read in a function the left side calls"));
+			// A waitUntil carries on when either side is true, whichever was set first.
+			FReloadRun Either;
+			Expect(StartRun(Either, Compile(TEXT("global bool wa;\nglobal bool wb;\nwaitUntil (wa || wb);\nTalk(\"go\");"))) && Either.Instance.GetStatus() == EBangoInstanceStatus::Waiting, TEXT("unknown: waitUntil (a || b) waits while neither is set"));
+			Set(Either.Globals, TEXT("wb"), FBangoValue::MakeBool(true));
+			Expect(Either.Instance.Resume(Context) == EBangoInstanceStatus::Finished && LastLog() == TEXT("go"), TEXT("unknown: waitUntil (a || b) carries on when only b is set"));
+			FReloadRun Both;
+			StartRun(Both, Compile(TEXT("global bool wc;\nglobal bool wd;\nwaitUntil (wc && wd);\nTalk(\"go\");")));
+			Set(Both.Globals, TEXT("wd"), FBangoValue::MakeBool(true));
+			Expect(Both.Instance.Resume(Context) == EBangoInstanceStatus::Waiting && Log.Num() == 0, TEXT("unknown: waitUntil (a && b) waits while a isn't set"));
+			Set(Both.Globals, TEXT("wc"), FBangoValue::MakeBool(true));
+			Expect(Both.Instance.Resume(Context) == EBangoInstanceStatus::Finished && LastLog() == TEXT("go"), TEXT("unknown: waitUntil (a && b) carries on once both are true"));
+		}
 		// Waits until a global it reads changes, then checks again.
 		{
 			FReloadRun Run;
@@ -2199,6 +2240,27 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			FBangoWatchHandle GoneWatch;
 			Registry.StopWatch(GoneWatch);
 			Expect(!Registry.StartWatch(First, { { TEXT("_activator"), Entity(TEXT("a")) } }, GoneWatch) && !GoneWatch.IsValid(), TEXT("watch: a destroyed group can't start watches"));
+
+			// `a || b` is satisfied as soon as either is true, whichever is set first: the other isn't set yet.
+			{
+				Calls.Reset();
+				const int32 ReportedBefore = Reported.Num();
+				FBangoWatchGroupHandle EitherGroup;
+				EitherGroup = Registry.CreateGroup(CompileWatched(TEXT("eitherA || eitherB")), 0.5f, TEXT("Either"), Recorder(&EitherGroup));
+				FBangoWatchHandle EitherWatch;
+				Expect(!Registry.StartWatch(EitherGroup, {}, EitherWatch), TEXT("watch: a || b with neither set isn't satisfied"));
+				FString EitherDeclareError;
+				WatchGlobals.Declare(TEXT("eitherB"), FBangoType::Bool(), EitherDeclareError);
+				Set(WatchGlobals, TEXT("eitherB"), FBangoValue::MakeBool(true));
+				Registry.Update(Now);
+				bool bEither = false;
+				Expect(Registry.IsWatching(EitherWatch, &bEither) && bEither && Calls.Num() == 1 && Reported.Num() == ReportedBefore, TEXT("watch: a || b is satisfied when only b is set"));
+				Set(WatchGlobals, TEXT("eitherB"), FBangoValue::MakeBool(false));
+				Registry.Update(Now);
+				Expect(Registry.IsWatching(EitherWatch, &bEither) && !bEither, TEXT("watch: a || b with b false and a not set isn't satisfied"));
+				Registry.DestroyGroup(EitherGroup);
+				Calls.Reset();
+			}
 		}
 	}
 }

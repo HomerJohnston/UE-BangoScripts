@@ -4,7 +4,7 @@
 
 namespace BangoInstancePrivate
 {
-	constexpr int32 InstanceSaveVersion = 6; // 2: waitUntil. 3: a pending command's type arguments. 4: and whether its result is used. 5: a waitUntil's timeout. 6: and its hold. Raise it when the save format changes: data in another format is refused, not misread
+	constexpr int32 InstanceSaveVersion = 7; // 2: waitUntil. 3: a pending command's type arguments. 4: and whether its result is used. 5: a waitUntil's timeout. 6: and its hold. 7: unknown sides of && and ||. Raise it when the save format changes: data in another format is refused, not misread
 
 	static FString TypeText(const FBangoType& Type)
 	{
@@ -404,11 +404,41 @@ EBangoConditionResult FBangoInstance::FinishCondition(EBangoInstanceStatus Resum
 
 bool FBangoInstance::UnsetGlobalFail(const FString& Message, const FBangoGlobalStore& Globals)
 {
+	// On the left side of an && or ||: unknown, not an error yet. On at its right side, which may settle the answer
+	// (its ResolveUnknown raises this again if it doesn't). The innermost one first: a waitUntil in a function the
+	// left side calls is further in than the guard, and takes it.
+	if (Status == EBangoInstanceStatus::Ready && UnknownGuards.Num() > 0
+		&& (WaitGuard.Set < 0 || UnknownGuards.Last().NumFrames >= WaitGuard.NumFrames)
+		&& Frames.Num() >= UnknownGuards.Last().NumFrames && Stack.Num() >= UnknownGuards.Last().StackSize)
+	{
+		const FUnknownGuard Guard = UnknownGuards.Pop();
+		Frames.SetNum(Guard.NumFrames);
+		Stack.SetNum(Guard.StackSize);
+		PendingUnknowns.SetNum(FMath::Min(Guard.NumPending, PendingUnknowns.Num()));
+		FPendingUnknown& Pending = PendingUnknowns.AddDefaulted_GetRef();
+		Pending.NumFrames = Guard.NumFrames;
+		Pending.HandlerIP = Guard.HandlerIP;
+		Pending.Message = Message;
+		Pending.Function = CurrentFunction;
+		Pending.IP = CurrentIP;
+		Frames.Last().IP = Guard.HandlerIP;
+		bUnknownCaught = true;
+		return false;
+	}
 	if (WaitGuard.Set >= 0 && Status == EBangoInstanceStatus::Ready && Frames.Num() >= WaitGuard.NumFrames && Stack.Num() >= WaitGuard.StackSize)
 	{
 		// In a waitUntil's condition: not set up yet, so not true yet. Back out of what it was working out, and wait.
 		Frames.SetNum(WaitGuard.NumFrames);
 		Stack.SetNum(WaitGuard.StackSize);
+		// With the && and || it was in the middle of (those further out, around a call to its function, stay).
+		while (UnknownGuards.Num() > 0 && UnknownGuards.Last().NumFrames >= WaitGuard.NumFrames)
+		{
+			UnknownGuards.Pop();
+		}
+		while (PendingUnknowns.Num() > 0 && PendingUnknowns.Last().NumFrames >= WaitGuard.NumFrames)
+		{
+			PendingUnknowns.Pop();
+		}
 		PauseAtWait(WaitGuard.Set, WaitGuard.CheckIP, Globals);
 		return false;
 	}
@@ -701,11 +731,13 @@ EBangoInstanceStatus FBangoInstance::Resume(const FBangoExecContext& Context)
 
 	do
 	{
-		// (A waitUntil that timed out while a global it read was unset stops Execute, ready to go on at its timeout block.)
+		// (A waitUntil that timed out while a global it read was unset stops Execute, ready to go on at its timeout block.
+		// So does an unset global on the left side of an && or ||, ready to go on at the right side.)
 		bWaitTimedOut = false;
+		bUnknownCaught = false;
 		Execute(Context);
 	}
-	while (bWaitTimedOut && Status == EBangoInstanceStatus::Ready);
+	while ((bWaitTimedOut || bUnknownCaught) && Status == EBangoInstanceStatus::Ready);
 	return Status;
 }
 
@@ -2077,6 +2109,50 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 			break;
 		}
 
+		case EBangoOp::TryUnknown:
+		{
+			FUnknownGuard& Guard = UnknownGuards.AddDefaulted_GetRef();
+			Guard.NumFrames = Frames.Num();
+			Guard.StackSize = Stack.Num();
+			Guard.HandlerIP = I.A;
+			Guard.NumPending = PendingUnknowns.Num();
+			break;
+		}
+
+		case EBangoOp::EndTryUnknown:
+			if (UnknownGuards.Num() == 0 || UnknownGuards.Last().NumFrames != Frames.Num())
+			{
+				return RuntimeFail(TEXT("Internal error: no unknown guard to end."));
+			}
+			UnknownGuards.Pop();
+			break;
+
+		case EBangoOp::ResolveUnknown:
+		{
+			if (PendingUnknowns.Num() == 0 || PendingUnknowns.Last().NumFrames != Frames.Num() || PendingUnknowns.Last().HandlerIP != I.A)
+			{
+				break; // the left side had its value: the right side is the answer
+			}
+			const FPendingUnknown Pending = PendingUnknowns.Pop();
+			if (Stack.Num() <= Frames.Last().StackBase)
+			{
+				return RuntimeFail(TEXT("Internal error: the value stack is empty."));
+			}
+			const FBangoValue& Right = Stack.Last();
+			if (!IsScalar(Right, EBangoBaseType::Bool))
+			{
+				return RuntimeFail(FString::Printf(TEXT("'%s' needs bools, but got %s."), I.B ? TEXT("||") : TEXT("&&"), *ValueTypeText(Right)));
+			}
+			if (Right.GetBool() == (I.B != 0))
+			{
+				break; // unknown || true is true, unknown && false is false
+			}
+			// Still unknown: the left side's unset global counts after all, where it was read.
+			CurrentFunction = Pending.Function;
+			CurrentIP = Pending.IP;
+			return UnsetGlobalFail(Pending.Message, Globals);
+		}
+
 		case EBangoOp::JumpIfFalseOrPop:
 		case EBangoOp::JumpIfTrueOrPop:
 		{
@@ -2364,7 +2440,7 @@ bool FBangoInstance::TryReload(FBangoGlobalStore& Globals)
 	}
 	// Only right after a simple statement, with nothing half worked out on the stack (or in a waitUntil's condition).
 	const FBangoFrame& Top = Frames.Last();
-	if (WaitGuard.Set >= 0 || !Program->Functions.IsValidIndex(Top.Function) || Stack.Num() != Top.StackBase
+	if (WaitGuard.Set >= 0 || UnknownGuards.Num() > 0 || PendingUnknowns.Num() > 0 || !Program->Functions.IsValidIndex(Top.Function) || Stack.Num() != Top.StackBase
 		|| !FindStatementEndingAt(Program->Functions[Top.Function], Top.IP))
 	{
 		return false;
@@ -2584,6 +2660,34 @@ void FBangoInstance::Serialize(FArchive& Ar)
 	Ar << WaitHoldLeft;
 	Ar << bWaitIgnoreHold;
 
+	int32 NumGuards = UnknownGuards.Num();
+	Ar << NumGuards;
+	if (Ar.IsLoading())
+	{
+		UnknownGuards.SetNum(FMath::Clamp(NumGuards, 0, 4096));
+	}
+	for (FUnknownGuard& Guard : UnknownGuards)
+	{
+		Ar << Guard.NumFrames;
+		Ar << Guard.StackSize;
+		Ar << Guard.HandlerIP;
+		Ar << Guard.NumPending;
+	}
+	int32 NumPending = PendingUnknowns.Num();
+	Ar << NumPending;
+	if (Ar.IsLoading())
+	{
+		PendingUnknowns.SetNum(FMath::Clamp(NumPending, 0, 4096));
+	}
+	for (FPendingUnknown& Pending : PendingUnknowns)
+	{
+		Ar << Pending.NumFrames;
+		Ar << Pending.HandlerIP;
+		Ar << Pending.Message;
+		Ar << Pending.Function;
+		Ar << Pending.IP;
+	}
+
 	if (Ar.IsLoading())
 	{
 		Status = StatusByte <= (uint8)EBangoInstanceStatus::Terminated ? (EBangoInstanceStatus)StatusByte : EBangoInstanceStatus::Failed;
@@ -2594,6 +2698,7 @@ void FBangoInstance::Serialize(FArchive& Ar)
 		WaitStamp = 0;
 		WaitGuard = FWaitGuard();
 		bWaitTimedOut = false;
+		bUnknownCaught = false;
 		Program.Reset();
 		BoundCommands.Reset();
 	}
