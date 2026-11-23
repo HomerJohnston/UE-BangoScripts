@@ -214,7 +214,7 @@ struct FBangoGraphWriteOptions
 	bool bFollowUsesGraphEditor = false;
 
 	/**
-	 * Always compact: no section headings, no node metadata (and so no reroutes), and no #USES_GRAPH_EDITOR line.
+	 * Always compact: no section headings (not even FUNCTIONS), no node metadata (and so no reroutes), and no #USES_GRAPH_EDITOR line.
 	 * For inline scripts made editable in their box.
 	 */
 	bool bCompact = false;
@@ -278,21 +278,23 @@ namespace Bango
 	/**
 	 * The section headings the writer puts in a file (the text after the //): SCRIPT INPUTS above the #inputs line,
 	 * GLOBAL VARS and LOCAL VARS above the declarations, SCRIPT BODY above the main graph's code, and FUNCTIONS
-	 * above the first function. Every heading starts with "====".
+	 * above the first function. Every heading starts with "====". A compact script (one without #USES_GRAPH_EDITOR)
+	 * has only the FUNCTIONS heading; text written with FBangoGraphWriteOptions::bCompact has none.
 	 */
 	BANGOSCRIPTS_API const TCHAR* GetScriptInputHeadingComment();
 	BANGOSCRIPTS_API const TCHAR* GetGlobalVarsHeadingComment();
 	BANGOSCRIPTS_API const TCHAR* GetScriptVarsHeadingComment();
 	BANGOSCRIPTS_API const TCHAR* GetScriptBodyHeadingComment();
 	BANGOSCRIPTS_API const TCHAR* GetFunctionsHeadingComment();
-	/** The line the writer puts between functions. */
-	BANGOSCRIPTS_API const TCHAR* GetFunctionSeparatorComment();
 	/**
 	 * True if a comment's text (after the //) is a section heading: it starts with "====" (after any spaces).
 	 * Reading a file skips these on lines of their own, anywhere, so they never become comment bubbles.
 	 */
 	BANGOSCRIPTS_API bool IsSectionHeadingComment(const FString& CommentText);
-	/** True if a comment's text is the line between functions (ignoring spaces around it). Reading skips it outside function bodies. */
+	/**
+	 * True if a comment's text is a line of dashes (ten or more, ignoring spaces around it). Reading skips one outside
+	 * function bodies: files used to have one between functions. The writer no longer writes any.
+	 */
 	BANGOSCRIPTS_API bool IsFunctionSeparatorComment(const FString& CommentText);
 
 	/** "WriteScreen", "If", "Set", ... a short title for the node. */

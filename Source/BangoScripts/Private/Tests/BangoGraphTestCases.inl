@@ -632,9 +632,9 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				FString(TEXT("LOCTEXT_NAMESPACE: under the description, written back the same:\n")) + ConfigText + WriteError);
 		}
 
-		// The FUNCTIONS heading and the lines between functions: written on save, skipped when read (outside function
-		// bodies), so they don't pile up or turn into comment bubbles. A function's own comment, and the same line
-		// inside a function body, are kept.
+		// The FUNCTIONS heading: written on save, skipped when read. A line of dashes between functions (files used to
+		// have one) is skipped when read too, outside function bodies, and not written again. A function's own
+		// comment, and the same line inside a function body, are kept.
 		{
 			const TCHAR* Separated =
 				TEXT("// ============ SCRIPT BODY =====================\n")
@@ -662,8 +662,34 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				&& SepDoc.Functions[0].Nodes[0].Comment == FString(TEXT("What F does")) && SepDoc.Functions[1].Nodes[0].Comment.IsEmpty()
 				&& SepDoc.Functions[0].Nodes[1].Comment == FString(TEXT("----------------------------------------------")),
 				FString(TEXT("function separators: not read as comments: ")) + Error.ToString());
-			Expect(bSepBuilt && Bango::WriteGraphText(SepDoc, SepText, WriteError) && SepText == FString(Separated),
-				FString(TEXT("function separators: written back the same:\n")) + SepText + WriteError);
+			const FString SeparatedWritten = FString(Separated).Replace(TEXT("}\n\n// ----------------------------------------------\n\nfunction"), TEXT("}\n\nfunction"));
+			Expect(bSepBuilt && Bango::WriteGraphText(SepDoc, SepText, WriteError) && SepText == SeparatedWritten && SepText != FString(Separated),
+				FString(TEXT("function separators: written back without the line between the functions:\n")) + SepText + WriteError);
+			// A compact script keeps the FUNCTIONS heading, and only that one; an inline script's box has none.
+			FBangoGraphWriteOptions FollowOptions;
+			FollowOptions.bFollowUsesGraphEditor = true;
+			FBangoGraphWriteOptions BoxOptions;
+			BoxOptions.bCompact = true;
+			FString FollowText;
+			FString BoxText;
+			Expect(bSepBuilt && Bango::WriteGraphText(SepDoc, FollowText, WriteError, FollowOptions)
+				&& FollowText.Contains(TEXT("Talk(\"x\");\n\n// ============ FUNCTIONS =======================\n\n// What F does\nfunction void F()"))
+				&& FollowText.Contains(TEXT("}\n\nfunction void G()")) && !FollowText.Contains(TEXT("SCRIPT BODY")),
+				FString(TEXT("function separators: a compact script has the FUNCTIONS heading:\n")) + FollowText + WriteError);
+			Expect(bSepBuilt && Bango::WriteGraphText(SepDoc, BoxText, WriteError, BoxOptions) && !BoxText.Contains(TEXT("====")),
+				FString(TEXT("function separators: an inline script's box has no heading:\n")) + BoxText + WriteError);
+			FBangoGraphDocument FollowDoc;
+			FString FollowAgain;
+			Expect(Bango::BuildGraph(FollowText, TEXT("sep.bango"), FollowDoc, Error) && Bango::WriteGraphText(FollowDoc, FollowAgain, WriteError, FollowOptions) && FollowAgain == FollowText,
+				FString(TEXT("function separators: a compact script saved again is the same:\n")) + FollowAgain);
+			// Only functions, compact: the heading is the first line, and isn't read back as the description.
+			FBangoGraphDocument OnlyDoc;
+			FString OnlyText;
+			Expect(Bango::BuildGraph(TEXT("function void F()\n{\n}\n"), TEXT("only.bango"), OnlyDoc, Error) && Bango::WriteGraphText(OnlyDoc, OnlyText, WriteError, FollowOptions)
+				&& OnlyText.StartsWith(TEXT("// ============ FUNCTIONS =======================\n\nfunction void F()"), ESearchCase::CaseSensitive),
+				FString(TEXT("function separators: a script of only functions starts with the heading:\n")) + OnlyText);
+			FBangoGraphDocument OnlyAgain;
+			Expect(Bango::BuildGraph(OnlyText, TEXT("only.bango"), OnlyAgain, Error) && OnlyAgain.Description.IsEmpty(), TEXT("function separators: the heading isn't the description"));
 		}
 
 		// The description: the // lines from line 1 on, until a line that isn't one. Not a node's comment; saved
@@ -979,8 +1005,6 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				TEXT("\n")
 				TEXT("\tTalk(\"y\");    //@2(0, 0)\n")
 				TEXT("}\n")
-				TEXT("\n")
-				TEXT("// ----------------------------------------------\n")
 				TEXT("\n")
 				TEXT("function void G()\n")
 				TEXT("{\n")
@@ -1390,7 +1414,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		}
 	}
 
-	// ---- Lines of dashes typed above functions are dividers, not comments: saving writes one divider between functions ----
+	// ---- Lines of dashes above and between functions are dividers, not comments: saving drops them ----
 	{
 		const TCHAR* Source =
 			TEXT("global int step;\n")
@@ -1425,8 +1449,8 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			{
 				Dividers += Text.Mid(i, 6) == FString(TEXT("// ---")) ? 1 : 0;
 			}
-			Expect(Dividers == 1 && Text.Contains(FString(TEXT("//")) + Bango::GetFunctionSeparatorComment()) && Text.Contains(TEXT("// Puts it back.\nfunction void Second()")),
-				FString(TEXT("function dividers: one divider, between the functions, and the real comment kept:\n")) + Text);
+			Expect(Dividers == 0 && Text.Contains(TEXT("FUNCTIONS =======================\n\nfunction void First()")) && Text.Contains(TEXT("}\n\n// Puts it back.\nfunction void Second()")),
+				FString(TEXT("function dividers: no dividers, and the real comment kept:\n")) + Text);
 			FBangoGraphDocument Again;
 			FString Text2;
 			Expect(Bango::BuildGraph(Text, TEXT("dividers.bango"), Again, Error) && Bango::WriteGraphText(Again, Text2, WriteError) && Text2 == Text, TEXT("function dividers: saving again changes nothing"));

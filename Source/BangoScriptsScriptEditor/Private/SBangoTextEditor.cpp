@@ -610,7 +610,15 @@ void SBangoTextEditor::ReportCursorNodes(bool bForce)
 	TArray<int64> NodeIDs;
 	if (!GetNodesOfLines(FirstLine, LastLine, FunctionName, NodeIDs))
 	{
-		return; // a line that isn't a node ({, };, a declaration): leave the graph's selection alone
+		// A line that isn't a node ({, };, a declaration): the graph's selection is left alone. But if the cursor has
+		// moved into another graph's lines (out of a function, or into one), that's reported, with no nodes.
+		const FBangoScriptNames& Names = Marshaller->GetScriptNames();
+		FunctionName = Names.GetGraphFunctionName(Names.GetLineGraph(TextBox->GetCursorLocation().GetLineIndex()));
+		if (!bForce && bHasReportedNodes && FunctionName.Equals(ReportedFunctionName, ESearchCase::CaseSensitive))
+		{
+			return;
+		}
+		NodeIDs.Reset();
 	}
 	if (!bForce && bHasReportedNodes && FunctionName.Equals(ReportedFunctionName, ESearchCase::CaseSensitive) && NodeIDs == ReportedNodeIDs)
 	{

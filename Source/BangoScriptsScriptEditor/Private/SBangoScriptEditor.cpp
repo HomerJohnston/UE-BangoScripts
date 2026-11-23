@@ -208,6 +208,10 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 					.BorderImage(&FCoreStyle::Get().GetWidgetStyle<FWindowStyle>("Window").BackgroundBrush)
 					.Padding(0.0f)
 					[
+					// The lists, and floating over them, while a function's graph is shown, that function's own panel.
+					SNew(SOverlay)
+					+ SOverlay::Slot()
+					[
 					SNew(SScrollBox)
 					+ SScrollBox::Slot()
 					[
@@ -271,7 +275,10 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 						.Padding(0.0f, 0.0f, 0.0f, 2.0f)
 						[
 							MakeFoldout(LOCTEXT("InputsHeading", "SCRIPT INPUTS"), &bInputsExpanded,
+								// Always the script's own. While a function is shown they're looked at, not edited: its
+								// own are in its panel.
 								SNew(SVerticalBox)
+								.Visibility_Lambda([this]() { return ShownGraph > 0 ? EVisibility::HitTestInvisible : EVisibility::SelfHitTestInvisible; })
 								// An inline script's given inputs (its inputs signature's), read-only.
 								+ SVerticalBox::Slot()
 								.AutoHeight()
@@ -293,10 +300,10 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 								.AutoHeight()
 								[
 								SNew(SBox)
-								.HeightOverride_Lambda([this]() { return VariableListHeight(InputItems.Num()); })
+								.HeightOverride_Lambda([this]() { return VariableListHeight(MainInputItems.Num()); })
 								[
 									SAssignNew(InputList, SListView<TSharedPtr<FInputEntry>>)
-									.ListItemsSource(&InputItems)
+									.ListItemsSource(&MainInputItems)
 									.SelectionMode(ESelectionMode::Single)
 									.ScrollbarVisibility(EVisibility::Collapsed)
 									.ConsumeMouseWheel(EConsumeMouseWheel::Never)
@@ -323,10 +330,10 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 										return FText::Format(LOCTEXT("AddGivenInputTooltip", "This script's inputs are given by {0}, so it can't have others."), FText::FromString(Signature->Label));
 									}
 									return ShownGraph > 0
-										? LOCTEXT("AddFunctionInputTooltip", "Add a parameter to this function. Calls to it need a value for it.")
+										? LOCTEXT("AddScriptInputInFunctionTooltip", "The script's own inputs: go back to the main graph to change them. This function's parameters are in its panel (FUNCTION ARGS).")
 										: LOCTEXT("AddScriptInputTooltip", "Add a parameter to this script (#inputs): a value it's spawned with.");
 								})
-								.IsEnabled_Lambda([this]() { return GetShownEntryNode() != nullptr && (ShownGraph > 0 || GivenInputItems.Num() == 0); })
+								.IsEnabled_Lambda([this]() { return GetShownEntryNode() != nullptr && ShownGraph == 0 && GivenInputItems.Num() == 0; })
 								.OnClicked(this, &SBangoScriptEditor::OnAddInputClicked)
 								[
 									SNew(STextBlock).Text(LOCTEXT("AddInput", "+ Add"))
@@ -369,7 +376,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 								])
 						]
 
-						// LOCAL VARS
+						// SCRIPT VARS
 						+ SVerticalBox::Slot()
 						.AutoHeight()
 						.Padding(0.0f, 0.0f, 0.0f, 2.0f)
@@ -377,12 +384,13 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 							MakeFoldout(LOCTEXT("ScriptVarsHeading", "SCRIPT VARS"), &bLocalsExpanded,
 								SNew(SBox)
 								.Padding(0.0f, 0.0f, 0.0f, 0.0f)
+								.Visibility_Lambda([this]() { return ShownGraph > 0 ? EVisibility::HitTestInvisible : EVisibility::SelfHitTestInvisible; })
 								[
 									SNew(SBox)
-									.HeightOverride_Lambda([this]() { return VariableListHeight(LocalItems.Num()); })
+									.HeightOverride_Lambda([this]() { return VariableListHeight(MainLocalItems.Num()); })
 									[
 										SAssignNew(LocalList, SListView<TSharedPtr<FDeclEntry>>)
-										.ListItemsSource(&LocalItems)
+										.ListItemsSource(&MainLocalItems)
 										.SelectionMode(ESelectionMode::Single)
 										.ScrollbarVisibility(EVisibility::Collapsed)
 										.ConsumeMouseWheel(EConsumeMouseWheel::Never)
@@ -401,11 +409,33 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 								SNew(SButton)
 								.ButtonStyle(FAppStyle::Get(), "SimpleButton")
 								.ContentPadding(FMargin(4.0f, 0.0f))
-								.ToolTipText(LOCTEXT("ScriptVarsHeadingAddTooltip", "Add a script variable to this graph, with the value it starts with. (For a local, which can be given its value anywhere, add a Local node.)"))
-								.IsEnabled_Lambda([this]() { return GetShownEntryNode() != nullptr; })
+								.ToolTipText(LOCTEXT("ScriptVarsHeadingAddTooltip", "Add a script variable to the script, with the value it starts with. (For a local, which can be given its value anywhere, add a Local node.) While a function is shown, its own are added in its panel."))
+								.IsEnabled_Lambda([this]() { return GetShownEntryNode() != nullptr && ShownGraph == 0; })
 								.OnClicked_Lambda([this]() { return OnAddDeclClicked(false); })
 								[
 									SNew(STextBlock).Text(LOCTEXT("LocalsHeadingAdd", "+ Add"))
+								])
+						]
+
+						// LOCAL VARS: the locals the shown graph's nodes declare, and its loops' variables. Shown, not
+						// edited: each belongs to its node (clicking one shows it).
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(0.0f, 0.0f, 0.0f, 2.0f)
+						[
+							MakeFoldout(LOCTEXT("LocalVarsHeading", "LOCAL VARS"), &bNodeLocalsExpanded,
+								SNew(SBox)
+								.HeightOverride_Lambda([this]() { return VariableListHeight(MainNodeLocalItems.Num()); })
+								.Visibility_Lambda([this]() { return ShownGraph > 0 ? EVisibility::HitTestInvisible : EVisibility::SelfHitTestInvisible; })
+								[
+									SAssignNew(NodeLocalList, SListView<TSharedPtr<FDeclEntry>>)
+									.ListItemsSource(&MainNodeLocalItems)
+									.SelectionMode(ESelectionMode::Single)
+									.ScrollbarVisibility(EVisibility::Collapsed)
+									.ConsumeMouseWheel(EConsumeMouseWheel::Never)
+									.AllowOverscroll(EAllowOverscroll::No)
+									.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateDeclRow)
+									.OnMouseButtonClick(this, &SBangoScriptEditor::OnDeclClicked)
 								])
 						]
 
@@ -445,6 +475,14 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 									SNew(STextBlock).Text(LOCTEXT("AddFunction", "+ Add"))
 								])
 						]
+					]
+					]
+					+ SOverlay::Slot()
+					.HAlign(HAlign_Fill)
+					.VAlign(VAlign_Bottom)
+					.Padding(4.0f)
+					[
+						MakeFunctionPanel()
 					]
 					]
 				]
@@ -1296,8 +1334,13 @@ void SBangoScriptEditor::UpdateInputs()
 	const UBangoEdGraphNode* Entry = GetShownEntryNode();
 	// The given inputs are part of what's shown: another inline script can have the same text with other ones.
 	FString SignatureError;
-	const TSharedPtr<const FBangoInputsSignature> Signature = ShownGraph == 0 ? GetInputsSignature(SignatureError) : nullptr;
-	const FString Text = (Entry ? Entry->Text : FString()) + TEXT("\n") + (Signature.IsValid() ? Signature->Label + TEXT(": ") + Signature->ToInputsText() : FString());
+	// The pane's SCRIPT INPUTS always lists the script's own (the ones it's given, and its #inputs), whichever graph
+	// is shown; a function's parameters are in its panel (FUNCTION ARGS).
+	const bool bFunction = ShownGraph > 0;
+	const TSharedPtr<const FBangoInputsSignature> Signature = ShownGraph >= 0 ? GetInputsSignature(SignatureError) : nullptr;
+	const UBangoEdGraphNode* MainEntry = bFunction && EdGraphs.Num() > 0 ? BangoScriptEditor::FindEntryNode(EdGraphs[0].Get()) : nullptr;
+	const FString Text = (Entry ? Entry->Text : FString()) + TEXT("\n") + (Signature.IsValid() ? Signature->Label + TEXT(": ") + Signature->ToInputsText() : FString())
+		+ TEXT("\n") + (MainEntry ? MainEntry->Text : FString());
 	if (InputsGraph == ShownGraph && InputsText == Text && (Entry != nullptr || InputItems.Num() == 0))
 	{
 		return;
@@ -1312,7 +1355,7 @@ void SBangoScriptEditor::UpdateInputs()
 		for (int32 i = 0; i < Signature->Params.Num(); ++i)
 		{
 			TSharedPtr<FInputEntry> Item = MakeShared<FInputEntry>();
-			Item->Index = i;
+			Item->Index = GivenTooltips.Num();
 			Item->Param.Type = Signature->Params[i].Type.ToString();
 			Item->Param.Name = Signature->Params[i].Name;
 			GivenInputItems.Add(Item);
@@ -1337,11 +1380,42 @@ void SBangoScriptEditor::UpdateInputs()
 		TSharedPtr<FInputEntry> Item = MakeShared<FInputEntry>();
 		Item->Index = i;
 		Item->Param = Params[i];
+		Item->bMain = !bFunction;
 		InputItems.Add(Item);
+	}
+	// What the lists show. The pane's: the main graph's parameters, which are InputItems themselves while the main
+	// graph is shown (so they're edited there), and otherwise a copy to look at. The function panel's: InputItems
+	// while a function is shown.
+	if (bFunction)
+	{
+		FunctionInputItems = InputItems;
+		MainInputItems.Reset();
+		TArray<FBangoEntryParam> ScriptParams;
+		if (MainEntry)
+		{
+			Bango::ReadEntryParams(MainEntry->Text, false, ScriptParams);
+		}
+		for (int32 i = 0; i < ScriptParams.Num(); ++i)
+		{
+			TSharedPtr<FInputEntry> Item = MakeShared<FInputEntry>();
+			Item->Index = i;
+			Item->Param = ScriptParams[i];
+			Item->bMain = true;
+			MainInputItems.Add(Item);
+		}
+	}
+	else
+	{
+		MainInputItems = InputItems;
+		FunctionInputItems.Reset();
 	}
 	if (InputList.IsValid())
 	{
 		InputList->RequestListRefresh();
+	}
+	if (FunctionInputList.IsValid())
+	{
+		FunctionInputList->RequestListRefresh();
 	}
 
 	// A new input is renamed straight away, once its row exists (next frame).
@@ -1476,19 +1550,21 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateInputRow(TSharedPtr<FInputEn
 	// is typed without quotes. Required parameters must come before optional ones, so a required parameter can only
 	// get a default if every parameter after it already has one (it's the last required one); otherwise its box is
 	// locked. (Clearing an optional one's default can still be refused, if an optional one comes before it.)
+	// (A row of the pane's list is the main graph's even while a function is shown: Item->bMain, not ShownGraph.)
+	const bool bMainRow = Item.IsValid() && Item->bMain;
 	TSharedRef<SWidget> DefaultBox = SNullWidget::NullWidget;
-	if (ShownGraph == 0)
+	if (bMainRow)
 	{
 		bool bCanEditDefault = Param.bHasDefault;
 		if (!bCanEditDefault)
 		{
 			bCanEditDefault = true;
-			for (int32 Later = Index + 1; Later < InputItems.Num(); ++Later)
+			for (int32 Later = Index + 1; Later < MainInputItems.Num(); ++Later)
 			{
-				bCanEditDefault = bCanEditDefault && InputItems[Later]->Param.bHasDefault;
+				bCanEditDefault = bCanEditDefault && MainInputItems[Later]->Param.bHasDefault;
 			}
 		}
-		const UBangoEdGraphNode* Entry = GetShownEntryNode();
+		const UBangoEdGraphNode* Entry = EdGraphs.Num() > 0 ? BangoScriptEditor::FindEntryNode(EdGraphs[0].Get()) : nullptr;
 		const FBangoNodeField* Field = Entry ? Entry->Layout.Fields.FindByPredicate([&Param](const FBangoNodeField& Each)
 		{
 			return Each.Label == Param.Name;
@@ -1595,7 +1671,7 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateInputRow(TSharedPtr<FInputEn
 			.VAlign(VAlign_Center)
 			[
 				SNew(SBox)
-				.WidthOverride(ShownGraph == 0 ? 96.0f : 0.0f)
+				.WidthOverride(bMainRow ? 96.0f : 0.0f)
 				[
 					DefaultBox
 				]
@@ -1922,6 +1998,9 @@ void SBangoScriptEditor::UpdateVariables(const FBangoGraphDocument& Document, co
 	// script variables, then (greyed) the locals its nodes declare and its loop variables.
 	TArray<TSharedPtr<FDeclEntry>> Globals;
 	TArray<TSharedPtr<FDeclEntry>> Locals;
+	TArray<TSharedPtr<FDeclEntry>> NodeLocals;
+	TArray<TSharedPtr<FDeclEntry>> MainLocals;
+	TArray<TSharedPtr<FDeclEntry>> MainNodeLocals;
 	const FBangoGraph* Shown = !EdGraphs.IsValidIndex(ShownGraph) ? nullptr : ShownGraph == 0 ? &Document.Main
 		: Document.Functions.IsValidIndex(ShownGraph - 1) ? &Document.Functions[ShownGraph - 1] : nullptr;
 	if (Shown)
@@ -1941,30 +2020,83 @@ void SBangoScriptEditor::UpdateVariables(const FBangoGraphDocument& Document, co
 			Item->Decl = Shown->ScriptVars[i];
 			Locals.Add(Item);
 		}
-		for (const FBangoGraphVariable& Variable : Variables)
+		// GLOBAL VARS and the pane's own lists always describe the main graph, whichever graph is shown: a function's
+		// are in its floating panel (MakeFunctionPanel).
+		TArray<FBangoGraphVariable> MainVariables;
+		if (ShownGraph > 0)
 		{
-			const bool bUndeclared = Variable.Kind == FBangoGraphVariable::EKind::Global && Variable.Index == INDEX_NONE;
-			const bool bNodeLocal = Variable.Kind == FBangoGraphVariable::EKind::Local;
-			const bool bScripts = Variable.Kind == FBangoGraphVariable::EKind::Script;
-			if (!bUndeclared && !bNodeLocal && !bScripts && Variable.Kind != FBangoGraphVariable::EKind::Loop)
-			{
-				continue;
-			}
+			Bango::GetGraphVariables(Document, INDEX_NONE, Context, MainVariables);
+		}
+		const TArray<FBangoGraphVariable>& PaneVariables = ShownGraph > 0 ? MainVariables : Variables;
+		auto MakeGreyed = [](const FBangoGraphVariable& Variable)
+		{
+			const bool bUndeclared = Variable.Kind == FBangoGraphVariable::EKind::Global;
 			TSharedPtr<FDeclEntry> Item = MakeShared<FDeclEntry>();
 			Item->bGlobal = bUndeclared;
 			Item->bReadOnly = true;
-			Item->bNodeLocal = bNodeLocal;
-			Item->bScripts = bScripts;
+			Item->bNodeLocal = Variable.Kind == FBangoGraphVariable::EKind::Local;
 			Item->Decl.Name = Variable.Name;
 			Item->Decl.Type = Variable.Type;
-			Item->LoopNode = bUndeclared || bScripts ? INDEX_NONE : Variable.Index;
-			(bUndeclared ? Globals : Locals).Add(Item);
+			Item->LoopNode = bUndeclared ? INDEX_NONE : Variable.Index;
+			return Item;
+		};
+		auto IsNodeVariable = [](const FBangoGraphVariable& Variable)
+		{
+			return Variable.Kind == FBangoGraphVariable::EKind::Local || Variable.Kind == FBangoGraphVariable::EKind::Loop;
+		};
+		// The shown graph's locals and loop variables.
+		for (const FBangoGraphVariable& Variable : Variables)
+		{
+			if (IsNodeVariable(Variable))
+			{
+				NodeLocals.Add(MakeGreyed(Variable));
+			}
+		}
+		// The globals the main graph uses that the file doesn't declare, greyed under GLOBAL VARS.
+		for (const FBangoGraphVariable& Variable : PaneVariables)
+		{
+			if (Variable.Kind == FBangoGraphVariable::EKind::Global && Variable.Index == INDEX_NONE)
+			{
+				Globals.Add(MakeGreyed(Variable));
+			}
+		}
+		// While a function is shown: the main graph's script variables, locals and loop variables, for the pane.
+		if (ShownGraph > 0)
+		{
+			for (int32 i = 0; i < Document.Main.ScriptVars.Num(); ++i)
+			{
+				TSharedPtr<FDeclEntry> Item = MakeShared<FDeclEntry>();
+				Item->Index = i;
+				Item->Decl = Document.Main.ScriptVars[i];
+				MainLocals.Add(Item);
+			}
+			for (const FBangoGraphVariable& Variable : MainVariables)
+			{
+				if (IsNodeVariable(Variable))
+				{
+					MainNodeLocals.Add(MakeGreyed(Variable));
+				}
+			}
 		}
 	}
 
 	// Only make the rows again when something changed, so the lists don't flicker or lose their scroll position.
+	// What the lists show. The pane's: the main graph's, which are Locals and NodeLocals themselves while the main
+	// graph is shown (so they're edited there), and otherwise copies to look at. The function panel's FUNCTION
+	// LOCALS: the function's script variables, then its locals and loop variables.
+	TArray<TSharedPtr<FDeclEntry>> FunctionLocals;
+	if (ShownGraph > 0)
+	{
+		FunctionLocals = Locals;
+		FunctionLocals.Append(NodeLocals);
+	}
+	else
+	{
+		MainLocals = Locals;
+		MainNodeLocals = NodeLocals;
+	}
 	FString Shape = FString::Printf(TEXT("%d|"), ShownGraph);
-	for (const TArray<TSharedPtr<FDeclEntry>>* List : { &Globals, &Locals })
+	for (const TArray<TSharedPtr<FDeclEntry>>* List : { &Globals, &MainLocals, &MainNodeLocals, &FunctionLocals })
 	{
 		for (const TSharedPtr<FDeclEntry>& Item : *List)
 		{
@@ -1980,8 +2112,17 @@ void SBangoScriptEditor::UpdateVariables(const FBangoGraphDocument& Document, co
 	DeclsShown = Shape;
 	GlobalItems = Globals;
 	LocalItems = Locals;
+	NodeLocalItems = NodeLocals;
+	MainLocalItems = MainLocals;
+	MainNodeLocalItems = MainNodeLocals;
+	FunctionLocalItems = FunctionLocals;
 	GlobalList->RequestListRefresh();
 	LocalList->RequestListRefresh();
+	NodeLocalList->RequestListRefresh();
+	if (FunctionLocalList.IsValid())
+	{
+		FunctionLocalList->RequestListRefresh();
+	}
 
 	// A new declaration is renamed straight away, once its row exists (next frame).
 	const TArray<TSharedPtr<FDeclEntry>>& PendingIn = bPendingDeclGlobal ? GlobalItems : LocalItems;
@@ -2340,7 +2481,7 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateDeclRow(TSharedPtr<FDeclEntr
 			? (bGlobal
 				? LOCTEXT("UndeclaredGlobalTooltip", "Used here, but this script doesn't declare it: another script or a Blueprint may (or it's a typo). Click + to declare it here. Drag it onto the graph to use it.")
 				: Entry.bScripts
-				? LOCTEXT("ScriptsVariableTooltip", "One of the script's inputs or script variables. Functions see those too (not the main graph's locals), and can change them. It's edited in the main graph. Drag it onto the graph to use it.")
+				? LOCTEXT("ScriptsVariableTooltip", "One of the script's script variables. Functions see those too (not the main graph's locals), and can change them. It's edited in the main graph. Drag it onto the graph to use it.")
 				: Entry.bNodeLocal
 				? LOCTEXT("NodeLocalTooltip", "A local, declared by a Local node (or a Spawn that keeps its copy's id). It exists from that node to the end of its block. Click to show the node. Drag it onto the graph to use it.")
 				: LOCTEXT("LoopVariableTooltip", "A loop's variable, declared by its For or For Each node. Click to show the loop. Drag it onto the graph to use it."))
@@ -2591,9 +2732,18 @@ void SBangoScriptEditor::CloseScript()
 	VariableItems.Reset();
 	GlobalItems.Reset();
 	LocalItems.Reset();
+	NodeLocalItems.Reset();
+	MainLocalItems.Reset();
+	MainNodeLocalItems.Reset();
+	FunctionLocalItems.Reset();
 	DeclsShown.Reset();
 	GlobalList->RequestListRefresh();
 	LocalList->RequestListRefresh();
+	NodeLocalList->RequestListRefresh();
+	if (FunctionLocalList.IsValid())
+	{
+		FunctionLocalList->RequestListRefresh();
+	}
 	ShownGraph = INDEX_NONE;
 	UpdateInputs();
 	SavedDocument = FBangoGraphDocument();
@@ -2855,6 +3005,109 @@ void SBangoScriptEditor::ShowMessage(const FText& Message)
 }
 
 // ---- The left pane's foldouts, and the reference pane's COMMANDS and NODES lists ----
+
+TSharedRef<SWidget> SBangoScriptEditor::MakeFunctionPanel()
+{
+	// The function scope panel: floats over the script data pane while a function's graph is shown, with that
+	// function's own parameters and variables. The pane under it goes on showing the script's.
+	static const FSlateRoundedBoxBrush PanelBrush(FLinearColor(0.012f, 0.012f, 0.012f, 1.0f), 4.0f, FLinearColor(0.85f, 0.08f, 0.08f, 1.0f), 1.5f);
+	return SNew(SBorder)
+		.BorderImage(&PanelBrush)
+		.Padding(FMargin(4.0f, 4.0f, 4.0f, 4.0f))
+		.Visibility_Lambda([this]() { return ShownGraph > 0 ? EVisibility::Visible : EVisibility::Collapsed; })
+		[
+			SNew(SBox)
+			.MaxDesiredHeight(420.0f)
+			[
+				SNew(SScrollBox)
+				+ SScrollBox::Slot()
+				[
+					SNew(SVerticalBox)
+					// The function's name, as the script has it.
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(4.0f, 2.0f, 4.0f, 6.0f)
+					[
+						SNew(STextBlock)
+						.Font(FAppStyle::GetFontStyle("BoldFont"))
+						.Text_Lambda([this]()
+						{
+							return FText::FromString(ShownGraph > 0 && GraphItems.IsValidIndex(ShownGraph) && GraphItems[ShownGraph].IsValid() ? GraphItems[ShownGraph]->Label : FString());
+						})
+						.ToolTipText(LOCTEXT("FunctionPanelTooltip", "The function whose graph is shown. Its own parameters and variables are here; the lists behind this panel are still the script's."))
+					]
+					// FUNCTION ARGS: its parameters.
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 0.0f, 0.0f, 2.0f)
+					[
+						MakeFoldout(LOCTEXT("FunctionArgsHeading", "FUNCTION ARGS"), &bFunctionArgsExpanded,
+							SNew(SBox)
+							.HeightOverride_Lambda([this]() { return VariableListHeight(FunctionInputItems.Num()); })
+							[
+								SAssignNew(FunctionInputList, SListView<TSharedPtr<FInputEntry>>)
+								.ListItemsSource(&FunctionInputItems)
+								.SelectionMode(ESelectionMode::Single)
+								.ScrollbarVisibility(EVisibility::Collapsed)
+								.ConsumeMouseWheel(EConsumeMouseWheel::Never)
+								.AllowOverscroll(EAllowOverscroll::No)
+								.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateInputRow)
+								.OnMouseButtonDoubleClick_Lambda([](TSharedPtr<FInputEntry> Item)
+								{
+									if (TSharedPtr<SInlineEditableTextBlock> Name = Item.IsValid() ? Item->NameWidget.Pin() : nullptr)
+									{
+										Name->EnterEditingMode(); // double-click renames
+									}
+								})
+							],
+							SNew(SButton)
+							.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+							.ContentPadding(FMargin(4.0f, 0.0f))
+							.ToolTipText(LOCTEXT("AddFunctionInputTooltip", "Add a parameter to this function. Calls to it need a value for it."))
+							.IsEnabled_Lambda([this]() { return ShownGraph > 0 && GetShownEntryNode() != nullptr; })
+							.OnClicked(this, &SBangoScriptEditor::OnAddInputClicked)
+							[
+								SNew(STextBlock).Text(LOCTEXT("AddFunctionArg", "+ Add"))
+							])
+					]
+					// FUNCTION LOCALS: its script variables, then (greyed) the locals its nodes declare and its loops' variables.
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					[
+						MakeFoldout(LOCTEXT("FunctionLocalsHeading", "FUNCTION LOCALS"), &bFunctionLocalsExpanded,
+							SNew(SBox)
+							.HeightOverride_Lambda([this]() { return VariableListHeight(FunctionLocalItems.Num()); })
+							[
+								SAssignNew(FunctionLocalList, SListView<TSharedPtr<FDeclEntry>>)
+								.ListItemsSource(&FunctionLocalItems)
+								.SelectionMode(ESelectionMode::Single)
+								.ScrollbarVisibility(EVisibility::Collapsed)
+								.ConsumeMouseWheel(EConsumeMouseWheel::Never)
+								.AllowOverscroll(EAllowOverscroll::No)
+								.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateDeclRow)
+								.OnMouseButtonClick(this, &SBangoScriptEditor::OnDeclClicked)
+								.OnMouseButtonDoubleClick_Lambda([](TSharedPtr<FDeclEntry> Item)
+								{
+									if (TSharedPtr<SInlineEditableTextBlock> Name = Item.IsValid() ? Item->NameWidget.Pin() : nullptr)
+									{
+										Name->EnterEditingMode(); // double-click renames
+									}
+								})
+							],
+							SNew(SButton)
+							.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+							.ContentPadding(FMargin(4.0f, 0.0f))
+							.ToolTipText(LOCTEXT("AddFunctionLocalTooltip", "Add a script variable to this function: one with a fixed starting value, given again on each call. (For a local, which can be given its value anywhere, add a Local node.)"))
+							.IsEnabled_Lambda([this]() { return ShownGraph > 0 && GetShownEntryNode() != nullptr; })
+							.OnClicked_Lambda([this]() { return OnAddDeclClicked(false); })
+							[
+								SNew(STextBlock).Text(LOCTEXT("AddFunctionLocal", "+ Add"))
+							])
+					]
+				]
+			]
+		];
+}
 
 TSharedRef<SWidget> SBangoScriptEditor::MakeFoldout(const FText& Title, bool* bExpanded, TSharedRef<SWidget> Body, TSharedPtr<SWidget> Extra)
 {
@@ -6061,7 +6314,14 @@ void SBangoScriptEditor::OnTextCursorNodes(const FString& FunctionName, const TA
 	}
 	if (Found.Num() == 0)
 	{
-		return; // a line typed in and not applied yet, say
+		// No node: a line typed in and not applied yet, say. Or the cursor has only moved into another graph's
+		// lines (out of a function, or into one): that graph is shown, and its nodes are left as they are.
+		if (NodeIDs.Num() == 0 && GraphIndex != ShownGraph)
+		{
+			TGuardValue<bool> ScopeGuard(bSyncingFromText, true);
+			ShowGraph(GraphIndex, /*bZoomToFit*/ false);
+		}
+		return;
 	}
 
 	TGuardValue<bool> Guard(bSyncingFromText, true);

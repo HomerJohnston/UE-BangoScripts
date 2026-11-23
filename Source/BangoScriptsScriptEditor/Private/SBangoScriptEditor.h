@@ -129,11 +129,22 @@ private:
 	{
 		int32 Index = INDEX_NONE;
 		FBangoEntryParam Param;
+		/** One of the main graph's parameters (a row of the pane's SCRIPT INPUTS), not a function's (FUNCTION ARGS). */
+		bool bMain = false;
 		/** The name in the INPUTS list, for renaming. */
 		TWeakPtr<SInlineEditableTextBlock> NameWidget;
 	};
+	/** The shown graph's parameters: what the editing functions work on (by index). */
 	TArray<TSharedPtr<FInputEntry>> InputItems;
+	/**
+	 * What the pane's SCRIPT INPUTS list shows: always the main graph's parameters. InputItems themselves while the
+	 * main graph is shown; while a function is, a copy to look at (the list can't be clicked then).
+	 */
+	TArray<TSharedPtr<FInputEntry>> MainInputItems;
 	TSharedPtr<SListView<TSharedPtr<FInputEntry>>> InputList;
+	/** What the function panel's FUNCTION ARGS list shows: InputItems while a function is shown, else nothing. */
+	TArray<TSharedPtr<FInputEntry>> FunctionInputItems;
+	TSharedPtr<SListView<TSharedPtr<FInputEntry>>> FunctionInputList;
 	/**
 	 * In the main graph of an inline script with an inputs signature: the inputs its owner gives it, listed above
 	 * InputItems (which it then can't have), read-only. Param holds each one's type and name; GivenTooltips, what it is.
@@ -159,7 +170,7 @@ private:
 		int32 Index = INDEX_NONE;
 		FBangoGraphDecl Decl;
 		/**
-		 * A loop variable or a local declared by a node (in the SCRIPT VARS list), or a global declared elsewhere
+		 * A loop variable or a local declared by a node (in the LOCAL VARS list), or a global declared elsewhere
 		 * (GLOBAL VARS): shown greyed, not edited here.
 		 */
 		bool bReadOnly = false;
@@ -173,8 +184,25 @@ private:
 	};
 	TArray<TSharedPtr<FDeclEntry>> GlobalItems;
 	TArray<TSharedPtr<FDeclEntry>> LocalItems;
+	/** LOCAL VARS: the locals the shown graph's nodes declare and its loops' variables, greyed (they're edited on their nodes). */
+	TArray<TSharedPtr<FDeclEntry>> NodeLocalItems;
 	TSharedPtr<SListView<TSharedPtr<FDeclEntry>>> GlobalList;
 	TSharedPtr<SListView<TSharedPtr<FDeclEntry>>> LocalList;
+	TSharedPtr<SListView<TSharedPtr<FDeclEntry>>> NodeLocalList;
+	/**
+	 * LocalItems and NodeLocalItems are the shown graph's (what the editing functions work on). What the pane's SCRIPT
+	 * VARS and LOCAL VARS lists show is always the main graph's: those same items while the main graph is shown, and
+	 * copies to look at while a function is. FUNCTION LOCALS, in the function panel, shows the function's: its script
+	 * variables, then its locals and loop variables.
+	 */
+	TArray<TSharedPtr<FDeclEntry>> MainLocalItems;
+	TArray<TSharedPtr<FDeclEntry>> MainNodeLocalItems;
+	TArray<TSharedPtr<FDeclEntry>> FunctionLocalItems;
+	TSharedPtr<SListView<TSharedPtr<FDeclEntry>>> FunctionLocalList;
+	/** The function scope panel: floats over the script data pane while a function's graph is shown. */
+	TSharedRef<SWidget> MakeFunctionPanel();
+	bool bFunctionArgsExpanded = true;
+	bool bFunctionLocalsExpanded = true;
 
 	/** The left pane's foldouts, open or closed. */
 	bool bDescriptionExpanded = true;
@@ -183,6 +211,7 @@ private:
 	bool bInputsExpanded = true;
 	bool bGlobalsExpanded = true;
 	bool bLocalsExpanded = true;
+	bool bNodeLocalsExpanded = true;
 	/** One of the reference pane's tabs (COMMANDS or NODES): a search box, an order, and a list in group foldouts. */
 	struct FReferenceList
 	{

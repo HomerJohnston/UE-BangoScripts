@@ -43,7 +43,7 @@ namespace BangoGraphWriterPrivate
 	class FWriter
 	{
 	public:
-		FWriter(FString& InError, bool bInCompact) : Error(InError), bCompact(bInCompact) {}
+		FWriter(FString& InError, bool bInCompact, bool bInFunctionsHeading) : Error(InError), bCompact(bInCompact), bFunctionsHeading(bInFunctionsHeading) {}
 
 		bool Run(const FBangoGraphDocument& Doc, FString& OutText)
 		{
@@ -126,15 +126,19 @@ namespace BangoGraphWriterPrivate
 				}
 			}
 
-			// Functions, depth-first by first use: a FUNCTIONS heading before the first, and a line between the others.
+			// Functions, depth-first by first use: a FUNCTIONS heading before the first (in a compact script too: it's
+			// the one heading those keep), and a blank line between the others. No line of dashes between them.
 			bool bFirstFunction = true;
 			for (int32 FunctionIndex : Bango::GetFunctionWriteOrder(Doc))
 			{
 				const FBangoGraph& Function = Doc.Functions[FunctionIndex];
-				AddBlank();
-				if (!bCompact)
+				if (Out.Num() > 0)
 				{
-					AddCode(0, -1, FString(TEXT("//")) + (bFirstFunction ? Bango::GetFunctionsHeadingComment() : Bango::GetFunctionSeparatorComment()), nullptr);
+					AddBlank();
+				}
+				if (bFirstFunction && bFunctionsHeading)
+				{
+					AddCode(0, -1, FString(TEXT("//")) + Bango::GetFunctionsHeadingComment(), nullptr);
 					AddBlank();
 				}
 				bFirstFunction = false;
@@ -177,7 +181,8 @@ namespace BangoGraphWriterPrivate
 				}
 				Out = MoveTemp(Kept);
 			}
-			if (bCompact && Doc.Description.IsEmpty() && Out.Num() > 0 && Out[0].DetachedIndent < 0 && Out[0].Code.StartsWith(TEXT("//"), ESearchCase::CaseSensitive))
+			if (bCompact && Doc.Description.IsEmpty() && Out.Num() > 0 && Out[0].DetachedIndent < 0 && Out[0].Code.StartsWith(TEXT("//"), ESearchCase::CaseSensitive)
+				&& !Bango::IsSectionHeadingComment(Out[0].Code.Mid(2, Out[0].Code.Len() - 2))) // (the FUNCTIONS heading is never a description)
 			{
 				Out.Insert(FOutLine(), 0);
 			}
@@ -190,6 +195,8 @@ namespace BangoGraphWriterPrivate
 		FString& Error;
 		/** No section headings and no node metadata (and so no reroutes): see FBangoGraphWriteOptions. */
 		bool bCompact = false;
+		/** The FUNCTIONS heading above the first function: always, except in an inline script's box (Options.bCompact). */
+		bool bFunctionsHeading = true;
 		/** Compact: the comments of reroutes skipped since the last node written (CarryComment). */
 		FString CarriedComment;
 		TArray<FOutLine> Out;
@@ -875,7 +882,7 @@ namespace Bango
 	bool WriteGraphText(const FBangoGraphDocument& Document, FString& OutText, FString& OutError, const FBangoGraphWriteOptions& Options)
 	{
 		OutError.Reset();
-		BangoGraphWriterPrivate::FWriter Writer(OutError, IsWrittenCompact(Document, Options));
+		BangoGraphWriterPrivate::FWriter Writer(OutError, IsWrittenCompact(Document, Options), /*bFunctionsHeading*/ !Options.bCompact);
 		if (!Writer.Run(Document, OutText))
 		{
 			OutText.Reset();

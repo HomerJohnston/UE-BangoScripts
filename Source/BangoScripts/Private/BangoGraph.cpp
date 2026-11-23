@@ -1212,11 +1212,6 @@ namespace Bango
 		return TEXT(" ============ FUNCTIONS =======================");
 	}
 
-	const TCHAR* GetFunctionSeparatorComment()
-	{
-		return TEXT(" ----------------------------------------------");
-	}
-
 	bool IsSectionHeadingComment(const FString& CommentText)
 	{
 		return CommentText.TrimStart().StartsWith(TEXT("===="), ESearchCase::CaseSensitive);
@@ -1224,8 +1219,8 @@ namespace Bango
 
 	bool IsFunctionSeparatorComment(const FString& CommentText)
 	{
-		// Ours, or any line of dashes typed by hand (`// --------`, of any length from ten): between functions it's a
-		// divider either way. Kept as a function's comment, it would be written back beside the one saving adds.
+		// Any line of dashes (`// --------`, of any length from ten): between functions it's a divider, as files used
+		// to have there and as typed by hand. It's dropped, not kept as the next function's comment.
 		const FString Trimmed = CommentText.TrimStartAndEnd();
 		if (Trimmed.Len() < 10)
 		{
