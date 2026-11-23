@@ -1465,9 +1465,11 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateGivenInputRow(TSharedPtr<FIn
 				.VAlign(VAlign_Center)
 				.Padding(4.0f, 0.0f, 6.0f, 0.0f)
 				[
+					// The type is its icon; hovering it says which.
 					SNew(SImage)
 					.Image(Icon)
 					.ColorAndOpacity(Tint)
+					.ToolTipText(FText::FromString(Param.Type))
 				]
 				+ SHorizontalBox::Slot()
 				.FillWidth(1.0f)
@@ -1475,14 +1477,6 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateGivenInputRow(TSharedPtr<FIn
 				[
 					SNew(STextBlock)
 					.Text(FText::FromString(Param.Name))
-				]
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Center)
-				[
-					SNew(STextBlock)
-					.Text(FText::FromString(Param.Type))
-					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 				]
 			]
 		];
@@ -1619,7 +1613,7 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateInputRow(TSharedPtr<FInputEn
 				.ComboButtonStyle(FAppStyle::Get(), "SimpleComboButton")
 				.HasDownArrow(false)
 				.ContentPadding(FMargin(2.0f, 1.0f))
-				.ToolTipText(FText::Format(LOCTEXT("InputTypeTooltip", "{0}. Click to change the type."), FText::FromString(Param.Type)))
+				.ToolTipText(FText::Format(LOCTEXT("InputTypeTooltip", "{0}. Click to change."), FText::FromString(Param.Type)))
 				.OnGetMenuContent_Lambda([this, Index]() { return MakeInputTypeMenu(Index); })
 				.ButtonContent()
 				[
@@ -1650,25 +1644,12 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateInputRow(TSharedPtr<FInputEn
 					}
 				})
 			]
-			// The type and default columns have fixed widths, so they line up from row to row.
+			// (No type column: the type is its icon, which says it when hovered.) The default column has a fixed width,
+			// so it lines up from row to row.
 			+ SHorizontalBox::Slot()
 			.AutoWidth()
 			.VAlign(VAlign_Center)
-			.Padding(6.0f, 0.0f, 6.0f, 0.0f)
-			[
-				SNew(SBox)
-				.WidthOverride(64.0f)
-				[
-					SNew(STextBlock)
-					.Text(FText::FromString(Param.Type))
-					.ToolTipText(FText::FromString(Param.Type))
-					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-					.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
-				]
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
+			.Padding(6.0f, 0.0f, 0.0f, 0.0f)
 			[
 				SNew(SBox)
 				.WidthOverride(bMainRow ? 96.0f : 0.0f)
@@ -2551,9 +2532,11 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateDeclRow(TSharedPtr<FDeclEntr
 				.VAlign(VAlign_Center)
 				.Padding(18.0f, 0.0f, 6.0f, 0.0f)
 				[
+					// The type is its icon; hovering it says which.
 					SNew(SImage)
 					.Image(Icon)
 					.ColorAndOpacity(Tint * FLinearColor(1.0f, 1.0f, 1.0f, 0.6f))
+					.ToolTipText(Entry.Decl.Type.IsEmpty() ? LOCTEXT("UnknownTypeTooltip", "Unknown type") : FText::FromString(Entry.Decl.Type))
 				]
 				+ SHorizontalBox::Slot()
 				.FillWidth(1.0f)
@@ -2563,20 +2546,16 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateDeclRow(TSharedPtr<FDeclEntr
 					.Text(FText::FromString(Entry.Decl.Name))
 					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 				]
+				// An undeclared global says where it's from; a local or loop variable has nothing here (no type label).
 				+ SHorizontalBox::Slot()
 				.AutoWidth()
 				.VAlign(VAlign_Center)
 				.Padding(6.0f, 0.0f, 6.0f, 0.0f)
 				[
-					SNew(SBox)
-					.WidthOverride(bGlobal ? 64.0f : 160.0f)
-					[
-						SNew(STextBlock)
-						.Text(bGlobal ? LOCTEXT("DeclaredElsewhere", "elsewhere")
-							: FText::Format(LOCTEXT("LoopVariableType", "{0} (loop)"), FText::FromString(Entry.Decl.Type.IsEmpty() ? FString(TEXT("?")) : Entry.Decl.Type)))
-						.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-						.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
-					]
+					SNew(STextBlock)
+					.Visibility(bGlobal ? EVisibility::Visible : EVisibility::Collapsed)
+					.Text(LOCTEXT("DeclaredElsewhere", "elsewhere"))
+					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 				]
 				+ SHorizontalBox::Slot()
 				.AutoWidth()
@@ -2668,25 +2647,12 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateDeclRow(TSharedPtr<FDeclEntr
 					}
 				})
 			]
-			// The type and value columns have fixed widths, so they line up from row to row.
+			// (No type column: the type is its icon, which says it when hovered.) The value column has a fixed width,
+			// so it lines up from row to row.
 			+ SHorizontalBox::Slot()
 			.AutoWidth()
 			.VAlign(VAlign_Center)
-			.Padding(6.0f, 0.0f, 6.0f, 0.0f)
-			[
-				SNew(SBox)
-				.WidthOverride(64.0f)
-				[
-					SNew(STextBlock)
-					.Text(FText::FromString(DeclType))
-					.ToolTipText(FText::FromString(DeclType))
-					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-					.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
-				]
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
+			.Padding(6.0f, 0.0f, 0.0f, 0.0f)
 			[
 				SNew(SBox)
 				.WidthOverride(96.0f)

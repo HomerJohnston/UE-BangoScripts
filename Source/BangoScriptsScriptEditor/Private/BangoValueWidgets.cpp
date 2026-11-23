@@ -138,7 +138,7 @@ void SBangoTypePicker::Construct(const FArguments& InArgs)
 		.ComboButtonStyle(FAppStyle::Get(), "SimpleComboButton")
 		.HasDownArrow(false)
 		.ContentPadding(FMargin(2.0f, 1.0f))
-		.ToolTipText_Lambda([this]() { return FText::Format(LOCTEXT("TypeTooltip", "{0}. Click to change the type."), FText::FromString(Type.Get(FString()))); })
+		.ToolTipText_Lambda([this]() { return FText::Format(LOCTEXT("TypeTooltip", "{0}. Click to change."), FText::FromString(Type.Get(FString()))); })
 		.OnGetMenuContent_Lambda([this]()
 		{
 			FOnBangoTypePicked Picked = OnTypePicked;
