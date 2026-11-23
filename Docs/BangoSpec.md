@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.92)
+# Bango Language Spec (draft v0.93)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.93:** **constants**: any class with inline scripts can give them named values that are set in the details panel, one list per placed object (section 15, Constants). `FBangoConstant` is a name, a type and a value on one row, with the script editor's type picker and value box; **an `entity` constant is an actor picked in the level, and an `entity[]` a list of picked actors**, so actors without a Bango ID can be used. `Bango::SetConstantInputs` gives an object's scripts its constants as their instance inputs, and `Bango::GetConstantValues` gives their values to pass when a script is spawned. This is the trigger plugin's constants system, moved into the base plugin for any owner to use.
 
 **Changes in v0.92:** **a line of dashes typed between functions is a divider, whatever its length** (`// ----------`, ten dashes or more), not a comment: it's dropped when the file is read, and saving writes the one divider between functions (section 12). A hand-typed one of another length used to be kept as the next function's comment, so the file ended up with both.
 
@@ -504,7 +506,7 @@ _count++;
 ### Fixed values
 A **fixed value** is one written out, with nothing to work out: a number (`5`, `-2.5`), a string, `true`, `false`, `nil`, a Bango ID (`@john`, or `player`), a text (`INVTEXT("...")`, `NSLOCTEXT(...)`, and in a script `LOCTEXT(...)`), or an array of those (`[1, -2]`, and `[0, 0, 100]` for a vector). Script variables' starting values, globals' defaults and inputs' defaults are fixed values.
 
-C++ can read one from text, outside any script, for values a designer types into a property (a trigger's constants, passed to its scripts as instance inputs, section 15):
+C++ can read one from text, outside any script, for values a designer types into a property (an object's constants, passed to its scripts as instance inputs, section 15):
 ```cpp
 FBangoValue Value;
 FString Error;
@@ -1933,8 +1935,41 @@ SNew(SBangoValueBox)
   - It's **checked as it's typed**: a value that isn't right shows an error mark on the box, with why. Unless `OnCheckValue` is given, the check is `Bango::ParseFixedValue`, so it's the same check as when the value is read.
   - **Committing** (Enter, or the focus leaving): a value that passes is reported as Bango text (`OnValueCommitted`; empty for none); one that doesn't is dropped, the box goes back to the value it had, and `OnValueRejected` gets why. Escape goes back too.
   - A **`text`** typed as plain words is written `INVTEXT("words")`, or, with a `TextNamespace`, `NSLOCTEXT("Namespace", "<a new key>", "words")` (retyping it keeps its key). `UseScriptNamespace` is for values inside a script, where it's a `LOCTEXT`.
-  - It's a plain text box: no autocomplete or colouring (SCRIPT VARS has none either). For an entity, a caller can show an actor picker instead and write `@name` as the value.
+  - It's a plain text box: no autocomplete or colouring (SCRIPT VARS has none either). For an entity, a caller can show an actor picker instead, as a constant's row does (Constants, below).
 - **When the type changes, the value is cleared** (none, so `nil`), since a value made for the old type rarely fits the new one; a value of `nil` stays. The widgets don't hold both, so whoever does applies it: `SBangoValueBox::GetValueAfterTypeChange(Value)`. The name isn't touched.
+
+### Constants
+A **constant** is a named value an object gives its inline scripts and conditions, set per placed object in the details panel: a lever's `_door`, a light switch's `_lamps` and `_colour`. Every script on that object reads it as an input, after the ones its inputs signature gives it, so the same script text works on every placed copy, each with its own values. They're instance inputs (above) with a ready-made property, details row and helpers, in the **BangoScripts** module (`BangoConstant.h`); the row is in **BangoScriptsScriptEditor**, and needs nothing from the owner.
+
+```cpp
+// The owner: any class with inline scripts.
+UPROPERTY(EditAnywhere, Category = "Lever")
+TArray<FBangoConstant> Constants;
+
+UPROPERTY(EditAnywhere, Category = "Lever")
+FBangoInlineScript PulledScript;
+
+// Wherever it's set up, and whenever the list may have changed: PostInitProperties, PostLoad,
+// PostEditChangeProperty, PostEditUndo, and for a component PostApplyToComponent.
+Bango::SetConstantInputs(Constants, { &PulledScript, &ReleasedScript, &Condition });
+
+// When it begins play (or later): the values, once.
+TArray<FString> Errors;
+Bango::GetConstantValues(Constants, ConstantValues, &Errors);   // one value each; a bad one is nil, with a line in Errors
+
+// Spawning a script: its other arguments, then the constants' values.
+TArray<FBangoValue> Args = SignatureArgs;
+Args.Append(ConstantValues);
+UBangoScriptSubsystem::Get(this)->Spawn(PulledScript, Args, GetOwner());
+```
+
+- **`FBangoConstant`** has a **name** (as scripts read it; a leading `_` is usual), a **type** (any type a script variable can have, arrays included) and a **value**. The value is written as a script variable's starting value is, and read by `Bango::ParseFixedValue` (section 4, Fixed values): empty is `nil`.
+- **An `entity` is an actor picked in the level**, with the engine's actor picker and eyedropper, and **an `entity[]` is a list of them**, in order. So any placed actor can be used, with or without a Bango ID component: the script gets its Bango ID name if it has one, and its level ID otherwise (section 4, Entity IDs). No actor is `nil`; a gap in a list is a `nil` element. They're actors of the same level as the owner, as for any actor property. Other arrays of entities (`entity[][]`) are written as text, with `@names`.
+- **In the details panel** each constant is one row, like a row of the script editor's SCRIPT VARS: the name on the left, then the type picker and the value box (section 15, Value widgets), which marks a value that doesn't fit its type as it's typed. An `entity` shows the actor picker instead of the box; an `entity[]` shows how many actors it has, with the buttons to add one and to empty the list, and its actors on rows under the constant's. Picking another type clears the value (and the actors), and leaves the name alone, as one undoable change.
+- **`Bango::SetConstantInputs(Constants, Scripts, &Error)`** gives each of the scripts (inline scripts and conditions; nulls are skipped) the list as its instance inputs: `entity _door`, `entity[] _lamps`. False, with the first error, if a constant doesn't read as an input (a name that isn't one, or two of the same name): the scripts then show that as their own error, in the editor too. `Bango::GetConstantInputs(Constants)` gives the list alone.
+- **`Bango::GetConstantValues(Constants, OutValues, &Errors)`** gives the values in order, always one per constant, to pass after a script's other arguments (and by name for watches, `SetGroupInputs`). One that can't be used (a value that doesn't fit its type) is `nil`, with a line in `Errors` naming it; it returns false if any couldn't. **Call it in a game world**, when the owner begins play or later: an actor's entity is only known there. It registers a picked actor's Bango ID name first if that actor hasn't begun play yet. `FBangoConstant::GetValue` is the same for one constant.
+- **In scripts** a constant is an input like any other: read, passed on, looped over (`forEach (_lamp in _lamps)`), and seen by the script's functions too (section 4). Autocomplete offers them, and SCRIPT INPUTS lists them read-only.
+- **Constants aren't Blueprint-editable yet**: they're for C++ owners. A Blueprint class that has such an owner as a component can set its constants per placed actor, as any other property of it.
 
 ### Level start scripts
 A level can have a **start script**: a script asset that runs when the level begins play, before anything else can start a script. It's for setting up the level: setting globals (`questStage = 0;`), putting actors in their starting state (`@gate Lock();`), and starting the level's ongoing scripts with spawn blocks.

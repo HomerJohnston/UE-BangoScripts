@@ -2,7 +2,9 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "BangoConstant.h"
 #include "BangoGlobalStore.h"
+#include "BangoInlineScript.h"
 #include "BangoTypes.h"
 #include "Serialization/MemoryReader.h"
 #include "Serialization/MemoryWriter.h"
@@ -309,6 +311,72 @@ bool FBangoGlobalsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("loaded count"), Globals->Num(), 2);
 	TestTrue(TEXT("loaded speed"), Globals->Find(TEXT("speed")) && *Globals->Find(TEXT("speed")) == FBangoValue::MakeDouble(3.0));
 	TestTrue(TEXT("loaded gold still nil int"), Globals->Find(TEXT("gold")) && *Globals->Find(TEXT("gold")) == FBangoValue::MakeNil(FBangoType::Int()));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoConstantTest, "Bango.Core.Constants",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FBangoConstantTest::RunTest(const FString& Parameters)
+{
+	// Values that need no world: written as Bango text, and actors that aren't set.
+	TArray<FBangoConstant> Constants;
+	Constants.AddDefaulted(5);
+	Constants[0].Name = TEXT("_count");
+	Constants[0].Type = TEXT("int");
+	Constants[0].Value = TEXT("3");
+	Constants[1].Name = TEXT("_red");
+	Constants[1].Type = TEXT("vector3");
+	Constants[1].Value = TEXT("[1, 0, 0]");
+	Constants[2].Name = TEXT("_door");
+	Constants[2].Type = TEXT("entity");
+	Constants[2].Value = TEXT("this isn't read");
+	Constants[3].Name = TEXT("_lamps");
+	Constants[3].Type = TEXT("entity[]");
+	Constants[3].Actors.Add(nullptr);
+	Constants[4].Name = TEXT("_note");
+	Constants[4].Type = TEXT("string");
+	Constants[4].Value = TEXT("");
+
+	const TArray<FBangoInputDecl> Inputs = Bango::GetConstantInputs(Constants);
+	TestEqual(TEXT("one input per constant"), Inputs.Num(), 5);
+	TestEqual(TEXT("a declaration"), Inputs.Num() > 3 ? Inputs[3].Decl : FString(), FString(TEXT("entity[] _lamps")));
+
+	TArray<FBangoValue> Values;
+	TArray<FString> Errors;
+	TestTrue(TEXT("all the values read"), Bango::GetConstantValues(Constants, Values, &Errors));
+	TestEqual(TEXT("no errors"), Errors.Num(), 0);
+	TestEqual(TEXT("one value per constant"), Values.Num(), 5);
+	if (Values.Num() == 5)
+	{
+		TestTrue(TEXT("an int"), Values[0] == FBangoValue::MakeInt(3));
+		TestTrue(TEXT("a vector"), Values[1] == FBangoValue::MakeVector3(1.0, 0.0, 0.0));
+		TestTrue(TEXT("no actor is a nil entity"), Values[2] == FBangoValue::MakeNil(FBangoType::Entity()));
+		TestTrue(TEXT("an entity[] has an element per actor, nil for none"), !Values[3].IsNil() && Values[3].GetArray().Num() == 1 && Values[3].GetArray()[0].IsNil());
+		TestTrue(TEXT("no text is nil"), Values[4] == FBangoValue::MakeNil(FBangoType::String()));
+	}
+
+	// One that can't be used is nil, with a line saying why; the others are still there.
+	Constants[0].Value = TEXT("\"three\"");
+	Constants[1].Type = TEXT("colour");
+	TestFalse(TEXT("bad values are reported"), Bango::GetConstantValues(Constants, Values, &Errors));
+	TestEqual(TEXT("still one value per constant"), Values.Num(), 5);
+	TestEqual(TEXT("a line per bad one"), Errors.Num(), 2);
+	TestTrue(TEXT("each line names its constant"), Errors.Num() == 2 && Errors[0].StartsWith(TEXT("_count: ")) && Errors[1].StartsWith(TEXT("_red: ")));
+	TestTrue(TEXT("a bad value is nil of its type"), Values.Num() == 5 && Values[0] == FBangoValue::MakeNil(FBangoType::Int()));
+
+	// As the scripts' instance inputs.
+	Constants[0].Value = TEXT("3");
+	Constants[1].Type = TEXT("vector3");
+	FBangoInlineScript Script;
+	FBangoInlineCondition Condition;
+	FString Error;
+	TestTrue(TEXT("the scripts take them as instance inputs"), Bango::SetConstantInputs(Constants, { &Script, nullptr, &Condition }, &Error));
+	TestEqual(TEXT("each script has them all"), Script.GetInstanceInputs().Num(), 5);
+	TestEqual(TEXT("a condition too"), Condition.GetInstanceInputs().Num(), 5);
+	Constants[4].Name = TEXT("_count");
+	TestFalse(TEXT("two of one name is an error"), Bango::SetConstantInputs(Constants, { &Script, &Condition }, &Error));
+	TestFalse(TEXT("which says why"), Error.IsEmpty());
 	return true;
 }
 

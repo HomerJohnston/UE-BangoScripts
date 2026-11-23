@@ -1,4 +1,6 @@
 #include "BangoConnectionDrawingPolicy.h"
+#include "BangoConstant.h"
+#include "BangoConstantCustomization.h"
 #include "BangoInlineScript.h"
 #include "BangoInlineScriptCustomization.h"
 #include "BangoLevelStartScriptMenu.h"
@@ -70,6 +72,9 @@ public:
 		// Bango ID names (FBangoIDName properties): their text box after an '@'.
 		PropertyEditor.RegisterCustomPropertyTypeLayout(FBangoIDName::StaticStruct()->GetFName(),
 			FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FBangoIDNameCustomization::MakeInstance));
+		// Constants (FBangoConstant properties): a name, the type picker and the value box on one row; actors for an entity.
+		PropertyEditor.RegisterCustomPropertyTypeLayout(FBangoConstant::StaticStruct()->GetFName(),
+			FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FBangoConstantCustomization::MakeInstance));
 		PropertyEditor.NotifyCustomizationModuleChanged();
 
 		PinFactory = MakeShared<FBangoGraphPinFactory>();
@@ -113,6 +118,7 @@ public:
 			PropertyEditor->UnregisterCustomPropertyTypeLayout(FBangoInlineScript::StaticStruct()->GetFName());
 			PropertyEditor->UnregisterCustomPropertyTypeLayout(FBangoInlineCondition::StaticStruct()->GetFName());
 			PropertyEditor->UnregisterCustomPropertyTypeLayout(FBangoIDName::StaticStruct()->GetFName());
+			PropertyEditor->UnregisterCustomPropertyTypeLayout(FBangoConstant::StaticStruct()->GetFName());
 		}
 		if (LevelStartScriptMenu.IsValid())
 		{
