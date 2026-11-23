@@ -721,4 +721,22 @@ bool FBangoCompletionTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+#include "BangoValueWidgets.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoActorNamePickerTest, "Bango.ScriptEditor.ValueWidgets.ActorNamePicker",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FBangoActorNamePickerTest::RunTest(const FString& Parameters)
+{
+	// What a picked actor's name does to an entity value, and to a list of them.
+	auto Add = [](const TCHAR* Type, const TCHAR* Value) { return SBangoActorNamePicker::AddNameToValue(Type, Value, TEXT("john")); };
+	TestEqual(TEXT("An entity becomes the actor"), Add(TEXT("entity"), TEXT("@mary")), FString(TEXT("@john")));
+	TestEqual(TEXT("An entity with no value"), Add(TEXT("entity"), TEXT("")), FString(TEXT("@john")));
+	TestEqual(TEXT("A list gets it at its end"), Add(TEXT("entity[]"), TEXT("[@mary, @sue]")), FString(TEXT("[@mary, @sue, @john]")));
+	TestEqual(TEXT("An empty list"), Add(TEXT("entity[]"), TEXT(" [ ] ")), FString(TEXT("[@john]")));
+	TestEqual(TEXT("A list with no value"), Add(TEXT("entity[]"), TEXT("")), FString(TEXT("[@john]")));
+	TestEqual(TEXT("A nil list"), Add(TEXT("entity[]"), TEXT("nil")), FString(TEXT("[@john]")));
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

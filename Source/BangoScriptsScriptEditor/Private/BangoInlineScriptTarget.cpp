@@ -57,6 +57,7 @@ namespace BangoInlineScriptTargetPrivate
 
 FBangoInlineScriptTarget::FBangoInlineScriptTarget(UObject* InOwner, const FString& InPropertyPath, const TSharedPtr<IPropertyHandle>& InStructHandle, const FText& InPropertyLabel)
 	: Owner(InOwner)
+	, OwnerPath(InOwner ? InOwner->GetPathName() : FString())
 	, PropertyPath(InPropertyPath)
 	, StructHandle(InStructHandle)
 	, OwnerLabel(BangoInlineScriptTargetPrivate::LabelOf(InOwner))
@@ -65,9 +66,26 @@ FBangoInlineScriptTarget::FBangoInlineScriptTarget(UObject* InOwner, const FStri
 {
 }
 
+UObject* FBangoInlineScriptTarget::GetOwner() const
+{
+	UObject* Object = Owner.Get();
+	if (IsValid(Object) || OwnerPath.IsEmpty())
+	{
+		return Object;
+	}
+	// Gone: the object that's at its path now, if it still has the script (see the header).
+	UObject* Replacement = FindObject<UObject>(nullptr, *OwnerPath);
+	if (IsValid(Replacement) && Resolve(Replacement, PropertyPath))
+	{
+		Owner = Replacement;
+		return Replacement;
+	}
+	return Object;
+}
+
 TSharedPtr<const FBangoInputsSignature> FBangoInlineScriptTarget::GetInputsSignature(FString& OutError) const
 {
-	const FBangoInlineScriptBase* Script = Resolve(Owner.Get(), PropertyPath);
+	const FBangoInlineScriptBase* Script = Resolve(GetOwner(), PropertyPath);
 	return Script ? Script->FindInputsSignature(OutError) : nullptr;
 }
 
@@ -103,13 +121,13 @@ TSharedPtr<const FBangoInputsSignature> FBangoInlineScriptTarget::GetInputsSigna
 
 FString FBangoInlineScriptTarget::GetKey() const
 {
-	const UObject* Object = Owner.Get();
-	return (Object ? Object->GetPathName() : FString()) + TEXT(":") + PropertyPath;
+	// The path it was opened with, so the key stays the same when the object is replaced.
+	return OwnerPath + TEXT(":") + PropertyPath;
 }
 
 FString FBangoInlineScriptTarget::GetScriptName() const
 {
-	const UObject* Object = Owner.Get();
+	const UObject* Object = GetOwner();
 	return (Object ? Object->GetName() : OwnerLabel) + TEXT(".") + PropertyPath;
 }
 
@@ -120,7 +138,7 @@ FText FBangoInlineScriptTarget::GetDisplayName() const
 
 bool FBangoInlineScriptTarget::Read(FString& OutSource) const
 {
-	const FBangoInlineScriptBase* Script = Resolve(Owner.Get(), PropertyPath);
+	const FBangoInlineScriptBase* Script = Resolve(GetOwner(), PropertyPath);
 	if (!Script)
 	{
 		return false;
@@ -131,7 +149,7 @@ bool FBangoInlineScriptTarget::Read(FString& OutSource) const
 
 bool FBangoInlineScriptTarget::Write(const FString& Source, FString& OutError)
 {
-	UObject* Object = Owner.Get();
+	UObject* Object = GetOwner();
 	FProperty* TopProperty = nullptr;
 	FBangoInlineScriptBase* Script = Resolve(Object, PropertyPath, &TopProperty);
 	if (!Script)

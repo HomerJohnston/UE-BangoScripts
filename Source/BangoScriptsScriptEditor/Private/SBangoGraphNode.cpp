@@ -7,6 +7,7 @@
 #include "BangoGraph.h"
 #include "BangoGraphLayout.h"
 #include "BangoText.h"
+#include "BangoValueWidgets.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
 #include "HAL/PlatformTime.h"
 #include "GraphEditorSettings.h"
@@ -903,9 +904,35 @@ TSharedRef<SWidget> SBangoGraphNode::MakeFieldValue(int32 FieldIndex)
 			];
 	}
 
+	// An entity's value (a command's target, an entity argument) gets an actor picker: it writes the @name of an
+	// actor in the open level that has a named Bango ID.
+	const bool bActorPicker = bEditable && !Field.bVariable && Field.TypeHint == TEXT("entity");
+	if (bActorPicker)
+	{
+		Content = SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot()
+			.FillWidth(1.0f)
+			[
+				Content
+			]
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(2.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(SBangoActorNamePicker)
+				.OnActorNamePicked_Lambda([this, FieldIndex](const FString& Name)
+				{
+					// As if @name had been typed into the field's box and entered.
+					EditingField = FieldIndex;
+					OnValueCommitted(FText::FromString(FString(TEXT("@")) + Name), ETextCommit::OnEnter, FieldIndex);
+				})
+			];
+	}
+
 	return SNew(SBox)
 		.MinDesiredWidth(MinValueWidth)
-		.MaxDesiredWidth(MaxValueWidth + (bLocalized ? IconSize + 4.0f : 0.0f))
+		.MaxDesiredWidth(MaxValueWidth + (bLocalized ? IconSize + 4.0f : 0.0f) + (bActorPicker ? 2.0f * IconSize + 8.0f : 0.0f))
 		[
 			Content
 		];

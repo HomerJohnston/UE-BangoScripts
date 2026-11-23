@@ -34,7 +34,13 @@ public:
 	/** Sets the script's text, as one undoable change. */
 	bool Write(const FString& Source, FString& OutError);
 
-	UObject* GetOwner() const { return Owner.Get(); }
+	/**
+	 * The object the script is on. Unreal replaces some objects while they're being edited: a component an actor's
+	 * Blueprint gave it is made again every time the actor's construction script reruns, which is after any change
+	 * to it, saving this script included. The one it was is then gone, so this finds the one that has taken its
+	 * place (same path), and carries on with that.
+	 */
+	UObject* GetOwner() const;
 
 	/**
 	 * The property is a condition (an FBangoInlineCondition): its script answers true or false, and the editor
@@ -65,7 +71,10 @@ public:
 	static FBangoInlineScriptBase* Resolve(UObject* Owner, const FString& Path, FProperty** OutTopProperty = nullptr);
 
 private:
-	TWeakObjectPtr<UObject> Owner;
+	/** The owner as last found (GetOwner): replaced by the object now at OwnerPath when this one is gone. */
+	mutable TWeakObjectPtr<UObject> Owner;
+	/** The owner's full path when the target was made, to find its replacement by, and for the window's key. */
+	FString OwnerPath;
 	FString PropertyPath;
 	/** The details panel's handle for the struct, while the panel shows it. */
 	TWeakPtr<IPropertyHandle> StructHandle;

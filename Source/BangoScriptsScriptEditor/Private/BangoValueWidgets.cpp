@@ -4,7 +4,12 @@
 #include "BangoEditorStyle.h"
 #include "BangoGraphEdit.h"
 #include "BangoGraphLayout.h"
+#include "BangoIDActorComponent.h"
+#include "Editor.h"
+#include "Engine/World.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
+#include "GameFramework/Actor.h"
+#include "UObject/UObjectIterator.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "Widgets/Images/SImage.h"
@@ -146,6 +151,107 @@ void SBangoTypePicker::Construct(const FArguments& InArgs)
 	];
 }
 
+// ---- SBangoActorNamePicker ----
+
+void SBangoActorNamePicker::GetNamedActors(TArray<FNamedActor>& OutActors)
+{
+	OutActors.Reset();
+	const UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (!World)
+	{
+		return;
+	}
+	for (TObjectIterator<UBangoIDActorComponent> It; It; ++It)
+	{
+		const UBangoIDActorComponent* Component = *It;
+		if (!IsValid(Component) || Component->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject) || Component->GetWorld() != World)
+		{
+			continue;
+		}
+		const AActor* Actor = Component->GetOwner();
+		const FString Name = Component->BangoName.ToString();
+		if (!IsValid(Actor) || Name.IsEmpty())
+		{
+			continue;
+		}
+		FNamedActor& Added = OutActors.AddDefaulted_GetRef();
+		Added.Name = Name;
+		Added.Label = Actor->GetActorLabel();
+	}
+	OutActors.Sort([](const FNamedActor& A, const FNamedActor& B)
+	{
+		const int32 ByName = A.Name.Compare(B.Name, ESearchCase::IgnoreCase);
+		return ByName != 0 ? ByName < 0 : A.Label.Compare(B.Label, ESearchCase::IgnoreCase) < 0;
+	});
+}
+
+FString SBangoActorNamePicker::AddNameToValue(const FString& TypeName, const FString& BangoText, const FString& Name)
+{
+	const FString Entity = FString(TEXT("@")) + Name;
+	if (!TypeName.EndsWith(TEXT("[]"), ESearchCase::CaseSensitive))
+	{
+		return Entity;
+	}
+	const FString Old = BangoText.TrimStartAndEnd();
+	if (Old.Len() < 2 || !Old.StartsWith(TEXT("["), ESearchCase::CaseSensitive) || !Old.EndsWith(TEXT("]"), ESearchCase::CaseSensitive))
+	{
+		return FString::Printf(TEXT("[%s]"), *Entity);
+	}
+	const FString Inside = Old.Mid(1, Old.Len() - 2).TrimStartAndEnd();
+	return Inside.IsEmpty() ? FString::Printf(TEXT("[%s]"), *Entity) : FString::Printf(TEXT("[%s, %s]"), *Inside, *Entity);
+}
+
+TSharedRef<SWidget> SBangoActorNamePicker::MakeMenu() const
+{
+	FMenuBuilder Menu(/*bShouldCloseWindowAfterMenuSelection*/ true, nullptr);
+	TArray<FNamedActor> Actors;
+	GetNamedActors(Actors);
+	Menu.BeginSection(NAME_None, LOCTEXT("NamedActors", "Actors with a Bango ID name"));
+	if (Actors.Num() == 0)
+	{
+		Menu.AddMenuEntry(
+			LOCTEXT("NoNamedActors", "None in this level"),
+			LOCTEXT("NoNamedActorsTip", "No actor in the open level has a Bango ID component with a name. Add one to an actor and name it, and it's listed here."),
+			FSlateIcon(),
+			FUIAction(FExecuteAction(), FCanExecuteAction::CreateLambda([]() { return false; })));
+	}
+	const FOnBangoActorNamePicked Picked = OnActorNamePicked;
+	for (const FNamedActor& Actor : Actors)
+	{
+		const FString Name = Actor.Name;
+		Menu.AddMenuEntry(
+			FText::FromString(FString::Printf(TEXT("@%s"), *Actor.Name)),
+			FText::Format(LOCTEXT("NamedActorTip", "The actor {0} in the open level."), FText::FromString(Actor.Label)),
+			FSlateIcon(),
+			FUIAction(FExecuteAction::CreateLambda([Picked, Name]() { Picked.ExecuteIfBound(Name); })));
+	}
+	Menu.EndSection();
+	return Menu.MakeWidget();
+}
+
+void SBangoActorNamePicker::Construct(const FArguments& InArgs)
+{
+	OnActorNamePicked = InArgs._OnActorNamePicked;
+
+	FLinearColor Tint = FLinearColor::White;
+	const FSlateBrush* Icon = SBangoTypePicker::GetTypeIcon(TEXT("entity"), Tint);
+	ChildSlot
+	[
+		SNew(SComboButton)
+		.ComboButtonStyle(FAppStyle::Get(), "SimpleComboButton")
+		.HasDownArrow(true)
+		.ContentPadding(FMargin(1.0f, 1.0f))
+		.ToolTipText(LOCTEXT("ActorNamePickerTip", "Pick an actor in the open level, by its Bango ID name. Only actors that have a Bango ID component with a name are listed, since only those can be written as @name."))
+		.OnGetMenuContent_Lambda([this]() { return MakeMenu(); })
+		.ButtonContent()
+		[
+			SNew(SImage)
+			.Image(Icon)
+			.ColorAndOpacity(FSlateColor(Tint))
+		]
+	];
+}
+
 // ---- SBangoValueBox ----
 
 void SBangoValueBox::Construct(const FArguments& InArgs)
@@ -160,15 +266,51 @@ void SBangoValueBox::Construct(const FArguments& InArgs)
 
 	ChildSlot
 	[
-		SAssignNew(TextBox, SEditableTextBox)
-		.Text(this, &SBangoValueBox::GetShownText)
-		.HintText(InArgs._HintText)
-		.Font(FCoreStyle::GetDefaultFontStyle("Mono", 9))
-		.SelectAllTextWhenFocused(true)
-		.RevertTextOnEscape(true)
-		.OnTextChanged(this, &SBangoValueBox::HandleTextChanged)
-		.OnTextCommitted(this, &SBangoValueBox::HandleTextCommitted)
+		SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot()
+		.FillWidth(1.0f)
+		.VAlign(VAlign_Center)
+		[
+			SAssignNew(TextBox, SEditableTextBox)
+			.Text(this, &SBangoValueBox::GetShownText)
+			.HintText(InArgs._HintText)
+			.Font(FCoreStyle::GetDefaultFontStyle("Mono", 9))
+			.SelectAllTextWhenFocused(true)
+			.RevertTextOnEscape(true)
+			.OnTextChanged(this, &SBangoValueBox::HandleTextChanged)
+			.OnTextCommitted(this, &SBangoValueBox::HandleTextCommitted)
+		]
+		+ SHorizontalBox::Slot()
+		.AutoWidth()
+		.VAlign(VAlign_Center)
+		.Padding(2.0f, 0.0f, 0.0f, 0.0f)
+		[
+			// An entity, or a list of them: pick an actor in the level instead of typing its @name.
+			SNew(SBangoActorNamePicker)
+			.Visibility_Lambda([this]()
+			{
+				const FString TypeName = Type.Get(FString());
+				return TypeName == TEXT("entity") || TypeName == TEXT("entity[]") ? EVisibility::Visible : EVisibility::Collapsed;
+			})
+			.OnActorNamePicked(this, &SBangoValueBox::HandleActorNamePicked)
+		]
 	];
+}
+
+void SBangoValueBox::HandleActorNamePicked(const FString& Name)
+{
+	const FString BangoText = SBangoActorNamePicker::AddNameToValue(Type.Get(FString()), Value.Get(FString()), Name);
+	FString Error;
+	if (!Check(BangoText, Error))
+	{
+		OnValueRejected.ExecuteIfBound(Error);
+		return;
+	}
+	if (TextBox.IsValid())
+	{
+		TextBox->SetError(FText::GetEmpty());
+	}
+	OnValueCommitted.ExecuteIfBound(BangoText);
 }
 
 FString SBangoValueBox::GetValueAfterTypeChange(const FString& BangoText)

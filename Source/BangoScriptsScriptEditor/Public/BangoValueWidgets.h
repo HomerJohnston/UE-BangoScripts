@@ -27,6 +27,8 @@ DECLARE_DELEGATE_OneParam(FOnBangoTypePicked, const FString& /*TypeName*/);
 DECLARE_DELEGATE_OneParam(FOnBangoValueCommitted, const FString& /*BangoText*/);
 /** A value typed into an SBangoValueBox didn't pass its check, and the box went back to the value it had: why. */
 DECLARE_DELEGATE_OneParam(FOnBangoValueRejected, const FString& /*Error*/);
+/** An actor was picked in an SBangoActorNamePicker: its Bango ID name, without the '@' ("john"). */
+DECLARE_DELEGATE_OneParam(FOnBangoActorNamePicked, const FString& /*Name*/);
 /** Checks a value (as Bango text, never empty) of a type for an SBangoValueBox: false, with why, if it can't be used. */
 DECLARE_DELEGATE_RetVal_ThreeParams(bool, FOnCheckBangoValue, const FString& /*TypeName*/, const FString& /*BangoText*/, FString& /*OutError*/);
 
@@ -62,7 +64,48 @@ private:
 };
 
 /**
- * The value box: a one-line box for a fixed value of a type. It's typed as a graph node's field is: a string or a
+ * The actor picker for values written as text: a small button whose menu lists the actors in the open level that
+ * have a named Bango ID (a Bango ID component with a name), by `@name`, and reports the name picked. For places that
+ * hold an entity as `@name` text (a script variable's starting value, a node's field); an actor without a named ID
+ * can't be written that way, so it isn't listed. It doesn't change anything itself.
+ */
+class BANGOSCRIPTSSCRIPTEDITOR_API SBangoActorNamePicker : public SCompoundWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SBangoActorNamePicker)
+	{
+	}
+		SLATE_EVENT(FOnBangoActorNamePicked, OnActorNamePicked)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs);
+
+	/** An actor in the open level with a named Bango ID. */
+	struct FNamedActor
+	{
+		/** Its Bango ID name, without the '@'. */
+		FString Name;
+		/** The actor's label in the level (its name in the Outliner). */
+		FString Label;
+	};
+	/** The open level's actors with a named Bango ID, sorted by name. Empty while there's no editor world. */
+	static void GetNamedActors(TArray<FNamedActor>& OutActors);
+	/**
+	 * What an entity value becomes when an actor is picked for it. An `entity`: `@name`. An `entity[]`: the array
+	 * with `@name` added at its end (`[@a]` becomes `[@a, @name]`; none, `nil` or anything that isn't an array
+	 * becomes `[@name]`).
+	 */
+	static FString AddNameToValue(const FString& TypeName, const FString& BangoText, const FString& Name);
+
+private:
+	FOnBangoActorNamePicked OnActorNamePicked;
+
+	TSharedRef<SWidget> MakeMenu() const;
+};
+
+/**
+ * The value box: a one-line box for a fixed value of a type. An `entity` or an `entity[]` has an actor picker
+ * beside the box (SBangoActorNamePicker), which writes the picked actor's `@name` (added to an array's end). It's typed as a graph node's field is: a string or a
  * text as plain words, without quotes (`=` first for the code instead, like `=nil`); anything else as code (`5`,
  * `[0, 0, 100]`, `@john`, `true`). It's checked as it's typed, with the error shown on the box, and when it's
  * committed (Enter, or the focus leaving): a value that passes is reported, as Bango text, and one that doesn't is
@@ -117,6 +160,8 @@ private:
 	/** What was typed, as Bango text (empty for none). */
 	FString ToBangoText(const FString& Typed) const;
 	bool Check(const FString& BangoText, FString& OutError) const;
+	/** An actor was picked beside the box: its `@name` becomes the value (or is added to an array's end). */
+	void HandleActorNamePicked(const FString& Name);
 	void HandleTextChanged(const FText& NewText);
 	void HandleTextCommitted(const FText& NewText, ETextCommit::Type CommitType);
 };
