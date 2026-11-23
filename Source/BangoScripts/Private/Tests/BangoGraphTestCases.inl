@@ -1390,6 +1390,55 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		}
 	}
 
+	// ---- Lines of dashes typed above functions are dividers, not comments: saving writes one divider between functions ----
+	{
+		const TCHAR* Source =
+			TEXT("global int step;\n")
+			TEXT("step = 1;    //@1(4, 0)\n")
+			TEXT("\n")
+			TEXT("// ============ FUNCTIONS =======================\n")
+			TEXT("\n")
+			TEXT("// -------------------------------------------------\n")
+			TEXT("function void First()\n")
+			TEXT("{\n")
+			TEXT("\tstep = 2;    //@2(4, 0)\n")
+			TEXT("}\n")
+			TEXT("\n")
+			TEXT("// ----------------------------------------------\n")
+			TEXT("\n")
+			TEXT("// -------------------------------------------------\n")
+			TEXT("// Puts it back.\n")
+			TEXT("function void Second()\n")
+			TEXT("{\n")
+			TEXT("\tstep = 0;    //@3(4, 0)\n")
+			TEXT("}\n");
+		FBangoGraphDocument Doc;
+		FBangoCompileError Error;
+		const bool bBuilt = Bango::BuildGraph(Source, TEXT("dividers.bango"), Doc, Error);
+		Expect(bBuilt && Doc.Functions.Num() == 2, FString(TEXT("function dividers: build: ")) + Error.ToString());
+		FString Text;
+		FString WriteError;
+		if (bBuilt && Bango::WriteGraphText(Doc, Text, WriteError))
+		{
+			int32 Dividers = 0;
+			for (int32 i = 0; i + 6 <= Text.Len(); ++i)
+			{
+				Dividers += Text.Mid(i, 6) == FString(TEXT("// ---")) ? 1 : 0;
+			}
+			Expect(Dividers == 1 && Text.Contains(FString(TEXT("//")) + Bango::GetFunctionSeparatorComment()) && Text.Contains(TEXT("// Puts it back.\nfunction void Second()")),
+				FString(TEXT("function dividers: one divider, between the functions, and the real comment kept:\n")) + Text);
+			FBangoGraphDocument Again;
+			FString Text2;
+			Expect(Bango::BuildGraph(Text, TEXT("dividers.bango"), Again, Error) && Bango::WriteGraphText(Again, Text2, WriteError) && Text2 == Text, TEXT("function dividers: saving again changes nothing"));
+		}
+		else
+		{
+			Expect(false, FString(TEXT("function dividers: write: ")) + WriteError);
+		}
+		Expect(!Bango::IsFunctionSeparatorComment(TEXT(" -- note --")) && !Bango::IsFunctionSeparatorComment(TEXT(" ---")) && Bango::IsFunctionSeparatorComment(TEXT(" ------------")),
+			TEXT("function dividers: only a line of ten or more dashes"));
+	}
+
 	// ---- Functions see the script's inputs and script variables (not its locals) ----
 	{
 		const TCHAR* Source =

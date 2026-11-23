@@ -1224,6 +1224,20 @@ namespace Bango
 
 	bool IsFunctionSeparatorComment(const FString& CommentText)
 	{
-		return CommentText.TrimStartAndEnd().Equals(FString(GetFunctionSeparatorComment()).TrimStartAndEnd(), ESearchCase::CaseSensitive);
+		// Ours, or any line of dashes typed by hand (`// --------`, of any length from ten): between functions it's a
+		// divider either way. Kept as a function's comment, it would be written back beside the one saving adds.
+		const FString Trimmed = CommentText.TrimStartAndEnd();
+		if (Trimmed.Len() < 10)
+		{
+			return false;
+		}
+		for (int32 i = 0; i < Trimmed.Len(); ++i)
+		{
+			if (Trimmed[i] != TEXT('-'))
+			{
+				return false;
+			}
+		}
+		return true;
 	}
 }
