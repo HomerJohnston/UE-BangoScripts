@@ -2,9 +2,17 @@
 
 #include "Serialization/Archive.h"
 
+#include <atomic>
+
 namespace BangoGlobalStorePrivate
 {
 	constexpr int32 SaveVersion = 2; // 2: ints are 32-bit
+}
+
+uint64 FBangoGlobalStore::FLayout::MakeNumber()
+{
+	static std::atomic<uint64> Last{0};
+	return ++Last;
 }
 
 bool FBangoGlobalStore::Declare(const FString& Name, const FBangoType& Type, FString& OutError)
@@ -15,7 +23,7 @@ bool FBangoGlobalStore::Declare(const FString& Name, const FBangoType& Type, FSt
 		return false;
 	}
 
-	if (const FBangoValue* Existing = Globals.Find(Name))
+	if (const FBangoValue* Existing = Find(Name))
 	{
 		if (Existing->GetType() != Type)
 		{
@@ -26,19 +34,23 @@ bool FBangoGlobalStore::Declare(const FString& Name, const FBangoType& Type, FSt
 		return true;
 	}
 
-	Globals.Add(Name, FBangoValue::MakeNil(Type));
-	NoteChanged(Name);
+	FEntry& Entry = Entries.AddDefaulted_GetRef();
+	Entry.Name = Name;
+	Entry.Value = FBangoValue::MakeNil(Type);
+	Entry.Stamp = ++ChangeStamp;
+	Slots.Add(Name, Entries.Num() - 1);
 	return true;
 }
 
 bool FBangoGlobalStore::Set(const FString& Name, const FBangoValue& Value, FString& OutError)
 {
-	FBangoValue* Existing = Globals.Find(Name);
-	if (!Existing)
+	const int32 Slot = FindSlot(Name);
+	if (Slot == INDEX_NONE)
 	{
 		OutError = FString::Printf(TEXT("Can't set global '%s': it has not been declared."), *Name);
 		return false;
 	}
+	FBangoValue* Existing = &Entries[Slot].Value;
 
 	FBangoValue Converted;
 	if (!Value.TryConvertTo(Existing->GetType(), Converted))
@@ -51,41 +63,39 @@ bool FBangoGlobalStore::Set(const FString& Name, const FBangoValue& Value, FStri
 	if (!(*Existing == Converted))
 	{
 		*Existing = MoveTemp(Converted);
-		NoteChanged(Name);
+		Entries[Slot].Stamp = ++ChangeStamp;
 	}
 	return true;
 }
 
 const FBangoValue* FBangoGlobalStore::Find(const FString& Name) const
 {
-	return Globals.Find(Name);
+	const int32 Slot = FindSlot(Name);
+	return Slot != INDEX_NONE ? &Entries[Slot].Value : nullptr;
 }
 
 FBangoValue* FBangoGlobalStore::FindMutable(const FString& Name)
 {
-	FBangoValue* Value = Globals.Find(Name);
-	if (Value)
-	{
-		NoteChanged(Name);
-	}
-	return Value;
+	const int32 Slot = FindSlot(Name);
+	return Slot != INDEX_NONE ? &GetSlotMutable(Slot) : nullptr;
 }
 
 uint64 FBangoGlobalStore::GetChangeStamp(const FString& Name) const
 {
-	const uint64* Stamp = ChangeStamps.Find(Name);
-	return Stamp ? *Stamp : AllChangedStamp;
+	const int32 Slot = FindSlot(Name);
+	return Slot != INDEX_NONE ? Entries[Slot].Stamp : AllChangedStamp;
 }
 
 bool FBangoGlobalStore::IsDefined(const FString& Name) const
 {
-	const FBangoValue* Value = Globals.Find(Name);
+	const FBangoValue* Value = Find(Name);
 	return Value && !Value->IsNil();
 }
 
 void FBangoGlobalStore::ResetAll()
 {
-	Globals.Reset();
+	Entries.Reset();
+	Slots.Reset();
 	NoteAllChanged();
 }
 
@@ -101,12 +111,12 @@ void FBangoGlobalStore::Serialize(FArchive& Ar)
 
 	if (Ar.IsSaving())
 	{
-		int32 Count = Globals.Num();
+		int32 Count = Entries.Num();
 		Ar << Count;
-		for (TPair<FString, FBangoValue>& Pair : Globals)
+		for (FEntry& Entry : Entries)
 		{
-			Ar << Pair.Key;
-			Ar << Pair.Value;
+			Ar << Entry.Name;
+			Ar << Entry.Value;
 		}
 	}
 	else if (Ar.IsLoading())
@@ -119,15 +129,25 @@ void FBangoGlobalStore::Serialize(FArchive& Ar)
 			return;
 		}
 
-		Globals.Reset();
+		Entries.Reset();
+		Slots.Reset();
+		NoteAllChanged();
 		for (int32 i = 0; i < Count && !Ar.IsError(); ++i)
 		{
 			FString Name;
 			FBangoValue Value;
 			Ar << Name;
 			Ar << Value;
-			Globals.Add(MoveTemp(Name), MoveTemp(Value));
+			if (const int32* Slot = Slots.Find(Name))
+			{
+				Entries[*Slot].Value = MoveTemp(Value); // a name twice: the later one, as before
+				continue;
+			}
+			FEntry& Entry = Entries.AddDefaulted_GetRef();
+			Entry.Name = Name;
+			Entry.Value = MoveTemp(Value);
+			Entry.Stamp = AllChangedStamp;
+			Slots.Add(MoveTemp(Name), Entries.Num() - 1);
 		}
-		NoteAllChanged();
 	}
 }

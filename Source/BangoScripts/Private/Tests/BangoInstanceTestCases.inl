@@ -1310,6 +1310,179 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			}
 		}
 
+		// Globals by slot (FBangoInstance::FindGlobalSlot): a running script remembers where the store keeps each global
+		// it uses, which must not outlive the store's layout.
+		{
+			const TCHAR* SlotSource = TEXT("global int a = 1;\nglobal int b = 10;\na = a + 1;\nb = b + 1;\nSleep();\na = a + 1;\nb = b + 1;\nSleep();\na = a + 1;");
+			TSharedPtr<FBangoProgram> SlotProgram = MakeShared<FBangoProgram>();
+			Expect(Bango::CompileSource(SlotSource, TEXT("slots.bango"), Commands, *SlotProgram, CompileError), TEXT("slots: compiles"));
+			auto IntOf = [](const FBangoGlobalStore& Store, const TCHAR* Name) -> int64
+			{
+				const FBangoValue* Value = Store.Find(Name);
+				return Value && !Value->IsNil() ? Value->GetInt() : -1;
+			};
+			FString Unused;
+			FBangoGlobalStore* const GlobalsBefore = Context.Globals;
+			{
+				// Every global replaced while it waits, and made again in another order: the script finds its own again.
+				FBangoGlobalStore Store;
+				Context.Globals = &Store;
+				FBangoInstance Instance;
+				FBangoRuntimeError Error;
+				Expect(Instance.Start(SlotProgram, Commands, Store, 1, Error), TEXT("slots: starts"));
+				Expect(Instance.Resume(Context) == EBangoInstanceStatus::Waiting, TEXT("slots: waits"));
+				Expect(IntOf(Store, TEXT("a")) == 2 && IntOf(Store, TEXT("b")) == 11, TEXT("slots: both globals written"));
+				const uint64 Layout = Store.GetLayout();
+				Store.ResetAll();
+				Expect(Store.GetLayout() != Layout && Store.GetLayout() != 0, TEXT("slots: ResetAll gives the store a new layout"));
+				Store.Declare(TEXT("other"), FBangoType::Int(), Unused);
+				Store.Declare(TEXT("b"), FBangoType::Int(), Unused);
+				Store.Declare(TEXT("a"), FBangoType::Int(), Unused);
+				Store.Set(TEXT("other"), FBangoValue::MakeInt(500), Unused);
+				Store.Set(TEXT("b"), FBangoValue::MakeInt(100), Unused);
+				Store.Set(TEXT("a"), FBangoValue::MakeInt(50), Unused);
+				Expect(Instance.Resume(Context) == EBangoInstanceStatus::Waiting, TEXT("slots: carries on after the globals were replaced"));
+				Expect(IntOf(Store, TEXT("a")) == 51 && IntOf(Store, TEXT("b")) == 101 && IntOf(Store, TEXT("other")) == 500,
+					TEXT("slots: the globals are found again by name after the store's layout changed"));
+
+				// Gone altogether: the usual error, not another global's value.
+				Store.ResetAll();
+				Store.Declare(TEXT("other"), FBangoType::Int(), Unused);
+				Store.Set(TEXT("other"), FBangoValue::MakeInt(500), Unused);
+				Expect(Instance.Resume(Context) == EBangoInstanceStatus::Failed, TEXT("slots: a global that's gone stops the script"));
+				Expect(Instance.GetError().Message.Contains(TEXT("Global 'a' doesn't exist")), TEXT("slots: with its own error"));
+				Expect(IntOf(Store, TEXT("other")) == 500, TEXT("slots: and no other global was touched"));
+			}
+			{
+				// A copy of a store is another store: globals added to each afterwards share slot numbers, not values.
+				FBangoGlobalStore First;
+				First.Declare(TEXT("x"), FBangoType::Int(), Unused);
+				FBangoGlobalStore Second = First;
+				Expect(Second.GetLayout() != First.GetLayout(), TEXT("slots: a copied store has its own layout"));
+				FBangoGlobalStore Third;
+				Third = First;
+				Expect(Third.GetLayout() != First.GetLayout() && Third.GetLayout() != Second.GetLayout(), TEXT("slots: an assigned store has its own layout"));
+				First.Declare(TEXT("b"), FBangoType::Int(), Unused);
+				First.Declare(TEXT("a"), FBangoType::Int(), Unused);
+				Context.Globals = &First;
+				FBangoInstance Instance;
+				FBangoRuntimeError Error;
+				Expect(Instance.Start(SlotProgram, Commands, First, 1, Error) && Instance.Resume(Context) == EBangoInstanceStatus::Waiting, TEXT("slots: runs in the first store"));
+				// The same running script, carried on against the copy (where a and b are in the other order).
+				Second.Declare(TEXT("a"), FBangoType::Int(), Unused);
+				Second.Declare(TEXT("b"), FBangoType::Int(), Unused);
+				Second.Set(TEXT("a"), FBangoValue::MakeInt(1000), Unused);
+				Second.Set(TEXT("b"), FBangoValue::MakeInt(2000), Unused);
+				Context.Globals = &Second;
+				Expect(Instance.Resume(Context) == EBangoInstanceStatus::Waiting, TEXT("slots: carries on in another store"));
+				Expect(IntOf(Second, TEXT("a")) == 1001 && IntOf(Second, TEXT("b")) == 2001 && IntOf(First, TEXT("a")) == 2 && IntOf(First, TEXT("b")) == 11,
+					TEXT("slots: each store's globals are its own"));
+			}
+			{
+				// Change stamps are per global, and a store that's saved and loaded keeps every value.
+				FBangoGlobalStore Store;
+				Store.Declare(TEXT("a"), FBangoType::Int(), Unused);
+				Store.Declare(TEXT("b"), FBangoType::Int(), Unused);
+				const uint64 StampA = Store.GetChangeStamp(TEXT("a"));
+				const uint64 StampB = Store.GetChangeStamp(TEXT("b"));
+				Store.Set(TEXT("b"), FBangoValue::MakeInt(7), Unused);
+				Expect(Store.GetChangeStamp(TEXT("a")) == StampA && Store.GetChangeStamp(TEXT("b")) > StampB, TEXT("slots: only the changed global's stamp moves"));
+				Store.Set(TEXT("b"), FBangoValue::MakeInt(7), Unused);
+				Expect(Store.GetChangeStamp(TEXT("b")) == Store.GetChangeStamp(), TEXT("slots: setting the same value is no change"));
+				const int32 SlotB = Store.FindSlot(TEXT("b"));
+				Expect(SlotB != INDEX_NONE && Store.FindSlot(TEXT("nobody")) == INDEX_NONE && Store.GetSlot(SlotB).GetInt() == 7, TEXT("slots: FindSlot and GetSlot"));
+				const uint64 Before = Store.GetChangeStamp();
+				Store.GetSlotMutable(SlotB) = FBangoValue::MakeInt(8);
+				Expect(Store.GetChangeStamp(TEXT("b")) == Before + 1 && IntOf(Store, TEXT("b")) == 8, TEXT("slots: GetSlotMutable counts as a change"));
+				Expect(Store.GetChangeStamp(TEXT("nobody")) == 0, TEXT("slots: a global that doesn't exist has never changed"));
+				Store.ResetAll();
+				Expect(Store.Num() == 0 && Store.GetChangeStamp(TEXT("b")) == Store.GetChangeStamp() && Store.FindSlot(TEXT("b")) == INDEX_NONE, TEXT("slots: ResetAll changes every global"));
+			}
+			Context.Globals = GlobalsBefore;
+		}
+
+		// Calls that use memory again (v0.108): a function's slots are a returned call's, and a command's call is the
+		// instance's one call. Nothing of an earlier call may show in a later one.
+		{
+			struct FCallRun
+			{
+				FBangoGlobalStore Globals;
+				FBangoInstance Instance;
+				EBangoInstanceStatus Status = EBangoInstanceStatus::None;
+			};
+			auto RunCalls = [&](const TCHAR* CallSource, FCallRun& Run) -> bool
+			{
+				TSharedPtr<FBangoProgram> CallProgram = MakeShared<FBangoProgram>();
+				FBangoCompileError CallCompileError;
+				if (!Bango::CompileSource(CallSource, TEXT("calls.bango"), Commands, *CallProgram, CallCompileError))
+				{
+					OutFailures.Add(FString::Printf(TEXT("calls: doesn't compile: %s"), *CallCompileError.ToString()));
+					return false;
+				}
+				FBangoRuntimeError CallStartError;
+				if (!Run.Instance.Start(CallProgram, Commands, Run.Globals, 1, CallStartError))
+				{
+					OutFailures.Add(FString::Printf(TEXT("calls: doesn't start: %s"), *CallStartError.Message));
+					return false;
+				}
+				Context.Globals = &Run.Globals;
+				Run.Status = Run.Instance.Resume(Context);
+				return true;
+			};
+			auto IntOf = [](const FBangoGlobalStore& Store, const TCHAR* Name) -> int64
+			{
+				const FBangoValue* Value = Store.Find(Name);
+				return Value && !Value->IsNil() ? Value->GetInt() : -1;
+			};
+			FBangoGlobalStore* const GlobalsBefore = Context.Globals;
+			{
+				FCallRun Run;
+				if (RunCalls(TEXT("global int out;\nout = Fact(6);\n\nfunction int Fact(int _n)\n{\n\tif (_n <= 1)\n\t{\n\t\treturn 1;\n\t}\n\treturn _n * Fact(_n - 1);\n}"), Run))
+				{
+					Expect(Run.Status == EBangoInstanceStatus::Finished && IntOf(Run.Globals, TEXT("out")) == 720, TEXT("calls: a function that calls itself"));
+				}
+			}
+			{
+				// Many calls one after another, each with locals of its own.
+				FCallRun Run;
+				if (RunCalls(TEXT("global int out;\nint _sum = 0;\nfor (int _i = 0; _i < 50; _i++)\n{\n\t_sum = _sum + Twice(_i) - Once(_i);\n}\nout = _sum;\n\nfunction int Twice(int _n)\n{\n\tint _a = _n;\n\tint _b = _n;\n\treturn _a + _b;\n}\n\nfunction int Once(int _n)\n{\n\tstring _s = \"x\";\n\treturn _n;\n}"), Run))
+				{
+					Expect(Run.Status == EBangoInstanceStatus::Finished && IntOf(Run.Globals, TEXT("out")) == 1225, TEXT("calls: many calls in a row"));
+				}
+			}
+			{
+				// A local that was never given a value is nil, whatever the call before left in that memory.
+				FCallRun Run;
+				if (RunCalls(TEXT("global int out;\nFill(5);\nout = Read();\n\nfunction void Fill(int _v)\n{\n\tint _a = _v;\n\tint _b = _v;\n}\n\nfunction int Read()\n{\n\tint _x;\n\tint _y;\n\treturn _x + 1;\n}"), Run))
+				{
+					Expect(Run.Status == EBangoInstanceStatus::Failed && Run.Instance.GetError().Message.Contains(TEXT("'_x' is nil")),
+						*FString::Printf(TEXT("calls: a local is nil at the start of every call. Got: %s"), *Run.Instance.GetError().Message));
+				}
+			}
+			{
+				// An int for a float parameter is still made a float.
+				FCallRun Run;
+				if (RunCalls(TEXT("global float outf;\noutf = Half(3);\n\nfunction float Half(float _x)\n{\n\treturn _x / 2;\n}"), Run))
+				{
+					const FBangoValue* Value = Run.Globals.Find(TEXT("outf"));
+					Expect(Run.Status == EBangoInstanceStatus::Finished && Value && !Value->IsNil() && Value->GetType() == FBangoType::Double() && Value->GetDouble() == 1.5,
+						TEXT("calls: an int argument for a float parameter"));
+				}
+			}
+			{
+				// Commands with different numbers of arguments, one that waits among them.
+				Log.Reset();
+				FCallRun Run;
+				if (RunCalls(TEXT("global int out;\nout = Max(2, 7);\nTalk(\"x\");\nSleep(0);\nout = out + Max(Max(1, 3), 2);\nTalk(\"y\");"), Run))
+				{
+					Expect(Run.Status == EBangoInstanceStatus::Waiting && IntOf(Run.Globals, TEXT("out")) == 7 && Log.Num() == 1, TEXT("calls: commands up to one that waits"));
+					Expect(Run.Instance.GetWaitingCommandName() == TEXT("Sleep"), TEXT("calls: it's waiting on Sleep"));
+					Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && IntOf(Run.Globals, TEXT("out")) == 10 && Log.Num() == 2, TEXT("calls: and the commands after it"));
+				}
+			}
+			Context.Globals = GlobalsBefore;
+		}
+
 		// Conditions (Bango::CompileCondition): a script, or one expression, that returns true or false.
 		{
 			struct FConditionCase

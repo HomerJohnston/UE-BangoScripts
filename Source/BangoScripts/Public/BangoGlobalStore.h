@@ -14,6 +14,8 @@
  * - Set() requires the global to exist, and the value to fit its type.
  * - Each change is stamped (GetChangeStamp), so a script waiting on globals (`waitUntil`) can tell whether any of
  *   them has changed since it last looked.
+ * - Every global has a slot, a number that stays its own until every global is replaced (ResetAll, loading). The
+ *   VM finds a global by name once and by slot after that (FindSlot, GetLayout).
  */
 class BANGOSCRIPTS_API FBangoGlobalStore
 {
@@ -48,17 +50,65 @@ public:
 	/** Saves or loads every global. Loading replaces the current globals. */
 	void Serialize(FArchive& Ar);
 
-	int32 Num() const { return Globals.Num(); }
+	int32 Num() const { return Entries.Num(); }
+
+	/**
+	 * By slot, for a caller that reads or writes the same globals over and over (the VM): looking a global up by
+	 * name hashes the name every time. A slot is only good for the layout it was found in: keep GetLayout() with it,
+	 * and find it again once that has changed.
+	 */
+	int32 FindSlot(const FString& Name) const
+	{
+		const int32* Slot = Slots.Find(Name);
+		return Slot ? *Slot : INDEX_NONE;
+	}
+
+	/**
+	 * A number no other store has, and that this one changes whenever its slots stop meaning what they did (ResetAll,
+	 * loading). A copy of a store gets its own. Never 0.
+	 */
+	uint64 GetLayout() const { return Layout.Number; }
+
+	/** The global in Slot, which must be one FindSlot gave for this layout. */
+	const FBangoValue& GetSlot(int32 Slot) const { return Entries[Slot].Value; }
+
+	/** As FindMutable, by slot. */
+	FBangoValue& GetSlotMutable(int32 Slot)
+	{
+		FEntry& Entry = Entries[Slot];
+		Entry.Stamp = ++ChangeStamp;
+		return Entry.Value;
+	}
 
 private:
-	/** Stamps Name as changed. */
-	void NoteChanged(const FString& Name) { ChangeStamps.FindOrAdd(Name) = ++ChangeStamp; }
-	/** Stamps every global as changed (ResetAll, loading). */
-	void NoteAllChanged() { AllChangedStamp = ++ChangeStamp; ChangeStamps.Reset(); }
+	struct FEntry
+	{
+		FString Name;
+		FBangoValue Value;
+		/** Its latest change. */
+		uint64 Stamp = 0;
+	};
 
-	TBangoNameMap<FBangoValue> Globals;
+	/** The layout's number: a new one for every store, and for every copy of one. */
+	struct FLayout
+	{
+		uint64 Number;
+		FLayout() : Number(MakeNumber()) {}
+		FLayout(const FLayout&) : Number(MakeNumber()) {}
+		FLayout& operator=(const FLayout&) { Number = MakeNumber(); return *this; }
+		void Renew() { Number = MakeNumber(); }
+		BANGOSCRIPTS_API static uint64 MakeNumber();
+	};
+
+	/** Every global is new or gone (ResetAll, loading): the slots mean something else now. */
+	void NoteAllChanged() { AllChangedStamp = ++ChangeStamp; Layout.Renew(); }
+
+	/** The globals, each at its slot. Only added to, until they're all replaced. */
+	TArray<FEntry> Entries;
+	/** Each global's slot. */
+	TBangoNameMap<int32> Slots;
 	uint64 ChangeStamp = 0;
-	/** Each global's latest change since AllChangedStamp (ones changed only before it aren't kept). */
-	TBangoNameMap<uint64> ChangeStamps;
+	/** The stamp of the last time every global was replaced: what a global that doesn't exist was last changed at. */
 	uint64 AllChangedStamp = 0;
+	FLayout Layout;
 };

@@ -313,6 +313,22 @@ struct FBangoCommandCall
 	/** Failed: put the reason here. */
 	FString Error;
 
+	/** Empties it, as a new one is, but keeps its lists' memory: the VM uses one over and over for the calls it makes. */
+	void Reset()
+	{
+		InstanceId = 0;
+		WorldContext = nullptr;
+		bHasTarget = false;
+		Target = FBangoValue();
+		Args.Reset();
+		TypeArgs.Reset();
+		DeltaSeconds = 0.0f;
+		LatentState.Reset();
+		bResultUsed = false;
+		Result = FBangoValue();
+		Error.Reset();
+	}
+
 	/** Fails the call with a message: `return Call.Fail(TEXT("..."));` */
 	EBangoCommandResult Fail(const FString& Message)
 	{

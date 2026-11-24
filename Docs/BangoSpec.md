@@ -1,8 +1,12 @@
-# Bango Language Spec (draft v0.106)
+# Bango Language Spec (draft v0.108)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.108:** **calling a function or a command no longer allocates**. A function's slots (its parameters and locals) use the memory of a call that has returned, and an argument that's already its parameter's type is moved in, not copied. A command is given the instance's own call, used again for each one (`FBangoCommandCall::Reset` empties it and keeps its lists' memory), and only a command that waits has it kept as before. Nothing about the language or about writing a command changes.
+
+**Changes in v0.107:** **a running script finds each global by name once**, and by its place in the store after that: before, every read hashed the global's name, and every write hashed it twice (once more to note the change). `FBangoGlobalStore` keeps its globals in slots (`FindSlot`, `GetSlot`, `GetSlotMutable`), and a slot is good until every global is replaced (a new game, a load), which gives the store a new `GetLayout` number. Save data is the same. Nothing about the language changes.
 
 **Changes in v0.106:** **the VM runs common runs of instructions in one go**: a loop's condition and its jump (`while (_i < _n)`), a step like `_i++` or `_sum = _sum + _i;`, and an operator with a local or a constant beside it (`_a * 3`). The compiler marks the first instruction of each such run (`Bango::FuseInstructions`), and the run's other instructions stay where they are, so nothing else about a program changes: every error is the same and comes from the same place, the instruction limit counts the same, a listing reads the same, and the debugger's trail is the same. Only whole locals and constants are fused, not globals. Nothing about the language changes.
 

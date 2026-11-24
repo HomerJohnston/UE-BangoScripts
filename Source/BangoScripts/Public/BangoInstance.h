@@ -345,6 +345,15 @@ private:
 	const TArray<FBangoValue>& GetScriptSlots() const;
 	/** The slots a local or script place is in. */
 	TArray<FBangoValue>& GetPlaceSlots(const FBangoPlace& Place);
+	/**
+	 * The store's slot of the global a place names, or INDEX_NONE if nobody has made that global. Found by name the
+	 * first time and remembered (GlobalSlots), so reading or writing a global doesn't hash its name every time.
+	 */
+	FORCENOINLINE int32 FindGlobalSlot(const FBangoPlace& Place, const FBangoGlobalStore& Globals);
+	/** The global a place names, or null if nobody has made it. */
+	const FBangoValue* FindGlobal(const FBangoPlace& Place, const FBangoGlobalStore& Globals);
+	/** As FindGlobal, to change it: it counts as changed, as with FBangoGlobalStore::FindMutable. */
+	FBangoValue* FindGlobalToChange(const FBangoPlace& Place, FBangoGlobalStore& Globals);
 	/** Entities is only used to add a hint when a missing global is really a Bango ID written without its `@`. */
 	/** With bNilOk, a value that's nil or missing (a global nobody made, an element past the end) is loaded as nil instead of stopping the script. */
 	bool LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Globals, const IBangoEntityResolver* Entities, bool bNilOk = false);
@@ -367,6 +376,8 @@ private:
 	/** `target call Name(args)`: hands it to Context.CallReflected. */
 	bool CallReflected(int32 NameIndex, int32 ArgCount, bool bWantResult, const FBangoExecContext& Context);
 	bool FinishCommand(EBangoCommandResult Result);
+	/** A command's call is done: fails if it failed, and puts its result, as the type it should be, on the stack. */
+	bool FinishCall(EBangoCommandResult Result, const FBangoCommand& Command, FBangoCommandCall& Call);
 
 	TSharedPtr<const FBangoProgram> Program;
 	/** Program->Names index -> command, for names that are commands. Not saved; rebuilt by Bind. */
@@ -484,4 +495,22 @@ private:
 	FString ReloadFailure;
 	EBangoReloadResult ReloadResult = EBangoReloadResult::None;
 	FString ReloadMessage;
+
+	/**
+	 * The store's slot of each of the program's names that has been used as a global (INDEX_NONE: not looked up yet,
+	 * or not there), good while the store's layout is GlobalSlotsLayout. Emptied whenever Program changes. Not saved.
+	 * (Kept last: ahead of the members the VM's loop uses all the time, they moved those, and plain loops ran slower.)
+	 */
+	TArray<int32> GlobalSlots;
+	uint64 GlobalSlotsLayout = 0;
+
+	/**
+	 * The call a command is given, used again for the next one so its argument list isn't allocated for every call.
+	 * Empty between calls. Not saved: a command that waits gets PendingCall.
+	 */
+	FBangoCommandCall CallScratch;
+	/** CallScratch is being used by a call that hasn't returned yet (a call made from inside it gets one of its own). */
+	bool bCallScratchInUse = false;
+	/** The memory of the slots of functions that have returned, for the next calls' slots. Always empty lists. Not saved. */
+	TArray<TArray<FBangoValue>> SpareSlots;
 };
