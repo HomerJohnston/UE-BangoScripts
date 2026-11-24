@@ -28,6 +28,84 @@ namespace BangoInstancePrivate
 		return IsScalar(Value, EBangoBaseType::Int) || IsScalar(Value, EBangoBaseType::Double);
 	}
 
+	/**
+	 * A binary operator on two ints or on two floats, worked out directly, for the fused instructions: true with the
+	 * answer, or false for anything else at all (other types, a nil, an int answer that doesn't fit, dividing by
+	 * zero), which is then done the usual way (FBangoInstance::BinaryOpValues), so every error stays that one's. For
+	 * what it does answer, it must give exactly what BinaryOpValues gives.
+	 */
+	static FORCEINLINE bool TryScalarOp(EBangoOp Op, const FBangoValue& Left, const FBangoValue& Right, FBangoValue& Out)
+	{
+		if (IsScalar(Left, EBangoBaseType::Int) && IsScalar(Right, EBangoBaseType::Int))
+		{
+			const int64 A = Left.GetInt();
+			const int64 B = Right.GetInt();
+			int64 Result = 0;
+			switch (Op)
+			{
+			case EBangoOp::Less:         Out = FBangoValue::MakeBool(A < B); return true;
+			case EBangoOp::LessEqual:    Out = FBangoValue::MakeBool(A <= B); return true;
+			case EBangoOp::Greater:      Out = FBangoValue::MakeBool(A > B); return true;
+			case EBangoOp::GreaterEqual: Out = FBangoValue::MakeBool(A >= B); return true;
+			case EBangoOp::Equal:        Out = FBangoValue::MakeBool(A == B); return true;
+			case EBangoOp::NotEqual:     Out = FBangoValue::MakeBool(A != B); return true;
+			case EBangoOp::Add:      Result = A + B; break;
+			case EBangoOp::Subtract: Result = A - B; break;
+			case EBangoOp::Multiply: Result = A * B; break;
+			case EBangoOp::Divide:
+				if (B == 0)
+				{
+					return false;
+				}
+				Result = A / B;
+				break;
+			case EBangoOp::Modulo:
+				if (B == 0)
+				{
+					return false;
+				}
+				Result = A % B;
+				break;
+			default:
+				return false;
+			}
+			if (Result < (int64)MIN_int32 || Result > (int64)MAX_int32)
+			{
+				return false;
+			}
+			Out = FBangoValue::MakeInt((int32)Result);
+			return true;
+		}
+		if (IsScalar(Left, EBangoBaseType::Double) && IsScalar(Right, EBangoBaseType::Double))
+		{
+			const double A = Left.GetDouble();
+			const double B = Right.GetDouble();
+			switch (Op)
+			{
+			case EBangoOp::Less:         Out = FBangoValue::MakeBool(A < B); return true;
+			// (Written as BinaryOpValues works them out, which matters for a NaN: neither less nor greater.)
+			case EBangoOp::LessEqual:    Out = FBangoValue::MakeBool(!(A > B)); return true;
+			case EBangoOp::Greater:      Out = FBangoValue::MakeBool(A > B); return true;
+			case EBangoOp::GreaterEqual: Out = FBangoValue::MakeBool(!(A < B)); return true;
+			case EBangoOp::Equal:        Out = FBangoValue::MakeBool(A == B); return true;
+			case EBangoOp::NotEqual:     Out = FBangoValue::MakeBool(!(A == B)); return true;
+			case EBangoOp::Add:      Out = FBangoValue::MakeDouble(A + B); return true;
+			case EBangoOp::Subtract: Out = FBangoValue::MakeDouble(A - B); return true;
+			case EBangoOp::Multiply: Out = FBangoValue::MakeDouble(A * B); return true;
+			case EBangoOp::Divide:
+				if (B == 0.0)
+				{
+					return false;
+				}
+				Out = FBangoValue::MakeDouble(A / B);
+				return true;
+			default:
+				return false;
+			}
+		}
+		return false;
+	}
+
 	static const TCHAR* PartName(int32 Part)
 	{
 		return Part == 0 ? TEXT("x") : Part == 1 ? TEXT("y") : TEXT("z");
@@ -2223,10 +2301,32 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 					Budget -= OpOffset; // counted as the instructions it stands for: so far, up to the operator
 					CurrentIP = IP + OpOffset; // an error is the operator's, from where the operator is
 					bool bOk = false;
+					// Two ints or two floats, the usual case, are worked out right here, and the answer (Quick) goes
+					// straight to where the run puts it. Anything else goes the long way, by the value stack.
+					FBangoValue Quick;
+					bool bQuick = false;
 					if (bLeftOnStack)
 					{
-						const FBangoValue LeftValue = PopValue();
-						bOk = BinaryOpValues(Run[OpOffset].Op, LeftValue, *Right);
+						if (TryScalarOp(Run[OpOffset].Op, Stack.Last(), *Right, Quick))
+						{
+							Stack.Last() = MoveTemp(Quick); // the answer where its left side was
+							bOk = true;
+						}
+						else
+						{
+							const FBangoValue LeftValue = PopValue();
+							bOk = BinaryOpValues(Run[OpOffset].Op, LeftValue, *Right);
+						}
+					}
+					else if (TryScalarOp(Run[OpOffset].Op, *Left, *Right, Quick))
+					{
+						bOk = true;
+						bQuick = true;
+						if (Length != 4)
+						{
+							Stack.Add(MoveTemp(Quick));
+							bQuick = false;
+						}
 					}
 					else
 					{
@@ -2242,15 +2342,53 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 							if (Function.Places.IsValidIndex(Last.A))
 							{
 								const FBangoPlace StoreTo = Function.Places[Last.A];
-								StorePlace(StoreTo, Globals);
+								if (bQuick)
+								{
+									// Into a whole local or script variable of the answer's own type, it's just put there
+									// (as StorePlace would); otherwise StorePlace takes it from the stack.
+									FBangoValue* Slot = nullptr;
+									if (StoreTo.Kind != EBangoPlaceKind::Global && StoreTo.NumIndexes == 0 && StoreTo.Part == -1)
+									{
+										TArray<FBangoValue>& Slots = GetPlaceSlots(StoreTo);
+										if (Slots.IsValidIndex(StoreTo.Index) && Slots[StoreTo.Index].GetType() == Quick.GetType())
+										{
+											Slot = &Slots[StoreTo.Index];
+										}
+									}
+									if (Slot)
+									{
+										*Slot = MoveTemp(Quick);
+									}
+									else
+									{
+										Stack.Add(MoveTemp(Quick));
+										StorePlace(StoreTo, Globals);
+									}
+								}
+								else
+								{
+									StorePlace(StoreTo, Globals);
+								}
 							}
 							else
 							{
 								return RuntimeFail(TEXT("Internal error: bad place."));
 							}
 						}
+						else if (bQuick && IsScalar(Quick, EBangoBaseType::Bool))
+						{
+							// As JumpIfFalse, with the answer in hand.
+							if (!Quick.GetBool())
+							{
+								Frames.Last().IP = Last.A;
+							}
+						}
 						else
 						{
+							if (bQuick)
+							{
+								Stack.Add(MoveTemp(Quick));
+							}
 							// As JumpIfFalse.
 							const FBangoValue Condition = PopValue();
 							if (Status == EBangoInstanceStatus::Failed)

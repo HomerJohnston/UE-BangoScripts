@@ -1243,6 +1243,17 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				{ TEXT("dividing by zero"), TEXT("int _a = 4;\nint _z = 0;\nint _c = _a / _z;"), 0 },
 				{ TEXT("an int too big"), TEXT("int _a = 2000000000;\nint _b = 2000000000;\n_a = _a + _b;"), 0 },
 				{ TEXT("the instruction limit"), TEXT("int _i = 0;\nwhile (_i < 1000)\n{\n\t_i++;\n}"), 200 },
+				{ TEXT("int division and remainder"), TEXT("global int out;\nint _a = -17;\nint _b = 5;\nint _q = _a / _b;\nint _r = _a % _b;\nint _m = _q * 100;\nout = _m + _r;"), 0 },
+				{ TEXT("int remainder by zero"), TEXT("int _a = 4;\nint _z = 0;\nint _c = _a % _z;"), 0 },
+				{ TEXT("an int product too big"), TEXT("int _a = 70000;\nint _b = 70000;\nint _c = _a * _b;"), 0 },
+				{ TEXT("the smallest int divided by -1"), TEXT("int _a = -2147483647;\n_a = _a - 1;\nint _b = -1;\nint _c = _a / _b;"), 0 },
+				{ TEXT("float division by zero"), TEXT("float _a = 4.0;\nfloat _z = 0.0;\nfloat _c = _a / _z;"), 0 },
+				{ TEXT("float remainder"), TEXT("global float outf;\nfloat _a = 7.5;\nfloat _b = 2.0;\noutf = _a % _b;"), 0 },
+				{ TEXT("floats that aren't numbers any more"), TEXT("global int out;\nfloat _a = 10.0;\nfor (int _i = 0; _i < 12; _i++)\n{\n\t_a = _a * _a;\n}\nfloat _n = _a - _a;\nout = 0;\nif (_n <= _n)\n{\n\tout = out + 1;\n}\nif (_n >= _n)\n{\n\tout = out + 10;\n}\nif (_n < _n)\n{\n\tout = out + 100;\n}\nif (_n == _n)\n{\n\tout = out + 1000;\n}\nif (_n != _n)\n{\n\tout = out + 10000;\n}"), 0 },
+				{ TEXT("an int beside a float"), TEXT("global float outf;\nint _i = 3;\nfloat _f = 0.5;\nfloat _x = _i * _f;\nif (_i > _f)\n{\n\t_x = _x + _i;\n}\noutf = _x;"), 0 },
+				{ TEXT("a comparison kept in a variable"), TEXT("global int out;\nint _a = 2;\nint _b = 3;\nbool _less = _a < _b;\nbool _same = _a == _b;\nout = 0;\nif (_less)\n{\n\tout = 1;\n}\nif (_same)\n{\n\tout = 2;\n}"), 0 },
+				{ TEXT("straight into a global"), TEXT("global int out;\nglobal float outf;\nint _a = 2;\nint _b = 3;\nout = _a + _b;\nfloat _x = 1.5;\nfloat _y = 2.0;\noutf = _x * _y;"), 0 },
+				{ TEXT("a longer expression"), TEXT("global int out;\nint _a = 2;\nint _b = 3;\nint _c = 4;\nout = (_a + _b) * _c - _a * 7 + _c % 3;"), 0 },
 				{ TEXT("in a function, with the script's variables"), TEXT("global int out;\nscriptVar int _total = 0;\nAddUp(4);\nAddUp(5);\nout = _total;\n\nfunction void AddUp(int _n)\n{\n\t_total = _total + _n;\n}"), 0 },
 			};
 			for (const FFuseCase& Case : Cases)
