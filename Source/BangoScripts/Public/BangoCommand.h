@@ -384,8 +384,24 @@ public:
 
 	int32 Num() const { return Commands.Num(); }
 
+	/**
+	 * A number no other table has (a copy of a table gets its own), never 0: what a compiled script keeps beside the
+	 * commands it found here (FBangoProgram::BoundCommands), to know they're this table's.
+	 */
+	uint64 GetId() const { return Id.Number; }
+
 private:
+	struct FTableId
+	{
+		uint64 Number;
+		FTableId() : Number(MakeNumber()) {}
+		FTableId(const FTableId&) : Number(MakeNumber()) {}
+		FTableId& operator=(const FTableId&) { Number = MakeNumber(); return *this; }
+		BANGOSCRIPTS_API static uint64 MakeNumber();
+	};
+
 	TBangoNameMap<TSharedPtr<FBangoCommand>> Commands;
+	FTableId Id;
 };
 
 namespace Bango

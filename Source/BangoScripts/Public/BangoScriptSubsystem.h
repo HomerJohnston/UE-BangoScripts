@@ -7,6 +7,7 @@
 #include "BangoInlineScript.h"
 #include "BangoConditionWatches.h"
 class UBangoScriptAsset;
+class UBangoGlobalsSubsystem;
 
 #include "BangoScriptSubsystem.generated.h"
 
@@ -264,9 +265,17 @@ private:
 	{
 		/** The script's path, or for a script spawned from text (SpawnFromSource), its name. */
 		FString Path;
-		/** True for a script spawned from text (SpawnFromSource): Source is its text, and it has no file. */
+		/**
+		 * True for a script spawned from text (SpawnFromSource): Source is its text, and it has no file. The text is
+		 * shared, not copied: an inline script's running copies and the script itself all use one copy.
+		 */
 		bool bFromSource = false;
-		FString Source;
+		TSharedPtr<const FString> Source;
+		const FString& GetSource() const
+		{
+			static const FString None;
+			return Source.IsValid() ? *Source : None;
+		}
 		/**
 		 * An inline script's inputs signature (FBangoInlineScriptBase::UseInputsSignature), saved with it so it compiles the
 		 * same when it's restored: its class's path (empty for a global one) and its name (empty for none).
@@ -281,6 +290,11 @@ private:
 		FBangoInstance Instance;
 		/** The newest version it's been asked to switch to (hot reload), so each version is asked for once. */
 		TSharedPtr<const FBangoProgram> ReloadTarget;
+		/**
+		 * True once it has started a script of its own (Exec, spawn, a spawn block). A script that neither has a parent
+		 * nor ever started one links nothing to anything when it ends, so it isn't kept in EndedParents.
+		 */
+		bool bStartedChild = false;
 		/** The script that started it (with Exec or spawn), or 0. For Terminate's bAndChildren. */
 		int32 ParentId = 0;
 	};
@@ -298,8 +312,11 @@ private:
 	int32 GetParentId(int32 Id) const;
 	/** True if Ancestor started Id, or started a script that started it, and so on. */
 	bool IsDescendant(int32 Id, int32 Ancestor) const;
-	/** Removes an ended script, keeping its parent in EndedParents (PruneEndedParents drops what's no longer needed). */
-	void RemoveScript(int64 Id);
+	/**
+	 * Removes an ended script, keeping its parent in EndedParents (PruneEndedParents drops what's no longer needed).
+	 * False if it had no parent and never started a script: then EndedParents is as it was, and needs no pruning.
+	 */
+	bool RemoveScript(int64 Id);
 	void PruneEndedParents();
 
 	bool MakeContext(float DeltaSeconds, FBangoExecContext& OutContext);
@@ -352,4 +369,7 @@ private:
 	static constexpr int32 MaxStartDepth = 32;
 	/** Checks entity names against this world's UBangoActorRegistry. */
 	TUniquePtr<IBangoEntityResolver> EntityResolver;
+	/** The game instance's globals, found once (UBangoGlobalsSubsystem::Get looks them up through the world each time). */
+	UBangoGlobalsSubsystem* GetGlobals();
+	TWeakObjectPtr<UBangoGlobalsSubsystem> KnownGlobals;
 };

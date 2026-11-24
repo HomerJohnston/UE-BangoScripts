@@ -3,6 +3,13 @@
 #include "BangoScriptsBenchmark.h"
 #include "BangoScriptsBenchmarkBlueprint.h"
 #include "BangoLog.h"
+#include "BangoInlineScript.h"
+#include "BangoScriptAsset.h"
+#include "BangoScriptSubsystem.h"
+#include "BangoTypes.h"
+#include "Engine/World.h"
+#include "GameFramework/WorldSettings.h"
+#include "HAL/PlatformTime.h"
 #include "HAL/IConsoleManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -81,7 +88,66 @@ namespace BangoBenchmarkCommandPrivate
 		return Class;
 	}
 
-	static void Run(const TArray<FString>& Args)
+	/**
+	 * The cases that go through the game's script subsystem (the options' RunInGame): Iterations spawns of Source, as
+	 * an inline script or as a script asset, each run to its end at once. The first spawn, which compiles it, isn't timed.
+	 */
+	static bool RunInGame(UWorld* World, const FString& Case, const FString& Source, int32 Iterations, double& OutSeconds, FString& OutError)
+	{
+		UBangoScriptSubsystem* Subsystem = World ? UBangoScriptSubsystem::Get(World) : nullptr;
+		if (!Subsystem)
+		{
+			OutError = TEXT("It needs a running game (its world's script subsystem): run Bango.Benchmark from a game's console, or while playing in the editor.");
+			return false;
+		}
+		const TArray<FBangoValue> NoArgs;
+		// An owner, as a trigger's scripts have: its name is part of what an inline script is called.
+		const UObject* Owner = World->GetWorldSettings();
+		FString SpawnError;
+		if (Case.Equals(TEXT("SpawnAsset"), ESearchCase::CaseSensitive))
+		{
+			const TStrongObjectPtr<UBangoScriptAsset> Asset(NewObject<UBangoScriptAsset>(GetTransientPackage()));
+			Asset->Source = Source;
+			const UBangoScriptAsset* Script = Asset.Get();
+			if (!Subsystem->Spawn(Script, NoArgs, Owner, SpawnError).IsValid())
+			{
+				OutError = FString(TEXT("The script asset didn't spawn: ")) + SpawnError;
+				return false;
+			}
+			const double Start = FPlatformTime::Seconds();
+			for (int32 Index = 0; Index < Iterations; ++Index)
+			{
+				if (!Subsystem->Spawn(Script, NoArgs, Owner, SpawnError).IsValid())
+				{
+					OutError = FString(TEXT("The script asset didn't spawn: ")) + SpawnError;
+					return false;
+				}
+			}
+			OutSeconds = FPlatformTime::Seconds() - Start;
+			return true;
+		}
+
+		FBangoInlineScript Script;
+		Script.Source = Source;
+		if (!Subsystem->Spawn(Script, NoArgs, Owner, SpawnError).IsValid())
+		{
+			OutError = FString(TEXT("The inline script didn't spawn: ")) + SpawnError;
+			return false;
+		}
+		const double Start = FPlatformTime::Seconds();
+		for (int32 Index = 0; Index < Iterations; ++Index)
+		{
+			if (!Subsystem->Spawn(Script, NoArgs, Owner, SpawnError).IsValid())
+			{
+				OutError = FString(TEXT("The inline script didn't spawn: ")) + SpawnError;
+				return false;
+			}
+		}
+		OutSeconds = FPlatformTime::Seconds() - Start;
+		return true;
+	}
+
+	static void Run(const TArray<FString>& Args, UWorld* World)
 	{
 		// Bango.Benchmark List: the cases, each with the script it runs, for writing the Blueprint versions.
 		if (Args.Num() > 0 && Args[0].Equals(TEXT("List"), ESearchCase::IgnoreCase))
@@ -138,6 +204,16 @@ namespace BangoBenchmarkCommandPrivate
 			};
 		}
 
+		// The cases that spawn through the script subsystem: only where there's a game running to have one.
+		if (World && UBangoScriptSubsystem::Get(World))
+		{
+			const TWeakObjectPtr<UWorld> WeakWorld(World);
+			Options.RunInGame = [WeakWorld](const FString& Case, const FString& Source, int32 Iterations, double& OutSeconds, FString& OutError)
+			{
+				return RunInGame(WeakWorld.Get(), Case, Source, Iterations, OutSeconds, OutError);
+			};
+		}
+
 #if UE_BUILD_SHIPPING
 		const TCHAR* BuildName = TEXT("Shipping");
 #elif UE_BUILD_TEST
@@ -170,8 +246,8 @@ namespace BangoBenchmarkCommandPrivate
 		}
 	}
 
-	static FAutoConsoleCommand BenchmarkCommand(
+	static FAutoConsoleCommandWithWorldAndArgs BenchmarkCommand(
 		TEXT("Bango.Benchmark"),
 		TEXT("Times Bango scripts against the same work in C++ (and in a Blueprint, see Bango.Benchmark.Blueprint). Bango.Benchmark [Iterations] [CaseFilter] [Repeats=N] [Trail]; Bango.Benchmark List prints the cases and their scripts."),
-		FConsoleCommandWithArgsDelegate::CreateStatic(&Run));
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&Run));
 }

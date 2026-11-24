@@ -22,6 +22,12 @@ bool FBangoBenchmarkTest::RunTest(const FString& Parameters)
 	{
 		const FBangoBenchmarkResult* Script = Results.FindByPredicate([&Case](const FBangoBenchmarkResult& Result) { return Result.Case == Case.Name && Result.Runner == TEXT("Bango"); });
 		const FBangoBenchmarkResult* Cpp = Results.FindByPredicate([&Case](const FBangoBenchmarkResult& Result) { return Result.Case == Case.Name && Result.Runner == TEXT("C++"); });
+		if (Case.bNeedsGame)
+		{
+			// Run by the game's script subsystem, which a test hasn't got: no row.
+			TestTrue(*FString::Printf(TEXT("%s: no row without a game"), *Case.Name), !Script && !Cpp);
+			continue;
+		}
 		if (Case.Source.IsEmpty())
 		{
 			// C++ only: what a value on its own costs.

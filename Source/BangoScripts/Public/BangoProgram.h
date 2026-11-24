@@ -394,6 +394,16 @@ struct FBangoProgram
 	/** Where the inputs line is, for errors about arguments. */
 	FBangoDebugLoc ParamsLoc;
 
+	/**
+	 * Which command each of Names is (null for a name that isn't a command's), in the command table whose id is
+	 * BoundTableId (0: not worked out yet). The first copy of the script to start works it out and the rest use it
+	 * (FBangoInstance::BindCommandsFor), so starting one doesn't look every command up by name again. A table only
+	 * ever gains commands, and keeps each for as long as it lasts, so this stays right for as long as that table does.
+	 * Scripts start on the game thread, the only place this is touched. Not part of the program: compiling starts it empty.
+	 */
+	mutable uint64 BoundTableId = 0;
+	mutable TArray<const struct FBangoCommand*> BoundCommands;
+
 	/** How many arguments a spawn must pass at least. */
 	int32 GetNumRequiredParams() const
 	{

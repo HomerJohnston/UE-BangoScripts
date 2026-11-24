@@ -344,6 +344,21 @@ bool FBangoModuleTest::RunTest(const FString& Parameters)
 	TSharedPtr<const FBangoProgram> Changed;
 	TestTrue(TEXT("changed script compiles"), Module.GetScriptCache().GetProgram(*Asset, Module.GetCommands(), Changed, DisplayPath, Error));
 	TestTrue(TEXT("changed text is compiled again"), Changed.IsValid() && Changed != Program);
+	{
+		// The asset remembers what it was compiled as, for as long as its text is the same.
+		TSharedPtr<const FBangoProgram> Remembered;
+		FString RememberedPath;
+		TestTrue(TEXT("remembered asset: the asset keeps what it was compiled as"), Asset->LastCompiled.IsValid() && Asset->LastCompiled->Program == Changed);
+		TestTrue(TEXT("remembered asset: the same again, with its display path"),
+			Module.GetScriptCache().GetProgram(*Asset, Module.GetCommands(), Remembered, RememberedPath, Error) && Remembered == Changed
+			&& RememberedPath == TEXT("/BangoScripts/BangoTests/Hello.bango"));
+		Asset->Source = TEXT("WriteScreen(");
+		TestFalse(TEXT("remembered asset: text that no longer compiles fails"),
+			Module.GetScriptCache().GetProgram(*Asset, Module.GetCommands(), Remembered, RememberedPath, Error));
+		Asset->Source = TEXT("WriteScreen(\"changed\");");
+		TestTrue(TEXT("remembered asset: the text it was compiled from, again"),
+			Module.GetScriptCache().GetProgram(*Asset, Module.GetCommands(), Remembered, RememberedPath, Error) && Remembered == Changed);
+	}
 	Asset->Source = TEXT("#inputs (string _name = \"you\")\nWriteScreen(_name);");
 
 	TArray<FBangoScriptParamInfo> Params;
@@ -364,6 +379,35 @@ bool FBangoModuleTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("inline script compiles"), Module.GetInlineProgram(Inline, TEXT("Test (inline script)"), InlineProgram, Error));
 	TestTrue(TEXT("inline script: the same text comes from the cache"), Module.GetInlineProgram(Inline, TEXT("Test (inline script)"), InlineAgain, Error) && InlineAgain == InlineProgram);
 	TestTrue(TEXT("inline script: its parameters"), InlineProgram.IsValid() && InlineProgram->Params.Num() == 2);
+	{
+		// The script remembers what it was compiled as, and stops using that as soon as anything it came from changes.
+		FBangoInlineScript Remembering;
+		Remembering.Source = TEXT("WriteScreen(\"one\");");
+		TSharedPtr<const FBangoProgram> First;
+		TSharedPtr<const FBangoProgram> Second;
+		TSharedPtr<const FString> FirstText;
+		TSharedPtr<const FString> SecondText;
+		TestTrue(TEXT("remembered: compiles"), Module.GetInlineProgram(Remembering, TEXT("Remembering (inline script)"), First, Error, &FirstText));
+		TestTrue(TEXT("remembered: the script keeps it"), Remembering.LastCompiled.IsValid() && Remembering.LastCompiled->Program == First);
+		TestTrue(TEXT("remembered: the same again, with the same copy of its text"),
+			Module.GetInlineProgram(Remembering, TEXT("Remembering (inline script)"), Second, Error, &SecondText) && Second == First
+			&& FirstText.IsValid() && SecondText == FirstText && *FirstText == Remembering.Source);
+		const FBangoInlineScript Copied = Remembering;
+		TestTrue(TEXT("remembered: a copy of the script uses it too"),
+			Module.GetInlineProgram(Copied, TEXT("Remembering (inline script)"), Second, Error) && Second == First);
+		TestTrue(TEXT("remembered: another name is another program, named for it"),
+			Module.GetInlineProgram(Remembering, TEXT("Other (inline script)"), Second, Error) && Second != First
+			&& Second->FileName == TEXT("Other (inline script)"));
+		Remembering.Source = TEXT("WriteScreen(\"two\");");
+		TestTrue(TEXT("remembered: changed text is compiled again"),
+			Module.GetInlineProgram(Remembering, TEXT("Other (inline script)"), First, Error, &FirstText) && First != Second
+			&& FirstText.IsValid() && *FirstText == Remembering.Source);
+		Remembering.Source = TEXT("WriteScreen(");
+		TestFalse(TEXT("remembered: text that no longer compiles fails"), Module.GetInlineProgram(Remembering, TEXT("Other (inline script)"), First, Error));
+		FBangoInlineScript Blank;
+		Blank.Source = TEXT(" \t\n ");
+		TestTrue(TEXT("remembered: only spaces is empty"), Blank.IsEmpty() && FBangoInlineScript().IsEmpty() && !Copied.IsEmpty());
+	}
 	FBangoInlineScript Broken;
 	Broken.Source = TEXT("Sleep(");
 	TestFalse(TEXT("inline script that doesn't compile"), Module.GetInlineProgram(Broken, TEXT("Test (inline script)"), InlineProgram, Error));

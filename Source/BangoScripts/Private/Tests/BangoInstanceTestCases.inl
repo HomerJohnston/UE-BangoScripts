@@ -1518,6 +1518,75 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			Context.Globals = GlobalsBefore;
 		}
 
+		// A compiled script keeps which command each name is, for the next copy to start (FBangoProgram::BoundCommands):
+		// that must be the commands of the table the copy is started with.
+		{
+			auto MakeProbeTable = [](FBangoCommandTable& Table, int32 Answer) -> bool
+			{
+				FBangoCommand Probe;
+				Probe.Signature = FBangoCommandSignature::Make(TEXT("Probe")).Returns(FBangoType::Int());
+				Probe.Start = [Answer](FBangoCommandCall& Call)
+				{
+					Call.Result = FBangoValue::MakeInt(Answer);
+					return EBangoCommandResult::Done;
+				};
+				FString AddError;
+				return Table.Add(Probe, AddError);
+			};
+			FBangoCommandTable First;
+			FBangoCommandTable Second;
+			Expect(MakeProbeTable(First, 1) && MakeProbeTable(Second, 2), TEXT("bound commands: the tables are made"));
+			Expect(First.GetId() != 0 && First.GetId() != Second.GetId(), TEXT("bound commands: each table has its own id"));
+			const FBangoCommandTable Copy = First;
+			Expect(Copy.GetId() != First.GetId(), TEXT("bound commands: a copy of a table has its own id"));
+
+			TSharedPtr<FBangoProgram> ProbeProgram = MakeShared<FBangoProgram>();
+			FBangoCompileError ProbeCompileError;
+			Expect(Bango::CompileSource(TEXT("global int probed;\nprobed = Probe() * 10 + Probe();"), TEXT("probe.bango"), First, *ProbeProgram, ProbeCompileError), TEXT("bound commands: compiles"));
+			Expect(ProbeProgram->BoundTableId == 0, TEXT("bound commands: nothing is kept until a copy starts"));
+			auto RunProbe = [&](const FBangoCommandTable& Table) -> int64
+			{
+				FBangoGlobalStore ProbeGlobals;
+				FBangoExecContext ProbeContext = Context;
+				ProbeContext.Globals = &ProbeGlobals;
+				FBangoInstance Instance;
+				FBangoRuntimeError ProbeError;
+				if (!Instance.Start(ProbeProgram, Table, ProbeGlobals, 1, ProbeError) || Instance.Resume(ProbeContext) != EBangoInstanceStatus::Finished)
+				{
+					return -1;
+				}
+				const FBangoValue* Value = ProbeGlobals.Find(TEXT("probed"));
+				return Value && !Value->IsNil() ? Value->GetInt() : -1;
+			};
+			Expect(RunProbe(First) == 11, TEXT("bound commands: the first copy finds its commands"));
+			Expect(ProbeProgram->BoundTableId == First.GetId(), TEXT("bound commands: and they're kept, with the table's id"));
+			Expect(RunProbe(First) == 11, TEXT("bound commands: the next copy uses them"));
+			Expect(RunProbe(Second) == 22, TEXT("bound commands: a copy started with another table gets that table's"));
+			Expect(RunProbe(First) == 11 && RunProbe(Copy) == 11, TEXT("bound commands: and back again"));
+			{
+				// A table without the command: the usual error, whatever is kept.
+				FBangoCommandTable Empty;
+				FBangoGlobalStore ProbeGlobals;
+				FBangoInstance Instance;
+				FBangoRuntimeError ProbeError;
+				Expect(!Instance.Start(ProbeProgram, Empty, ProbeGlobals, 1, ProbeError) && ProbeError.Message.Contains(TEXT("'Probe', which isn't registered"))
+					&& ProbeError.FileName == TEXT("probe.bango"), *FString::Printf(TEXT("bound commands: a table without the command. Got: %s"), *ProbeError.ToString()));
+			}
+			{
+				// A script that fails while running still says which file it is (the name is filled in with the error).
+				TSharedPtr<FBangoProgram> FailProgram = MakeShared<FBangoProgram>();
+				Expect(Bango::CompileSource(TEXT("int _a = 1;\nint _z = 0;\nint _c = _a / _z;"), TEXT("fails.bango"), First, *FailProgram, ProbeCompileError), TEXT("file name: compiles"));
+				FBangoGlobalStore ProbeGlobals;
+				FBangoExecContext ProbeContext = Context;
+				ProbeContext.Globals = &ProbeGlobals;
+				FBangoInstance Instance;
+				FBangoRuntimeError ProbeError;
+				Expect(Instance.Start(FailProgram, First, ProbeGlobals, 1, ProbeError) && Instance.Resume(ProbeContext) == EBangoInstanceStatus::Failed
+					&& Instance.GetError().FileName == TEXT("fails.bango") && Instance.GetError().ToString().Contains(TEXT("fails.bango(3:")),
+					*FString::Printf(TEXT("file name: an error while running names its file. Got: %s"), *Instance.GetError().ToString()));
+			}
+		}
+
 		// Conditions (Bango::CompileCondition): a script, or one expression, that returns true or false.
 		{
 			struct FConditionCase

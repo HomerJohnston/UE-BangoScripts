@@ -138,9 +138,20 @@ void UBangoScriptSubsystem::RunLevelStartScript(UWorld& InWorld)
 	}
 }
 
+UBangoGlobalsSubsystem* UBangoScriptSubsystem::GetGlobals()
+{
+	if (UBangoGlobalsSubsystem* Known = KnownGlobals.Get())
+	{
+		return Known;
+	}
+	UBangoGlobalsSubsystem* Found = UBangoGlobalsSubsystem::Get(this);
+	KnownGlobals = Found;
+	return Found;
+}
+
 bool UBangoScriptSubsystem::MakeContext(float DeltaSeconds, FBangoExecContext& OutContext)
 {
-	UBangoGlobalsSubsystem* Globals = UBangoGlobalsSubsystem::Get(this);
+	UBangoGlobalsSubsystem* Globals = GetGlobals();
 	if (!Globals)
 	{
 		return false;
@@ -175,6 +186,7 @@ bool UBangoScriptSubsystem::StartSpawnBlock(const FBangoInstance& Parent, int32 
 	TSharedPtr<FRunningScript> Script = MakeShared<FRunningScript>();
 	if (const TSharedPtr<FRunningScript>* ParentScript = Scripts.Find(Parent.GetId()))
 	{
+		(*ParentScript)->bStartedChild = true;
 		Script->Path = (*ParentScript)->Path;
 		Script->bFromSource = (*ParentScript)->bFromSource;
 		Script->Source = (*ParentScript)->Source;
@@ -234,16 +246,22 @@ FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FBangoInlineScript& Script
 	{
 		return FBangoScriptHandle(); // nothing to run (an inline script left empty is normal)
 	}
-	const FString Name = GetInlineScriptName(Owner);
+	// The same owner as last time has the same name: what the script remembers has it, already made. (Last keeps that
+	// alive here, since the script remembers something else if it's compiled again.)
+	const TSharedPtr<const FBangoInlineCompiled> Last = Script.LastCompiled;
+	const bool bSameOwner = Last.IsValid() && Owner && !Last->OwnerName.IsNone() && Last->OwnerName == Owner->GetFName();
+	const FString MadeName = bSameOwner ? FString() : GetInlineScriptName(Owner);
+	const FString& Name = bSameOwner ? Last->Name : MadeName;
 	TSharedPtr<const FBangoProgram> Program;
-	if (!FBangoModule::Get().GetInlineProgram(Script, Name, Program, OutError))
+	TSharedPtr<const FString> SharedSource;
+	if (!FBangoModule::Get().GetInlineProgram(Script, Name, Program, OutError, &SharedSource, Owner))
 	{
 		return FBangoScriptHandle();
 	}
 	TSharedPtr<FRunningScript> Running = MakeShared<FRunningScript>();
 	Running->Path = Name;
 	Running->bFromSource = true; // saved with its text; not hot reloaded (it has no file)
-	Running->Source = Script.Source;
+	Running->Source = SharedSource; // the one copy the script was compiled from, not another
 	if (Script.HasInputsSignature())
 	{
 		const UClass* SignatureClass = Script.GetInputsSignatureClass();
@@ -332,13 +350,21 @@ bool UBangoScriptSubsystem::IsDescendant(int32 Id, int32 Ancestor) const
 	return false;
 }
 
-void UBangoScriptSubsystem::RemoveScript(int64 Id)
+bool UBangoScriptSubsystem::RemoveScript(int64 Id)
 {
-	if (const TSharedPtr<FRunningScript>* Script = Scripts.Find(Id))
+	const TSharedPtr<FRunningScript>* Script = Scripts.Find(Id);
+	if (!Script)
+	{
+		return false;
+	}
+	// Most scripts have no parent and start no script: nothing is found through them, so they needn't be kept.
+	const bool bLinked = (*Script)->ParentId != 0 || (*Script)->bStartedChild;
+	if (bLinked)
 	{
 		EndedParents.Add((int32)Id, (*Script)->ParentId);
-		Scripts.Remove(Id);
 	}
+	Scripts.Remove(Id);
+	return bLinked;
 }
 
 void UBangoScriptSubsystem::PruneEndedParents()
@@ -402,7 +428,7 @@ void UBangoScriptSubsystem::GetDebugInfo(TArray<FBangoScriptDebugInfo>& OutScrip
 		Info.Status = Script.Instance.GetStatus();
 		Script.Instance.GetCallStack(Info.CallStack);
 		Info.WaitingOn = Script.Instance.GetWaitingCommandName();
-		Info.SourceHash = Script.bFromSource ? FCrc::StrCrc32(*Script.Source) : 0;
+		Info.SourceHash = Script.bFromSource ? FCrc::StrCrc32(*Script.GetSource()) : 0;
 	}
 	OutScripts.Append(EndedScripts);
 }
@@ -426,7 +452,7 @@ void UBangoScriptSubsystem::ReportFailure(const FRunningScript& Script)
 	FBangoScriptDebugInfo& Ended = EndedScripts.AddDefaulted_GetRef();
 	Ended.Id = Script.Instance.GetId();
 	Ended.Path = Script.Path;
-	Ended.SourceHash = Script.bFromSource ? FCrc::StrCrc32(*Script.Source) : 0;
+	Ended.SourceHash = Script.bFromSource ? FCrc::StrCrc32(*Script.GetSource()) : 0;
 	Ended.Status = EBangoInstanceStatus::Failed;
 	Ended.Error = Script.Instance.GetError();
 	Ended.TrailCount = Script.Instance.GetTrail(0, Ended.Trail); // the way it came to the error
@@ -639,7 +665,7 @@ bool UBangoScriptSubsystem::CompileSavedSource(const FRunningScript& Script, TSh
 {
 	if (Script.SignatureName.IsEmpty() && Script.InstanceInputs.Num() == 0)
 	{
-		return CompileFromSource(Script.Source, Script.Path, OutProgram, OutError);
+		return CompileFromSource(Script.GetSource(), Script.Path, OutProgram, OutError);
 	}
 	TSharedPtr<const FBangoInputsSignature> Signature;
 	if (!Script.SignatureName.IsEmpty())
@@ -663,7 +689,7 @@ bool UBangoScriptSubsystem::CompileSavedSource(const FRunningScript& Script, TSh
 	}
 	if (Script.InstanceInputs.Num() == 0)
 	{
-		return FBangoModule::Get().GetInlineProgram(Script.Source, Signature.Get(), Script.Path, OutProgram, OutError);
+		return FBangoModule::Get().GetInlineProgram(Script.GetSource(), Signature.Get(), Script.Path, OutProgram, OutError);
 	}
 	// With its object's own inputs after the signature's, as it was compiled when it was spawned.
 	TArray<FBangoInputDecl> InstanceInputs;
@@ -677,7 +703,7 @@ bool UBangoScriptSubsystem::CompileSavedSource(const FRunningScript& Script, TSh
 	{
 		return false;
 	}
-	return FBangoModule::Get().GetInlineProgram(Script.Source, &Inputs, Script.Path, OutProgram, OutError);
+	return FBangoModule::Get().GetInlineProgram(Script.GetSource(), &Inputs, Script.Path, OutProgram, OutError);
 }
 
 bool UBangoScriptSubsystem::CompileFromSource(const FString& Source, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError)
@@ -707,7 +733,7 @@ FBangoScriptHandle UBangoScriptSubsystem::SpawnFromSource(const FString& Source,
 	TSharedPtr<FRunningScript> Script = MakeShared<FRunningScript>();
 	Script->Path = ScriptName;
 	Script->bFromSource = true;
-	Script->Source = Source;
+	Script->Source = MakeShared<FString>(Source);
 	Script->Instance.SetOwner(GetScriptOwner(Owner));
 	return StartScript(Program, Script, Args);
 }
@@ -727,7 +753,7 @@ FBangoScriptHandle UBangoScriptSubsystem::StartScript(const TSharedPtr<const FBa
 		}
 	};
 	FBangoModule& Module = FBangoModule::Get();
-	UBangoGlobalsSubsystem* Globals = UBangoGlobalsSubsystem::Get(this);
+	UBangoGlobalsSubsystem* Globals = GetGlobals();
 	if (!Globals)
 	{
 		Report(FString::Printf(TEXT("Can't spawn '%s': there is no game instance for global variables."), *Script->Path));
@@ -743,6 +769,13 @@ FBangoScriptHandle UBangoScriptSubsystem::StartScript(const TSharedPtr<const FBa
 
 	Script->ParentId = PendingParentId; // SpawnChild's (taken now, so the scripts this one starts don't get it too)
 	PendingParentId = 0;
+	if (Script->ParentId != 0)
+	{
+		if (const TSharedPtr<FRunningScript>* ParentScript = Scripts.Find(Script->ParentId))
+		{
+			(*ParentScript)->bStartedChild = true;
+		}
+	}
 #if WITH_EDITOR
 	Script->Instance.SetRecordTrail(true); // for the editor's debugger
 #endif
@@ -763,9 +796,8 @@ FBangoScriptHandle UBangoScriptSubsystem::StartScript(const TSharedPtr<const FBa
 	++StartDepth;
 	const bool bStillRunning = ResumeScript(*Script, 0.0f);
 	--StartDepth;
-	if (!bStillRunning)
+	if (!bStillRunning && RemoveScript(Id))
 	{
-		RemoveScript(Id);
 		PruneEndedParents();
 	}
 
@@ -998,8 +1030,7 @@ void UBangoScriptSubsystem::Tick(float DeltaTime)
 		const TSharedPtr<FRunningScript>* Script = Scripts.Find(Id);
 		if (Script && !(*Script)->Instance.IsRunning())
 		{
-			RemoveScript(Id);
-			bRemoved = true;
+			bRemoved |= RemoveScript(Id);
 		}
 	}
 	if (bRemoved)
@@ -1055,7 +1086,8 @@ bool UBangoScriptSubsystem::SaveState(TArray<uint8>& OutData)
 		Writer << Script.bFromSource;
 		if (Script.bFromSource)
 		{
-			Writer << Script.Source; // it has no file to compile it from again
+			FString Text = Script.GetSource();
+			Writer << Text; // it has no file to compile it from again
 			Writer << Script.SignatureClass;
 			Writer << Script.SignatureName;
 			Writer << Script.InstanceInputs;
@@ -1107,7 +1139,9 @@ bool UBangoScriptSubsystem::LoadState(const TArray<uint8>& Data)
 		Reader << Script->bFromSource;
 		if (Script->bFromSource)
 		{
-			Reader << Script->Source;
+			FString Text;
+			Reader << Text;
+			Script->Source = MakeShared<FString>(MoveTemp(Text));
 			Reader << Script->SignatureClass;
 			Reader << Script->SignatureName;
 			Reader << Script->InstanceInputs;
@@ -1131,6 +1165,7 @@ bool UBangoScriptSubsystem::LoadState(const TArray<uint8>& Data)
 		}
 		if (Script->Instance.IsRunning())
 		{
+			Script->bStartedChild = true; // not saved: taken as possible, so it's kept in EndedParents as before
 			Scripts.Add(Script->Instance.GetId(), Script);
 		}
 	}

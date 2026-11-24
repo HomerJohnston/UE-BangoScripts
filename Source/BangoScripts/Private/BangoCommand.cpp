@@ -1,5 +1,7 @@
 #include "BangoCommand.h"
 
+#include <atomic>
+
 namespace BangoCommandPrivate
 {
 	/** "an int", "a float", "an entity[]". */
@@ -496,6 +498,12 @@ FBangoCommandSignature& FBangoCommandSignature::Describe(const FString& InDescri
 {
 	CommandDescription = InDescription;
 	return *this;
+}
+
+uint64 FBangoCommandTable::FTableId::MakeNumber()
+{
+	static std::atomic<uint64> Last{0};
+	return ++Last;
 }
 
 bool FBangoCommandTable::Add(const FBangoCommandSignature& Signature, FString& OutError)

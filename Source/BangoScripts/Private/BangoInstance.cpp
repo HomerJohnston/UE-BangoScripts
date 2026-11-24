@@ -181,6 +181,12 @@ bool FBangoInstance::BindCommands(const FBangoCommandTable& Commands, FString& O
 
 bool FBangoInstance::BindCommandsFor(const FBangoProgram& InProgram, const FBangoCommandTable& Commands, TArray<const FBangoCommand*>& OutBound, FString& OutError)
 {
+	// Worked out already, by another copy of this script, for this table: used as it is.
+	if (InProgram.BoundTableId == Commands.GetId() && InProgram.BoundCommands.Num() == InProgram.Names.Num())
+	{
+		OutBound = InProgram.BoundCommands;
+		return true;
+	}
 	OutBound.Init(nullptr, InProgram.Names.Num());
 	for (const FBangoFunctionCode& Function : InProgram.Functions)
 	{
@@ -198,7 +204,8 @@ bool FBangoInstance::BindCommandsFor(const FBangoProgram& InProgram, const FBang
 				return false;
 			}
 			const FString& Name = InProgram.Names[NameIndex];
-			const FBangoCommand* Command = Commands.FindCommandImpl(Name);
+			// Looked up by name once for each command, however many times the script calls it.
+			const FBangoCommand* Command = OutBound[NameIndex] ? OutBound[NameIndex] : Commands.FindCommandImpl(Name);
 			if (!Command)
 			{
 				OutError = FString::Printf(TEXT("This script calls the command '%s', which isn't registered."), *Name);
@@ -218,6 +225,8 @@ bool FBangoInstance::BindCommandsFor(const FBangoProgram& InProgram, const FBang
 			OutBound[NameIndex] = Command;
 		}
 	}
+	InProgram.BoundCommands = OutBound;
+	InProgram.BoundTableId = Commands.GetId();
 	return true;
 }
 
@@ -233,7 +242,7 @@ bool FBangoInstance::Start(const TSharedPtr<const FBangoProgram>& InProgram, con
 	ScriptSlots.Reset();
 	Stack.Reset();
 	PendingCommandName = -1;
-	PendingCall = FBangoCommandCall();
+	PendingCall.Reset();
 	Status = EBangoInstanceStatus::Failed;
 
 	if (!Program.IsValid() || Program->Functions.Num() == 0)
@@ -242,11 +251,12 @@ bool FBangoInstance::Start(const TSharedPtr<const FBangoProgram>& InProgram, con
 		OutError = Error;
 		return false;
 	}
-	Error.FileName = Program->FileName;
+	// (The error's file name is only filled in for an error, here and in RuntimeFail: it's a copy of a string.)
 
 	FString Message;
 	if (!BindCommands(Commands, Message))
 	{
+		Error.FileName = Program->FileName;
 		Error.Message = Message;
 		OutError = Error;
 		return false;
@@ -256,6 +266,7 @@ bool FBangoInstance::Start(const TSharedPtr<const FBangoProgram>& InProgram, con
 	TArray<FBangoValue> ParamValues;
 	if (!CheckArguments(Args, ParamValues))
 	{
+		Error.FileName = Program->FileName;
 		OutError = Error;
 		return false;
 	}
@@ -263,6 +274,7 @@ bool FBangoInstance::Start(const TSharedPtr<const FBangoProgram>& InProgram, con
 	int32 GlobalLine = 0;
 	if (!DeclareGlobals(*Program, Globals, Message, GlobalLine))
 	{
+		Error.FileName = Program->FileName;
 		Error.Line = GlobalLine;
 		Error.Column = 1;
 		Error.Message = Message;
@@ -272,6 +284,7 @@ bool FBangoInstance::Start(const TSharedPtr<const FBangoProgram>& InProgram, con
 
 	FBangoFrame Main;
 	Main.Function = 0;
+	Main.Slots.Reserve(Program->Functions[0].SlotTypes.Num());
 	for (const FBangoType& SlotType : Program->Functions[0].SlotTypes)
 	{
 		Main.Slots.Add(FBangoValue::MakeNil(SlotType));
@@ -403,13 +416,20 @@ bool FBangoInstance::DeclareGlobals(const FBangoProgram& InProgram, FBangoGlobal
 {
 	for (const FBangoGlobalDecl& Global : InProgram.Globals)
 	{
-		if (!Globals.Declare(Global.Name, Global.Type, OutError))
+		// Usually it's there already, as this type (another copy of the script made it, or this one last time):
+		// looked up once, and nothing more to do unless it wants a default.
+		int32 Slot = Globals.FindSlot(Global.Name);
+		if (Slot == INDEX_NONE || Globals.GetSlot(Slot).GetType() != Global.Type)
 		{
-			OutLine = Global.Line;
-			return false;
+			if (!Globals.Declare(Global.Name, Global.Type, OutError))
+			{
+				OutLine = Global.Line;
+				return false;
+			}
+			Slot = Globals.FindSlot(Global.Name);
 		}
 		// `?= value`: given if it didn't exist (Declare just made it nil) or held nil.
-		if (Global.bHasDefault && !Global.Default.IsNil() && Globals.Find(Global.Name)->IsNil())
+		if (Global.bHasDefault && !Global.Default.IsNil() && Slot != INDEX_NONE && Globals.GetSlot(Slot).IsNil())
 		{
 			FBangoValue Default;
 			if (!ResolveSelf(Global.Default, Default) || !Globals.Set(Global.Name, Default, OutError))
@@ -1056,6 +1076,27 @@ namespace BangoInstancePrivate
 
 bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Globals, const IBangoEntityResolver* Entities, bool bNilOk)
 {
+	// The usual read by far, a whole variable that has a value: done before anything is set up for the others (the
+	// indexes, the name for a message). One that's nil or isn't there goes on below, for its error.
+	if (!bNilOk && Place.NumIndexes == 0 && Place.Part == -1)
+	{
+		const FBangoValue* Whole = nullptr;
+		if (Place.Kind != EBangoPlaceKind::Global)
+		{
+			const TArray<FBangoValue>& Slots = GetPlaceSlots(Place);
+			Whole = Slots.IsValidIndex(Place.Index) ? &Slots[Place.Index] : nullptr;
+		}
+		else
+		{
+			Whole = FindGlobal(Place, Globals);
+		}
+		if (Whole && !Whole->IsNil())
+		{
+			Stack.Add(*Whole);
+			return true;
+		}
+	}
+
 	TArray<int64> Indexes;
 	if (!PopIndexes(Place.NumIndexes, Indexes))
 	{
@@ -1201,6 +1242,35 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 
 bool FBangoInstance::StorePlace(const FBangoPlace& Place, FBangoGlobalStore& Globals)
 {
+	// The usual write by far, a whole variable given a value of its own type: moved in straight from the value stack,
+	// before anything is set up for the others. Anything else goes on below.
+	if (Place.NumIndexes == 0 && Place.Part == -1 && Stack.Num() > (Frames.Num() > 0 ? Frames.Last().StackBase : 0) && !Stack.Last().IsNil())
+	{
+		FBangoValue* Whole = nullptr;
+		if (Place.Kind != EBangoPlaceKind::Global)
+		{
+			TArray<FBangoValue>& Slots = GetPlaceSlots(Place);
+			if (Slots.IsValidIndex(Place.Index) && Slots[Place.Index].GetType() == Stack.Last().GetType())
+			{
+				Whole = &Slots[Place.Index];
+			}
+		}
+		else
+		{
+			const int32 GlobalSlot = FindGlobalSlot(Place, Globals);
+			if (GlobalSlot != INDEX_NONE && Globals.GetSlot(GlobalSlot).GetType() == Stack.Last().GetType())
+			{
+				Whole = &Globals.GetSlotMutable(GlobalSlot); // which notes that it changed
+			}
+		}
+		if (Whole)
+		{
+			*Whole = MoveTemp(Stack.Last());
+			Stack.Pop(EAllowShrinking::No);
+			return true;
+		}
+	}
+
 	FBangoValue Value = PopValue();
 	TArray<int64> Indexes;
 	if (Status == EBangoInstanceStatus::Failed || !PopIndexes(Place.NumIndexes, Indexes))

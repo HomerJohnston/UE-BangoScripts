@@ -17,12 +17,8 @@ uint64 FBangoGlobalStore::FLayout::MakeNumber()
 
 bool FBangoGlobalStore::Declare(const FString& Name, const FBangoType& Type, FString& OutError)
 {
-	if (!Bango::IsValidGlobalName(Name))
-	{
-		OutError = FString::Printf(TEXT("'%s' is not a valid global name. Globals must be identifiers (letters, digits and '_', not starting with a digit), and must not be reserved words."), *Name);
-		return false;
-	}
-
+	// One that's already there first: every script that declares a global does this each time it starts, and its
+	// name was checked when it was made.
 	if (const FBangoValue* Existing = Find(Name))
 	{
 		if (Existing->GetType() != Type)
@@ -32,6 +28,12 @@ bool FBangoGlobalStore::Declare(const FString& Name, const FBangoType& Type, FSt
 			return false;
 		}
 		return true;
+	}
+
+	if (!Bango::IsValidGlobalName(Name))
+	{
+		OutError = FString::Printf(TEXT("'%s' is not a valid global name. Globals must be identifiers (letters, digits and '_', not starting with a digit), and must not be reserved words."), *Name);
+		return false;
 	}
 
 	FEntry& Entry = Entries.AddDefaulted_GetRef();

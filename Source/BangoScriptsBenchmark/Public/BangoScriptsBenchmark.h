@@ -58,6 +58,12 @@ struct FBangoBenchmarkOptions
 	 * the case (bOutImplemented false) or couldn't run it. Unset: no Blueprint rows.
 	 */
 	TFunction<bool(const FString& Case, int32 Iterations, double& OutChecksum, bool& bOutImplemented)> RunBlueprint;
+	/**
+	 * Runs one of the cases that need a running game (SpawnInline and the like): Iterations spawns of Source through
+	 * the game's script subsystem, giving the time they took in seconds (the first spawn, which compiles the script,
+	 * isn't timed). False, with why, if it couldn't. Unset: those cases have no rows.
+	 */
+	TFunction<bool(const FString& Case, const FString& Source, int32 Iterations, double& OutSeconds, FString& OutError)> RunInGame;
 };
 
 /** A case, for listing them (and for writing its Blueprint version). */
@@ -70,6 +76,8 @@ struct FBangoBenchmarkCaseInfo
 	FString Source;
 	/** True if it has a script, a C++ version, and can have a Blueprint one. */
 	bool bComparable = false;
+	/** True if it only runs in a game (the options' RunInGame): the script subsystem's own way of starting a script. */
+	bool bNeedsGame = false;
 };
 
 namespace Bango

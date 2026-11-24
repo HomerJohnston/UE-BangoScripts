@@ -45,8 +45,14 @@ public:
 	 * An inline script's compiled program (FBangoInlineScript, spec section 15), with its inputs signature if it has
 	 * one, compiled the first time this text is asked for under this Name (what errors call it) and kept: the same text
 	 * isn't compiled again. Fails, with OutError, if it doesn't compile or its signature isn't registered.
+	 *
+	 * The script remembers the answer (FBangoInlineScriptBase::LastCompiled), so asking again for a script that hasn't
+	 * changed only compares its text. OutSource, if given, gets the one shared copy of the text it was compiled from.
+	 * NameOwner, if given, is the object Name was made from (UBangoScriptSubsystem::GetInlineScriptName), kept with
+	 * what the script remembers so the name needn't be made again for the same owner.
 	 */
-	bool GetInlineProgram(const FBangoInlineScript& Script, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError);
+	bool GetInlineProgram(const FBangoInlineScript& Script, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError,
+		TSharedPtr<const FString>* OutSource = nullptr, const UObject* NameOwner = nullptr);
 
 	/** GetInlineProgram for a script's text and its signature (null for none), as a saved script is restored. */
 	bool GetInlineProgram(const FString& Source, const FBangoInputsSignature* Signature, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError);

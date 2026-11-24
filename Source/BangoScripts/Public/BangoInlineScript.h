@@ -8,6 +8,24 @@
 class UClass;
 
 /**
+ * What an inline script remembers of the last time it was compiled (FBangoModule::GetInlineProgram), so spawning it
+ * again costs a comparison of its text instead of a lookup by all of it. Used only while everything it was compiled
+ * from is still the same: the name, the text and the inputs it's given.
+ */
+struct FBangoInlineCompiled
+{
+	/** What errors call the script (its owner's name). */
+	FString Name;
+	/** The owner Name was made from, if it's known (none otherwise): the same owner again has the same Name. */
+	FName OwnerName;
+	/** The text it was compiled from: one copy, shared with the running scripts (they keep it for saving). */
+	TSharedPtr<const FString> Source;
+	/** The inputs it was compiled with, or null. */
+	TSharedPtr<const FBangoInputsSignature> Signature;
+	TSharedPtr<const FBangoProgram> Program;
+};
+
+/**
  * One of an inline script's instance inputs, as it's kept on the script (FBangoInlineScriptBase::SetInstanceInputs):
  * an FBangoInputDecl, as properties.
  */
@@ -51,7 +69,17 @@ struct BANGOSCRIPTS_API FBangoInlineScriptBase
 	FString Source;
 
 	/** True if there's no script (nothing but spaces). */
-	bool IsEmpty() const { return Source.TrimStartAndEnd().IsEmpty(); }
+	bool IsEmpty() const
+	{
+		for (const TCHAR Char : Source)
+		{
+			if (!FChar::IsWhitespace(Char))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
 
 	/**
 	 * Gives the script the inputs signature Name of Owner's class (or the global one, with a null Owner), registered
@@ -109,6 +137,13 @@ struct BANGOSCRIPTS_API FBangoInlineScriptBase
 	const UClass* GetInputsSignatureClass() const;
 	FName GetInputsSignatureName() const { return InputsSignatureName; }
 	bool IsGlobalInputsSignature() const { return bGlobalInputsSignature; }
+
+	/**
+	 * FBangoModule::GetInlineProgram's: what this script was last compiled as, or null. Not a property, and not part
+	 * of what makes two scripts equal. A copy of the script carries it along, which is safe: it's checked against the
+	 * script's text and inputs each time it's used.
+	 */
+	mutable TSharedPtr<const FBangoInlineCompiled> LastCompiled;
 
 private:
 	// Set by the owner's constructor, not saved (UseInputsSignature).

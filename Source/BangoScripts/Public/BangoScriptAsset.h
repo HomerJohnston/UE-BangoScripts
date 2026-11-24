@@ -4,6 +4,8 @@
 #include "UObject/Object.h"
 #include "BangoScriptAsset.generated.h"
 
+struct FBangoScriptCompiled;
+
 /**
  * A Bango script (Bango spec section 15): an asset anywhere in Content, named by its asset path ("/Game/Quests/Intro").
  *
@@ -23,6 +25,12 @@ public:
 
 	/** The script's name: its asset path, like "/Game/Quests/Intro". */
 	FString GetScriptName() const;
+
+	/**
+	 * FBangoScriptCache's: what this script was last compiled as, or null, so spawning it again unchanged compares its
+	 * text instead of looking it up by name. Not saved. Checked against the asset each time it's used.
+	 */
+	mutable TSharedPtr<const FBangoScriptCompiled> LastCompiled;
 
 #if WITH_EDITORONLY_DATA
 	/** The script is the .bango file next to this asset (same folder, same name), and Source is a copy of it. */
