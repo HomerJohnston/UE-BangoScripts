@@ -4,6 +4,7 @@
 #include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
 #include "BangoEntity.h"
+#include "BangoInlineScript.h"
 #include "BangoEntityTestComponent.generated.h"
 
 /** For the automation tests of component entities (Bango.Game.EntityIDs): a scene component that keeps its own entity ID. */
@@ -22,6 +23,14 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Bango")
 	void Poke(int32 Times) { Pokes += Times; }
+
+	/** For finding which of an object's inline scripts one is (Bango::DescribeInlineScriptOwner). */
+	UPROPERTY()
+	FBangoInlineScript OnOpened;
+	UPROPERTY()
+	FBangoInlineScript OnClosed;
+	UPROPERTY()
+	TArray<FBangoInlineScript> Steps;
 
 	virtual FString GetBangoEntityID() const override { return EntityID; }
 	virtual void SetBangoEntityID(const FString& ID) override { EntityID = ID; }

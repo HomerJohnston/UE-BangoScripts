@@ -120,14 +120,19 @@ public:
 	 * Starts an inline script (an FBangoInlineScript property, spec section 15), as Spawn does a script asset: Args fill
 	 * its #inputs line, in order, and it runs straight away until it first pauses. Its compiled program is kept
 	 * (FBangoModule::GetInlineProgram), so the same text isn't compiled again. Owner, the object it belongs to (usually
-	 * `this`), names it in errors and the debugger ("Door_1 (inline script)"), and is what `self` means, as for Spawn.
+	 * `this`), names it in errors (its class, as "BP_Door (inline script)", then which object and which of its scripts:
+	 * Bango::DescribeInlineScriptOwner), and is what `self` means, as for Spawn.
 	 * An empty script does nothing and gives an invalid handle, without an error. Its text is saved with it, so
 	 * SaveState saves it.
 	 */
 	FBangoScriptHandle Spawn(const FBangoInlineScript& Script, const TArray<FBangoValue>& Args = TArray<FBangoValue>(), const UObject* Owner = nullptr);
 	/** Spawn of an inline script, for callers that report errors themselves (OutError, as above). */
 	FBangoScriptHandle Spawn(const FBangoInlineScript& Script, const TArray<FBangoValue>& Args, const UObject* Owner, FString& OutError);
-	/** What errors and the debugger call an inline script of Owner's: "Door_1 (inline script)", or "Inline script". */
+	/**
+	 * What errors and the debugger call an inline script of Owner's: its class, as "BP_Door (inline script)" (a
+	 * Blueprint's class without its "_C"), or "Inline script" without an owner. By class, not by object, so every
+	 * object of a class with the same script shares one compiled program; an error adds which object it was.
+	 */
 	static FString GetInlineScriptName(const UObject* Owner);
 
 	/**
@@ -296,6 +301,8 @@ private:
 		 * nor ever started one links nothing to anything when it ends, so it isn't kept in EndedParents.
 		 */
 		bool bStartedChild = false;
+		/** An inline script's owner as it was given to Spawn (not saved), for saying which object's script an error is in. */
+		TWeakObjectPtr<const UObject> OwnerObject;
 		/** The script that started it (with Exec or spawn), or 0. For Terminate's bAndChildren. */
 		int32 ParentId = 0;
 	};
@@ -340,6 +347,8 @@ private:
 	/** Resumes one script. Returns false once it has ended (for any reason). */
 	bool ResumeScript(FRunningScript& Script, float DeltaSeconds);
 	void ReportFailure(const FRunningScript& Script);
+	/** For an error in an inline script: " (on 'Door_3', its script 'OnOpened')", or empty for any other script. */
+	FString DescribeInlineOwner(const FRunningScript& Script) const;
 
 	/** Hot reload, in the editor: asks the running copies of every script whose file changed to switch to its new version. */
 	void ReloadChangedScripts();

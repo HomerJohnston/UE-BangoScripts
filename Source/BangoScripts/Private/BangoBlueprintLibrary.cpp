@@ -326,7 +326,7 @@ FBangoScriptHandle UBangoBlueprintLibrary::SpawnBangoInlineScript(UObject* World
 	const FString Name = UBangoScriptSubsystem::GetInlineScriptName(Owner);
 	TSharedPtr<const FBangoProgram> Program;
 	FString Error;
-	if (!FBangoModule::Get().GetInlineProgram(Script, Name, Program, Error))
+	if (!FBangoModule::Get().GetInlineProgram(Script, Name, Program, Error, nullptr, Owner))
 	{
 		Bango::ReportError(Error);
 		return FBangoScriptHandle();
@@ -334,7 +334,8 @@ FBangoScriptHandle UBangoBlueprintLibrary::SpawnBangoInlineScript(UObject* World
 	TArray<FBangoValue> Values;
 	if (!Bango::ResolveBlueprintArgs(Args, Program->Params, Values, Error))
 	{
-		Bango::ReportError(FString::Printf(TEXT("Spawn Bango Inline Script (%s): %s"), *Name, *Error));
+		const FString Where = Bango::DescribeInlineScriptOwner(Owner, &Script, nullptr);
+		Bango::ReportError(FString::Printf(TEXT("Spawn Bango Inline Script (%s%s%s): %s"), *Name, Where.IsEmpty() ? TEXT("") : TEXT(", "), *Where, *Error));
 		return FBangoScriptHandle();
 	}
 	return Subsystem->Spawn(Script, Values, Owner);

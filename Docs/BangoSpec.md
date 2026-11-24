@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.119)
+# Bango Language Spec (draft v0.120)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.120:** **an inline script is named for its owner's class, not for the object**: `BP_Door (inline script)`, where it was `Door_3 (inline script)`, so every object of a class with the same script shares one compiled program instead of each compiling its own. **An error about an inline script says which object and which of its scripts**: `... (on 'Door_3', its script 'Lock.OnOpened')`, found by looking through the owner's properties only when there's an error to show (`Bango::DescribeInlineScriptOwner`; section 10).
 
 **Changes in v0.119:** **who `self` is isn't worked out again for every spawn**: the script subsystem keeps each owning actor's answer while it can't have changed, which is while its actor registry has had no name added or removed (`UBangoActorRegistry::GetVersion`, new) and the actor is, or isn't, the player's pawn as it was. An answer with a problem (an owner that can't be `self`) isn't kept. Nothing a script can see changes.
 
@@ -1353,7 +1355,7 @@ These checks happen when the script is spawned. If any fails, the script doesn't
   UBangoScriptSubsystem::Get(this)->SpawnFromSource(Source, TEXT("Greeting"), Args);
   ```
   A script spawned from text keeps its text: saving the state saves it, and loading compiles it again (section 11). It isn't hot reloaded, since there's no file to watch, and no script editor tab follows it.
-- `UBangoScriptSubsystem::Spawn(InlineScript, Args, Owner)` starts an **inline script** (an `FBangoInlineScript` property, section 15), like `SpawnFromSource`, except that its compiled program is kept (`FBangoModule::GetInlineProgram(Script, Name, Program, Error)`), so the same text (with the same inputs signature) is compiled once. `Owner` (usually `this`) names it in errors: `Door_1 (inline script)(1:7): ...`, and is what `self` means in it. An empty inline script does nothing and gives an invalid handle, without an error. `Spawn(InlineScript, Args, Owner, Error)` puts an error starting it in `Error` instead of showing it.
+- `UBangoScriptSubsystem::Spawn(InlineScript, Args, Owner)` starts an **inline script** (an `FBangoInlineScript` property, section 15), like `SpawnFromSource`, except that its compiled program is kept (`FBangoModule::GetInlineProgram(Script, Name, Program, Error)`), so the same text (with the same inputs signature) is compiled once. `Owner` (usually `this`) is what `self` means in it, and names it in errors by its class: `BP_Door (inline script)(1:7): ...`, so every object of a class with the same script shares one compiled program. An error then says which object it was and which of its scripts, found by looking through the owner's properties (and, for an actor, its components') only when there's an error to show: `... (on 'Door_3', its script 'Lock.OnOpened')`; without a match (the script isn't a property of the owner), only the object. `Bango::DescribeInlineScriptOwner` gives that text. An empty inline script does nothing and gives an invalid handle, without an error. `Spawn(InlineScript, Args, Owner, Error)` puts an error starting it in `Error` instead of showing it.
   ```cpp
   TArray<FBangoValue> Args;
   Args.Add(FBangoValue::MakeString(EnemyType));

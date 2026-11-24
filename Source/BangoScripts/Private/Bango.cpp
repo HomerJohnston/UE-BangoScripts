@@ -12,6 +12,16 @@ namespace BangoModulePrivate
 {
 	// The loaded module, so Get doesn't ask the module manager each time (a lock and a lookup by name, on every spawn).
 	static FBangoModule* Loaded = nullptr;
+
+	/** Adds which object's script it is, and which of its scripts, to an error about it (the script's name only has the class). */
+	static void AddOwner(FString& Error, const UObject* Owner, const FBangoInlineScript& Script)
+	{
+		const FString Where = Bango::DescribeInlineScriptOwner(Owner, &Script, nullptr);
+		if (!Where.IsEmpty())
+		{
+			Error += FString::Printf(TEXT(" (%s)"), *Where);
+		}
+	}
 }
 
 FBangoModule& FBangoModule::Get()
@@ -52,6 +62,7 @@ bool FBangoModule::GetInlineProgram(const FBangoInlineScript& Script, const FStr
 	if (Script.HasGivenInputs() && !Signature.IsValid())
 	{
 		OutError = FString::Printf(TEXT("%s: %s"), *Name, *SignatureError);
+		BangoModulePrivate::AddOwner(OutError, NameOwner, Script);
 		return false;
 	}
 	if (bSameText && Last->Signature == Signature) // scripts given the same inputs get the same signature object
@@ -65,11 +76,12 @@ bool FBangoModule::GetInlineProgram(const FBangoInlineScript& Script, const FStr
 	}
 	if (!GetInlineProgram(Script.Source, Signature.Get(), Name, OutProgram, OutError))
 	{
+		BangoModulePrivate::AddOwner(OutError, NameOwner, Script);
 		return false;
 	}
 	const TSharedRef<FBangoInlineCompiled> Compiled = MakeShared<FBangoInlineCompiled>();
 	Compiled->Name = Name;
-	Compiled->OwnerName = NameOwner ? NameOwner->GetFName() : FName();
+	Compiled->OwnerClass = NameOwner ? NameOwner->GetClass()->GetFName() : FName();
 	Compiled->Source = MakeShared<FString>(Script.Source);
 	Compiled->Signature = Signature;
 	Compiled->Program = OutProgram;

@@ -797,6 +797,30 @@ bool FBangoEntityIDsTest::RunTest(const FString& Parameters)
 		Keeper->RegisterComponent();
 		const FString KeptID = Registry->GetOrMakeEntityID(Keeper, Error);
 		TestTrue(TEXT("one that keeps its ID keeps it"), Bango::GetEntityIDKind(KeptID) == Bango::EBangoEntityIDKind::Automatic && Keeper->EntityID == KeptID);
+		{
+			// Inline scripts are named for their owner's class; an error says which object and which of its scripts.
+			TestEqual(TEXT("an inline script is named for its owner's class"), UBangoScriptSubsystem::GetInlineScriptName(Door), FString(TEXT("Actor (inline script)")));
+			Keeper->OnOpened.Source = TEXT("WriteScreen(\"opened\");");
+			Keeper->OnClosed.Source = TEXT("WriteScreen(\"closed\");");
+			Keeper->Steps.AddDefaulted(2);
+			Keeper->Steps[1].Source = TEXT("WriteScreen(\"step\");");
+			const FString ByPlace = Bango::DescribeInlineScriptOwner(Door, &Keeper->OnOpened, nullptr);
+			TestTrue(TEXT("which script: found by where it is, on the actor's component"),
+				ByPlace.StartsWith(TEXT("on '")) && ByPlace.Contains(TEXT(".OnOpened'")) && !ByPlace.Contains(TEXT("OnClosed")));
+			const FString ByText = Bango::DescribeInlineScriptOwner(Door, nullptr, &Keeper->OnClosed.Source);
+			TestTrue(TEXT("which script: found by its text"), ByText.Contains(TEXT(".OnClosed'")) && !ByText.Contains(TEXT("OnOpened")));
+			TestTrue(TEXT("which script: in an array"), Bango::DescribeInlineScriptOwner(Door, &Keeper->Steps[1], nullptr).Contains(TEXT(".Steps[1]'")));
+			TestTrue(TEXT("which script: the component as the owner"), Bango::DescribeInlineScriptOwner(Keeper, &Keeper->OnOpened, nullptr).Contains(TEXT("its script 'OnOpened'")));
+			const FBangoInlineScript Copied = Keeper->OnClosed;
+			TestTrue(TEXT("which script: a copy is found by its text"), Bango::DescribeInlineScriptOwner(Door, &Copied, nullptr).Contains(TEXT(".OnClosed'")));
+			Keeper->OnClosed.Source = Keeper->OnOpened.Source;
+			const FString Both = Bango::DescribeInlineScriptOwner(Door, nullptr, &Keeper->OnOpened.Source);
+			TestTrue(TEXT("which script: two of the same text are both named"), Both.Contains(TEXT(".OnOpened'")) && Both.Contains(TEXT(" or ")) && Both.Contains(TEXT(".OnClosed'")));
+			const FString Elsewhere = TEXT("WriteScreen(\"nowhere\");");
+			const FString OnlyObject = Bango::DescribeInlineScriptOwner(Door, nullptr, &Elsewhere);
+			TestTrue(TEXT("which script: one that isn't the owner's only names the owner"), OnlyObject.StartsWith(TEXT("on '")) && !OnlyObject.Contains(TEXT("its script")));
+			TestTrue(TEXT("which script: nothing without an owner"), Bango::DescribeInlineScriptOwner(nullptr, &Keeper->OnOpened, nullptr).IsEmpty());
+		}
 		// As if loaded from a save: a new component holding that ID, registered as it's initialized, is found by it.
 		Keeper->DestroyComponent();
 		TestNull(TEXT("a removed component isn't found"), Registry->FindEntity(KeptID));

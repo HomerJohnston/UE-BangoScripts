@@ -187,6 +187,7 @@ bool UBangoScriptSubsystem::StartSpawnBlock(const FBangoInstance& Parent, int32 
 	if (const TSharedPtr<FRunningScript>* ParentScript = Scripts.Find(Parent.GetId()))
 	{
 		(*ParentScript)->bStartedChild = true;
+		Script->OwnerObject = (*ParentScript)->OwnerObject;
 		Script->Path = (*ParentScript)->Path;
 		Script->bFromSource = (*ParentScript)->bFromSource;
 		Script->Source = (*ParentScript)->Source;
@@ -226,7 +227,13 @@ bool UBangoScriptSubsystem::StartSpawnBlock(const FBangoInstance& Parent, int32 
 
 FString UBangoScriptSubsystem::GetInlineScriptName(const UObject* Owner)
 {
-	return Owner ? FString::Printf(TEXT("%s (inline script)"), *Owner->GetName()) : FString(TEXT("Inline script"));
+	if (!Owner)
+	{
+		return FString(TEXT("Inline script"));
+	}
+	FString ClassName = Owner->GetClass()->GetName();
+	ClassName.RemoveFromEnd(TEXT("_C"), ESearchCase::CaseSensitive); // a Blueprint's class
+	return ClassName + TEXT(" (inline script)");
 }
 
 FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FBangoInlineScript& Script, const TArray<FBangoValue>& Args, const UObject* Owner)
@@ -246,10 +253,10 @@ FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FBangoInlineScript& Script
 	{
 		return FBangoScriptHandle(); // nothing to run (an inline script left empty is normal)
 	}
-	// The same owner as last time has the same name: what the script remembers has it, already made. (Last keeps that
+	// An owner of the same class as last time has the same name: what the script remembers has it, already made. (Last keeps that
 	// alive here, since the script remembers something else if it's compiled again.)
 	const TSharedPtr<const FBangoInlineCompiled> Last = Script.LastCompiled;
-	const bool bSameOwner = Last.IsValid() && Owner && !Last->OwnerName.IsNone() && Last->OwnerName == Owner->GetFName();
+	const bool bSameOwner = Last.IsValid() && Owner && !Last->OwnerClass.IsNone() && Last->OwnerClass == Owner->GetClass()->GetFName();
 	const FString MadeName = bSameOwner ? FString() : GetInlineScriptName(Owner);
 	const FString& Name = bSameOwner ? Last->Name : MadeName;
 	TSharedPtr<const FBangoProgram> Program;
@@ -262,6 +269,7 @@ FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FBangoInlineScript& Script
 	Running->Path = Name;
 	Running->bFromSource = true; // saved with its text; not hot reloaded (it has no file)
 	Running->Source = SharedSource; // the one copy the script was compiled from, not another
+	Running->OwnerObject = Owner;
 	if (Script.HasInputsSignature())
 	{
 		const UClass* SignatureClass = Script.GetInputsSignatureClass();
@@ -494,11 +502,30 @@ void UBangoScriptSubsystem::ReportFailure(const FRunningScript& Script)
 		EndedScripts.RemoveAt(0);
 	}
 #endif
-	const FString Message = Script.Instance.GetError().ToString();
+	const FString Message = Script.Instance.GetError().ToString() + DescribeInlineOwner(Script);
 	Bango::ReportError(Message);
 	FBangoScriptHandle Handle;
 	Handle.Id = (int32)Script.Instance.GetId();
 	OnScriptFailed.Broadcast(Handle, Message);
+}
+
+FString UBangoScriptSubsystem::DescribeInlineOwner(const FRunningScript& Script) const
+{
+	if (!Script.bFromSource || !Script.Path.EndsWith(TEXT("(inline script)"), ESearchCase::CaseSensitive))
+	{
+		return FString();
+	}
+	// The owner it was spawned with, or (a script restored from a save) the actor that's its `self`.
+	const UObject* Owner = Script.OwnerObject.Get();
+	if (!Owner && !Script.Instance.GetOwner().BangoName.IsEmpty())
+	{
+		if (const UBangoActorRegistry* Registry = UBangoActorRegistry::Get(this))
+		{
+			Owner = Registry->FindEntity(Script.Instance.GetOwner().BangoName);
+		}
+	}
+	const FString Where = Bango::DescribeInlineScriptOwner(Owner, nullptr, &Script.GetSource());
+	return Where.IsEmpty() ? FString() : FString::Printf(TEXT(" (%s)"), *Where);
 }
 
 bool UBangoScriptSubsystem::ResumeScript(FRunningScript& Script, float DeltaSeconds)
@@ -820,7 +847,7 @@ FBangoScriptHandle UBangoScriptSubsystem::StartScript(const TSharedPtr<const FBa
 	}
 	if (!bStarted)
 	{
-		Report(StartError.ToString());
+		Report(StartError.ToString() + DescribeInlineOwner(*Script));
 		return FBangoScriptHandle();
 	}
 

@@ -48,8 +48,9 @@ public:
 	 *
 	 * The script remembers the answer (FBangoInlineScriptBase::LastCompiled), so asking again for a script that hasn't
 	 * changed only compares its text. OutSource, if given, gets the one shared copy of the text it was compiled from.
-	 * NameOwner, if given, is the object Name was made from (UBangoScriptSubsystem::GetInlineScriptName), kept with
-	 * what the script remembers so the name needn't be made again for the same owner.
+	 * NameOwner, if given, is the object Name was made from (UBangoScriptSubsystem::GetInlineScriptName): its class is
+	 * kept with what the script remembers, so the name needn't be made again for an owner of the same class, and an
+	 * error says which object's script it is and which of its scripts (Bango::DescribeInlineScriptOwner).
 	 */
 	bool GetInlineProgram(const FBangoInlineScript& Script, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError,
 		TSharedPtr<const FString>* OutSource = nullptr, const UObject* NameOwner = nullptr);

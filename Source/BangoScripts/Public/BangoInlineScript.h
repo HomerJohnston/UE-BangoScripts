@@ -14,10 +14,10 @@ class UClass;
  */
 struct FBangoInlineCompiled
 {
-	/** What errors call the script (its owner's name). */
+	/** What errors call the script: its owner's class ("BP_Door (inline script)"). */
 	FString Name;
-	/** The owner Name was made from, if it's known (none otherwise): the same owner again has the same Name. */
-	FName OwnerName;
+	/** The class of the owner Name was made from, if it's known (none otherwise): an owner of the same class has the same Name. */
+	FName OwnerClass;
 	/** The text it was compiled from: one copy, shared with the running scripts (they keep it for saving). */
 	TSharedPtr<const FString> Source;
 	/** The inputs it was compiled with, or null. */
@@ -191,3 +191,16 @@ struct BANGOSCRIPTS_API FBangoInlineCondition : public FBangoInlineScriptBase
 	}
 	bool operator!=(const FBangoInlineCondition& Other) const { return !(*this == Other); }
 };
+
+namespace Bango
+{
+	/**
+	 * For an error about one of Owner's inline scripts: which object and which script, as "on 'Door_3', its script
+	 * 'OnOpened'". An inline script is compiled once for every object of a class, so its own name only has the class
+	 * ("BP_Door (inline script)"); this says the rest. The script is looked for among Owner's properties, and for an
+	 * actor its components' ("Trigger.OnEnter"), in arrays and structs too ("Steps[2].Script"): by where it is, if
+	 * Script is given, or else by its text, Source (several of the same text are all named). Without a match, only
+	 * the object ("on 'Door_3'"). Empty without an Owner. It searches, so call it only when there's an error to show.
+	 */
+	BANGOSCRIPTS_API FString DescribeInlineScriptOwner(const UObject* Owner, const FBangoInlineScriptBase* Script, const FString* Source);
+}
