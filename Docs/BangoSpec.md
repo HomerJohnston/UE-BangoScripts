@@ -1,8 +1,16 @@
-# Bango Language Spec (draft v0.101)
+# Bango Language Spec (draft v0.105)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.105:** **reading and writing a variable no longer copies its name**, and **the VM's value stack keeps its memory** when it empties at the end of a statement. Both were allocations on nearly every instruction, and most of what a simple instruction cost in an Unreal build. Nothing about the language changes.
+
+**Changes in v0.104:** **values are cheaper to handle**: a bool, a number or a vector is now all inline in its `FBangoValue`, and only a string, an entity, a text or an array has contents of its own, made when first needed (before, every value carried an unused string, text and array, built and torn down with it on nearly every VM instruction). Nothing about the language or the C++ interface changes, and save data is the same. **Bango has trace scopes** for Unreal Insights (`Bango_Compile`, `Bango_InstanceResume`, `Bango_Tick` and others; section 11, Benchmark), and the benchmark has two cases that time a value on its own, `ValueInt` and `ValueString`.
+
+**Changes in v0.103:** **the benchmark is in a module of its own**, **BangoScriptsBenchmark**, which nothing else depends on and which is left out of Shipping builds (section 11, Benchmark). Its files are named after the module (`BangoScriptsBenchmark.h`), and its test is `Bango.Benchmark.Cases`. Only `FBangoInstance::GetInstructionsRun` stays in the VM.
+
+**Changes in v0.102:** **a benchmark**: the console command **`Bango.Benchmark`** times a set of small scripts against the same work in C++, and in a Blueprint if the project has one for it, and prints a table (section 11, Benchmark). `FBangoInstance::GetInstructionsRun` counts the instructions a script has run.
 
 **Changes in v0.101:** **the text pane's debugger marks are drawn across the whole line**, not only beside its number: a fainter band of the same colour over the line's text (section 12).
 
@@ -1568,6 +1576,26 @@ The save data has a format version. Data in another version's format fails to lo
 | How long a WriteScreen message stays on screen when the script doesn't say (Write Screen Seconds) | 5 seconds |
 | ID Label Fade Distance / ID Label Hide Distance: where Bango ID labels in the level editor's viewport start to fade, and where they're gone (section 4) | 7,500 / 10,000 units |
 | Large Script Threshold: when nodes are moved in the graph editor in a script with at least this many nodes, the script gets `#USES_GRAPH_EDITOR`, and is saved with section headings and node metadata from then on (section 12, Compact scripts); 0: moving any node does it | 3 |
+
+### Benchmark
+The console command **`Bango.Benchmark`** shows what the script VM costs: it runs a set of cases, each the same work as a Bango script and as C++ (and as a Blueprint, below), and prints a table to the log, with each runner's time for one iteration, how many times C++'s time that is, and for scripts the time per VM instruction. It also writes the rows to `Saved/BangoBuild/benchmark.csv`.
+
+```
+Bango.Benchmark                   every case, 1,000,000 iterations, best of 5 runs
+Bango.Benchmark 200000            fewer iterations
+Bango.Benchmark IntMath           only the cases whose name contains that
+Bango.Benchmark Repeats=9 Trail   more runs; with the debugger's trail recorded, as in the editor
+Bango.Benchmark List              the cases, each with the script it runs
+```
+
+- **The cases:** `EmptyLoop` (a loop that only counts), `IntMath`, `FloatMath`, `GlobalReadWrite` (a global each pass; C++ and Blueprint use a variable), `FunctionCall` (a function of the script), `NativeCall` (a C++ command), `ArrayPushSum` (adding to an array, then a `forEach`; a tenth of the iterations). Two are C++ only, and time a value on its own, without the VM: `ValueInt` (making an int value, copying it and moving it, as the VM does on nearly every instruction) and `ValueString` (the same with a short string). And three that only scripts have: `StartScripts` (starting a three-line script and running it to its end), `WaitingIdle` (one frame's check of a script paused at a `waitUntil` whose global hasn't changed) and `WaitingWake` (the global changes, and each carries on); those run a hundredth of the iterations.
+- **Each case is run several times**, and the best and the median times are kept; the best is the one to compare. A script is compiled once, outside the timing. Every runner's answer is checked against C++'s, and a different one is marked in the table.
+- The scripts run in the VM directly, without the script subsystem, with no instruction limit. The debugger's trail is off unless `Trail` is given.
+- **C++'s versions are made not to vanish**: each is a function the compiler can't fold into its caller, and the simplest loops write their counter to a `volatile` each pass, since an empty loop would otherwise be removed. So those rows are C++ doing the least it can be made to do.
+- **Blueprint:** make a Blueprint class whose parent is **Bango Benchmark Blueprint** (`UBangoBenchmarkBlueprint`), at `/Game/BangoBenchmark/BP_BangoBenchmark` (or wherever the console variable `Bango.Benchmark.Blueprint` says), and override the functions of the cases to compare: each gets the iterations and returns the answer. A case that isn't overridden has no Blueprint row. `NativeCall` calls the class's **Bench Add** node, the same C++ function the script's command calls. In the editor, Blueprint stops a loop after the project's Maximum Loop Iteration Count (a million by default): raise it, or run fewer iterations.
+- **In Unreal Insights:** each case and runner is a scope of its own (`Bango.Benchmark IntMath Bango`, `... C++`, `... Blueprint`). The rest of Bango has scopes too, in any build but Shipping: `Bango_CompileSource` (parsing and `Bango_Compile`), `Bango_CompileCondition`, `Bango_GetProgram` (a script asset's program, compiled the first time it's asked for), `Bango_InstanceStart`, `Bango_InstanceResume` (one script's run to its next pause; never one per instruction), `Bango_SpawnAsset`, `Bango_SpawnPath`, `Bango_SpawnFromSource`, `Bango_EvaluateCondition`, `Bango_Tick` and `Bango_TickWatches`. Tracing with `-statnamedevents` makes every Blueprint call an event, which slows the Blueprint rows only: take speed comparisons from a run without it.
+- **Only an optimized build says anything**: Development or Test, and a packaged game rather than the editor. The command says which build it's in. In a Test build nothing is logged unless the target turns logging on, so read the CSV there.
+- **It's all in the module BangoScriptsBenchmark** (the cases and runners in `BangoScriptsBenchmark.h`, the Blueprint class, the command, and the test `Bango.Benchmark.Cases`): a runtime module, so it's there in packaged Development and Test builds, that nothing else depends on, and that the plugin leaves out of **Shipping** builds (`TargetConfigurationDenyList` in `BangoScripts.uplugin`). The one thing it needs from the VM is `FBangoInstance::GetInstructionsRun`.
 
 ### Editor preferences
 Your own, not the project's: **Editor Preferences > Plugins > Bango**, saved in `EditorPerProjectUserSettings.ini`.

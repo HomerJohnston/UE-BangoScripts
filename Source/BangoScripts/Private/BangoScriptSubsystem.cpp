@@ -1,4 +1,5 @@
 #include "BangoScriptSubsystem.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 #include "BangoScriptAsset.h"
 
@@ -549,6 +550,7 @@ FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FString& ScriptPath, const
 
 FBangoScriptHandle UBangoScriptSubsystem::SpawnPath(const FString& ScriptPath, const TArray<FBangoValue>& Args, const FBangoScriptOwner& Owner, FString* OutError)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(Bango_SpawnPath);
 	FBangoModule& Module = FBangoModule::Get();
 	TSharedPtr<const FBangoProgram> Program;
 	FString DisplayPath;
@@ -578,6 +580,7 @@ FBangoScriptHandle UBangoScriptSubsystem::Spawn(const UBangoScriptAsset* ScriptA
 
 FBangoScriptHandle UBangoScriptSubsystem::Spawn(const UBangoScriptAsset* ScriptAsset, const TArray<FBangoValue>& Args, const UObject* Owner, FString& OutError)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(Bango_SpawnAsset);
 	OutError.Reset();
 	if (!ScriptAsset)
 	{
@@ -692,6 +695,7 @@ bool UBangoScriptSubsystem::CompileFromSource(const FString& Source, const FStri
 
 FBangoScriptHandle UBangoScriptSubsystem::SpawnFromSource(const FString& Source, const FString& Name, const TArray<FBangoValue>& Args, const UObject* Owner)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(Bango_SpawnFromSource);
 	const FString ScriptName = Name.IsEmpty() ? FString(TEXT("Script")) : Name;
 	TSharedPtr<const FBangoProgram> Program;
 	FString Error;
@@ -784,6 +788,7 @@ EBangoConditionResult UBangoScriptSubsystem::EvaluateCondition(FBangoConditionHa
 EBangoConditionResult UBangoScriptSubsystem::EvaluateCondition(const FString& Source, FString& OutError,
 	const TArray<FBangoValue>& Args, const FString& Name)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(Bango_EvaluateCondition);
 	TSharedPtr<const FBangoProgram> Program;
 	if (!Bango::CompileConditionProgram(Source, Name, Program, OutError))
 	{
@@ -949,6 +954,7 @@ void UBangoScriptSubsystem::Tick(float DeltaTime)
 	}
 #endif
 
+	TRACE_CPUPROFILER_EVENT_SCOPE(Bango_Tick);
 	// Scripts may spawn or terminate scripts while running, so work from a snapshot.
 	TArray<int64> Ids;
 	Scripts.GetKeys(Ids);
@@ -982,6 +988,7 @@ void UBangoScriptSubsystem::Tick(float DeltaTime)
 	// Then watched conditions whose answer may have changed (CreateWatchGroup).
 	if (Watches.IsValid())
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(Bango_TickWatches);
 		Watches->Update(GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0);
 	}
 

@@ -8,7 +8,12 @@ namespace Bango
 {
 	FText MakeLocalizedText(const FString& Namespace, const FString& Key, const FString& Source, const FString& Notes)
 	{
+		// A text's notes for translators are editor-only data: only builds that have it take them.
+#if WITH_EDITORONLY_DATA
 		return FText::AsLocalizable_Advanced(FTextKey(Namespace), FTextKey(Key), FString(Source), FStringView(Notes));
+#else
+		return FText::AsLocalizable_Advanced(FTextKey(Namespace), FTextKey(Key), FString(Source));
+#endif
 	}
 
 	FText MakeInvariantText(const FString& String)

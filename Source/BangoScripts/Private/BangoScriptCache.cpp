@@ -1,4 +1,5 @@
 #include "BangoScriptCache.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 #include "BangoCompiler.h"
 #include "BangoScriptAsset.h"
@@ -43,6 +44,7 @@ bool FBangoScriptCache::GetProgram(const FString& ScriptPath, const IBangoComman
 
 bool FBangoScriptCache::GetProgram(const UBangoScriptAsset& Asset, const IBangoCommandLookup& Commands, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutDisplayPath, FString& OutError)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(Bango_GetProgram); // compiles the script the first time it's asked for
 	const FString Name = Asset.GetScriptName();
 	OutDisplayPath = Name + TEXT(".bango");
 	if (const FEntry* Entry = Entries.Find(Name))

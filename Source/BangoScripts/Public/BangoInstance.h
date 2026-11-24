@@ -229,6 +229,9 @@ public:
 	 */
 	bool IsWaitDue(const FBangoGlobalStore& Globals) const;
 
+	/** How many instructions it has run in all, over every Resume (for benchmarks). Not saved. */
+	uint64 GetInstructionsRun() const { return InstructionsRun; }
+
 	/**
 	 * For the debugger's trail: records the node IDs it runs, in order (each time it moves on to another node), keeping
 	 * the last TrailSize. Off by default; the script subsystem turns it on in the editor.
@@ -336,7 +339,8 @@ private:
 	bool PopIndexes(int32 Count, TArray<int64>& OutIndexes);
 
 	// Places
-	FString DescribePlace(const FBangoPlace& Place) const;
+	/** The variable's name, for messages and for finding a global. A reference into the program: nothing is copied. */
+	const FString& DescribePlace(const FBangoPlace& Place) const;
 	/** The main graph's slots: the script's inputs and script variables, which its functions see (EBangoPlaceKind::Script). */
 	const TArray<FBangoValue>& GetScriptSlots() const;
 	/** The slots a local or script place is in. */
@@ -456,6 +460,9 @@ private:
 
 	/** A condition's answer, once it has returned (GetResult). */
 	FBangoValue ConditionResult;
+
+	// GetInstructionsRun. Not saved.
+	uint64 InstructionsRun = 0;
 
 	// The debugger's trail (SetRecordTrail). Not saved.
 	bool bRecordTrail = false;

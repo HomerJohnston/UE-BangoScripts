@@ -1,4 +1,5 @@
 #include "BangoInstance.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 #include "Serialization/Archive.h"
 
@@ -146,6 +147,7 @@ bool FBangoInstance::BindCommandsFor(const FBangoProgram& InProgram, const FBang
 bool FBangoInstance::Start(const TSharedPtr<const FBangoProgram>& InProgram, const FBangoCommandTable& Commands, FBangoGlobalStore& Globals, int64 InId, FBangoRuntimeError& OutError,
 	TConstArrayView<FBangoValue> Args)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(Bango_InstanceStart);
 	Program = InProgram;
 	Id = InId;
 	Error = FBangoRuntimeError();
@@ -716,6 +718,8 @@ EBangoInstanceStatus FBangoInstance::Resume(const FBangoExecContext& Context)
 	{
 		return Status;
 	}
+	// One scope for the whole run to its next pause, never one per instruction.
+	TRACE_CPUPROFILER_EVENT_SCOPE(Bango_InstanceResume);
 	if (!Context.Globals)
 	{
 		RuntimeFail(TEXT("No global variable store was given to run the script with."));
@@ -796,7 +800,9 @@ FBangoValue FBangoInstance::PopValue()
 		RuntimeFail(TEXT("Internal error: the value stack is empty."));
 		return FBangoValue();
 	}
-	return Stack.Pop();
+	// Never shrinking: the stack empties at the end of every statement, and giving its memory back each time (which
+	// is what a TArray does when it empties) meant allocating it again for the next one.
+	return Stack.Pop(EAllowShrinking::No);
 }
 
 bool FBangoInstance::PopIndexes(int32 Count, TArray<int64>& OutIndexes)
@@ -836,19 +842,24 @@ TArray<FBangoValue>& FBangoInstance::GetPlaceSlots(const FBangoPlace& Place)
 	return Frames.Last().Slots;
 }
 
-FString FBangoInstance::DescribePlace(const FBangoPlace& Place) const
+const FString& FBangoInstance::DescribePlace(const FBangoPlace& Place) const
 {
+	// By reference: this is asked on every read and write of a variable, and a copy of the name each time (an
+	// allocation) was most of what a simple instruction cost.
+	static const FString UnknownScriptVariable(TEXT("<script variable>"));
+	static const FString UnknownLocal(TEXT("<local>"));
+	static const FString UnknownGlobal(TEXT("<global>"));
 	if (Place.Kind == EBangoPlaceKind::Script)
 	{
 		const FBangoFunctionCode& Main = Program->Functions[0];
-		return Main.SlotNames.IsValidIndex(Place.Index) ? Main.SlotNames[Place.Index] : FString(TEXT("<script variable>"));
+		return Main.SlotNames.IsValidIndex(Place.Index) ? Main.SlotNames[Place.Index] : UnknownScriptVariable;
 	}
 	if (Place.Kind == EBangoPlaceKind::Local)
 	{
 		const FBangoFunctionCode& Function = Program->Functions[Frames.Last().Function];
-		return Function.SlotNames.IsValidIndex(Place.Index) ? Function.SlotNames[Place.Index] : FString(TEXT("<local>"));
+		return Function.SlotNames.IsValidIndex(Place.Index) ? Function.SlotNames[Place.Index] : UnknownLocal;
 	}
-	return Program->Names.IsValidIndex(Place.Index) ? Program->Names[Place.Index] : FString(TEXT("<global>"));
+	return Program->Names.IsValidIndex(Place.Index) ? Program->Names[Place.Index] : UnknownGlobal;
 }
 
 namespace BangoInstancePrivate
@@ -946,7 +957,7 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 		return true;
 	}
 
-	const FString RootName = DescribePlace(Place);
+	const FString& RootName = DescribePlace(Place);
 	const FBangoValue* Current = nullptr;
 	if (Place.Kind != EBangoPlaceKind::Global)
 	{
@@ -969,6 +980,13 @@ bool FBangoInstance::LoadPlace(const FBangoPlace& Place, FBangoGlobalStore& Glob
 			}
 			return UnsetGlobalFail(FString::Printf(TEXT("Global '%s' doesn't exist. No script or Blueprint has declared it."), *RootName), Globals);
 		}
+	}
+
+	// The usual read, a whole variable that has a value: nothing more to work out, and no message to build.
+	if (Indexes.Num() == 0 && Place.Part == -1 && !Current->IsNil())
+	{
+		Stack.Add(*Current);
+		return true;
 	}
 
 	FString Path = RootName;
@@ -1059,7 +1077,7 @@ bool FBangoInstance::StorePlace(const FBangoPlace& Place, FBangoGlobalStore& Glo
 		return false;
 	}
 
-	const FString RootName = DescribePlace(Place);
+	const FString& RootName = DescribePlace(Place);
 	FBangoValue* Root = nullptr;
 	if (Place.Kind != EBangoPlaceKind::Global)
 	{
@@ -1077,6 +1095,13 @@ bool FBangoInstance::StorePlace(const FBangoPlace& Place, FBangoGlobalStore& Glo
 		{
 			return RuntimeFail(FString::Printf(TEXT("Global '%s' doesn't exist."), *RootName));
 		}
+	}
+
+	// The usual write, a whole variable given a value of its own type: it's moved in.
+	if (Indexes.Num() == 0 && Place.Part == -1 && !Value.IsNil() && Value.GetType() == Root->GetType())
+	{
+		*Root = MoveTemp(Value);
+		return true;
 	}
 
 	FString Message;
@@ -1441,7 +1466,7 @@ bool FBangoInstance::CallReflected(int32 NameIndex, int32 ArgCount, bool bWantRe
 
 FBangoValue* FBangoInstance::FindPlaceToChange(const FBangoPlace& Place, TConstArrayView<int64> Indexes, FBangoGlobalStore& Globals, const FString& What)
 {
-	const FString RootName = DescribePlace(Place);
+	const FString& RootName = DescribePlace(Place);
 	FBangoValue* Target = nullptr;
 	if (Place.Kind != EBangoPlaceKind::Global)
 	{
@@ -1737,6 +1762,14 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 {
 	FBangoGlobalStore& Globals = *Context.Globals;
 	int32 Budget = Context.MaxInstructionsPerResume;
+	// Counts what this call runs, however it's left (GetInstructionsRun): the budget is counted down anyway.
+	struct FCountInstructions
+	{
+		uint64& Total;
+		const int32& Left;
+		const int32 Start;
+		~FCountInstructions() { Total += (uint64)FMath::Max(0, Start - FMath::Max(Left, 0)); }
+	} CountInstructions{ InstructionsRun, Budget, Budget };
 
 	while (Status == EBangoInstanceStatus::Ready)
 	{
@@ -1952,7 +1985,7 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 					return RuntimeFail(FString::Printf(TEXT("Building an array: %s"), *Message));
 				}
 			}
-			Stack.SetNum(First);
+			Stack.SetNum(First, EAllowShrinking::No);
 			Stack.Add(MoveTemp(Array));
 			break;
 		}
@@ -1974,7 +2007,7 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 				}
 				Parts[k] = Part.GetNumberAsDouble();
 			}
-			Stack.SetNum(First);
+			Stack.SetNum(First, EAllowShrinking::No);
 			Stack.Add(MakeVector(I.A, Parts));
 			break;
 		}
@@ -2292,7 +2325,7 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 			}
 			else
 			{
-				Stack.Pop();
+				Stack.Pop(EAllowShrinking::No);
 			}
 			break;
 		}
@@ -2328,7 +2361,7 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 				}
 				NewFrame.Slots[k] = MoveTemp(Converted);
 			}
-			Stack.SetNum(First);
+			Stack.SetNum(First, EAllowShrinking::No);
 			NewFrame.StackBase = Stack.Num();
 			Frames.Add(MoveTemp(NewFrame));
 			break;
@@ -2354,8 +2387,8 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 					return false;
 				}
 			}
-			Stack.SetNum(FMath::Min(Stack.Num(), Frames.Last().StackBase));
-			Frames.Pop();
+			Stack.SetNum(FMath::Min(Stack.Num(), Frames.Last().StackBase), EAllowShrinking::No);
+			Frames.Pop(EAllowShrinking::No);
 			if (Frames.Num() == 0)
 			{
 				ConditionResult = MoveTemp(ReturnValue); // a condition's answer (GetResult)

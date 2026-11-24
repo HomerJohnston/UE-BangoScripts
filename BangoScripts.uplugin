@@ -21,6 +21,14 @@
 			"LoadingPhase": "Default"
 		},
 		{
+			"Name": "BangoScriptsBenchmark",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"TargetConfigurationDenyList": [
+				"Shipping"
+			]
+		},
+		{
 			"Name": "BangoScriptsEditor",
 			"Type": "UncookedOnly",
 			"LoadingPhase": "Default"

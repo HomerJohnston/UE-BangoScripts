@@ -106,47 +106,95 @@ void FBangoType::Serialize(FArchive& Ar)
 // FBangoValue: construction and access
 // ---------------------------------------------------------------------------
 
-FBangoValue FBangoValue::MakeNil(const FBangoType& InType)
+// What a string, entity, text or array value holds besides its inline part. A value has one only once it's been given
+// such contents, so the values the VM handles most (bools and numbers) never make, copy or free any of this.
+struct FBangoValueHeap
 {
-	FBangoValue V;
-	V.Type = InType;
-	V.bIsNil = true;
-	return V;
+	FString String;              // string, and the name for entity
+	FText Text;                  // text
+	TArray<FBangoValue> Array;   // elements, which may themselves be arrays
+};
+
+void FBangoValue::CopyHeap(const FBangoValue& Other)
+{
+	if (!Other.Heap)
+	{
+		if (Heap)
+		{
+			FreeHeap();
+		}
+	}
+	else if (Heap)
+	{
+		*Heap = *Other.Heap;
+	}
+	else
+	{
+		Heap = new FBangoValueHeap(*Other.Heap);
+	}
 }
 
-FBangoValue FBangoValue::MakeBool(bool Value)
+void FBangoValue::FreeHeap()
 {
-	FBangoValue V;
-	V.Type = FBangoType::Bool();
-	V.bIsNil = false;
-	V.BoolValue = Value;
-	return V;
+	delete Heap;
+	Heap = nullptr;
 }
 
-FBangoValue FBangoValue::MakeInt(int32 Value)
+FString& FBangoValue::HeapString()
 {
-	FBangoValue V;
-	V.Type = FBangoType::Int();
-	V.bIsNil = false;
-	V.IntValue = Value;
-	return V;
+	if (!Heap)
+	{
+		Heap = new FBangoValueHeap();
+	}
+	return Heap->String;
 }
 
-FBangoValue FBangoValue::MakeDouble(double Value)
+const FString& FBangoValue::HeapString() const
 {
-	FBangoValue V;
-	V.Type = FBangoType::Double();
-	V.bIsNil = false;
-	V.DoubleValue = Value;
-	return V;
+	static const FString Empty;
+	return Heap ? Heap->String : Empty;
 }
+
+FText& FBangoValue::HeapText()
+{
+	if (!Heap)
+	{
+		Heap = new FBangoValueHeap();
+	}
+	return Heap->Text;
+}
+
+const FText& FBangoValue::HeapText() const
+{
+	static const FText Empty;
+	return Heap ? Heap->Text : Empty;
+}
+
+TArray<FBangoValue>& FBangoValue::HeapArray()
+{
+	if (!Heap)
+	{
+		Heap = new FBangoValueHeap();
+	}
+	return Heap->Array;
+}
+
+const TArray<FBangoValue>& FBangoValue::HeapArray() const
+{
+	static const TArray<FBangoValue> Empty;
+	return Heap ? Heap->Array : Empty;
+}
+
+
+
+
 
 FBangoValue FBangoValue::MakeString(const FString& Value)
 {
 	FBangoValue V;
 	V.Type = FBangoType::String();
 	V.bIsNil = false;
-	V.StringValue = Value;
+	V.HeapString() = Value;
 	return V;
 }
 
@@ -155,7 +203,7 @@ FBangoValue FBangoValue::MakeEntity(const FString& Name)
 	FBangoValue V;
 	V.Type = FBangoType::Entity();
 	V.bIsNil = false;
-	V.StringValue = Name;
+	V.HeapString() = Name;
 	return V;
 }
 
@@ -164,7 +212,7 @@ FBangoValue FBangoValue::MakeText(const FText& Value)
 	FBangoValue V;
 	V.Type = FBangoType::Text();
 	V.bIsNil = false;
-	V.TextValue = Value;
+	V.HeapText() = Value;
 	return V;
 }
 
@@ -194,68 +242,43 @@ FBangoValue FBangoValue::MakeArray(const FBangoType& ElementType, const TArray<F
 	FBangoValue V;
 	V.Type = ElementType.MakeArrayType();
 	V.bIsNil = false;
-	V.ArrayValue.Reserve(Elements.Num());
+	V.HeapArray().Reserve(Elements.Num());
 
 	for (const FBangoValue& Element : Elements)
 	{
 		FBangoValue Converted;
 		verifyf(Element.TryConvertTo(ElementType, Converted), TEXT("MakeArray: element of type %s does not fit %s"), *Element.GetType().ToString(), *V.Type.ToString());
-		V.ArrayValue.Add(MoveTemp(Converted));
+		V.HeapArray().Add(MoveTemp(Converted));
 	}
 	return V;
 }
 
-bool FBangoValue::GetBool() const
-{
-	check(!bIsNil && Type == FBangoType::Bool());
-	return BoolValue;
-}
 
-int32 FBangoValue::GetInt() const
-{
-	check(!bIsNil && Type == FBangoType::Int());
-	return IntValue;
-}
 
-double FBangoValue::GetDouble() const
-{
-	check(!bIsNil && Type == FBangoType::Double());
-	return DoubleValue;
-}
 
 const FString& FBangoValue::GetString() const
 {
 	check(!bIsNil && Type == FBangoType::String());
-	return StringValue;
+	return HeapString();
 }
 
 const FString& FBangoValue::GetEntityName() const
 {
 	check(!bIsNil && Type == FBangoType::Entity());
-	return StringValue;
+	return HeapString();
 }
 
 const FText& FBangoValue::GetText() const
 {
 	check(!bIsNil && Type == FBangoType::Text());
-	return TextValue;
+	return HeapText();
 }
 
-double FBangoValue::GetNumberAsDouble() const
-{
-	check(!bIsNil && !Type.IsArray());
-	if (Type.Base == EBangoBaseType::Int)
-	{
-		return (double)IntValue;
-	}
-	check(Type.Base == EBangoBaseType::Double);
-	return DoubleValue;
-}
 
 const TArray<FBangoValue>& FBangoValue::GetArray() const
 {
 	check(!bIsNil && Type.IsArray());
-	return ArrayValue;
+	return HeapArray();
 }
 
 double FBangoValue::GetVectorPart(int32 Index) const
@@ -307,16 +330,16 @@ bool FBangoValue::CheckWriteIndex(int64 Index, const TCHAR* Operation, FString& 
 FBangoValue& FBangoValue::GrowToIndex(int64 Index)
 {
 	check(!bIsNil && Type.IsArray() && Index >= 0 && Index < MaxArraySize);
-	if (ArrayValue.Num() <= Index)
+	if (HeapArray().Num() <= Index)
 	{
 		const FBangoValue NilElement = MakeNil(Type.GetElementType());
-		ArrayValue.Reserve((int32)Index + 1);
-		while (ArrayValue.Num() <= Index)
+		HeapArray().Reserve((int32)Index + 1);
+		while (HeapArray().Num() <= Index)
 		{
-			ArrayValue.Add(NilElement);
+			HeapArray().Add(NilElement);
 		}
 	}
-	return ArrayValue[(int32)Index];
+	return HeapArray()[(int32)Index];
 }
 
 bool FBangoValue::PrepareElement(const FBangoValue& Element, FBangoValue& OutConverted, FString& OutError) const
@@ -332,17 +355,17 @@ bool FBangoValue::PrepareElement(const FBangoValue& Element, FBangoValue& OutCon
 int64 FBangoValue::ArrayCount() const
 {
 	check(!bIsNil && Type.IsArray());
-	return ArrayValue.Num();
+	return HeapArray().Num();
 }
 
 const FBangoValue* FBangoValue::GetElement(int64 Index) const
 {
 	check(!bIsNil && Type.IsArray());
-	if (Index < 0 || Index >= ArrayValue.Num())
+	if (Index < 0 || Index >= HeapArray().Num())
 	{
 		return nullptr;
 	}
-	return &ArrayValue[(int32)Index];
+	return &HeapArray()[(int32)Index];
 }
 
 bool FBangoValue::SetElement(int64 Index, const FBangoValue& Element, FString& OutError)
@@ -369,7 +392,7 @@ bool FBangoValue::Push(const FBangoValue& Element, FString& OutError)
 	{
 		return false;
 	}
-	if (ArrayValue.Num() >= MaxArraySize)
+	if (HeapArray().Num() >= MaxArraySize)
 	{
 		OutError = FString::Printf(TEXT("Push: array is at the limit of %lld elements."), MaxArraySize);
 		return false;
@@ -380,7 +403,7 @@ bool FBangoValue::Push(const FBangoValue& Element, FString& OutError)
 	{
 		return false;
 	}
-	ArrayValue.Add(MoveTemp(Converted));
+	HeapArray().Add(MoveTemp(Converted));
 	return true;
 }
 
@@ -394,7 +417,7 @@ bool FBangoValue::InsertAt(int64 Index, const FBangoValue& Element, FString& Out
 	{
 		return false;
 	}
-	if (ArrayValue.Num() >= MaxArraySize)
+	if (HeapArray().Num() >= MaxArraySize)
 	{
 		OutError = FString::Printf(TEXT("InsertAt: array would pass the limit of %lld elements."), MaxArraySize);
 		return false;
@@ -406,19 +429,19 @@ bool FBangoValue::InsertAt(int64 Index, const FBangoValue& Element, FString& Out
 		return false;
 	}
 
-	if (Index >= ArrayValue.Num())
+	if (Index >= HeapArray().Num())
 	{
 		// Past the end: fill the gap with nil, then the element lands at Index.
 		const FBangoValue NilElement = MakeNil(Type.GetElementType());
-		while (ArrayValue.Num() < Index)
+		while (HeapArray().Num() < Index)
 		{
-			ArrayValue.Add(NilElement);
+			HeapArray().Add(NilElement);
 		}
-		ArrayValue.Add(MoveTemp(Converted));
+		HeapArray().Add(MoveTemp(Converted));
 	}
 	else
 	{
-		ArrayValue.Insert(MoveTemp(Converted), (int32)Index);
+		HeapArray().Insert(MoveTemp(Converted), (int32)Index);
 	}
 	return true;
 }
@@ -429,12 +452,12 @@ bool FBangoValue::Pop(FBangoValue& OutElement, FString& OutError)
 	{
 		return false;
 	}
-	if (ArrayValue.Num() == 0)
+	if (HeapArray().Num() == 0)
 	{
 		OutError = TEXT("Pop on an empty array.");
 		return false;
 	}
-	OutElement = ArrayValue.Pop();
+	OutElement = HeapArray().Pop();
 	return true;
 }
 
@@ -444,13 +467,13 @@ bool FBangoValue::RemoveAt(int64 Index, FBangoValue& OutElement, FString& OutErr
 	{
 		return false;
 	}
-	if (Index < 0 || Index >= ArrayValue.Num())
+	if (Index < 0 || Index >= HeapArray().Num())
 	{
-		OutError = FString::Printf(TEXT("RemoveAt: index %lld is out of range (array has %d elements)."), Index, ArrayValue.Num());
+		OutError = FString::Printf(TEXT("RemoveAt: index %lld is out of range (array has %d elements)."), Index, HeapArray().Num());
 		return false;
 	}
-	OutElement = MoveTemp(ArrayValue[(int32)Index]);
-	ArrayValue.RemoveAt((int32)Index);
+	OutElement = MoveTemp(HeapArray()[(int32)Index]);
+	HeapArray().RemoveAt((int32)Index);
 	return true;
 }
 
@@ -515,13 +538,13 @@ FBangoValue* FBangoValue::FindElementAtPath(TConstArrayView<int64> Indices, FStr
 			return nullptr;
 		}
 		const int64 Index = Indices[Level];
-		if (Index < 0 || Index >= Current->ArrayValue.Num())
+		if (Index < 0 || Index >= Current->HeapArray().Num())
 		{
 			OutError = FString::Printf(TEXT("Index %s is out of range (that array has %d elements)."),
-				*PathToString(Indices, Level + 1), Current->ArrayValue.Num());
+				*PathToString(Indices, Level + 1), Current->HeapArray().Num());
 			return nullptr;
 		}
-		Current = &Current->ArrayValue[(int32)Index];
+		Current = &Current->HeapArray()[(int32)Index];
 	}
 	return Current;
 }
@@ -600,12 +623,12 @@ bool FBangoValue::TryConvertTo(const FBangoType& Target, FBangoValue& OutValue) 
 
 	const FBangoType TargetElement = Target.GetElementType();
 	FBangoValue Result = MakeArray(TargetElement);
-	Result.ArrayValue.Reserve(ArrayValue.Num());
-	for (const FBangoValue& Element : ArrayValue)
+	Result.HeapArray().Reserve(HeapArray().Num());
+	for (const FBangoValue& Element : HeapArray())
 	{
 		FBangoValue Converted;
 		verify(Element.TryConvertTo(TargetElement, Converted));
-		Result.ArrayValue.Add(MoveTemp(Converted));
+		Result.HeapArray().Add(MoveTemp(Converted));
 	}
 	OutValue = MoveTemp(Result);
 	return true;
@@ -620,8 +643,8 @@ FString FBangoValue::ToDebugString() const
 	if (Type.IsArray())
 	{
 		TArray<FString> Parts;
-		Parts.Reserve(ArrayValue.Num());
-		for (const FBangoValue& Element : ArrayValue)
+		Parts.Reserve(HeapArray().Num());
+		for (const FBangoValue& Element : HeapArray())
 		{
 			Parts.Add(Element.ToDebugString());
 		}
@@ -633,14 +656,14 @@ FString FBangoValue::ToDebugString() const
 	case EBangoBaseType::Bool:   return BoolValue ? TEXT("true") : TEXT("false");
 	case EBangoBaseType::Int:    return FString::Printf(TEXT("%d"), IntValue);
 	case EBangoBaseType::Double: return FString::SanitizeFloat(DoubleValue);
-	case EBangoBaseType::String: return FString::Printf(TEXT("\"%s\""), *StringValue.ReplaceCharWithEscapedChar());
+	case EBangoBaseType::String: return FString::Printf(TEXT("\"%s\""), *HeapString().ReplaceCharWithEscapedChar());
 	case EBangoBaseType::Entity:
-		if (Bango::GetEntityIDKind(StringValue) == Bango::EBangoEntityIDKind::Named)
+		if (Bango::GetEntityIDKind(HeapString()) == Bango::EBangoEntityIDKind::Named)
 		{
-			return FString::Printf(TEXT("@%s"), *StringValue);
+			return FString::Printf(TEXT("@%s"), *HeapString());
 		}
-		return Bango::GetEntityDisplayName(StringValue); // player, self, or an actor without a Bango ID name
-	case EBangoBaseType::Text:   return FString::Printf(TEXT("text(\"%s\")"), *TextValue.ToString().ReplaceCharWithEscapedChar());
+		return Bango::GetEntityDisplayName(HeapString()); // player, self, or an actor without a Bango ID name
+	case EBangoBaseType::Text:   return FString::Printf(TEXT("text(\"%s\")"), *HeapText().ToString().ReplaceCharWithEscapedChar());
 	case EBangoBaseType::Vector2:
 	case EBangoBaseType::Vector3:
 	{
@@ -664,8 +687,8 @@ FString FBangoValue::ToDisplayString() const
 	if (Type.IsArray())
 	{
 		TArray<FString> Parts;
-		Parts.Reserve(ArrayValue.Num());
-		for (const FBangoValue& Element : ArrayValue)
+		Parts.Reserve(HeapArray().Num());
+		for (const FBangoValue& Element : HeapArray())
 		{
 			Parts.Add(Element.ToDisplayString());
 		}
@@ -674,11 +697,11 @@ FString FBangoValue::ToDisplayString() const
 	switch (Type.Base)
 	{
 	case EBangoBaseType::String:
-		return StringValue;
+		return HeapString();
 	case EBangoBaseType::Entity:
-		return Bango::GetEntityDisplayName(StringValue);
+		return Bango::GetEntityDisplayName(HeapString());
 	case EBangoBaseType::Text:
-		return TextValue.ToString();
+		return HeapText().ToString();
 	default:
 		return ToDebugString();
 	}
@@ -696,7 +719,7 @@ bool FBangoValue::operator==(const FBangoValue& Other) const
 	}
 	if (Type.IsArray())
 	{
-		return ArrayValue == Other.ArrayValue;
+		return HeapArray() == Other.HeapArray();
 	}
 
 	switch (Type.Base)
@@ -705,8 +728,8 @@ bool FBangoValue::operator==(const FBangoValue& Other) const
 	case EBangoBaseType::Int:    return IntValue == Other.IntValue;
 	case EBangoBaseType::Double: return DoubleValue == Other.DoubleValue;
 	case EBangoBaseType::String:
-	case EBangoBaseType::Entity: return StringValue.Equals(Other.StringValue, ESearchCase::CaseSensitive);
-	case EBangoBaseType::Text:   return TextValue.ToString().Equals(Other.TextValue.ToString(), ESearchCase::CaseSensitive);
+	case EBangoBaseType::Entity: return HeapString().Equals(Other.HeapString(), ESearchCase::CaseSensitive);
+	case EBangoBaseType::Text:   return HeapText().ToString().Equals(Other.HeapText().ToString(), ESearchCase::CaseSensitive);
 	case EBangoBaseType::Vector2:
 	case EBangoBaseType::Vector3:
 		for (int32 i = 0; i < Type.GetVectorSize(); ++i)
@@ -726,9 +749,10 @@ void FBangoValue::ResetPayload()
 	BoolValue = false;
 	IntValue = 0;
 	DoubleValue = 0.0;
-	StringValue.Reset();
-	TextValue = FText::GetEmpty();
-	ArrayValue.Reset();
+	if (Heap)
+	{
+		FreeHeap();
+	}
 	VectorValue[0] = VectorValue[1] = VectorValue[2] = 0.0;
 }
 
@@ -748,7 +772,7 @@ void FBangoValue::Serialize(FArchive& Ar)
 
 	if (Type.IsArray())
 	{
-		Ar << ArrayValue;
+		Ar << HeapArray();
 		return;
 	}
 
@@ -758,8 +782,8 @@ void FBangoValue::Serialize(FArchive& Ar)
 	case EBangoBaseType::Int:    Ar << IntValue; break;
 	case EBangoBaseType::Double: Ar << DoubleValue; break;
 	case EBangoBaseType::String:
-	case EBangoBaseType::Entity: Ar << StringValue; break;
-	case EBangoBaseType::Text:   Ar << TextValue; break; // keeps where a localized text came from, so it shows in the language of the game that loads it
+	case EBangoBaseType::Entity: Ar << HeapString(); break;
+	case EBangoBaseType::Text:   Ar << HeapText(); break; // keeps where a localized text came from, so it shows in the language of the game that loads it
 	case EBangoBaseType::Vector2:
 	case EBangoBaseType::Vector3:
 		for (int32 i = 0; i < Type.GetVectorSize(); ++i)

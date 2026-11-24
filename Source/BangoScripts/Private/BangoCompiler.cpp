@@ -1,5 +1,6 @@
 #include "BangoCompiler.h"
 #include "BangoText.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 namespace BangoCompilerPrivate
 {
@@ -3920,6 +3921,7 @@ namespace Bango
 	bool CompileScript(const FBangoScript& Script, const IBangoCommandLookup& Commands, FBangoProgram& OutProgram, FBangoCompileError& OutError,
 		const FBangoInputsSignature* Signature)
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(Bango_Compile); // (the trace scopes are compiled out of Shipping builds)
 		OutError = FBangoCompileError();
 		OutError.FileName = Script.FileName;
 		BangoCompilerPrivate::FCompiler Compiler(Script, Commands, OutProgram, OutError);
@@ -3930,6 +3932,7 @@ namespace Bango
 	bool CompileSource(const FString& Source, const FString& FileName, const IBangoCommandLookup& Commands, FBangoProgram& OutProgram, FBangoCompileError& OutError,
 		const FBangoInputsSignature* Signature)
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(Bango_CompileSource); // parsing, then Bango_Compile
 		FBangoScript Script;
 		if (!ParseScript(Source, FileName, Script, OutError))
 		{
@@ -4223,6 +4226,7 @@ namespace Bango
 	bool CompileCondition(const FString& Source, const FString& FileName, const IBangoCommandLookup& Commands, FBangoProgram& OutProgram, FBangoCompileError& OutError,
 		const FBangoInputsSignature* Signature)
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(Bango_CompileCondition);
 		// A single expression is compiled as `return <expression>;`.
 		static const FString ReturnPrefix = TEXT("return ");
 		int32 ExprLine = 0;

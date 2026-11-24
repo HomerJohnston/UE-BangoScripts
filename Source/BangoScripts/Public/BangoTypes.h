@@ -88,9 +88,16 @@ inline FArchive& operator<<(FArchive& Ar, FBangoType& Type)
 	return Ar;
 }
 
+/** What a string, entity, text or array value holds besides its inline part (FBangoValue::Heap). Defined in BangoTypes.cpp. */
+struct FBangoValueHeap;
+
 /**
  * A Bango value. Every value carries its type and may be nil (undefined).
  * Arrays are values: copying an FBangoValue copies the whole array, including nested arrays.
+ *
+ * A bool, a number or a vector is all inline: making, copying and destroying one touches nothing else, which is what
+ * the VM does on nearly every instruction. A string, an entity, a text or an array keeps its contents in a block of
+ * its own (Heap), made when it's first needed. The functions that only read or make the inline kinds are inline too.
  *
  * Accessors (GetInt etc.) assert that the value is non-nil and of the right type.
  * The interpreter must check IsNil() first and report a script error, so these asserts never fire from script mistakes.
@@ -103,11 +110,85 @@ public:
 
 	/** A nil int. Needed for containers and loading; prefer MakeNil(Type). */
 	FBangoValue() = default;
+	FBangoValue(const FBangoValue& Other)
+	{
+		CopyInline(Other);
+		if (Other.Heap)
+		{
+			CopyHeap(Other);
+		}
+	}
+	/** The moved-from value keeps its type and inline part, and its string, text and array are empty. */
+	FBangoValue(FBangoValue&& Other) noexcept
+		: Heap(Other.Heap)
+	{
+		CopyInline(Other);
+		Other.Heap = nullptr;
+	}
+	FBangoValue& operator=(const FBangoValue& Other)
+	{
+		if (this != &Other)
+		{
+			CopyInline(Other);
+			if (Heap || Other.Heap)
+			{
+				CopyHeap(Other);
+			}
+		}
+		return *this;
+	}
+	FBangoValue& operator=(FBangoValue&& Other) noexcept
+	{
+		if (this != &Other)
+		{
+			if (Heap)
+			{
+				FreeHeap();
+			}
+			CopyInline(Other);
+			Heap = Other.Heap;
+			Other.Heap = nullptr;
+		}
+		return *this;
+	}
+	~FBangoValue()
+	{
+		if (Heap)
+		{
+			FreeHeap();
+		}
+	}
 
-	static FBangoValue MakeNil(const FBangoType& Type);
-	static FBangoValue MakeBool(bool Value);
-	static FBangoValue MakeInt(int32 Value);
-	static FBangoValue MakeDouble(double Value);
+	static FBangoValue MakeNil(const FBangoType& InType)
+	{
+		FBangoValue V;
+		V.Type = InType;
+		return V;
+	}
+	static FBangoValue MakeBool(bool Value)
+	{
+		FBangoValue V;
+		V.Type = FBangoType::Bool();
+		V.bIsNil = false;
+		V.BoolValue = Value;
+		return V;
+	}
+	static FBangoValue MakeInt(int32 Value)
+	{
+		FBangoValue V;
+		V.Type = FBangoType::Int();
+		V.bIsNil = false;
+		V.IntValue = Value;
+		return V;
+	}
+	static FBangoValue MakeDouble(double Value)
+	{
+		FBangoValue V;
+		V.Type = FBangoType::Double();
+		V.bIsNil = false;
+		V.DoubleValue = Value;
+		return V;
+	}
 	static FBangoValue MakeString(const FString& Value);
 	static FBangoValue MakeEntity(const FString& Name);
 	/** Localized text (see BangoText.h for making one from a namespace, key and source). */
@@ -120,14 +201,30 @@ public:
 	const FBangoType& GetType() const { return Type; }
 	bool IsNil() const { return bIsNil; }
 
-	bool GetBool() const;
-	int32 GetInt() const;
-	double GetDouble() const;
+	bool GetBool() const
+	{
+		check(!bIsNil && Type == FBangoType::Bool());
+		return BoolValue;
+	}
+	int32 GetInt() const
+	{
+		check(!bIsNil && Type == FBangoType::Int());
+		return IntValue;
+	}
+	double GetDouble() const
+	{
+		check(!bIsNil && Type == FBangoType::Double());
+		return DoubleValue;
+	}
 	const FString& GetString() const;
 	const FString& GetEntityName() const;
 	const FText& GetText() const;
 	/** Int or double, returned as double. */
-	double GetNumberAsDouble() const;
+	double GetNumberAsDouble() const
+	{
+		check(!bIsNil && !Type.IsArray() && (Type.Base == EBangoBaseType::Int || Type.Base == EBangoBaseType::Double));
+		return Type.Base == EBangoBaseType::Int ? (double)IntValue : DoubleValue;
+	}
 	const TArray<FBangoValue>& GetArray() const;
 	/** Part Index of a vector (0 = x, 1 = y, 2 = z). Must be a non-nil vector, and Index must be below its size. */
 	double GetVectorPart(int32 Index) const;
@@ -207,16 +304,40 @@ private:
 	bool PrepareElement(const FBangoValue& Element, FBangoValue& OutConverted, FString& OutError) const;
 	void ResetPayload();
 
+	/** Everything but Heap. */
+	void CopyInline(const FBangoValue& Other)
+	{
+		Type = Other.Type;
+		bIsNil = Other.bIsNil;
+		BoolValue = Other.BoolValue;
+		IntValue = Other.IntValue;
+		DoubleValue = Other.DoubleValue;
+		VectorValue[0] = Other.VectorValue[0];
+		VectorValue[1] = Other.VectorValue[1];
+		VectorValue[2] = Other.VectorValue[2];
+	}
+	/** Makes Heap a copy of Other's: none if Other has none. */
+	void CopyHeap(const FBangoValue& Other);
+	/** Deletes Heap. It must have one. */
+	void FreeHeap();
+	// The string (and an entity's name), the text and the array's elements: made on the first use that could change
+	// them; read-only, an empty one if there's no Heap.
+	FString& HeapString();
+	const FString& HeapString() const;
+	FText& HeapText();
+	const FText& HeapText() const;
+	TArray<FBangoValue>& HeapArray();
+	const TArray<FBangoValue>& HeapArray() const;
+
 	FBangoType Type;
 	bool bIsNil = true;
 
 	bool BoolValue = false;
 	int32 IntValue = 0;
 	double DoubleValue = 0.0;
-	FString StringValue;              // string, and the name for entity
-	FText TextValue;                  // text
-	TArray<FBangoValue> ArrayValue;   // elements, which may themselves be arrays
 	double VectorValue[3] = { 0.0, 0.0, 0.0 };  // vector2 uses the first two
+	/** Null for a bool, a number, a vector, and anything nil or never given contents. */
+	FBangoValueHeap* Heap = nullptr;
 };
 
 inline FArchive& operator<<(FArchive& Ar, FBangoValue& Value)
