@@ -1220,6 +1220,96 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			Expect(CallStack.Num() == 1 && CallStack[0].Loc.Line == 10, TEXT("line trail: the call stack has the line it's paused at"));
 		}
 
+		// Fused instructions (Bango::FuseInstructions): each script is run as compiled, and again with its fused
+		// instructions put back as they were. Both must end the same way: the same globals, the same error from the
+		// same place, and the same count of instructions.
+		{
+			struct FFuseCase
+			{
+				const TCHAR* Name;
+				const TCHAR* Source;
+				int32 MaxInstructions; // 0: the usual limit
+			};
+			const FFuseCase Cases[] =
+			{
+				{ TEXT("a counting loop"), TEXT("global int out;\nint _i = 0;\nint _n = 10;\nwhile (_i < _n)\n{\n\t_i++;\n}\nout = _i;"), 0 },
+				{ TEXT("int arithmetic"), TEXT("global int out;\nint _sum = 0;\nfor (int _i = 0; _i < 9; _i++)\n{\n\t_sum = (_sum + _i * 3) % 7;\n}\nout = _sum - 1;"), 0 },
+				{ TEXT("float arithmetic"), TEXT("global float outf;\nfloat _x = 0.0;\nfor (int _i = 0; _i < 7; _i++)\n{\n\t_x = _x * 0.5 + _i * 0.25;\n}\noutf = _x / 3;"), 0 },
+				{ TEXT("comparing with a constant"), TEXT("global int out;\nint _count = 5;\nif (_count > 3)\n{\n\tout = _count * 2;\n}\nif (_count == 4)\n{\n\tout = 0;\n}"), 0 },
+				{ TEXT("strings"), TEXT("global string outs;\nstring _s = \"a\";\nstring _t = _s + \"b\";\nif (_t == \"ab\")\n{\n\touts = _t + _s;\n}"), 0 },
+				{ TEXT("a nil variable on the left"), TEXT("int _a;\nint _b = 2;\nint _c = _a + _b;"), 0 },
+				{ TEXT("a nil variable on the right"), TEXT("int _a = 1;\nint _b;\nif (_a < _b)\n{\n\t_a = 2;\n}"), 0 },
+				{ TEXT("a nil variable against a constant"), TEXT("int _a;\nwhile (_a < 3)\n{\n\t_a++;\n}"), 0 },
+				{ TEXT("dividing by zero"), TEXT("int _a = 4;\nint _z = 0;\nint _c = _a / _z;"), 0 },
+				{ TEXT("an int too big"), TEXT("int _a = 2000000000;\nint _b = 2000000000;\n_a = _a + _b;"), 0 },
+				{ TEXT("the instruction limit"), TEXT("int _i = 0;\nwhile (_i < 1000)\n{\n\t_i++;\n}"), 200 },
+				{ TEXT("in a function, with the script's variables"), TEXT("global int out;\nscriptVar int _total = 0;\nAddUp(4);\nAddUp(5);\nout = _total;\n\nfunction void AddUp(int _n)\n{\n\t_total = _total + _n;\n}"), 0 },
+			};
+			for (const FFuseCase& Case : Cases)
+			{
+				const TSharedPtr<FBangoProgram> Fused = Compile(Case.Source);
+				if (!Fused.IsValid())
+				{
+					OutFailures.Add(FString::Printf(TEXT("fused: %s: does not compile"), Case.Name));
+					continue;
+				}
+				// The same program with every fused instruction as it was.
+				const TSharedPtr<FBangoProgram> Plain = MakeShared<FBangoProgram>(*Fused);
+				int32 NumFused = 0;
+				for (FBangoFunctionCode& Function : Plain->Functions)
+				{
+					for (FBangoInstruction& Instruction : Function.Code)
+					{
+						if (Instruction.Op == EBangoOp::FusedLoad || Instruction.Op == EBangoOp::FusedConst)
+						{
+							Instruction.Op = Instruction.Op == EBangoOp::FusedLoad ? EBangoOp::LoadPlace : EBangoOp::PushConst;
+							Instruction.C = 0;
+							++NumFused;
+						}
+					}
+				}
+				Expect(NumFused > 0, *FString::Printf(TEXT("fused: %s: has fused instructions"), Case.Name));
+				Expect(Bango::Disassemble(*Fused) == Bango::Disassemble(*Plain), *FString::Printf(TEXT("fused: %s: is listed as it was"), Case.Name));
+
+				auto RunIt = [&](const TSharedPtr<FBangoProgram>& ToRun, uint64& OutInstructions) -> FString
+				{
+					FBangoGlobalStore RunGlobals;
+					BangoMakeRuntimeTestGlobals(RunGlobals);
+					FBangoExecContext RunContext = Context;
+					RunContext.Globals = &RunGlobals;
+					if (Case.MaxInstructions > 0)
+					{
+						RunContext.MaxInstructionsPerResume = Case.MaxInstructions;
+					}
+					FBangoInstance Instance;
+					FBangoRuntimeError StartError;
+					if (!Instance.Start(ToRun, Commands, RunGlobals, 1, StartError))
+					{
+						return FString(TEXT("didn't start: ")) + StartError.Message;
+					}
+					const EBangoInstanceStatus EndStatus = Instance.Resume(RunContext);
+					OutInstructions = Instance.GetInstructionsRun();
+					FString Summary = FString::Printf(TEXT("status %d, error (%d:%d) %s;"), (int32)EndStatus, Instance.GetError().Line, Instance.GetError().Column, *Instance.GetError().Message);
+					for (const TCHAR* Name : { TEXT("out"), TEXT("outf"), TEXT("outs") })
+					{
+						if (const FBangoValue* Value = RunGlobals.Find(Name))
+						{
+							Summary += FString::Printf(TEXT(" %s = %s"), Name, *Value->ToDebugString());
+						}
+					}
+					return Summary;
+				};
+				uint64 FusedInstructions = 0;
+				uint64 PlainInstructions = 0;
+				const FString FusedEnd = RunIt(Fused, FusedInstructions);
+				const FString PlainEnd = RunIt(Plain, PlainInstructions);
+				Expect(FusedEnd == PlainEnd, *FString::Printf(TEXT("fused: %s: ends the same. Fused: %s Plain: %s"), Case.Name, *FusedEnd, *PlainEnd));
+				// (At the limit, a fused instruction may be a few instructions into its run when it's stopped.)
+				Expect(Case.MaxInstructions > 0 || FusedInstructions == PlainInstructions,
+					*FString::Printf(TEXT("fused: %s: counts the same instructions (%llu, plain %llu)"), Case.Name, (unsigned long long)FusedInstructions, (unsigned long long)PlainInstructions));
+			}
+		}
+
 		// Conditions (Bango::CompileCondition): a script, or one expression, that returns true or false.
 		{
 			struct FConditionCase

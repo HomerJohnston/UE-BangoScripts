@@ -18,6 +18,23 @@ namespace Bango
 	constexpr int32 WaitHasHold = 1;
 	constexpr int32 WaitHasTimeout = 2;
 	constexpr int32 WaitHasIgnoreHold = 4;
+
+	// What a FusedLoad or FusedConst instruction runs in one go (its C): itself and the instructions after it.
+	// L is a LoadPlace of a whole local, C a PushConst, Op an arithmetic or comparison operator, S a StorePlace of a
+	// whole variable, J a JumpIfFalse. In the last two, the operator's left side is already on the stack.
+	constexpr int32 FuseLoadLoadOp = 1;        // L L Op      `_a + _b`
+	constexpr int32 FuseLoadConstOp = 2;       // L C Op      `_a * 3`
+	constexpr int32 FuseLoadLoadOpJump = 3;    // L L Op J    `while (_i < _n)`
+	constexpr int32 FuseLoadConstOpJump = 4;   // L C Op J    `if (_count > 3)`
+	constexpr int32 FuseLoadLoadOpStore = 5;   // L L Op S    `_sum = _sum + _i;`
+	constexpr int32 FuseLoadConstOpStore = 6;  // L C Op S    `_i++;`
+	constexpr int32 FuseLoadOp = 7;            // L Op        `... + _b`
+	constexpr int32 FuseConstOp = 8;           // C Op        `... % 1000003`
+	/** How many instructions a fused one of that kind stands for. */
+	constexpr int32 GetFuseLength(int32 Kind)
+	{
+		return Kind == FuseLoadOp || Kind == FuseConstOp ? 2 : (Kind == FuseLoadLoadOp || Kind == FuseLoadConstOp ? 3 : 4);
+	}
 }
 
 /**
@@ -88,6 +105,15 @@ enum class EBangoOp : uint8
 	WaitTimeoutCheck,   // A = wait set, B = its WaitCheck. Its timeout's condition follows (`timeout (condition)`): reached from WaitResult, never by running into it. While it's worked out, a global that's unset makes it false
 	WaitTimeoutResult,  // A = wait set, B = its WaitCheck.  bool -> : true goes on (into the timeout's block, which follows); false pauses, to run from B again
 	WaitResult,         // A = wait set, B = its WaitCheck.  bool -> : true carries on; false pauses until one of the set's globals changes (every frame, if it polls), then runs from B again. With a timeout whose time is up, false goes on at the set's TimeoutIP instead. With a heldFor, true pauses too until it has been true that long (FBangoInstance::HoldAtWait)
+
+	// ---- Fused (Bango::FuseInstructions) ----
+	// The first instruction of a common run (`_i < _n` and its jump, `_i++`), which does the whole run in one go. The
+	// run's other instructions are still there after it, unchanged, and it has its own operands unchanged, so
+	// whenever the quick way doesn't apply (a nil variable, a reload waiting) it does what it was, a LoadPlace or a
+	// PushConst, and the rest run as they would have. Nothing else about the program changes: not an instruction's
+	// position, not a jump, not what's counted against the instruction limit. A listing shows what it was.
+	FusedLoad,          // A = place, B = 0 (as LoadPlace), C = which run (Bango::FuseLoadLoadOp, ...)
+	FusedConst,         // A = constant (as PushConst), C = Bango::FuseConstOp
 
 	Count               // not an op
 };
@@ -392,4 +418,12 @@ namespace Bango
 	 * script's functions (FBangoDependencies). Inputs are counted only in the main graph (Function 0).
 	 */
 	BANGOSCRIPTS_API FBangoDependencies FindDependencies(const FBangoProgram& Program, int32 Function, int32 Begin, int32 End);
+
+	/**
+	 * Makes the first instruction of each common run of instructions a fused one (EBangoOp::FusedLoad, FusedConst),
+	 * which the VM runs in one go. The compiler does this last, to every program. Only runs that are one node's, on one
+	 * line, are fused, so the debugger's trail is the same; and only whole locals and number, bool or string
+	 * constants, so everything that looks for a global or a command in the code still finds it.
+	 */
+	BANGOSCRIPTS_API void FuseInstructions(FBangoProgram& Program);
 }

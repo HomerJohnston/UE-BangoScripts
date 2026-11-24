@@ -222,6 +222,8 @@ namespace BangoCompilerPrivate
 			{
 				Program.ConditionDependencies = Bango::FindDependencies(Program, 0, 0, Program.Functions[0].Code.Num());
 			}
+			// Last, once everything that reads the code has: the common runs of instructions, for the VM to run in one go.
+			Bango::FuseInstructions(Program);
 			return true;
 		}
 

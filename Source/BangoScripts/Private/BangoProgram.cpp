@@ -49,6 +49,7 @@ namespace BangoProgramPrivate
 		switch (I.Op)
 		{
 		case EBangoOp::PushConst:
+		case EBangoOp::FusedConst:
 			return Program.Constants.IsValidIndex(I.A) ? Program.Constants[I.A].ToDebugString() : FString(TEXT("<bad constant>"));
 		case EBangoOp::PushNil:
 		case EBangoOp::Convert:
@@ -56,6 +57,7 @@ namespace BangoProgramPrivate
 		case EBangoOp::DupN:
 			return FString::Printf(TEXT("%d"), I.A);
 		case EBangoOp::LoadPlace:
+		case EBangoOp::FusedLoad:
 			return DescribePlace(Program, Function, I.A) + (I.B != 0 ? TEXT(" (nil ok)") : TEXT(""));
 		case EBangoOp::StorePlace:
 		case EBangoOp::IsNilPlace:
@@ -153,6 +155,9 @@ namespace Bango
 		case EBangoOp::WaitBegin:          return TEXT("WaitBegin");
 		case EBangoOp::WaitCheck:          return TEXT("WaitCheck");
 		case EBangoOp::WaitResult:         return TEXT("WaitResult");
+		// A fused instruction is listed as what it was, and still is whenever its quick way doesn't apply.
+		case EBangoOp::FusedLoad:          return TEXT("LoadPlace");
+		case EBangoOp::FusedConst:         return TEXT("PushConst");
 		case EBangoOp::WaitTimeoutCheck:   return TEXT("WaitTimeoutCheck");
 		case EBangoOp::WaitTimeoutResult:  return TEXT("WaitTimeoutResult");
 		default:                           return TEXT("?");
@@ -349,4 +354,95 @@ bool Bango::CheckReflectedCall(const FBangoReflectedCallSite& Site, const TArray
 		return false;
 	}
 	return true;
+}
+
+namespace Bango
+{
+	void FuseInstructions(FBangoProgram& Program)
+	{
+		auto IsOperator = [](EBangoOp Op)
+		{
+			switch (Op)
+			{
+			case EBangoOp::Add: case EBangoOp::Subtract: case EBangoOp::Multiply: case EBangoOp::Divide: case EBangoOp::Modulo:
+			case EBangoOp::Less: case EBangoOp::LessEqual: case EBangoOp::Greater: case EBangoOp::GreaterEqual:
+			case EBangoOp::Equal: case EBangoOp::NotEqual:
+				return true;
+			default:
+				return false;
+			}
+		};
+		for (FBangoFunctionCode& Function : Program.Functions)
+		{
+			TArray<FBangoInstruction>& Code = Function.Code;
+			// A whole variable, with no indexes and no vector part.
+			auto IsWhole = [&Function](int32 PlaceIndex)
+			{
+				return Function.Places.IsValidIndex(PlaceIndex) && Function.Places[PlaceIndex].NumIndexes == 0 && Function.Places[PlaceIndex].Part == -1;
+			};
+			// L: a LoadPlace of a whole local (or one of the script's, in a function) that must have a value.
+			auto IsLoad = [&](int32 i)
+			{
+				return Code.IsValidIndex(i) && Code[i].Op == EBangoOp::LoadPlace && Code[i].B == 0 && IsWhole(Code[i].A)
+					&& Function.Places[Code[i].A].Kind != EBangoPlaceKind::Global;
+			};
+			// C: a PushConst of a value that's pushed as it is (an entity's may be `self`, which isn't).
+			auto IsConst = [&](int32 i)
+			{
+				return Code.IsValidIndex(i) && Code[i].Op == EBangoOp::PushConst && Program.Constants.IsValidIndex(Code[i].A)
+					&& !Program.Constants[Code[i].A].IsNil() && Program.Constants[Code[i].A].GetType().Base != EBangoBaseType::Entity;
+			};
+			auto IsOp = [&](int32 i) { return Code.IsValidIndex(i) && IsOperator(Code[i].Op); };
+			auto IsStore = [&](int32 i) { return Code.IsValidIndex(i) && Code[i].Op == EBangoOp::StorePlace && IsWhole(Code[i].A); };
+			auto IsJump = [&](int32 i) { return Code.IsValidIndex(i) && Code[i].Op == EBangoOp::JumpIfFalse; };
+			// One node's, on one line: the trail the debugger records doesn't change.
+			auto IsOneNode = [&Function](int32 First, int32 Length)
+			{
+				for (int32 i = First + 1; i < First + Length; ++i)
+				{
+					if (!Function.Debug.IsValidIndex(i) || Function.Debug[i].NodeID != Function.Debug[First].NodeID || Function.Debug[i].Line != Function.Debug[First].Line)
+					{
+						return false;
+					}
+				}
+				return Function.Debug.IsValidIndex(First);
+			};
+
+			for (int32 i = 0; i < Code.Num(); )
+			{
+				// The longest run that starts here.
+				int32 Kind = 0;
+				if (IsLoad(i))
+				{
+					const bool bSecondLoad = IsLoad(i + 1);
+					if ((bSecondLoad || IsConst(i + 1)) && IsOp(i + 2))
+					{
+						Kind = IsJump(i + 3) ? (bSecondLoad ? FuseLoadLoadOpJump : FuseLoadConstOpJump)
+							: IsStore(i + 3) ? (bSecondLoad ? FuseLoadLoadOpStore : FuseLoadConstOpStore)
+							: (bSecondLoad ? FuseLoadLoadOp : FuseLoadConstOp);
+						if (GetFuseLength(Kind) == 4 && !IsOneNode(i, 4))
+						{
+							Kind = bSecondLoad ? FuseLoadLoadOp : FuseLoadConstOp; // the shorter run may still do
+						}
+					}
+					else if (IsOp(i + 1))
+					{
+						Kind = FuseLoadOp;
+					}
+				}
+				else if (IsConst(i) && IsOp(i + 1))
+				{
+					Kind = FuseConstOp;
+				}
+				if (Kind == 0 || !IsOneNode(i, GetFuseLength(Kind)))
+				{
+					++i;
+					continue;
+				}
+				Code[i].Op = Code[i].Op == EBangoOp::LoadPlace ? EBangoOp::FusedLoad : EBangoOp::FusedConst;
+				Code[i].C = Kind;
+				i += GetFuseLength(Kind);
+			}
+		}
+	}
 }

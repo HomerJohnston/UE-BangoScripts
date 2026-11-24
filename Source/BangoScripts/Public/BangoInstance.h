@@ -359,6 +359,8 @@ private:
 
 	// Operators
 	bool BinaryOp(EBangoOp Op);
+	/** The operator on two values (not taken from the stack): its result is pushed. */
+	bool BinaryOpValues(EBangoOp Op, const FBangoValue& Left, const FBangoValue& Right);
 
 	// Calls
 	bool CallCommand(int32 NameIndex, int32 ArgCount, int32 Flags, const FBangoExecContext& Context);

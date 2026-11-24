@@ -1236,6 +1236,11 @@ bool FBangoInstance::BinaryOp(EBangoOp Op)
 	{
 		return false;
 	}
+	return BinaryOpValues(Op, Left, Right);
+}
+
+bool FBangoInstance::BinaryOpValues(EBangoOp Op, const FBangoValue& Left, const FBangoValue& Right)
+{
 	const TCHAR* Symbol = OpSymbol(Op);
 
 	if (Left.IsNil() || Right.IsNil())
@@ -2095,6 +2100,127 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 		case EBangoOp::Jump:
 			Frames.Last().IP = I.A;
 			break;
+
+		case EBangoOp::FusedLoad:
+		case EBangoOp::FusedConst:
+		{
+			// The first instruction of a run that's done in one go (Bango::FuseInstructions). The run's other
+			// instructions follow it, unchanged, and say what to do: which variable or constant, which operator, where
+			// to store or jump. If anything isn't as the quick way needs (a variable that's nil, a reload waiting),
+			// this does only what it was, a LoadPlace or a PushConst, and the others run as usual: so every error is
+			// the one it always was, from the instruction it always came from.
+			const int32 Kind = I.C;
+			const int32 Length = Bango::GetFuseLength(Kind);
+			// A whole variable's value, or null if it has none (then its LoadPlace must say so).
+			auto GetVariable = [this, &Function](int32 PlaceIndex) -> const FBangoValue*
+			{
+				if (!Function.Places.IsValidIndex(PlaceIndex))
+				{
+					return nullptr;
+				}
+				const FBangoPlace& Place = Function.Places[PlaceIndex];
+				const TArray<FBangoValue>& Slots = GetPlaceSlots(Place);
+				return Slots.IsValidIndex(Place.Index) && !Slots[Place.Index].IsNil() ? &Slots[Place.Index] : nullptr;
+			};
+			auto GetConstant = [this](int32 ConstantIndex) -> const FBangoValue*
+			{
+				return Program->Constants.IsValidIndex(ConstantIndex) ? &Program->Constants[ConstantIndex] : nullptr;
+			};
+
+			bool bDone = false;
+			if (!ReloadProgram.IsValid() && Function.Code.IsValidIndex(IP + Length - 1))
+			{
+				const FBangoInstruction* Run = &Function.Code[IP];
+				const bool bLeftOnStack = Kind == Bango::FuseLoadOp || Kind == Bango::FuseConstOp;
+				const int32 OpOffset = bLeftOnStack ? 1 : 2;
+				const FBangoValue* Left = nullptr;
+				const FBangoValue* Right = nullptr;
+				if (bLeftOnStack)
+				{
+					Right = Kind == Bango::FuseLoadOp ? GetVariable(I.A) : GetConstant(I.A);
+				}
+				else
+				{
+					Left = GetVariable(I.A);
+					const bool bRightIsLoad = Kind == Bango::FuseLoadLoadOp || Kind == Bango::FuseLoadLoadOpJump || Kind == Bango::FuseLoadLoadOpStore;
+					Right = bRightIsLoad ? GetVariable(Run[1].A) : GetConstant(Run[1].A);
+				}
+				if (Right && (bLeftOnStack ? Stack.Num() > Frames.Last().StackBase : Left != nullptr))
+				{
+					bDone = true;
+					Frames.Last().IP = IP + Length;
+					Budget -= OpOffset; // counted as the instructions it stands for: so far, up to the operator
+					CurrentIP = IP + OpOffset; // an error is the operator's, from where the operator is
+					bool bOk = false;
+					if (bLeftOnStack)
+					{
+						const FBangoValue LeftValue = PopValue();
+						bOk = BinaryOpValues(Run[OpOffset].Op, LeftValue, *Right);
+					}
+					else
+					{
+						bOk = BinaryOpValues(Run[OpOffset].Op, *Left, *Right);
+					}
+					if (bOk && Length == 4)
+					{
+						--Budget;
+						CurrentIP = IP + 3;
+						const FBangoInstruction& Last = Run[3];
+						if (Last.Op == EBangoOp::StorePlace)
+						{
+							if (Function.Places.IsValidIndex(Last.A))
+							{
+								const FBangoPlace StoreTo = Function.Places[Last.A];
+								StorePlace(StoreTo, Globals);
+							}
+							else
+							{
+								return RuntimeFail(TEXT("Internal error: bad place."));
+							}
+						}
+						else
+						{
+							// As JumpIfFalse.
+							const FBangoValue Condition = PopValue();
+							if (Status == EBangoInstanceStatus::Failed)
+							{
+								return false;
+							}
+							if (!IsScalar(Condition, EBangoBaseType::Bool))
+							{
+								return RuntimeFail(FString::Printf(TEXT("A condition must be a bool, but this is %s."), *ValueTypeText(Condition)));
+							}
+							if (!Condition.GetBool())
+							{
+								Frames.Last().IP = Last.A;
+							}
+						}
+					}
+				}
+			}
+			if (!bDone)
+			{
+				// What it was.
+				if (I.Op == EBangoOp::FusedLoad)
+				{
+					if (!Function.Places.IsValidIndex(I.A))
+					{
+						return RuntimeFail(TEXT("Internal error: bad place."));
+					}
+					const FBangoPlace Place = Function.Places[I.A];
+					LoadPlace(Place, Globals, Context.Entities, I.B != 0);
+				}
+				else
+				{
+					if (!Program->Constants.IsValidIndex(I.A))
+					{
+						return RuntimeFail(TEXT("Internal error: bad constant."));
+					}
+					Stack.Add(Program->Constants[I.A]);
+				}
+			}
+			break;
+		}
 
 		case EBangoOp::WaitBegin:
 		{

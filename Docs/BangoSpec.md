@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.105)
+# Bango Language Spec (draft v0.106)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.106:** **the VM runs common runs of instructions in one go**: a loop's condition and its jump (`while (_i < _n)`), a step like `_i++` or `_sum = _sum + _i;`, and an operator with a local or a constant beside it (`_a * 3`). The compiler marks the first instruction of each such run (`Bango::FuseInstructions`), and the run's other instructions stay where they are, so nothing else about a program changes: every error is the same and comes from the same place, the instruction limit counts the same, a listing reads the same, and the debugger's trail is the same. Only whole locals and constants are fused, not globals. Nothing about the language changes.
 
 **Changes in v0.105:** **reading and writing a variable no longer copies its name**, and **the VM's value stack keeps its memory** when it empties at the end of a statement. Both were allocations on nearly every instruction, and most of what a simple instruction cost in an Unreal build. Nothing about the language changes.
 
