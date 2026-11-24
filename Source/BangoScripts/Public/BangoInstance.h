@@ -376,6 +376,8 @@ private:
 	/** `target call Name(args)`: hands it to Context.CallReflected. */
 	bool CallReflected(int32 NameIndex, int32 ArgCount, bool bWantResult, const FBangoExecContext& Context);
 	bool FinishCommand(EBangoCommandResult Result);
+	/** Lends a command's call the instance's own (CallScratch) for as long as the call takes. */
+	struct FCallScope;
 	/** A command's call is done: fails if it failed, and puts its result, as the type it should be, on the stack. */
 	bool FinishCall(EBangoCommandResult Result, const FBangoCommand& Command, FBangoCommandCall& Call);
 

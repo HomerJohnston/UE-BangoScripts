@@ -1480,6 +1480,16 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 					Expect(Run.Instance.Resume(Context) == EBangoInstanceStatus::Finished && IntOf(Run.Globals, TEXT("out")) == 10 && Log.Num() == 2, TEXT("calls: and the commands after it"));
 				}
 			}
+			{
+				// Commands that change their target, with ordinary ones between them: each call's arguments and type
+				// parameters are its own.
+				FCallRun Run;
+				if (RunCalls(TEXT("global int out;\nint[] _list = [];\nfloat[] _floats = [];\nfor (int _i = 0; _i < 5; _i++)\n{\n\t_list Push(_i * 2);\n\t_floats Push(_i);\n\tout = Max(_i, 1);\n}\nint _last = _list Pop();\n_list Pop();\nout = _last * 100 + _list[0] + _list[2] + Max(1, 2);"), Run))
+				{
+					Expect(Run.Status == EBangoInstanceStatus::Finished && IntOf(Run.Globals, TEXT("out")) == 806,
+						*FString::Printf(TEXT("calls: commands that change their target. out = %lld, error: %s"), (long long)IntOf(Run.Globals, TEXT("out")), *Run.Instance.GetError().Message));
+				}
+			}
 			Context.Globals = GlobalsBefore;
 		}
 

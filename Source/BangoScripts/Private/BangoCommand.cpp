@@ -314,18 +314,26 @@ bool FBangoCommandSignature::BindTypeParams(const FBangoValue* Target, TArray<FB
 		int32 Depth = 0;
 		FBangoType Type;
 		int32 ArgIndex = INDEX_NONE; // INDEX_NONE: the target
-		FString What;                // "the target", "argument 2 ('B')"
-		FString Name;                // "the target", "'B'"
 	};
-	TArray<FSlot> Slots;
+	// (This runs for every call of such a command, so nothing here allocates unless the call is wrong: the slots are
+	// kept inline, and what a slot is called is only worked out for an error.)
+	TArray<FSlot, TInlineAllocator<8>> Slots;
+	// "the target", "argument 2 ('B')"
+	auto What = [this](const FSlot& Slot) -> FString
+	{
+		return Slot.ArgIndex == INDEX_NONE ? FString(TEXT("the target")) : FString::Printf(TEXT("argument %d ('%s')"), Slot.ArgIndex + 1, *Params[Slot.ArgIndex].Name);
+	};
+	// "the target", "'B'"
+	auto NameOf = [this](const FSlot& Slot) -> FString
+	{
+		return Slot.ArgIndex == INDEX_NONE ? FString(TEXT("the target")) : FString::Printf(TEXT("'%s'"), *Params[Slot.ArgIndex].Name);
+	};
 	if (Target && TypeParams.IsValidIndex(TargetTypeVar))
 	{
 		FSlot& Slot = Slots.AddDefaulted_GetRef();
 		Slot.Var = TargetTypeVar;
 		Slot.Depth = TargetTypeVarDepth;
 		Slot.Type = Target->GetType();
-		Slot.What = TEXT("the target");
-		Slot.Name = TEXT("the target");
 	}
 	for (int32 i = 0; i < Args.Num() && i < Params.Num(); ++i)
 	{
@@ -336,8 +344,6 @@ bool FBangoCommandSignature::BindTypeParams(const FBangoValue* Target, TArray<FB
 			Slot.Depth = Params[i].TypeVarDepth;
 			Slot.Type = Args[i].GetType();
 			Slot.ArgIndex = i;
-			Slot.What = FString::Printf(TEXT("argument %d ('%s')"), i + 1, *Params[i].Name);
-			Slot.Name = FString::Printf(TEXT("'%s'"), *Params[i].Name);
 		}
 	}
 
@@ -354,18 +360,18 @@ bool FBangoCommandSignature::BindTypeParams(const FBangoValue* Target, TArray<FB
 			}
 			if (Slot.Type.ArrayDepth < Slot.Depth)
 			{
-				OutError = FString::Printf(TEXT("%s must be %s, but it is %s."), *Slot.What, *TypeParam.Describe(Slot.Depth), *WithArticle(Slot.Type));
+				OutError = FString::Printf(TEXT("%s must be %s, but it is %s."), *What(Slot), *TypeParam.Describe(Slot.Depth), *WithArticle(Slot.Type));
 				return false;
 			}
 			const FBangoType Inner(Slot.Type.Base, (uint8)(Slot.Type.ArrayDepth - Slot.Depth));
 			if (!TypeParam.Allows(Inner))
 			{
-				OutError = FString::Printf(TEXT("%s must be %s, but it is %s."), *Slot.What, *TypeParam.Describe(Slot.Depth), *WithArticle(Slot.Type));
+				OutError = FString::Printf(TEXT("%s must be %s, but it is %s."), *What(Slot), *TypeParam.Describe(Slot.Depth), *WithArticle(Slot.Type));
 				return false;
 			}
 			if (Anchor && !(Inner == OutTypeArgs[Var]))
 			{
-				OutError = FString::Printf(TEXT("%s and %s must go together, but they are %s and %s."), *Anchor->Name, *Slot.Name, *WithArticle(Anchor->Type), *WithArticle(Slot.Type));
+				OutError = FString::Printf(TEXT("%s and %s must go together, but they are %s and %s."), *NameOf(*Anchor), *NameOf(Slot), *WithArticle(Anchor->Type), *WithArticle(Slot.Type));
 				return false;
 			}
 			if (!Anchor)
@@ -387,7 +393,7 @@ bool FBangoCommandSignature::BindTypeParams(const FBangoValue* Target, TArray<FB
 				// It must fit what the array holds (an int into a float array is fine).
 				if (!OutTypeArgs[Var].IsAssignableFrom(Slot.Type))
 				{
-					OutError = FString::Printf(TEXT("%s must be %s, but it is %s."), *Slot.What, *WithArticle(OutTypeArgs[Var]), *WithArticle(Slot.Type));
+					OutError = FString::Printf(TEXT("%s must be %s, but it is %s."), *What(Slot), *WithArticle(OutTypeArgs[Var]), *WithArticle(Slot.Type));
 					return false;
 				}
 				continue;
@@ -395,7 +401,7 @@ bool FBangoCommandSignature::BindTypeParams(const FBangoValue* Target, TArray<FB
 			FBangoType ArgType;
 			if (!TypeParam.Resolve(Slot.Type, ArgType))
 			{
-				OutError = FString::Printf(TEXT("%s must be %s, but it is %s."), *Slot.What, *TypeParam.Describe(), *WithArticle(Slot.Type));
+				OutError = FString::Printf(TEXT("%s must be %s, but it is %s."), *What(Slot), *TypeParam.Describe(), *WithArticle(Slot.Type));
 				return false;
 			}
 			if (!First)
@@ -407,7 +413,7 @@ bool FBangoCommandSignature::BindTypeParams(const FBangoValue* Target, TArray<FB
 			FBangoType Unified;
 			if (!FBangoTypeParam::Unify(OutTypeArgs[Var], ArgType, Unified))
 			{
-				OutError = FString::Printf(TEXT("%s and %s must be the same type, but they are %s and %s."), *First->Name, *Slot.Name, *WithArticle(First->Type), *WithArticle(Slot.Type));
+				OutError = FString::Printf(TEXT("%s and %s must be the same type, but they are %s and %s."), *NameOf(*First), *NameOf(Slot), *WithArticle(First->Type), *WithArticle(Slot.Type));
 				return false;
 			}
 			OutTypeArgs[Var] = Unified;
@@ -429,7 +435,7 @@ bool FBangoCommandSignature::BindTypeParams(const FBangoValue* Target, TArray<FB
 		FBangoValue Converted;
 		if (!Args[Slot.ArgIndex].TryConvertTo(Wanted, Converted))
 		{
-			OutError = FString::Printf(TEXT("%s can't be passed as %s."), *Slot.What, *WithArticle(Wanted));
+			OutError = FString::Printf(TEXT("%s can't be passed as %s."), *What(Slot), *WithArticle(Wanted));
 			return false;
 		}
 		Args[Slot.ArgIndex] = MoveTemp(Converted);

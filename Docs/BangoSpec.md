@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.108)
+# Bango Language Spec (draft v0.109)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.109:** **a command with type parameters no longer builds text for every call**, and **a command that changes its target no longer allocates**. Working out a call's type parameters (`Push`'s element type, `Max`'s number type) used to write out each argument's name for an error message that was almost never needed, twice per argument, on every call: that's now only done when the call is wrong. And a command that changes its target in place (`_list Push(_x);`) is given the instance's own call, as other commands are since v0.108. The error messages are the same. Nothing about the language or about writing a command changes.
 
 **Changes in v0.108:** **calling a function or a command no longer allocates**. A function's slots (its parameters and locals) use the memory of a call that has returned, and an argument that's already its parameter's type is moved in, not copied. A command is given the instance's own call, used again for each one (`FBangoCommandCall::Reset` empties it and keeps its lists' memory), and only a command that waits has it kept as before. Nothing about the language or about writing a command changes.
 

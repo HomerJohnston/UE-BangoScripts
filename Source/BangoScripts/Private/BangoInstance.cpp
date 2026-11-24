@@ -1577,6 +1577,32 @@ bool FBangoInstance::PrepareCommandCall(const FBangoCommandSignature& Signature,
 	return true;
 }
 
+// The instance's own call, used again and again so its argument list keeps its memory; emptied on the way out. A
+// call made while that one is still out (a command that runs this same instance) gets one of its own.
+struct FBangoInstance::FCallScope
+{
+	FBangoInstance& Instance;
+	FBangoCommandCall Own;
+	const bool bScratch;
+	FBangoCommandCall& Call;
+	explicit FCallScope(FBangoInstance& InInstance)
+		: Instance(InInstance), bScratch(!InInstance.bCallScratchInUse), Call(bScratch ? InInstance.CallScratch : Own)
+	{
+		if (bScratch)
+		{
+			Instance.bCallScratchInUse = true;
+		}
+	}
+	~FCallScope()
+	{
+		if (bScratch)
+		{
+			Instance.CallScratch.Reset();
+			Instance.bCallScratchInUse = false;
+		}
+	}
+};
+
 bool FBangoInstance::CallCommandInPlace(const FBangoPlace& Place, int32 NameIndex, int32 ArgCount, bool bResultUsed, FBangoGlobalStore& Globals, const FBangoExecContext& Context)
 {
 	const FBangoCommand* Command = BoundCommands.IsValidIndex(NameIndex) ? BoundCommands[NameIndex] : nullptr;
@@ -1586,12 +1612,13 @@ bool FBangoInstance::CallCommandInPlace(const FBangoPlace& Place, int32 NameInde
 	}
 	const FBangoCommandSignature& Signature = Command->Signature;
 
-	FBangoCommandCall Call;
+	FCallScope CallScope(*this);
+	FBangoCommandCall& Call = CallScope.Call;
 	Call.InstanceId = Id;
 	Call.WorldContext = Context.WorldContext;
 	Call.DeltaSeconds = Context.DeltaSeconds;
 	Call.bResultUsed = bResultUsed;
-	Call.Args.SetNum(ArgCount);
+	Call.Args.SetNum(ArgCount, EAllowShrinking::No);
 	for (int32 i = ArgCount - 1; i >= 0; --i)
 	{
 		Call.Args[i] = PopValue();
@@ -1669,9 +1696,7 @@ bool FBangoInstance::CallCommandInPlace(const FBangoPlace& Place, int32 NameInde
 		// Named with what it was called on.
 		return RuntimeFail(FString::Printf(TEXT("%s on '%s': %s"), *Signature.Name, *DescribePlace(Place), Call.Error.IsEmpty() ? TEXT("the command failed.") : *Call.Error));
 	}
-	PendingCommandName = NameIndex;
-	PendingCall = MoveTemp(Call);
-	return FinishCommand(Result);
+	return FinishCall(Result, *Command, Call);
 }
 
 bool FBangoInstance::CallCommand(int32 NameIndex, int32 ArgCount, int32 Flags, const FBangoExecContext& Context)
@@ -1690,31 +1715,6 @@ bool FBangoInstance::CallCommand(int32 NameIndex, int32 ArgCount, int32 Flags, c
 		return RuntimeFail(FString::Printf(TEXT("Internal error: '%s' changes its target, but was called without a place for it."), *Signature.Name));
 	}
 
-	// The instance's own call, used again and again so its argument list keeps its memory; emptied on the way out. A
-	// call made while that one is still out (a command that runs this same instance) gets one of its own.
-	struct FCallScope
-	{
-		FBangoInstance& Instance;
-		FBangoCommandCall Own;
-		const bool bScratch;
-		FBangoCommandCall& Call;
-		explicit FCallScope(FBangoInstance& InInstance)
-			: Instance(InInstance), bScratch(!InInstance.bCallScratchInUse), Call(bScratch ? InInstance.CallScratch : Own)
-		{
-			if (bScratch)
-			{
-				Instance.bCallScratchInUse = true;
-			}
-		}
-		~FCallScope()
-		{
-			if (bScratch)
-			{
-				Instance.CallScratch.Reset();
-				Instance.bCallScratchInUse = false;
-			}
-		}
-	};
 	FCallScope CallScope(*this);
 	FBangoCommandCall& Call = CallScope.Call;
 	Call.InstanceId = Id;
