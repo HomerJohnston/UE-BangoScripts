@@ -380,11 +380,10 @@ namespace Bango
 			{
 				return Function.Places.IsValidIndex(PlaceIndex) && Function.Places[PlaceIndex].NumIndexes == 0 && Function.Places[PlaceIndex].Part == -1;
 			};
-			// L: a LoadPlace of a whole local (or one of the script's, in a function) that must have a value.
+			// L: a LoadPlace of a whole variable (a local, one of the script's, or a global) that must have a value.
 			auto IsLoad = [&](int32 i)
 			{
-				return Code.IsValidIndex(i) && Code[i].Op == EBangoOp::LoadPlace && Code[i].B == 0 && IsWhole(Code[i].A)
-					&& Function.Places[Code[i].A].Kind != EBangoPlaceKind::Global;
+				return Code.IsValidIndex(i) && Code[i].Op == EBangoOp::LoadPlace && Code[i].B == 0 && IsWhole(Code[i].A);
 			};
 			// C: a PushConst of a value that's pushed as it is (an entity's may be `self`, which isn't).
 			auto IsConst = [&](int32 i)

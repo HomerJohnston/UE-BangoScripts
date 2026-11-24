@@ -1254,6 +1254,11 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				{ TEXT("a comparison kept in a variable"), TEXT("global int out;\nint _a = 2;\nint _b = 3;\nbool _less = _a < _b;\nbool _same = _a == _b;\nout = 0;\nif (_less)\n{\n\tout = 1;\n}\nif (_same)\n{\n\tout = 2;\n}"), 0 },
 				{ TEXT("straight into a global"), TEXT("global int out;\nglobal float outf;\nint _a = 2;\nint _b = 3;\nout = _a + _b;\nfloat _x = 1.5;\nfloat _y = 2.0;\noutf = _x * _y;"), 0 },
 				{ TEXT("a longer expression"), TEXT("global int out;\nint _a = 2;\nint _b = 3;\nint _c = 4;\nout = (_a + _b) * _c - _a * 7 + _c % 3;"), 0 },
+				{ TEXT("a global counted in a loop"), TEXT("global int out;\nout = 0;\nfor (int _i = 0; _i < 20; _i++)\n{\n\tout = out + 1;\n\tout = (out + _i) % 1000;\n}\nif (out > 3)\n{\n\tout = out * 2;\n}"), 0 },
+				{ TEXT("two globals"), TEXT("global int out;\nglobal float outf;\nglobal int other = 4;\nout = 3;\nout = out + other;\noutf = 1.5;\noutf = outf * outf;\nif (out == other)\n{\n\tout = 0;\n}"), 0 },
+				{ TEXT("a global that has no value yet"), TEXT("global int out;\nglobal int unset;\nout = 1;\nout = unset + 1;"), 0 },
+				{ TEXT("a global nobody has made"), TEXT("global int out;\nout = 1;\nif (nobodyMadeThis > 3)\n{\n\tout = 2;\n}"), 0 },
+				{ TEXT("a global of another type than the answer"), TEXT("global float outf;\nint _a = 2;\nint _b = 3;\noutf = _a + _b;"), 0 },
 				{ TEXT("in a function, with the script's variables"), TEXT("global int out;\nscriptVar int _total = 0;\nAddUp(4);\nAddUp(5);\nout = _total;\n\nfunction void AddUp(int _n)\n{\n\t_total = _total + _n;\n}"), 0 },
 			};
 			for (const FFuseCase& Case : Cases)
@@ -1499,6 +1504,15 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				{
 					Expect(Run.Status == EBangoInstanceStatus::Finished && IntOf(Run.Globals, TEXT("out")) == 806,
 						*FString::Printf(TEXT("calls: commands that change their target. out = %lld, error: %s"), (long long)IntOf(Run.Globals, TEXT("out")), *Run.Instance.GetError().Message));
+				}
+			}
+			{
+				// A float that isn't a number is neither less than, greater than nor equal to anything, itself included.
+				FCallRun Run;
+				if (RunCalls(TEXT("global int out;\nglobal int plain;\nfloat _a = 10.0;\nfor (int _i = 0; _i < 12; _i++)\n{\n\t_a = _a * _a;\n}\nfloat _n = _a - _a;\nout = 0;\nif (_n <= _n)\n{\n\tout = out + 1;\n}\nif (_n >= _n)\n{\n\tout = out + 10;\n}\nif (_n < _n)\n{\n\tout = out + 100;\n}\nif (_n > 1.0)\n{\n\tout = out + 1000;\n}\nif (_n == _n)\n{\n\tout = out + 10000;\n}\nif (_n != _n)\n{\n\tout = out + 100000;\n}\nplain = 0;\nif ((_n + 0.0) <= (_n + 0.0))\n{\n\tplain = 1;\n}\nif (2 >= _n)\n{\n\tplain = plain + 10;\n}"), Run))
+				{
+					Expect(Run.Status == EBangoInstanceStatus::Finished && IntOf(Run.Globals, TEXT("out")) == 100000 && IntOf(Run.Globals, TEXT("plain")) == 0,
+						*FString::Printf(TEXT("calls: comparing a float that isn't a number. out = %lld, plain = %lld, error: %s"), (long long)IntOf(Run.Globals, TEXT("out")), (long long)IntOf(Run.Globals, TEXT("plain")), *Run.Instance.GetError().Message));
 				}
 			}
 			Context.Globals = GlobalsBefore;

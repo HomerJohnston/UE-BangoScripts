@@ -83,10 +83,9 @@ namespace BangoInstancePrivate
 			switch (Op)
 			{
 			case EBangoOp::Less:         Out = FBangoValue::MakeBool(A < B); return true;
-			// (Written as BinaryOpValues works them out, which matters for a NaN: neither less nor greater.)
-			case EBangoOp::LessEqual:    Out = FBangoValue::MakeBool(!(A > B)); return true;
+			case EBangoOp::LessEqual:    Out = FBangoValue::MakeBool(A <= B); return true;
 			case EBangoOp::Greater:      Out = FBangoValue::MakeBool(A > B); return true;
-			case EBangoOp::GreaterEqual: Out = FBangoValue::MakeBool(!(A < B)); return true;
+			case EBangoOp::GreaterEqual: Out = FBangoValue::MakeBool(A >= B); return true;
 			case EBangoOp::Equal:        Out = FBangoValue::MakeBool(A == B); return true;
 			case EBangoOp::NotEqual:     Out = FBangoValue::MakeBool(!(A == B)); return true;
 			case EBangoOp::Add:      Out = FBangoValue::MakeDouble(A + B); return true;
@@ -885,6 +884,25 @@ FBangoValue FBangoInstance::PopValue()
 	return Stack.Pop(EAllowShrinking::No);
 }
 
+bool FBangoInstance::PopArgs(int32 Count, TArray<FBangoValue>& OutArgs)
+{
+	// All at once: one check, and each value moved from the stack to its place in the list.
+	OutArgs.Reset();
+	const int32 Base = Frames.Num() > 0 ? Frames.Last().StackBase : 0;
+	const int32 First = Stack.Num() - Count;
+	if (Count < 0 || First < Base)
+	{
+		return RuntimeFail(TEXT("Internal error: the value stack is empty."));
+	}
+	OutArgs.Reserve(Count);
+	for (int32 i = 0; i < Count; ++i)
+	{
+		OutArgs.Add(MoveTemp(Stack[First + i]));
+	}
+	Stack.SetNum(First, EAllowShrinking::No);
+	return true;
+}
+
 bool FBangoInstance::PopIndexes(int32 Count, TArray<int64>& OutIndexes)
 {
 	OutIndexes.SetNum(Count);
@@ -1453,24 +1471,32 @@ bool FBangoInstance::BinaryOpValues(EBangoOp Op, const FBangoValue& Left, const 
 	case EBangoOp::Greater:
 	case EBangoOp::GreaterEqual:
 	{
-		int32 Compare = 0;
+		bool bResult = false;
 		if (bInts)
 		{
-			Compare = Left.GetInt() < Right.GetInt() ? -1 : (Left.GetInt() > Right.GetInt() ? 1 : 0);
+			const int32 A = Left.GetInt();
+			const int32 B = Right.GetInt();
+			switch (Op)
+			{
+			case EBangoOp::Less:      bResult = A < B; break;
+			case EBangoOp::LessEqual: bResult = A <= B; break;
+			case EBangoOp::Greater:   bResult = A > B; break;
+			default:                  bResult = A >= B; break;
+			}
 		}
 		else
 		{
+			// A float that isn't a number (the answer of infinity minus infinity, say) is neither less than, greater
+			// than nor equal to anything, itself included: all four are false.
 			const double A = Left.GetNumberAsDouble();
 			const double B = Right.GetNumberAsDouble();
-			Compare = A < B ? -1 : (A > B ? 1 : 0);
-		}
-		bool bResult = false;
-		switch (Op)
-		{
-		case EBangoOp::Less:      bResult = Compare < 0; break;
-		case EBangoOp::LessEqual: bResult = Compare <= 0; break;
-		case EBangoOp::Greater:   bResult = Compare > 0; break;
-		default:                  bResult = Compare >= 0; break;
+			switch (Op)
+			{
+			case EBangoOp::Less:      bResult = A < B; break;
+			case EBangoOp::LessEqual: bResult = A <= B; break;
+			case EBangoOp::Greater:   bResult = A > B; break;
+			default:                  bResult = A >= B; break;
+			}
 		}
 		Stack.Add(FBangoValue::MakeBool(bResult));
 		return true;
@@ -1660,11 +1686,12 @@ bool FBangoInstance::PrepareCommandCall(const FBangoCommandSignature& Signature,
 struct FBangoInstance::FCallScope
 {
 	FBangoInstance& Instance;
-	FBangoCommandCall Own;
+	/** Only made for a call inside a call: making one for every call, to leave it unused, cost more than the rest of this. */
+	TOptional<FBangoCommandCall> Own;
 	const bool bScratch;
 	FBangoCommandCall& Call;
 	explicit FCallScope(FBangoInstance& InInstance)
-		: Instance(InInstance), bScratch(!InInstance.bCallScratchInUse), Call(bScratch ? InInstance.CallScratch : Own)
+		: Instance(InInstance), bScratch(!InInstance.bCallScratchInUse), Call(bScratch ? InInstance.CallScratch : Own.Emplace())
 	{
 		if (bScratch)
 		{
@@ -1696,11 +1723,7 @@ bool FBangoInstance::CallCommandInPlace(const FBangoPlace& Place, int32 NameInde
 	Call.WorldContext = Context.WorldContext;
 	Call.DeltaSeconds = Context.DeltaSeconds;
 	Call.bResultUsed = bResultUsed;
-	Call.Args.SetNum(ArgCount, EAllowShrinking::No);
-	for (int32 i = ArgCount - 1; i >= 0; --i)
-	{
-		Call.Args[i] = PopValue();
-	}
+	PopArgs(ArgCount, Call.Args);
 	TArray<int64> Indexes;
 	if (Status == EBangoInstanceStatus::Failed || !PopIndexes(Place.NumIndexes, Indexes))
 	{
@@ -1799,11 +1822,7 @@ bool FBangoInstance::CallCommand(int32 NameIndex, int32 ArgCount, int32 Flags, c
 	Call.WorldContext = Context.WorldContext;
 	Call.DeltaSeconds = Context.DeltaSeconds;
 	Call.bResultUsed = (Flags & Bango::CallResultUsed) != 0;
-	Call.Args.SetNum(ArgCount, EAllowShrinking::No);
-	for (int32 i = ArgCount - 1; i >= 0; --i)
-	{
-		Call.Args[i] = PopValue();
-	}
+	PopArgs(ArgCount, Call.Args);
 	if (bHasTarget)
 	{
 		Call.bHasTarget = true;
@@ -1882,7 +1901,11 @@ bool FBangoInstance::FinishCall(EBangoCommandResult Result, const FBangoCommand&
 		}
 		const FBangoType Expected = FBangoCommandSignature::GetTypeOf(Call.TypeArgs[Signature.ReturnTypeVar], Signature.ReturnTypeVarDepth);
 		FBangoValue Converted;
-		if (Call.Result.IsNil() && !Call.bResultUsed && Signature.bDiscardable)
+		if (!Call.Result.IsNil() && Call.Result.GetType() == Expected)
+		{
+			Converted = MoveTemp(Call.Result); // the usual result, already the type it should be: moved, not copied
+		}
+		else if (Call.Result.IsNil() && !Call.bResultUsed && Signature.bDiscardable)
 		{
 			Converted = FBangoValue::MakeNil(Expected); // thrown away (Pop of a nil element, on a line of its own)
 		}
@@ -1896,7 +1919,11 @@ bool FBangoInstance::FinishCall(EBangoCommandResult Result, const FBangoCommand&
 	else if (Signature.bReturnsValue)
 	{
 		FBangoValue Converted;
-		if (Call.Result.IsNil())
+		if (!Call.Result.IsNil() && Call.Result.GetType() == Signature.ReturnType)
+		{
+			Converted = MoveTemp(Call.Result); // the usual result, already the type it should be: moved, not copied
+		}
+		else if (Call.Result.IsNil())
 		{
 			Converted = FBangoValue::MakeNil(Signature.ReturnType);
 		}
@@ -2260,14 +2287,20 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 			// the one it always was, from the instruction it always came from.
 			const int32 Kind = I.C;
 			const int32 Length = Bango::GetFuseLength(Kind);
-			// A whole variable's value, or null if it has none (then its LoadPlace must say so).
-			auto GetVariable = [this, &Function](int32 PlaceIndex) -> const FBangoValue*
+			// A whole variable's value, or null if it has none (then its LoadPlace must say so: a nil, or a global that
+			// nobody has made).
+			auto GetVariable = [this, &Function, &Globals](int32 PlaceIndex) -> const FBangoValue*
 			{
 				if (!Function.Places.IsValidIndex(PlaceIndex))
 				{
 					return nullptr;
 				}
 				const FBangoPlace& Place = Function.Places[PlaceIndex];
+				if (Place.Kind == EBangoPlaceKind::Global)
+				{
+					const FBangoValue* Global = FindGlobal(Place, Globals);
+					return Global && !Global->IsNil() ? Global : nullptr;
+				}
 				const TArray<FBangoValue>& Slots = GetPlaceSlots(Place);
 				return Slots.IsValidIndex(Place.Index) && !Slots[Place.Index].IsNil() ? &Slots[Place.Index] : nullptr;
 			};
@@ -2344,15 +2377,24 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 								const FBangoPlace StoreTo = Function.Places[Last.A];
 								if (bQuick)
 								{
-									// Into a whole local or script variable of the answer's own type, it's just put there
-									// (as StorePlace would); otherwise StorePlace takes it from the stack.
+									// Into a whole variable of the answer's own type, it's just put there (as StorePlace
+									// would); otherwise StorePlace takes it from the stack.
 									FBangoValue* Slot = nullptr;
-									if (StoreTo.Kind != EBangoPlaceKind::Global && StoreTo.NumIndexes == 0 && StoreTo.Part == -1)
+									const bool bWholePlace = StoreTo.NumIndexes == 0 && StoreTo.Part == -1;
+									if (bWholePlace && StoreTo.Kind != EBangoPlaceKind::Global)
 									{
 										TArray<FBangoValue>& Slots = GetPlaceSlots(StoreTo);
 										if (Slots.IsValidIndex(StoreTo.Index) && Slots[StoreTo.Index].GetType() == Quick.GetType())
 										{
 											Slot = &Slots[StoreTo.Index];
+										}
+									}
+									else if (bWholePlace)
+									{
+										const int32 GlobalSlot = FindGlobalSlot(StoreTo, Globals);
+										if (GlobalSlot != INDEX_NONE && Globals.GetSlot(GlobalSlot).GetType() == Quick.GetType())
+										{
+											Slot = &Globals.GetSlotMutable(GlobalSlot); // which notes that it changed
 										}
 									}
 									if (Slot)

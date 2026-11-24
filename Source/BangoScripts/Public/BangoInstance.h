@@ -336,6 +336,8 @@ private:
 
 	// Stack helpers
 	FBangoValue PopValue();
+	/** Takes a call's arguments off the value stack, in order, into OutArgs (emptied first, its memory kept). */
+	bool PopArgs(int32 Count, TArray<FBangoValue>& OutArgs);
 	bool PopIndexes(int32 Count, TArray<int64>& OutIndexes);
 
 	// Places

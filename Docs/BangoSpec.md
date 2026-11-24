@@ -1,8 +1,12 @@
-# Bango Language Spec (draft v0.110)
+# Bango Language Spec (draft v0.112)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.112:** **small savings on every command call**: the spare call that was made and thrown away for each one is only made for a call inside a call; a call's arguments are moved off the value stack together; and a result that's already the type it should be is moved to the stack, not copied. Nothing about the language or about writing a command changes.
+
+**Changes in v0.111:** **a float that isn't a number compares as false**: `<`, `<=`, `>`, `>=` and `==` are all false for it, against anything, itself included, and only `!=` is true (section 5). Before, `<=` and `>=` were true for it. **Fused instructions take globals too** (v0.106 left them out): a global that has a value is read, and a whole global is written, as a local is, so `counter = counter + 1;` and `if (stage > 3)` are each one step. A global that's nil, or that nobody has made, is read the usual way, with its usual error.
 
 **Changes in v0.110:** **a fused instruction works out two ints or two floats directly**, and puts the answer straight where its run sends it: into the local it's stored in, or to the jump it decides, without going by the value stack. Anything else (other types, an int and a float together, an answer that doesn't fit an int, dividing by zero) is done as before, so every answer and every error is the same. Nothing about the language changes.
 
@@ -687,6 +691,7 @@ All binary operators are left-associative: `a - b - c` is `(a - b) - c`.
 - `int / int` gives `int`, rounded toward zero. `%` on floats gives the floating-point remainder.
 - **Dividing by zero stops the script**, for both ints and floats, with `/` or `%`.
 - **Integer overflow stops the script.** An int result outside -2147483648 to 2147483647 is an error that points at the operator, e.g. `2147483647 + 1`, `65536 * 65536`, `(-2147483647 - 1) / -1`, or negating -2147483648. It never wraps around. Mixing in a float (`65536 * 65536.0`) gives a float instead.
+- **A float that isn't a number** (the answer of infinity minus infinity, say; a float sum or product past the largest float is infinity, not an error) is neither less than, greater than nor equal to anything, itself included: `<`, `<=`, `>`, `>=` and `==` are false for it, and `!=` is true.
 - `==` on strings and entities is case-sensitive.
 - Joining a string with any other type (`"a" + 1`) is a compile error.
 - Arrays can't be used with any operator, including `==`.
