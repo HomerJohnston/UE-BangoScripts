@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.118)
+# Bango Language Spec (draft v0.119)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.119:** **who `self` is isn't worked out again for every spawn**: the script subsystem keeps each owning actor's answer while it can't have changed, which is while its actor registry has had no name added or removed (`UBangoActorRegistry::GetVersion`, new) and the actor is, or isn't, the player's pawn as it was. An answer with a problem (an owner that can't be `self`) isn't kept. Nothing a script can see changes.
 
 **Changes in v0.118:** **a Bango Script asset remembers what it was compiled as**, as an inline script does since v0.116: `UBangoScriptAsset::LastCompiled` (an `FBangoScriptCompiled`), which `FBangoScriptCache::GetProgram` fills in and checks against the asset each time (the same text, the same package, and a cache that hasn't been cleared since), so spawning an asset again unchanged no longer makes its name and looks it up by it. Nothing a script can see changes.
 

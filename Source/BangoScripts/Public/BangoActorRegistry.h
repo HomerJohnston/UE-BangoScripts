@@ -70,6 +70,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Bango")
 	APawn* GetPlayerPawn() const;
 
+	/**
+	 * A number that goes up whenever a name is added or removed. While it's the same, an actor's entity name is the
+	 * same too (but for the player's pawn, which can become another actor without anything changing here).
+	 */
+	uint64 GetVersion() const { return Version; }
+
 protected:
 	virtual bool DoesSupportWorldType(const EWorldType::Type WorldType) const override;
 
@@ -90,6 +96,8 @@ private:
 	mutable TBangoNameMap<TWeakObjectPtr<UObject>> Objects;
 	/** Each actor's and component's entity name (GetOrMakeEntityID). */
 	mutable TMap<TWeakObjectPtr<const UObject>, FString> EntityIDs;
+	/** GetVersion's. Mutable as the maps are. */
+	mutable uint64 Version = 1;
 };
 
 namespace Bango

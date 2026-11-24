@@ -8,6 +8,7 @@
 #include "BangoConditionWatches.h"
 class UBangoScriptAsset;
 class UBangoGlobalsSubsystem;
+class UBangoActorRegistry;
 
 #include "BangoScriptSubsystem.generated.h"
 
@@ -372,4 +373,21 @@ private:
 	/** The game instance's globals, found once (UBangoGlobalsSubsystem::Get looks them up through the world each time). */
 	UBangoGlobalsSubsystem* GetGlobals();
 	TWeakObjectPtr<UBangoGlobalsSubsystem> KnownGlobals;
+
+	/**
+	 * GetScriptOwner's answer for an actor, kept while it can't have changed: its registry has had no name added or
+	 * removed (UBangoActorRegistry::GetVersion), and it's the player's pawn, or isn't, as it was. Only an answer
+	 * without a problem is kept.
+	 */
+	struct FKnownOwner
+	{
+		FBangoScriptOwner Owner;
+		TWeakObjectPtr<UBangoActorRegistry> Registry;
+		uint64 Version = 0;
+		bool bPlayerPawn = false;
+	};
+	TMap<TWeakObjectPtr<const UObject>, FKnownOwner> KnownOwners;
+	static constexpr int32 MaxKnownOwners = 256;
+	/** GetScriptOwner, from KnownOwners when it can be. */
+	FBangoScriptOwner FindScriptOwner(const UObject* Owner);
 };

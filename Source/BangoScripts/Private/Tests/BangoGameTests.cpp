@@ -726,6 +726,18 @@ bool FBangoEntityIDsTest::RunTest(const FString& Parameters)
 		AActor* Owner = World->SpawnActor<AActor>();
 		const FBangoScriptOwner ScriptOwner = UBangoScriptSubsystem::GetScriptOwner(Owner);
 		TestTrue(TEXT("any actor can be self"), ScriptOwner.Problem.IsEmpty() && Registry->FindActor(ScriptOwner.BangoName) == Owner);
+		// The registry's version: the same while nothing is added or removed (asking again adds nothing), and higher after.
+		const uint64 VersionBefore = Registry->GetVersion();
+		TestTrue(TEXT("asking again gives the same name and changes nothing"),
+			UBangoScriptSubsystem::GetScriptOwner(Owner).BangoName == ScriptOwner.BangoName && Registry->GetVersion() == VersionBefore);
+		AActor* AnotherOwner = World->SpawnActor<AActor>();
+		TestTrue(TEXT("a new entity raises the version"),
+			UBangoScriptSubsystem::GetScriptOwner(AnotherOwner).Problem.IsEmpty() && Registry->GetVersion() > VersionBefore);
+		const uint64 VersionWithBoth = Registry->GetVersion();
+		Registry->Unregister(ScriptOwner.BangoName, Owner);
+		TestTrue(TEXT("removing a name raises the version"), Registry->GetVersion() > VersionWithBoth);
+		AnotherOwner->Destroy();
+		Owner->Destroy();
 
 		// ---- Components ----
 		// One made by its actor's class or level (here: marked as on a startup actor): its actor's ID and its name.

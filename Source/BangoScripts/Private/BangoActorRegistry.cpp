@@ -82,6 +82,7 @@ namespace BangoActorRegistryPrivate
 
 void UBangoActorRegistry::Add(const FString& Name, UObject* Object) const
 {
+	++Version;
 	Objects.Add(Name, Object);
 	Bango::SetEntityDisplayName(Name, BangoActorRegistryPrivate::GetObjectDisplayName(Object));
 
@@ -102,6 +103,7 @@ void UBangoActorRegistry::Add(const FString& Name, UObject* Object) const
 
 void UBangoActorRegistry::Unregister(const FString& Name, const UObject* Object)
 {
+	++Version;
 	if (const TWeakObjectPtr<UObject>* Existing = Objects.Find(Name))
 	{
 		// Also removes stale entries whose object is already gone.

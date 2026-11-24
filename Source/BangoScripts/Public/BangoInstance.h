@@ -184,6 +184,7 @@ public:
 	 * with an error when it's used.
 	 */
 	void SetOwner(const FBangoScriptOwner& InOwner) { Owner = InOwner; }
+	void SetOwner(FBangoScriptOwner&& InOwner) { Owner = MoveTemp(InOwner); }
 	const FBangoScriptOwner& GetOwner() const { return Owner; }
 
 	/**

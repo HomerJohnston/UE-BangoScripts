@@ -679,13 +679,14 @@ bool FBangoCompletionTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("AddScore is a function"), AddScore != nullptr && AddScore->Kind == EBangoCompletionKind::Function && AddScore->bCallable
 		&& AddScore->Detail.Equals(TEXT("int AddScore(int amount, entity who)"), ESearchCase::CaseSensitive));
 
-	// In the function (line 9): its parameter, but not the script's.
+	// In the function (line 9): its parameter, and the script's too (a function sees the script's inputs, spec section 4).
 	FBangoCompletion::GatherItems(Names, 8, Commands, Items);
 	FBangoCompletion::Filter(Items, TEXT("am"), Shown);
 	TestTrue(TEXT("'am' in the function is its parameter"), Shown.Num() == 1 && Items[Shown[0]].Name.Equals(TEXT("amount"), ESearchCase::CaseSensitive)
 		&& Items[Shown[0]].Kind == EBangoCompletionKind::Parameter);
 	FBangoCompletion::Filter(Items, TEXT("spea"), Shown);
-	TestEqual(TEXT("The script's parameter isn't visible in a function"), Shown.Num(), 0);
+	TestTrue(TEXT("The script's parameter is visible in a function"), Shown.Num() == 1 && Items[Shown[0]].Name.Equals(TEXT("speaker"), ESearchCase::CaseSensitive)
+		&& Items[Shown[0]].Kind == EBangoCompletionKind::Parameter);
 
 	// The info popup: the name under the mouse, from the same items.
 	FBangoCompletionItem Hovered;
