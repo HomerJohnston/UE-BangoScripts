@@ -76,6 +76,15 @@ void UBangoScriptSubsystem::Deinitialize()
 	}
 	WatchConditions.Reset();
 	TerminateAll();
+	// The world's globals end with it; the persistent ones carry on to the next level.
+	const UWorld* World = GetWorld();
+	if (World && World->IsGameWorld())
+	{
+		if (UBangoGlobalsSubsystem* Globals = UBangoGlobalsSubsystem::Get(this))
+		{
+			Globals->GetStore().ResetWorldGlobals();
+		}
+	}
 	EntityResolver.Reset();
 	Super::Deinitialize();
 }

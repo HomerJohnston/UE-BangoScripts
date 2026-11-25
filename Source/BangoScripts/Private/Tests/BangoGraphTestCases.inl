@@ -156,6 +156,9 @@ static FString BangoCheckGraphRoundTrip(const TCHAR* Name, const FString& Source
 /** Extra scripts for the round-trip check: comments, disconnected nodes, functions, long lines. */
 static const TCHAR* const GBangoGraphRoundTripSources[] =
 {
+	// World and persistent globals: in the Globals list, and set in the code (a Global node).
+	TEXT("global int level ?= 1;\npersistent global int gold ?= 5;\n// Kept between levels.\npersistent global string[] log;\n\ngold = gold + level;\npersistent global bool rich = gold > 100;\nglobal bool here = true;\n"),
+	TEXT("persistent global int gold;\n\nfunction void Pay()\n{\n\tpersistent global bool paid = true;\n}\n\n/*\npersistent global bool off = true;\n*/\nPay();\n"),
 	// Commands with a block (section 7): a node with a Body output; its block's statements are nodes of their own.
 	TEXT("@john Speech(0, 1)\n{\n\tLine(INVTEXT(\"Hello\"));\n\tif (metBefore)\n\t{\n\t\tLine(INVTEXT(\"Again\"));\n\t}\n\tLine(INVTEXT(\"Bye\"));\n}\nWriteLog(\"done\");\n"),
 	TEXT("Speech(0) {\n\tLine(1);\n}\n"),

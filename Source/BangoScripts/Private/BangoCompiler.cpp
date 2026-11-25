@@ -1034,6 +1034,14 @@ namespace BangoCompilerPrivate
 						return Fail(Stmt.Loc, FString::Printf(TEXT("Global '%s' is declared as %s here, but as %s elsewhere in this script."),
 							*Decl.Name, *Decl.Type.ToString(), *Existing->ToString()));
 					}
+					const FBangoGlobalDecl* First = Program.Globals.FindByPredicate([&Decl](const FBangoGlobalDecl& Global) { return Global.Name.Equals(Decl.Name, ESearchCase::CaseSensitive); });
+					if (First && First->bPersistent != Decl.bPersistent)
+					{
+						CurrentStmt = &Stmt;
+						return Fail(Stmt.Loc, FString::Printf(TEXT("Global '%s' is declared %s here, but %s on line %d. A global is one or the other: write 'persistent global' in both places, or in neither."),
+							*Decl.Name, Decl.bPersistent ? TEXT("'persistent global'") : TEXT("'global' (without 'persistent')"),
+							First->bPersistent ? TEXT("'persistent global'") : TEXT("'global'"), First->Line));
+					}
 					return true;
 				}
 				DeclaredGlobals.Add(Decl.Name, Decl.Type);
@@ -1041,6 +1049,7 @@ namespace BangoCompilerPrivate
 				Global.Name = Decl.Name;
 				Global.Type = Decl.Type;
 				Global.Line = Stmt.Loc.Line;
+				Global.bPersistent = Decl.bPersistent;
 				if (Decl.Init.IsValid() && Decl.bDefault)
 				{
 					CurrentStmt = &Stmt;

@@ -853,7 +853,7 @@ namespace Bango
 		{
 			TEXT("if"), TEXT("else"), TEXT("while"), TEXT("for"), TEXT("forEach"), TEXT("in"), TEXT("sequence"), TEXT("spawn"), TEXT("waitUntil"), TEXT("switch"), TEXT("case"), TEXT("default"),
 			TEXT("break"), TEXT("continue"), TEXT("return"), TEXT("label"), TEXT("goto"),
-			TEXT("function"), TEXT("global"), TEXT("scriptVar"), TEXT("true"), TEXT("false"), TEXT("nil"),
+			TEXT("function"), TEXT("global"), TEXT("scriptVar"), TEXT("persistent"), TEXT("true"), TEXT("false"), TEXT("nil"),
 			TEXT("bool"), TEXT("int"), TEXT("float"), TEXT("string"), TEXT("entity"), TEXT("void"),
 			TEXT("text"), TEXT("vector2"), TEXT("vector3"), TEXT("isNil"), TEXT("call"), TEXT("player"), TEXT("self"),
 			TEXT("LOCTEXT"), TEXT("NSLOCTEXT"), TEXT("NOTELOCTEXT"), TEXT("NSNOTELOCTEXT"), TEXT("INVTEXT"),

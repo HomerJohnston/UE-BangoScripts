@@ -6,7 +6,7 @@
 
 namespace BangoGlobalStorePrivate
 {
-	constexpr int32 SaveVersion = 2; // 2: ints are 32-bit
+	constexpr int32 SaveVersion = 3; // 2: ints are 32-bit. 3: each global says whether it's persistent
 }
 
 uint64 FBangoGlobalStore::FLayout::MakeNumber()
@@ -15,16 +15,24 @@ uint64 FBangoGlobalStore::FLayout::MakeNumber()
 	return ++Last;
 }
 
-bool FBangoGlobalStore::Declare(const FString& Name, const FBangoType& Type, FString& OutError)
+bool FBangoGlobalStore::Declare(const FString& Name, const FBangoType& Type, FString& OutError, bool bPersistent)
 {
 	// One that's already there first: every script that declares a global does this each time it starts, and its
 	// name was checked when it was made.
-	if (const FBangoValue* Existing = Find(Name))
+	if (const int32* ExistingSlot = Slots.Find(Name))
 	{
-		if (Existing->GetType() != Type)
+		const FEntry& Existing = Entries[*ExistingSlot];
+		if (Existing.Value.GetType() != Type)
 		{
 			OutError = FString::Printf(TEXT("Global '%s' is declared as %s, but it already exists as %s."),
-				*Name, *Type.ToString(), *Existing->GetType().ToString());
+				*Name, *Type.ToString(), *Existing.Value.GetType().ToString());
+			return false;
+		}
+		if (Existing.bPersistent != bPersistent)
+		{
+			OutError = bPersistent
+				? FString::Printf(TEXT("Global '%s' is declared as 'persistent global' here, but it already exists as a world global (declared 'global', without 'persistent'). A name is one or the other in every script."), *Name)
+				: FString::Printf(TEXT("Global '%s' is declared as a world global ('global') here, but it already exists as a 'persistent global'. A name is one or the other in every script."), *Name);
 			return false;
 		}
 		return true;
@@ -40,6 +48,7 @@ bool FBangoGlobalStore::Declare(const FString& Name, const FBangoType& Type, FSt
 	Entry.Name = Name;
 	Entry.Value = FBangoValue::MakeNil(Type);
 	Entry.Stamp = ++ChangeStamp;
+	Entry.bPersistent = bPersistent;
 	Slots.Add(Name, Entries.Num() - 1);
 	return true;
 }
@@ -101,6 +110,29 @@ void FBangoGlobalStore::ResetAll()
 	NoteAllChanged();
 }
 
+void FBangoGlobalStore::ResetWorldGlobals()
+{
+	TArray<FEntry> Kept;
+	for (FEntry& Entry : Entries)
+	{
+		if (Entry.bPersistent)
+		{
+			Kept.Add(MoveTemp(Entry));
+		}
+	}
+	if (Kept.Num() == Entries.Num())
+	{
+		return; // no world globals: nothing changes
+	}
+	Entries = MoveTemp(Kept);
+	Slots.Reset();
+	for (int32 Index = 0; Index < Entries.Num(); ++Index)
+	{
+		Slots.Add(Entries[Index].Name, Index);
+	}
+	NoteAllChanged(); // the slots mean something else now, and the world globals are gone
+}
+
 void FBangoGlobalStore::Serialize(FArchive& Ar)
 {
 	int32 Version = BangoGlobalStorePrivate::SaveVersion;
@@ -119,6 +151,7 @@ void FBangoGlobalStore::Serialize(FArchive& Ar)
 		{
 			Ar << Entry.Name;
 			Ar << Entry.Value;
+			Ar << Entry.bPersistent;
 		}
 	}
 	else if (Ar.IsLoading())
@@ -138,16 +171,20 @@ void FBangoGlobalStore::Serialize(FArchive& Ar)
 		{
 			FString Name;
 			FBangoValue Value;
+			bool bPersistent = false;
 			Ar << Name;
 			Ar << Value;
+			Ar << bPersistent;
 			if (const int32* Slot = Slots.Find(Name))
 			{
 				Entries[*Slot].Value = MoveTemp(Value); // a name twice: the later one, as before
+				Entries[*Slot].bPersistent = bPersistent;
 				continue;
 			}
 			FEntry& Entry = Entries.AddDefaulted_GetRef();
 			Entry.Name = Name;
 			Entry.Value = MoveTemp(Value);
+			Entry.bPersistent = bPersistent;
 			Entry.Stamp = AllChangedStamp;
 			Slots.Add(MoveTemp(Name), Entries.Num() - 1);
 		}

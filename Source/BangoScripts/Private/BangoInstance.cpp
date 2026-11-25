@@ -429,9 +429,9 @@ bool FBangoInstance::DeclareGlobals(const FBangoProgram& InProgram, FBangoGlobal
 		// Usually it's there already, as this type (another copy of the script made it, or this one last time):
 		// looked up once, and nothing more to do unless it wants a default.
 		int32 Slot = Globals.FindSlot(Global.Name);
-		if (Slot == INDEX_NONE || Globals.GetSlot(Slot).GetType() != Global.Type)
+		if (Slot == INDEX_NONE || Globals.GetSlot(Slot).GetType() != Global.Type || Globals.IsSlotPersistent(Slot) != Global.bPersistent)
 		{
-			if (!Globals.Declare(Global.Name, Global.Type, OutError))
+			if (!Globals.Declare(Global.Name, Global.Type, OutError, Global.bPersistent))
 			{
 				OutLine = Global.Line;
 				return false;

@@ -33,6 +33,7 @@ namespace BangoLexerPrivate
 		{ TEXT("function"), EBangoTokenKind::KwFunction },
 		{ TEXT("global"), EBangoTokenKind::KwGlobal },
 		{ TEXT("scriptVar"), EBangoTokenKind::KwScriptVar },
+		{ TEXT("persistent"), EBangoTokenKind::KwPersistent },
 		{ TEXT("true"), EBangoTokenKind::KwTrue },
 		{ TEXT("false"), EBangoTokenKind::KwFalse },
 		{ TEXT("nil"), EBangoTokenKind::KwNil },

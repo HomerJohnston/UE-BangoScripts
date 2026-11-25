@@ -1326,6 +1326,102 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			}
 		}
 
+		// World and persistent globals: `global` ends with the world (ResetWorldGlobals), `persistent global` doesn't.
+		{
+			const TCHAR* PersistSource = TEXT("global int level ?= 1;\npersistent global int gold ?= 5;\nlevel = level + 1;\ngold = gold + 1;\nSleep();\ngold = gold + 1;");
+			TSharedPtr<FBangoProgram> PersistProgram = MakeShared<FBangoProgram>();
+			Expect(Bango::CompileSource(PersistSource, TEXT("persist.bango"), Commands, *PersistProgram, CompileError), TEXT("persistent: compiles"));
+			Expect(PersistProgram->Globals.Num() == 2 && !PersistProgram->Globals[0].bPersistent && PersistProgram->Globals[1].bPersistent, TEXT("persistent: the program says which global is which"));
+			auto IntOf = [](const FBangoGlobalStore& Store, const TCHAR* Name) -> int64
+			{
+				const FBangoValue* Value = Store.Find(Name);
+				return Value && !Value->IsNil() ? Value->GetInt() : -1;
+			};
+			FBangoGlobalStore Store;
+			FBangoExecContext PersistContext = Context;
+			PersistContext.Globals = &Store;
+			{
+				FBangoInstance Instance;
+				FBangoRuntimeError Error;
+				Expect(Instance.Start(PersistProgram, Commands, Store, 1, Error), TEXT("persistent: starts"));
+				Instance.Resume(PersistContext);
+				Expect(IntOf(Store, TEXT("level")) == 2 && IntOf(Store, TEXT("gold")) == 6, TEXT("persistent: both are set"));
+				Expect(!Store.IsPersistent(TEXT("level")) && Store.IsPersistent(TEXT("gold")) && !Store.IsPersistent(TEXT("nothing")), TEXT("persistent: the store says which is which"));
+				// The world ends while the script waits: its world global is gone, and it finds the persistent one again.
+				Store.ResetWorldGlobals();
+				Expect(Store.Find(TEXT("level")) == nullptr && IntOf(Store, TEXT("gold")) == 6 && Store.Num() == 1, TEXT("persistent: the world's end keeps only the persistent global"));
+				Instance.Resume(PersistContext);
+				Expect(IntOf(Store, TEXT("gold")) == 7, *FString::Printf(TEXT("persistent: a script still running finds the persistent global by its new slot (gold = %lld)"), (long long)IntOf(Store, TEXT("gold"))));
+			}
+			{
+				// The next level: the script runs again. Its world global starts over from its default; the persistent one carries on.
+				FBangoInstance Instance;
+				FBangoRuntimeError Error;
+				Expect(Instance.Start(PersistProgram, Commands, Store, 2, Error), TEXT("persistent: starts again"));
+				Instance.Resume(PersistContext);
+				Expect(IntOf(Store, TEXT("level")) == 2 && IntOf(Store, TEXT("gold")) == 8, *FString::Printf(TEXT("persistent: the next level (level = %lld, gold = %lld)"),
+					(long long)IntOf(Store, TEXT("level")), (long long)IntOf(Store, TEXT("gold"))));
+			}
+			{
+				// Saved and loaded, each keeps its kind.
+				TArray<uint8> Bytes;
+				FMemoryWriter Writer(Bytes);
+				Store.Serialize(Writer);
+				FBangoGlobalStore Loaded;
+				FMemoryReader Reader(Bytes);
+				Loaded.Serialize(Reader);
+				Expect(Loaded.Num() == 2 && Loaded.IsPersistent(TEXT("gold")) && !Loaded.IsPersistent(TEXT("level")), TEXT("persistent: kept by saving and loading"));
+				Loaded.ResetWorldGlobals();
+				Expect(Loaded.Num() == 1 && Loaded.Find(TEXT("gold")) != nullptr, TEXT("persistent: a loaded store's world globals end with the world too"));
+			}
+			{
+				// A name is one kind or the other, in every script.
+				FString DeclareError;
+				FBangoGlobalStore Mixed;
+				Expect(Mixed.Declare(TEXT("gold"), FBangoType::Int(), DeclareError, true), TEXT("persistent: declares"));
+				Expect(!Mixed.Declare(TEXT("gold"), FBangoType::Int(), DeclareError, false) && DeclareError.Contains(TEXT("already exists as a 'persistent global'")),
+					*FString::Printf(TEXT("persistent: a world global of a persistent one's name. Got: %s"), *DeclareError));
+				Expect(Mixed.Declare(TEXT("stage"), FBangoType::Int(), DeclareError), TEXT("persistent: a world global declares"));
+				Expect(!Mixed.Declare(TEXT("stage"), FBangoType::Int(), DeclareError, true) && DeclareError.Contains(TEXT("already exists as a world global")),
+					*FString::Printf(TEXT("persistent: a persistent global of a world one's name. Got: %s"), *DeclareError));
+				TSharedPtr<FBangoProgram> WorldGold = MakeShared<FBangoProgram>();
+				Expect(Bango::CompileSource(TEXT("global int gold;\ngold = 1;"), TEXT("worldgold.bango"), Commands, *WorldGold, CompileError), TEXT("persistent: the other script compiles"));
+				FBangoInstance Instance;
+				FBangoRuntimeError Error;
+				Expect(!Instance.Start(WorldGold, Commands, Mixed, 3, Error) && Error.Message.Contains(TEXT("already exists as a 'persistent global'")) && Error.Line == 1,
+					*FString::Printf(TEXT("persistent: a script declaring the other kind doesn't start. Got: %s"), *Error.Message));
+				Mixed.ResetAll();
+				Expect(Mixed.Num() == 0, TEXT("persistent: ResetAll clears both"));
+			}
+			{
+				// The compiler's errors.
+				struct FPersistError
+				{
+					const TCHAR* Name;
+					const TCHAR* Source;
+					const TCHAR* Contains;
+				};
+				const FPersistError PersistErrors[] =
+				{
+					{ TEXT("both kinds in one script"), TEXT("persistent global int gold;\ngold = 1;\nglobal int gold = 2;"), TEXT("declared 'global' (without 'persistent') here, but 'persistent global' on line 1") },
+					{ TEXT("persistent without global"), TEXT("persistent int _i = 0;"), TEXT("'persistent' goes before 'global'") },
+					{ TEXT("persistent in a for loop"), TEXT("for (persistent global int g = 0; g < 2; g++)\n{\n}"), TEXT("A for loop can't declare a global") },
+					{ TEXT("persistent is a reserved word"), TEXT("int persistent = 1;"), TEXT("persistent") },
+				};
+				for (const FPersistError& Case : PersistErrors)
+				{
+					FBangoProgram ErrorProgram;
+					FBangoCompileError PersistCompileError;
+					const bool bCompiled = Bango::CompileSource(Case.Source, TEXT("persist.bango"), Commands, ErrorProgram, PersistCompileError);
+					Expect(!bCompiled && PersistCompileError.Message.Contains(Case.Contains), *FString::Printf(TEXT("persistent: %s. Got: %s"), Case.Name, bCompiled ? TEXT("it compiled") : *PersistCompileError.Message));
+				}
+				FBangoProgram Both;
+				FBangoCompileError BothError;
+				Expect(Bango::CompileSource(TEXT("persistent global int gold ?= 0;\ngold = 1;\npersistent global int gold = 2;"), TEXT("persist.bango"), Commands, Both, BothError),
+					*FString::Printf(TEXT("persistent: declared persistent twice, at the top and in the code. Got: %s"), *BothError.Message));
+			}
+		}
+
 		// Globals by slot (FBangoInstance::FindGlobalSlot): a running script remembers where the store keeps each global
 		// it uses, which must not outlive the store's layout.
 		{

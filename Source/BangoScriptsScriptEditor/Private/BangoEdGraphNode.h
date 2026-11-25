@@ -35,6 +35,8 @@ struct FBangoEdDecl
 	FString Value;
 	UPROPERTY()
 	FString Comment;
+	UPROPERTY()
+	bool bPersistent = false;
 
 	static FBangoEdDecl From(const FBangoGraphDecl& Decl)
 	{
@@ -44,6 +46,7 @@ struct FBangoEdDecl
 		Out.bHasValue = Decl.bHasValue;
 		Out.Value = Decl.Value;
 		Out.Comment = Decl.Comment;
+		Out.bPersistent = Decl.bPersistent;
 		return Out;
 	}
 
@@ -55,6 +58,7 @@ struct FBangoEdDecl
 		Out.bHasValue = bHasValue;
 		Out.Value = Value;
 		Out.Comment = Comment;
+		Out.bPersistent = bPersistent;
 		return Out;
 	}
 };

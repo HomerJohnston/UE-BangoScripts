@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.123)
+# Bango Language Spec (draft v0.124)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.124:** **globals are world globals or persistent globals** (section 4, Globals). A global declared `global` now belongs to the world and is gone when the level ends; one declared **`persistent global`** lasts the whole game, as every global did before. Both are saved and loaded together, and a name is one kind or the other in every script. `persistent` is a reserved word. In C++: `FBangoGlobalStore::Declare` takes whether the global is persistent, `IsPersistent` says, and `ResetWorldGlobals` (which the script subsystem calls when its world ends) removes the world globals. The graph editor keeps `persistent` on globals in the Globals list and in Set Global nodes ("Set Persistent Global"); the list doesn't show it yet.
 
 **Changes in v0.123:** **the graph editor shows commands with a block** (section 7; section 1's table): a block command is its command's node with a **Body** output for its block and **Then** for what follows, and the statements in the block are nodes wired from Body. A script that has one is no longer text-only.
 
@@ -499,7 +501,7 @@ WriteScreen(ToString(NSLOCTEXT("Shared.UI", "Continue", "Continue")));
 - **Names are case-sensitive**: `john` and `John` are different names. This covers variables, globals, functions, labels, commands, keywords, type names and Bango ID names (`@john` and `@John` are different actors).
 - Calling a command or function with the wrong capitalisation is a compile error that suggests the right name: *"Unknown command or function 'writeScreen'. Did you mean 'WriteScreen'? Names are case-sensitive."*
 - A name is letters, digits and `_`, and doesn't start with a digit.
-- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn waitUntil switch case default break continue return label goto function global scriptVar call isNil player self true false nil bool int float string entity text vector2 vector3 void LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
+- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn waitUntil switch case default break continue return label goto function global scriptVar persistent call isNil player self true false nil bool int float string entity text vector2 vector3 void LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
 
 ### Locals and script variables
 A graph (the main script, or a function) has two kinds of variables of its own, besides its parameters and loop variables. Both only exist inside the running script instance.
@@ -583,8 +585,13 @@ if (!Bango::ParseFixedValue(TEXT("vector3"), TEXT("[0, 0, 100]"), Value, Error))
 
 ### Globals
 - Any name will do, including one starting with `_`. A local, script variable, parameter or loop variable can't have the name of a global the file declares (see Name lookup above).
-- They are shared across all scripts and live in a single global registry on the game instance, so they survive level changes.
-- Declared with `global`, in one of two ways:
+- They are shared across all scripts. There are two kinds:
+  - A **world global**, declared `global`, belongs to the world: it's there while the player is in the level, and is gone when the level ends (travel to another map; a level's own sublevels streaming in and out don't end it). The next level starts without it, and a script that declares it there gives it its default again.
+  - A **persistent global**, declared `persistent global`, lasts the whole game: it carries over from level to level.
+  - Both are saved with the game, and loading a save replaces them all. **Reset Bango State** clears both.
+  - **A name is one kind or the other, in every script.** Declaring `global int gold` in one script and `persistent global int gold` in another stops whichever script declares it second from starting: *"Global 'gold' is declared as a world global ('global') here, but it already exists as a 'persistent global'. A name is one or the other in every script."* Within one script it's a compile error.
+  - A global set from C++ or Blueprint that no script has declared yet (Set Bango Global) is made a world global.
+- Declared with `global` or `persistent global`, in one of two ways:
   - **At the top of the file**, without a value or with a **default** (`?=`): after the settings lines and before everything else, including the main graph's script variables.
   - **In the code, with a value** (`=`): a line of code, anywhere code goes (in a block, in a function, disabled like any node). It declares the global like one at the top, and **sets it each time the line runs**: `global bool opened = true;` is `opened = true;` with the declaration built in.
 
@@ -592,6 +599,7 @@ if (!Bango::ParseFixedValue(TEXT("vector3"), TEXT("[0, 0, 100]"), Value, Error))
 global bool playerHasGun;
 global int foundThings ?= 0;     // a default
 global string[] questLog;        // arrays can be global
+persistent global int gold ?= 0; // lasts the whole game, not only this level
 
 if (_pulled)
 {
@@ -1622,7 +1630,7 @@ The **Spawn Bango Script** node reads the script's `inputs` line and creates one
   3. The script's globals are declared (section 4). A type conflict stops the spawn.
   4. The top level starts running **immediately**, in the same frame, until it first pauses, finishes or fails.
 - `return;` at the top level ends the instance. Returning a value from the top level is a compile error.
-- **Instances belong to a game world.** They stop when their level is unloaded. Globals belong to the game instance and carry over between levels.
+- **Instances belong to a game world.** They stop when their level is unloaded. World globals end with them; persistent globals belong to the game instance and carry over between levels (section 4, Globals).
 - **Scheduling:** every frame, each running instance resumes in the order it was spawned and runs until it pauses, finishes or fails. Then each instance paused at a `waitUntil` whose condition might have a different answer (section 8) checks it again, in the same order; what one of them changes is seen by the later ones then, and by the others the next frame. Instances pause while the game is paused.
 - **Infinite-loop guard:** an instance that runs more than **1,000,000** instructions in one frame without pausing stops with an error (e.g. a `while` loop with no `Sleep`). The limit is a project setting.
 - A script can't call another script and wait for its result: it can only `spawn` it. (`target call Name(args)` is something else: it calls a Blueprint function on an actor, section 7.)
@@ -1642,7 +1650,7 @@ The **Spawn Bango Script** node reads the script's `inputs` line and creates one
 | **Clear Bango Global** | Makes a global nil. |
 | **Save Bango State** → bytes | Saves all running scripts and all globals, for storing in a SaveGame. |
 | **Load Bango State** (bytes) | Replaces all running scripts and globals with saved ones. |
-| **Reset Bango State** | Stops all scripts and clears all globals, e.g. for a new game. |
+| **Reset Bango State** | Stops all scripts and clears all globals, world and persistent, e.g. for a new game. |
 | **Skip Next Bango Level Start Script** | The next level to open doesn't run its start script (section 15), for loading a saved game: call it before opening the saved game's level, then Load Bango State once it's open. It lasts for that one level. |
 
 The script subsystem (`UBangoScriptSubsystem`) also has a Blueprint event, **OnScriptFailed** (handle, error), fired when a script stops with an error.

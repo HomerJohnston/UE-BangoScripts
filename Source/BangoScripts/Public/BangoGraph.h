@@ -135,6 +135,18 @@ struct BANGOSCRIPTS_API FBangoGraphNode
  * graph (`scriptVar int _count = 0;`). These aren't nodes; the editor lists them beside the graph. (A local, declared
  * without `scriptVar`, is a node: EBangoGraphNodeKind::Local; so is a global set in the code: EBangoGraphNodeKind::Global.)
  */
+namespace Bango
+{
+	/**
+	 * A Global node's statement, without its ';': its text is the declaration without 'global' (`bool opened = true`,
+	 * or `persistent bool gold = 5` for a persistent global), and this puts the keyword back
+	 * (`global bool opened = true`, `persistent global bool gold = 5`).
+	 */
+	BANGOSCRIPTS_API FString MakeGlobalNodeStatement(const FString& Text);
+	/** The other way: the node text for a `global ...` or `persistent global ...` statement's text. */
+	BANGOSCRIPTS_API FString MakeGlobalNodeText(const FString& Statement);
+}
+
 struct BANGOSCRIPTS_API FBangoGraphDecl
 {
 	/** As written: `int`, `string[]`. */
@@ -148,6 +160,8 @@ struct BANGOSCRIPTS_API FBangoGraphDecl
 	FString Value;
 	/** From `//` lines above the declaration. Lines are separated by '\n'. */
 	FString Comment;
+	/** A global's: `persistent global` (it outlives the world). */
+	bool bPersistent = false;
 
 	bool operator==(const FBangoGraphDecl& Other) const;
 	bool operator!=(const FBangoGraphDecl& Other) const { return !(*this == Other); }

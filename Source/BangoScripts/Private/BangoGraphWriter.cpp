@@ -217,7 +217,7 @@ namespace BangoGraphWriterPrivate
 			for (const FBangoGraphDecl& Decl : Decls)
 			{
 				AddComment(Decl.Comment, Indent, -1);
-				FString Code = bGlobal ? FString(TEXT("global ")) : FString(TEXT("scriptVar "));
+				FString Code = bGlobal ? FString(Decl.bPersistent ? TEXT("persistent global ") : TEXT("global ")) : FString(TEXT("scriptVar "));
 				Code += Decl.Type + TEXT(" ") + Decl.Name;
 				if (Decl.bHasValue) // a script variable's starting value, or a global's default
 				{
@@ -572,7 +572,7 @@ namespace BangoGraphWriterPrivate
 				AddCode(Indent, Detached, Text + TEXT(";"), &Node);
 				return true;
 			case EBangoGraphNodeKind::Global:
-				AddCode(Indent, Detached, FString(TEXT("global ")) + Text + TEXT(";"), &Node);
+				AddCode(Indent, Detached, Bango::MakeGlobalNodeStatement(Text) + TEXT(";"), &Node);
 				return true;
 
 			case EBangoGraphNodeKind::Break:

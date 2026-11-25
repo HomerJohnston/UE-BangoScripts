@@ -921,6 +921,7 @@ namespace BangoParserPrivate
 			switch (First.Kind)
 			{
 			case EBangoTokenKind::KwGlobal:   Stmt = ParseVarDecl(true); break;
+			case EBangoTokenKind::KwPersistent: Stmt = ParsePersistentDecl(); break;
 			case EBangoTokenKind::KwScriptVar: Stmt = ParseVarDecl(false, true); break;
 			case EBangoTokenKind::KwBreak:    Advance(); Stmt = MakeUnique<FBangoBreakStmt>(); break;
 			case EBangoTokenKind::KwContinue: Advance(); Stmt = MakeUnique<FBangoContinueStmt>(); break;
@@ -992,6 +993,25 @@ namespace BangoParserPrivate
 		}
 
 		/** `global T name [= e | ?= e]` or `T _name [= e]`, without the ';'. */
+		/** `persistent global int gold;`: a global that outlives the world. */
+		FBangoStmtPtr ParsePersistentDecl()
+		{
+			const FBangoSourceLocation Loc = Cur().Loc;
+			Advance();
+			if (!Check(EBangoTokenKind::KwGlobal))
+			{
+				Fail(Loc, FString::Printf(TEXT("'persistent' goes before 'global', like 'persistent global int gold;', for a global that lasts the whole game. Found %s after it."), *Bango::DescribeToken(Cur())));
+				return nullptr;
+			}
+			FBangoStmtPtr Stmt = ParseVarDecl(true);
+			if (Stmt)
+			{
+				Stmt->Loc = Loc;
+				Stmt->As<FBangoVarDeclStmt>()->bPersistent = true;
+			}
+			return Stmt;
+		}
+
 		FBangoStmtPtr ParseVarDecl(bool bGlobal, bool bScriptVar = false)
 		{
 			TUniquePtr<FBangoVarDeclStmt> Decl = MakeUnique<FBangoVarDeclStmt>();
@@ -1746,9 +1766,9 @@ namespace BangoParserPrivate
 			if (!Check(EBangoTokenKind::Semicolon))
 			{
 				const FBangoSourceLocation InitLoc = Cur().Loc;
-				if (Check(EBangoTokenKind::KwGlobal) || Check(EBangoTokenKind::KwScriptVar))
+				if (Check(EBangoTokenKind::KwGlobal) || Check(EBangoTokenKind::KwScriptVar) || Check(EBangoTokenKind::KwPersistent))
 				{
-					Fail(InitLoc, Check(EBangoTokenKind::KwGlobal)
+					Fail(InitLoc, !Check(EBangoTokenKind::KwScriptVar)
 						? TEXT("A for loop can't declare a global. Declare it at the top of the file.")
 						: TEXT("A for loop can't declare a scriptVar. Its variable is declared with just a type: 'for (int _i = 0; ...)'."));
 					return nullptr;
@@ -1788,7 +1808,7 @@ namespace BangoParserPrivate
 			if (!Check(EBangoTokenKind::RParen))
 			{
 				const FBangoSourceLocation StepLoc = Cur().Loc;
-				if (IsTypeKeyword(Cur().Kind) || Check(EBangoTokenKind::KwGlobal) || Check(EBangoTokenKind::KwScriptVar))
+				if (IsTypeKeyword(Cur().Kind) || Check(EBangoTokenKind::KwGlobal) || Check(EBangoTokenKind::KwScriptVar) || Check(EBangoTokenKind::KwPersistent))
 				{
 					Fail(StepLoc, TEXT("The last part of a for loop can't be a declaration. Use an assignment like '_i++'."));
 					return nullptr;
@@ -2305,7 +2325,7 @@ namespace BangoParserPrivate
 				Fail(Token.Loc, TEXT("'call' needs a target in front of it, the actor whose Blueprint function it calls: @light call TurnOn(); (or self call TurnOn();)"));
 				return nullptr;
 			}
-			if (IsTypeKeyword(Token.Kind) || Token.Kind == EBangoTokenKind::KwGlobal || Token.Kind == EBangoTokenKind::KwScriptVar)
+			if (IsTypeKeyword(Token.Kind) || Token.Kind == EBangoTokenKind::KwGlobal || Token.Kind == EBangoTokenKind::KwScriptVar || Token.Kind == EBangoTokenKind::KwPersistent)
 			{
 				Fail(Token.Loc, TEXT("A declaration must be a statement on its own line, like 'int _x = 5;'."));
 				return nullptr;

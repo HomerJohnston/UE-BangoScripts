@@ -98,7 +98,7 @@ namespace Bango
 				OutError = TEXT("The statement is empty.");
 				return false;
 			}
-			Source = FString(TEXT("global ")) + Text + TEXT(";");
+			Source = Bango::MakeGlobalNodeStatement(Text) + TEXT(";");
 			break;
 		case EBangoGraphNodeKind::If:      Source = FString(TEXT("if (")) + Text + TEXT(")\n{\n};"); break;
 		case EBangoGraphNodeKind::While:   Source = FString(TEXT("while (")) + Text + TEXT(")\n{\n};"); break;
@@ -1334,8 +1334,9 @@ namespace Bango
 			if (!TopGlobals.Find(Decl->Name))
 			{
 				TopGlobals.Add(Decl->Name, Decl->Type);
-				Inserted.Add(Default.IsEmpty() ? FString::Printf(TEXT("global %s %s;"), *Decl->Type.ToString(), *Decl->Name)
-					: FString::Printf(TEXT("global %s %s ?= %s;"), *Decl->Type.ToString(), *Decl->Name, *Default));
+				const TCHAR* Keyword = Decl->bPersistent ? TEXT("persistent global") : TEXT("global");
+				Inserted.Add(Default.IsEmpty() ? FString::Printf(TEXT("%s %s %s;"), Keyword, *Decl->Type.ToString(), *Decl->Name)
+					: FString::Printf(TEXT("%s %s %s ?= %s;"), Keyword, *Decl->Type.ToString(), *Decl->Name, *Default));
 			}
 			bChanged = true;
 		}

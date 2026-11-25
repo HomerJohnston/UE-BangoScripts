@@ -19,7 +19,7 @@ enum class EBangoTokenKind : uint8
 	// Keywords
 	KwIf, KwElse, KwWhile, KwFor, KwForEach, KwIn, KwSequence, KwSpawn, KwWaitUntil, KwSwitch, KwCase, KwDefault,
 	KwBreak, KwContinue, KwReturn, KwLabel, KwGoto,
-	KwFunction, KwGlobal, KwScriptVar, KwTrue, KwFalse, KwNil,
+	KwFunction, KwGlobal, KwScriptVar, KwPersistent, KwTrue, KwFalse, KwNil,
 	KwBool, KwInt, KwDouble, KwString, KwEntity, KwText, KwVector2, KwVector3, KwVoid,
 	KwIsNil,
 	/** `target call Name(args)`: calls a Blueprint function on the target's actor (FBangoCallExpr::bReflect). */

@@ -30,7 +30,47 @@ bool FBangoGraphDecl::operator==(const FBangoGraphDecl& Other) const
 {
 	return Type.Equals(Other.Type, ESearchCase::CaseSensitive) && Name.Equals(Other.Name, ESearchCase::CaseSensitive)
 		&& bHasValue == Other.bHasValue && (!bHasValue || Value.Equals(Other.Value, ESearchCase::CaseSensitive))
-		&& Comment.Equals(Other.Comment, ESearchCase::CaseSensitive);
+		&& Comment.Equals(Other.Comment, ESearchCase::CaseSensitive) && bPersistent == Other.bPersistent;
+}
+
+namespace BangoGraphGlobalPrivate
+{
+	/** Text starts with Word, then a space or tab: what follows it, without the gap. */
+	static bool TakeWord(const FString& Text, const FString& Word, FString& OutRest)
+	{
+		const int32 Len = Word.Len();
+		if (Text.Len() <= Len || !Text.StartsWith(*Word, ESearchCase::CaseSensitive) || (Text[Len] != TEXT(' ') && Text[Len] != TEXT('\t')))
+		{
+			return false;
+		}
+		OutRest = Text.Mid(Len).TrimStart();
+		return true;
+	}
+}
+
+FString Bango::MakeGlobalNodeStatement(const FString& Text)
+{
+	FString Rest;
+	if (BangoGraphGlobalPrivate::TakeWord(Text, TEXT("persistent"), Rest))
+	{
+		return FString(TEXT("persistent global ")) + Rest;
+	}
+	return FString(TEXT("global ")) + Text;
+}
+
+FString Bango::MakeGlobalNodeText(const FString& Statement)
+{
+	FString Rest;
+	FString AfterGlobal;
+	if (BangoGraphGlobalPrivate::TakeWord(Statement, TEXT("persistent"), Rest) && BangoGraphGlobalPrivate::TakeWord(Rest, TEXT("global"), AfterGlobal))
+	{
+		return FString(TEXT("persistent ")) + AfterGlobal;
+	}
+	if (BangoGraphGlobalPrivate::TakeWord(Statement, TEXT("global"), AfterGlobal))
+	{
+		return AfterGlobal;
+	}
+	return Statement;
 }
 
 bool FBangoGraph::operator==(const FBangoGraph& Other) const
@@ -716,6 +756,7 @@ namespace BangoGraphPrivate
 				FBangoGraphDecl Out;
 				Out.Type = Decl->Type.ToString();
 				Out.Name = Decl->Name;
+				Out.bPersistent = Decl->bPersistent;
 				if (Decl->Init.IsValid())
 				{
 					Out.bHasValue = true;
@@ -790,9 +831,9 @@ namespace BangoGraphPrivate
 				Node.Text = NodeText(Stmt);
 				if (VarDecl && VarDecl->IsGlobalAssignment())
 				{
-					// `global bool b = true`: the node's text is without its keyword.
+					// `global bool b = true`: the node's text is without its keyword (`persistent bool b = true` for a persistent one).
 					Node.Kind = EBangoGraphNodeKind::Global;
-					Node.Text = Node.Text.StartsWith(TEXT("global"), ESearchCase::CaseSensitive) ? Node.Text.Mid(6).TrimStart() : Node.Text;
+					Node.Text = Bango::MakeGlobalNodeText(Node.Text);
 				}
 				Node.bDisabled = Stmt.bDisabled;
 				if (Stmt.Node.bHasMetadata)

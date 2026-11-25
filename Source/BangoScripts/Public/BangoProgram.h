@@ -300,6 +300,8 @@ struct FBangoGlobalDecl
 	FString Name;
 	FBangoType Type;
 	int32 Line = 0;
+	/** `persistent global`: outlives the world (FBangoGlobalStore::ResetWorldGlobals keeps it). */
+	bool bPersistent = false;
 	/**
 	 * `global int stage ?= 1;`: a default, given to the global when an instance starts, but only if the global doesn't
 	 * exist yet or is nil (no script has given it a value, nothing has set it, and no save has brought one back). A

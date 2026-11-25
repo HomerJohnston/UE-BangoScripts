@@ -611,9 +611,9 @@ namespace BangoGraphLayoutPrivate
 		{
 			return false;
 		}
-		int32 i = 0;
-		bOutGlobal = Tok.Is(0, EBangoTokenKind::KwGlobal);
-		if (bOutGlobal || Tok.Is(0, EBangoTokenKind::KwScriptVar))
+		int32 i = Tok.Is(0, EBangoTokenKind::KwPersistent) ? 1 : 0; // a persistent global's
+		bOutGlobal = Tok.Is(i, EBangoTokenKind::KwGlobal);
+		if (bOutGlobal || Tok.Is(i, EBangoTokenKind::KwScriptVar))
 		{
 			++i;
 		}
@@ -1129,8 +1129,11 @@ namespace BangoGraphLayoutPrivate
 			{
 				break;
 			}
-			Out.Title = LocalNodeTitle(Type, TEXT("Set Global "));
-			Out.Description = FString::Printf(TEXT("Sets the global '%s' (%s) each time this runs. It's declared for the whole script, as if it were in the Globals list."), *Name, *Type);
+			const bool bPersistentGlobal = Tok.Is(0, EBangoTokenKind::KwPersistent);
+			Out.Title = LocalNodeTitle(Type, bPersistentGlobal ? TEXT("Set Persistent Global ") : TEXT("Set Global "));
+			Out.Description = FString::Printf(TEXT("Sets the %sglobal '%s' (%s) each time this runs. It's declared for the whole script, as if it were in the Globals list.%s"),
+				bPersistentGlobal ? TEXT("persistent ") : TEXT(""), *Name, *Type,
+				bPersistentGlobal ? TEXT(" It lasts the whole game, not only while the player is in this level.") : TEXT(""));
 			FBangoNodeField NameField = Tok.Field(TEXT("Name"), FString(), NameTok, NameTok + 1);
 			NameField.bVariable = true;
 			NameField.VariableType = Type;

@@ -176,6 +176,7 @@ void FBangoCompletion::GetKeywordItems(TArray<FBangoCompletionItem>& OutItems, b
 		{ TEXT("label"),    TEXT("jump"),        TEXT("label Name; marks a place that goto can jump to."), false },
 		{ TEXT("goto"),     TEXT("jump"),        TEXT("goto Name; jumps to a label."), false },
 		{ TEXT("global"),   TEXT("declaration"), TEXT("global int stage; declares a global, at the top of the file."), false },
+		{ TEXT("persistent"), TEXT("declaration"), TEXT("persistent global int gold; declares a global that lasts the whole game, not only while the player is in this level."), false },
 		{ TEXT("scriptVar"), TEXT("declaration"), TEXT("scriptVar int _count = 0; declares a script variable with a fixed starting value, at the top of the script or function."), false },
 		{ TEXT("call"),     TEXT("call"),        TEXT("@light call TurnOn(); calls a Blueprint function of an actor: one in the category 'Bango', named exactly as written."), false },
 		{ TEXT("isNil"),    TEXT("isNil(x) -> bool"), TEXT("True if the variable, global or array element is nil. Never reads it, so it never stops the script."), true, false, true },

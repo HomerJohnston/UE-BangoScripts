@@ -8,8 +8,12 @@
  * The Bango global variables (spec section 4), as a plain C++ object.
  * UBangoGlobalsSubsystem owns the game's store; tests and tools can create their own.
  *
- * - Declare() creates a global (holding nil) or confirms an existing one has the same type.
- *   A different type is a conflict: the caller fails, and the existing global is kept.
+ * - Declare() creates a global (holding nil) or confirms an existing one has the same type and kind.
+ *   A different type, or a world global declared as persistent (or the other way round), is a conflict: the caller
+ *   fails, and the existing global is kept.
+ * - A global is a **world global** (`global int stage;`), gone when the world is (ResetWorldGlobals, called when
+ *   the script subsystem's world ends), or a **persistent global** (`persistent global int gold;`), kept until
+ *   everything is reset or loaded. Both are saved and loaded together.
  * - Find() returns nullptr for a global that was never created. Scripts treat that the same as nil.
  * - Set() requires the global to exist, and the value to fit its type.
  * - Each change is stamped (GetChangeStamp), so a script waiting on globals (`waitUntil`) can tell whether any of
@@ -20,7 +24,7 @@
 class BANGOSCRIPTS_API FBangoGlobalStore
 {
 public:
-	bool Declare(const FString& Name, const FBangoType& Type, FString& OutError);
+	bool Declare(const FString& Name, const FBangoType& Type, FString& OutError, bool bPersistent = false);
 	bool Set(const FString& Name, const FBangoValue& Value, FString& OutError);
 	const FBangoValue* Find(const FString& Name) const;
 
@@ -46,6 +50,20 @@ public:
 
 	/** Removes all globals, e.g. when starting a new game. */
 	void ResetAll();
+
+	/**
+	 * Removes the world globals and keeps the persistent ones: the world they belong to has ended (the player left
+	 * the level). Every slot is renewed (GetLayout), as for ResetAll.
+	 */
+	void ResetWorldGlobals();
+
+	/** True for a persistent global; false for a world global, or one that doesn't exist. */
+	bool IsPersistent(const FString& Name) const
+	{
+		const int32* Slot = Slots.Find(Name);
+		return Slot && Entries[*Slot].bPersistent;
+	}
+	bool IsSlotPersistent(int32 Slot) const { return Entries[Slot].bPersistent; }
 
 	/** Saves or loads every global. Loading replaces the current globals. */
 	void Serialize(FArchive& Ar);
@@ -87,6 +105,8 @@ private:
 		FBangoValue Value;
 		/** Its latest change. */
 		uint64 Stamp = 0;
+		/** A persistent global (kept by ResetWorldGlobals). */
+		bool bPersistent = false;
 	};
 
 	/** The layout's number: a new one for every store, and for every copy of one. */

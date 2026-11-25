@@ -327,6 +327,8 @@ struct FBangoVarDeclStmt : FBangoStmt
 
 	bool bGlobal = false;
 	bool bScriptVar = false;
+	/** `persistent global int gold;`: a global that outlives the world (FBangoGlobalStore). Only with bGlobal, for now. */
+	bool bPersistent = false;
 	/** A local: not global, not a script variable. */
 	bool IsLocal() const { return !bGlobal && !bScriptVar; }
 	FBangoType Type;
