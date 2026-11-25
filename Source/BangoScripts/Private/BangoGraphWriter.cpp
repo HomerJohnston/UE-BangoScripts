@@ -510,7 +510,7 @@ namespace BangoGraphWriterPrivate
 		{
 			return Kind == EBangoGraphNodeKind::If || Kind == EBangoGraphNodeKind::While
 				|| Kind == EBangoGraphNodeKind::For || Kind == EBangoGraphNodeKind::ForEach || Kind == EBangoGraphNodeKind::Sequence
-				|| Kind == EBangoGraphNodeKind::Switch || Kind == EBangoGraphNodeKind::Spawn;
+				|| Kind == EBangoGraphNodeKind::Switch || Kind == EBangoGraphNodeKind::Spawn || Kind == EBangoGraphNodeKind::BlockCall;
 		}
 
 		/**
@@ -636,6 +636,18 @@ namespace BangoGraphWriterPrivate
 					}
 					AddCode(Indent, Detached, TEXT("}"), nullptr);
 				}
+				return true;
+			}
+
+			case EBangoGraphNodeKind::BlockCall:
+			{
+				// The call, with no ';', then its block.
+				AddCode(Indent, Detached, Text, &Node);
+				if (!WriteBlock(Graph, Node.Branches[0], Indent, Detached, Depth))
+				{
+					return false;
+				}
+				AddCode(Indent, Detached, TEXT("}"), nullptr);
 				return true;
 			}
 

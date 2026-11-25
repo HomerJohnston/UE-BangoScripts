@@ -379,6 +379,30 @@ private:
 	/** `target call Name(args)`: hands it to Context.CallReflected. */
 	bool CallReflected(int32 NameIndex, int32 ArgCount, bool bWantResult, const FBangoExecContext& Context);
 	bool FinishCommand(EBangoCommandResult Result);
+	/** A command returned Pending: its call is kept (PendingCall) and the script waits. */
+	bool WaitOnCall(int32 NameIndex, const FBangoCommand& Command, FBangoCommandCall& Call);
+
+	// ---- Block commands (FBangoFunctionCode::Blocks) ----
+	/** A block's state, in the running function's slots, or null (Block -1, or anything amiss). */
+	FBangoValue* GetBlockState(int32 Block);
+	void ClearBlockState(int32 Block);
+	/** The running function's block table, or null. */
+	const FBangoFunctionCode* GetBlockCode() const;
+	/** FBangoBlockInfo::PhaseSlot: 0 not open, 1 open, 2 closed with one of its blocks running. */
+	int32 GetBlockPhase(int32 Block) const;
+	void SetBlockPhase(int32 Block, int32 Phase);
+	/** For a script waiting on a command: the block that command opens, is in or is closing (-1 for none), from the instruction it's waiting at. */
+	void FindPendingBlock(int32& OutBlock, bool& bOutOpens, bool& bOutClosing, bool& bOutLeftEarly) const;
+	/** Gives a call what it's handed about blocks, for the block it opens (bOpens) or is written in. */
+	void SetCallBlock(FBangoCommandCall& Call, int32 Block, bool bOpens);
+	/** After a command that opens a block or is written in one is done: its block opens, is skipped or is ended, as it asked. */
+	bool AfterBlockCall(int32 Block, bool bOpens, bool bEndBlock, bool bSkipBlock, const FString& CommandName);
+	/** After a block's close handler is done: the block is closed, and one of its blocks runs if the handler picked one. */
+	bool AfterBlockClose(int32 Block, bool bLeftEarly, int32 RunBlock, const FString& CommandName);
+	/** The script has stopped for good: tells the command it was waiting on, and the commands of the blocks left open (FBangoCommand::Abandoned). */
+	void NotifyAbandoned();
+	/** CloseBlock: the block command's close handler, then its state is emptied. */
+	bool CloseBlock(int32 Block, bool bLeftEarly, const FBangoExecContext& Context);
 	/** Lends a command's call the instance's own (CallScratch) for as long as the call takes. */
 	struct FCallScope;
 	/** A command's call is done: fails if it failed, and puts its result, as the type it should be, on the stack. */
@@ -518,4 +542,8 @@ private:
 	bool bCallScratchInUse = false;
 	/** The memory of the slots of functions that have returned, for the next calls' slots. Always empty lists. Not saved. */
 	TArray<TArray<FBangoValue>> SpareSlots;
+	/** The world the script last ran in (Resume), for NotifyAbandoned. Not saved. */
+	UObject* LastWorldContext = nullptr;
+	/** NotifyAbandoned is at work: a failure or a Terminate while it is doesn't start it again. */
+	bool bNotifyingAbandoned = false;
 };

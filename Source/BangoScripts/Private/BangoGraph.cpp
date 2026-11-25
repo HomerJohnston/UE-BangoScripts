@@ -99,6 +99,7 @@ namespace Bango
 		case EBangoGraphNodeKind::Sequence: return 2;
 		case EBangoGraphNodeKind::Switch:   return 2; // a new one: one case and Default
 		case EBangoGraphNodeKind::Spawn:    return 1;
+		case EBangoGraphNodeKind::BlockCall: return 1; // Body
 		case EBangoGraphNodeKind::WaitUntil: return 1; // Timeout
 		default:                           return 0;
 		}
@@ -120,6 +121,7 @@ namespace Bango
 		case EBangoGraphNodeKind::Sequence:
 		case EBangoGraphNodeKind::Switch:
 		case EBangoGraphNodeKind::Spawn:
+		case EBangoGraphNodeKind::BlockCall:
 		case EBangoGraphNodeKind::WaitUntil: return TEXT("Then");
 		default:                           return FString();
 		}
@@ -146,6 +148,10 @@ namespace Bango
 		if (Kind == EBangoGraphNodeKind::WaitUntil)
 		{
 			return Branch == 0 ? TEXT("Timeout") : TEXT("");
+		}
+		if (Kind == EBangoGraphNodeKind::BlockCall)
+		{
+			return Branch == 0 ? TEXT("Body") : TEXT("");
 		}
 		return GetGraphNodeBranchCount(Kind) > Branch ? TEXT("Do") : TEXT("");
 	}
@@ -277,6 +283,7 @@ namespace Bango
 		case EBangoGraphNodeKind::Goto:     return TEXT("Go To");
 		case EBangoGraphNodeKind::Reroute:  return TEXT("Reroute");
 		case EBangoGraphNodeKind::WaitUntil: return TEXT("Wait Until");
+		case EBangoGraphNodeKind::BlockCall: return TEXT("Command With Block");
 		}
 		return TEXT("?");
 	}
@@ -455,6 +462,7 @@ namespace BangoGraphPrivate
 		case EBangoStmtKind::Sequence: return EBangoGraphNodeKind::Sequence;
 		case EBangoStmtKind::Switch:   return EBangoGraphNodeKind::Switch;
 		case EBangoStmtKind::Spawn:    return EBangoGraphNodeKind::Spawn;
+		case EBangoStmtKind::BlockCall: return EBangoGraphNodeKind::BlockCall;
 		case EBangoStmtKind::Break:    return EBangoGraphNodeKind::Break;
 		case EBangoStmtKind::Continue: return EBangoGraphNodeKind::Continue;
 		case EBangoStmtKind::Return:   return EBangoGraphNodeKind::Return;
@@ -845,6 +853,11 @@ namespace BangoGraphPrivate
 			else if (const FBangoSpawnStmt* Spawn = Stmt.As<FBangoSpawnStmt>())
 			{
 				const int32 Body = BuildChain(Graph, Spawn->Body, 0, Targets);
+				GraphAt(Graph).Nodes[Index].Branches[0] = Body;
+			}
+			else if (const FBangoBlockCallStmt* BlockCall = Stmt.As<FBangoBlockCallStmt>())
+			{
+				const int32 Body = BuildChain(Graph, BlockCall->Body, 0, Targets);
 				GraphAt(Graph).Nodes[Index].Branches[0] = Body;
 			}
 			else if (const FBangoWaitUntilStmt* Wait = Stmt.As<FBangoWaitUntilStmt>())

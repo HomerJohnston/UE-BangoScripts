@@ -795,6 +795,7 @@ namespace BangoGraphLayoutPrivate
 					Chain(Node.Branches[1], Scope);
 					break;
 				case EBangoGraphNodeKind::While:
+				case EBangoGraphNodeKind::BlockCall:
 					Chain(Node.Branches[0], Scope);
 					break;
 				case EBangoGraphNodeKind::Sequence:
@@ -1741,7 +1742,7 @@ namespace Bango
 			return Layout;
 		}
 
-		if (Node.Kind == EBangoGraphNodeKind::Call)
+		if (Node.Kind == EBangoGraphNodeKind::Call || Node.Kind == EBangoGraphNodeKind::BlockCall)
 		{
 			if (TryCallLayout(Node, Tok, Context, Layout))
 			{

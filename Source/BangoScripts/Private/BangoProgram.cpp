@@ -80,7 +80,10 @@ namespace BangoProgramPrivate
 		case EBangoOp::CallFunction:
 			return FString::Printf(TEXT("%s %d"), Program.Functions.IsValidIndex(I.A) ? *Program.Functions[I.A].Name : TEXT("<bad function>"), I.B);
 		case EBangoOp::CallCommand:
-			return FString::Printf(TEXT("%s %d%s"), Program.Names.IsValidIndex(I.A) ? *Program.Names[I.A] : TEXT("<bad name>"), I.B, (I.C & Bango::CallHasTarget) ? TEXT(" +target") : TEXT(""));
+			return FString::Printf(TEXT("%s %d%s%s"), Program.Names.IsValidIndex(I.A) ? *Program.Names[I.A] : TEXT("<bad name>"), I.B, (I.C & Bango::CallHasTarget) ? TEXT(" +target") : TEXT(""),
+				(I.C >> Bango::CallBlockShift) != 0 ? *FString::Printf(TEXT(" block %d"), (I.C >> Bango::CallBlockShift) - 1) : TEXT(""));
+		case EBangoOp::CloseBlock:
+			return FString::Printf(TEXT("%d%s"), I.A, I.B ? TEXT(" early") : TEXT(""));
 		case EBangoOp::CallReflected:
 			return FString::Printf(TEXT("%s %d%s"), Program.Names.IsValidIndex(I.A) ? *Program.Names[I.A] : TEXT("<bad name>"), I.B, I.C ? TEXT(" +result") : TEXT(""));
 		case EBangoOp::CallCommandInPlace:
@@ -150,6 +153,7 @@ namespace Bango
 		case EBangoOp::Halt:               return TEXT("Halt");
 		case EBangoOp::ErrorMissingReturn: return TEXT("ErrorMissingReturn");
 		case EBangoOp::SpawnBlock:         return TEXT("SpawnBlock");
+		case EBangoOp::CloseBlock:         return TEXT("CloseBlock");
 		case EBangoOp::CallCommandInPlace: return TEXT("CallCommandInPlace");
 		case EBangoOp::ForEachNext:        return TEXT("ForEachNext");
 		case EBangoOp::WaitBegin:          return TEXT("WaitBegin");

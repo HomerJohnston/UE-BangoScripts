@@ -332,6 +332,15 @@ bool FBangoInstance::StartSpawned(const FBangoInstance& Parent, int32 BlockIP, i
 	Frame.IP = BlockIP;
 	Frame.StackBase = 0;
 	Frame.Slots = From.Slots;
+	// The block commands' blocks it's written in are its parent's, not the copy's: here they aren't open.
+	for (const FBangoBlockInfo& Block : Program->Functions[From.Function].Blocks)
+	{
+		if (Frame.Slots.IsValidIndex(Block.StateSlot) && Frame.Slots.IsValidIndex(Block.PhaseSlot))
+		{
+			Frame.Slots[Block.StateSlot] = FBangoValue();
+			Frame.Slots[Block.PhaseSlot] = FBangoValue();
+		}
+	}
 	if (From.Function != 0)
 	{
 		// A block spawned in a function: the copy has no main graph frame, so it keeps its copies of the script's
@@ -400,6 +409,7 @@ void FBangoInstance::Terminate()
 	if (IsRunning())
 	{
 		Status = EBangoInstanceStatus::Terminated;
+		NotifyAbandoned();
 		PendingCommandName = -1;
 		PendingCall = FBangoCommandCall();
 	}
@@ -594,6 +604,7 @@ bool FBangoInstance::RuntimeFail(const FString& Message)
 			Error.NodeID = Debug.NodeID;
 		}
 	}
+	NotifyAbandoned();
 	PendingCommandName = -1;
 	return false;
 }
@@ -817,6 +828,7 @@ EBangoInstanceStatus FBangoInstance::Resume(const FBangoExecContext& Context)
 	{
 		return Status;
 	}
+	LastWorldContext = Context.WorldContext;
 	// One scope for the whole run to its next pause, never one per instruction.
 	TRACE_CPUPROFILER_EVENT_SCOPE(Bango_InstanceResume);
 	if (!Context.Globals)
@@ -868,12 +880,36 @@ EBangoInstanceStatus FBangoInstance::Resume(const FBangoExecContext& Context)
 		PendingCall.InstanceId = Id;
 		PendingCall.WorldContext = Context.WorldContext;
 		PendingCall.DeltaSeconds = Context.DeltaSeconds;
+		// A command with a block, or one in a block: which block, and whether this is its close, is worked out
+		// from the instruction it's waiting at each time (so nothing about it needs saving).
+		int32 PendingBlock = -1;
+		bool bPendingOpens = false;
+		bool bPendingClose = false;
+		bool bPendingEarly = false;
+		FindPendingBlock(PendingBlock, bPendingOpens, bPendingClose, bPendingEarly);
+		PendingCall.bClosing = bPendingClose;
+		PendingCall.bLeftEarly = bPendingEarly;
+		SetCallBlock(PendingCall, PendingBlock, bPendingOpens);
 		const EBangoCommandResult Result = Command->Poll(PendingCall);
+		PendingCall.BlockState = nullptr;
+		PendingCall.OuterBlockState = nullptr;
 		if (Status != EBangoInstanceStatus::Waiting || Result == EBangoCommandResult::Pending)
 		{
 			return Status;
 		}
+		const bool bEndBlock = PendingCall.bEndBlock;
+		const bool bSkipBlock = PendingCall.bSkipBlock;
+		const int32 RunBlock = PendingCall.RunBlockNumber;
+		if (bPendingClose && Result == EBangoCommandResult::Failed)
+		{
+			SetBlockPhase(PendingBlock, 0); // it knows it failed: it isn't told it was abandoned as well
+		}
 		if (!FinishCommand(Result))
+		{
+			return Status;
+		}
+		if (bPendingClose ? !AfterBlockClose(PendingBlock, bPendingEarly, RunBlock, Command->Signature.Name)
+				: !AfterBlockCall(PendingBlock, bPendingOpens, bEndBlock, bSkipBlock, Command->Signature.Name))
 		{
 			return Status;
 		}
@@ -1903,7 +1939,16 @@ bool FBangoInstance::CallCommand(int32 NameIndex, int32 ArgCount, int32 Flags, c
 		return false;
 	}
 
+	// The block the call opens or is written in, if any: the command gets its state.
+	const int32 Block = (Flags >> Bango::CallBlockShift) - 1;
+	const bool bOpens = Block >= 0 && (Flags & Bango::CallOpensBlock) != 0;
+	if (Block >= 0)
+	{
+		SetCallBlock(Call, Block, bOpens);
+	}
 	const EBangoCommandResult Result = Command->Start(Call);
+	Call.BlockState = nullptr;
+	Call.OuterBlockState = nullptr;
 	if (Status != EBangoInstanceStatus::Ready)
 	{
 		// The command terminated this instance (or something else stopped it).
@@ -1912,29 +1957,318 @@ bool FBangoInstance::CallCommand(int32 NameIndex, int32 ArgCount, int32 Flags, c
 
 	if (Result == EBangoCommandResult::Pending)
 	{
-		// It waits: the call is kept, for Poll and for its result.
-		PendingCommandName = NameIndex;
-		PendingCall = MoveTemp(Call);
-		if (WaitGuard.Set >= 0)
+		return WaitOnCall(NameIndex, *Command, Call);
+	}
+	const bool bEndBlock = Call.bEndBlock;
+	const bool bSkipBlock = Call.bSkipBlock;
+	return FinishCall(Result, *Command, Call) && AfterBlockCall(Block, bOpens, bEndBlock, bSkipBlock, Signature.Name);
+}
+
+bool FBangoInstance::WaitOnCall(int32 NameIndex, const FBangoCommand& Command, FBangoCommandCall& Call)
+{
+	// It waits: the call is kept, for Poll and for its result.
+	const FBangoCommandSignature& Signature = Command.Signature;
+	PendingCommandName = NameIndex;
+	PendingCall = MoveTemp(Call);
+	if (WaitGuard.Set >= 0)
+	{
+		return RuntimeFail(FString::Printf(TEXT("A waitUntil's condition must answer at once, but '%s' waits."), *Signature.Name));
+	}
+	if (!Command.Poll)
+	{
+		return RuntimeFail(FString::Printf(TEXT("Command '%s' returned Pending but has no Poll handler."), *Signature.Name));
+	}
+	// Arguments aren't needed any more; the command keeps what it needs in LatentState.
+	PendingCall.Args.Reset();
+	PendingCall.Target = FBangoValue();
+	Status = EBangoInstanceStatus::Waiting;
+	if (ReloadProgram.IsValid() && bReloadTried)
+	{
+		// It ran from one pause to the next without reaching a point where the new version fits.
+		FinishReload(EBangoReloadResult::KeptOld, ReloadFailure);
+	}
+	return true;
+}
+
+// ---- Block commands (`@john Speech(0, 1) { ... }`) ----
+
+const FBangoFunctionCode* FBangoInstance::GetBlockCode() const
+{
+	return Frames.Num() > 0 && Program.IsValid() && Program->Functions.IsValidIndex(Frames.Last().Function)
+		? &Program->Functions[Frames.Last().Function] : nullptr;
+}
+
+FBangoValue* FBangoInstance::GetBlockState(int32 Block)
+{
+	const FBangoFunctionCode* Code = GetBlockCode();
+	if (!Code || !Code->Blocks.IsValidIndex(Block) || !Frames.Last().Slots.IsValidIndex(Code->Blocks[Block].StateSlot))
+	{
+		return nullptr;
+	}
+	return &Frames.Last().Slots[Code->Blocks[Block].StateSlot];
+}
+
+void FBangoInstance::ClearBlockState(int32 Block)
+{
+	if (FBangoValue* State = GetBlockState(Block))
+	{
+		*State = FBangoValue();
+	}
+}
+
+int32 FBangoInstance::GetBlockPhase(int32 Block) const
+{
+	const FBangoFunctionCode* Code = GetBlockCode();
+	if (!Code || !Code->Blocks.IsValidIndex(Block) || !Frames.Last().Slots.IsValidIndex(Code->Blocks[Block].PhaseSlot))
+	{
+		return 0;
+	}
+	const FBangoValue& Phase = Frames.Last().Slots[Code->Blocks[Block].PhaseSlot];
+	return Phase.IsNil() ? 0 : (int32)Phase.GetInt();
+}
+
+void FBangoInstance::SetBlockPhase(int32 Block, int32 Phase)
+{
+	const FBangoFunctionCode* Code = GetBlockCode();
+	if (Code && Code->Blocks.IsValidIndex(Block) && Frames.Last().Slots.IsValidIndex(Code->Blocks[Block].PhaseSlot))
+	{
+		Frames.Last().Slots[Code->Blocks[Block].PhaseSlot] = FBangoValue::MakeInt(Phase);
+	}
+}
+
+void FBangoInstance::FindPendingBlock(int32& OutBlock, bool& bOutOpens, bool& bOutClosing, bool& bOutLeftEarly) const
+{
+	OutBlock = -1;
+	bOutOpens = false;
+	bOutClosing = false;
+	bOutLeftEarly = false;
+	const FBangoFunctionCode* Code = GetBlockCode();
+	const int32 At = Code ? Frames.Last().IP - 1 : -1; // the instruction it's waiting at
+	if (!Code || !Code->Code.IsValidIndex(At))
+	{
+		return;
+	}
+	const FBangoInstruction& Instruction = Code->Code[At];
+	if (Instruction.Op == EBangoOp::CallCommand)
+	{
+		OutBlock = (Instruction.C >> Bango::CallBlockShift) - 1;
+		bOutOpens = OutBlock >= 0 && (Instruction.C & Bango::CallOpensBlock) != 0;
+	}
+	else if (Instruction.Op == EBangoOp::CloseBlock)
+	{
+		OutBlock = Instruction.A;
+		bOutClosing = true;
+		bOutLeftEarly = Instruction.B != 0;
+	}
+}
+
+void FBangoInstance::SetCallBlock(FBangoCommandCall& Call, int32 Block, bool bOpens)
+{
+	Call.BlockState = GetBlockState(Block);
+	Call.OuterBlockState = nullptr;
+	Call.BlockNumber = -1;
+	if (bOpens || Call.bClosing)
+	{
+		Call.BlockNumber = Block;
+		const FBangoFunctionCode* Code = GetBlockCode();
+		if (bOpens && Code && Code->Blocks.IsValidIndex(Block))
 		{
-			return RuntimeFail(FString::Printf(TEXT("A waitUntil's condition must answer at once, but '%s' waits."), *Signature.Name));
+			Call.OuterBlockState = GetBlockState(Code->Blocks[Block].Parent);
 		}
-		if (!Command->Poll)
+	}
+}
+
+bool FBangoInstance::AfterBlockCall(int32 Block, bool bOpens, bool bEndBlock, bool bSkipBlock, const FString& CommandName)
+{
+	if (!bOpens && !bEndBlock && !bSkipBlock)
+	{
+		return true; // nearly every call
+	}
+	const FBangoFunctionCode* Code = GetBlockCode();
+	const bool bHasBlock = Code && Code->Blocks.IsValidIndex(Block);
+	if (bSkipBlock)
+	{
+		if (!bOpens || !bHasBlock)
 		{
-			return RuntimeFail(FString::Printf(TEXT("Command '%s' returned Pending but has no Poll handler."), *Signature.Name));
+			return RuntimeFail(FString::Printf(TEXT("%s: the command skipped its block, but it doesn't have one."), *CommandName));
 		}
-		// Arguments aren't needed any more; the command keeps what it needs in LatentState.
-		PendingCall.Args.Reset();
-		PendingCall.Target = FBangoValue();
-		Status = EBangoInstanceStatus::Waiting;
-		if (ReloadProgram.IsValid() && bReloadTried)
-		{
-			// It ran from one pause to the next without reaching a point where the new version fits.
-			FinishReload(EBangoReloadResult::KeptOld, ReloadFailure);
-		}
+		Frames.Last().IP = Code->Blocks[Block].CloseAt + 1; // past its closing brace: it isn't open, so it isn't closed
 		return true;
 	}
-	return FinishCall(Result, *Command, Call);
+	if (bOpens && bHasBlock)
+	{
+		SetBlockPhase(Block, 1);
+	}
+	if (!bEndBlock)
+	{
+		return true;
+	}
+	if (!bHasBlock)
+	{
+		return RuntimeFail(FString::Printf(TEXT("%s: the command ended its block, but it isn't in one."), *CommandName));
+	}
+	if (WaitGuard.Set >= 0)
+	{
+		return RuntimeFail(FString::Printf(TEXT("%s: a command can't end its block from a waitUntil's condition."), *CommandName));
+	}
+	// Whatever the statement it was in had worked out so far is dropped, and the script goes on at the closing brace.
+	Stack.SetNum(FMath::Min(Stack.Num(), Frames.Last().StackBase), EAllowShrinking::No);
+	Frames.Last().IP = Code->Blocks[Block].CloseAt;
+	return true;
+}
+
+bool FBangoInstance::AfterBlockClose(int32 Block, bool bLeftEarly, int32 RunBlock, const FString& CommandName)
+{
+	const FBangoFunctionCode* Code = GetBlockCode();
+	if (!Code || !Code->Blocks.IsValidIndex(Block))
+	{
+		return RuntimeFail(TEXT("Internal error: bad block closed."));
+	}
+	ClearBlockState(Block);
+	if (RunBlock >= 0)
+	{
+		// Its close picked one of the blocks written in it: that one runs now, and this one is done with.
+		if (bLeftEarly)
+		{
+			SetBlockPhase(Block, 0);
+			return RuntimeFail(FString::Printf(TEXT("%s: the command can't run one of its blocks when the script is leaving its block early."), *CommandName));
+		}
+		if (!Code->Blocks.IsValidIndex(RunBlock) || Code->Blocks[RunBlock].Parent != Block || GetBlockPhase(RunBlock) != 0)
+		{
+			SetBlockPhase(Block, 0);
+			return RuntimeFail(FString::Printf(TEXT("%s: the command asked to run block %d, which isn't a skipped block written directly in its block."), *CommandName, RunBlock));
+		}
+		SetBlockPhase(Block, 2);
+		SetBlockPhase(RunBlock, 1);
+		Frames.Last().IP = Code->Blocks[RunBlock].BodyAt;
+		return true;
+	}
+	SetBlockPhase(Block, 0);
+	// A block that was picked to run has reached its end: the script goes on after the block it's written in.
+	const int32 Parent = Code->Blocks[Block].Parent;
+	if (!bLeftEarly && Parent >= 0 && GetBlockPhase(Parent) == 2)
+	{
+		SetBlockPhase(Parent, 0);
+		Frames.Last().IP = Code->Blocks[Parent].CloseAt + 1;
+	}
+	return true;
+}
+
+bool FBangoInstance::CloseBlock(int32 Block, bool bLeftEarly, const FBangoExecContext& Context)
+{
+	const FBangoFunctionCode* Code = GetBlockCode();
+	if (!Code || !Code->Blocks.IsValidIndex(Block))
+	{
+		return RuntimeFail(TEXT("Internal error: bad block to close."));
+	}
+	if (GetBlockPhase(Block) != 1)
+	{
+		// Not open: already closed (its close picked a block to run, and the script is leaving that one early).
+		SetBlockPhase(Block, 0);
+		return true;
+	}
+	const int32 NameIndex = Code->Blocks[Block].Command;
+	const FBangoCommand* Command = BoundCommands.IsValidIndex(NameIndex) ? BoundCommands[NameIndex] : nullptr;
+	if (!Command)
+	{
+		return RuntimeFail(TEXT("Internal error: block command not bound."));
+	}
+	if (!Command->Close)
+	{
+		return AfterBlockClose(Block, bLeftEarly, -1, Command->Signature.Name); // nothing to do at its closing brace
+	}
+
+	FCallScope CallScope(*this);
+	FBangoCommandCall& Call = CallScope.Call;
+	Call.InstanceId = Id;
+	Call.WorldContext = Context.WorldContext;
+	Call.DeltaSeconds = Context.DeltaSeconds;
+	Call.bClosing = true;
+	Call.bLeftEarly = bLeftEarly;
+	SetCallBlock(Call, Block, false);
+	const EBangoCommandResult Result = Command->Close(Call);
+	Call.BlockState = nullptr;
+	if (Status != EBangoInstanceStatus::Ready)
+	{
+		return false; // the command terminated this instance (or something else stopped it)
+	}
+	if (Result == EBangoCommandResult::Pending)
+	{
+		return WaitOnCall(NameIndex, *Command, Call); // the block is closed when it's done (Resume)
+	}
+	if (Result == EBangoCommandResult::Failed)
+	{
+		SetBlockPhase(Block, 0); // it knows it failed: it isn't told it was abandoned as well
+		return RuntimeFail(FString::Printf(TEXT("%s: %s"), *Command->Signature.Name, Call.Error.IsEmpty() ? TEXT("the command failed at the end of its block.") : *Call.Error));
+	}
+	return AfterBlockClose(Block, bLeftEarly, Call.RunBlockNumber, Command->Signature.Name);
+}
+
+void FBangoInstance::NotifyAbandoned()
+{
+	if (bNotifyingAbandoned || !Program.IsValid() || Frames.Num() == 0)
+	{
+		return;
+	}
+	bNotifyingAbandoned = true;
+
+	// The command the script was waiting on.
+	int32 PendingBlock = -1;
+	bool bPendingOpens = false;
+	bool bPendingClose = false;
+	bool bPendingEarly = false;
+	const FBangoCommand* Pending = BoundCommands.IsValidIndex(PendingCommandName) ? BoundCommands[PendingCommandName] : nullptr;
+	if (Pending)
+	{
+		FindPendingBlock(PendingBlock, bPendingOpens, bPendingClose, bPendingEarly);
+		if (Pending->Abandoned)
+		{
+			PendingCall.InstanceId = Id;
+			PendingCall.WorldContext = LastWorldContext;
+			PendingCall.bClosing = bPendingClose;
+			PendingCall.bLeftEarly = bPendingEarly;
+			PendingCall.bBlockAbandoned = false;
+			SetCallBlock(PendingCall, PendingBlock, bPendingOpens);
+			Pending->Abandoned(PendingCall);
+			PendingCall.BlockState = nullptr;
+			PendingCall.OuterBlockState = nullptr;
+		}
+	}
+
+	// The blocks left open, innermost first: in each function that's running, from the one on top down.
+	// (GetBlockState and the rest read the top frame, so the frames are looked at through a copy of the list's top.)
+	for (int32 FrameIndex = Frames.Num() - 1; FrameIndex >= 0; --FrameIndex)
+	{
+		FBangoFrame& Frame = Frames[FrameIndex];
+		if (!Program->Functions.IsValidIndex(Frame.Function))
+		{
+			continue;
+		}
+		const FBangoFunctionCode& Code = Program->Functions[Frame.Function];
+		for (int32 Block = Code.Blocks.Num() - 1; Block >= 0; --Block)
+		{
+			const FBangoBlockInfo& Info = Code.Blocks[Block];
+			if (!Frame.Slots.IsValidIndex(Info.PhaseSlot) || !Frame.Slots.IsValidIndex(Info.StateSlot))
+			{
+				continue;
+			}
+			const FBangoValue& Phase = Frame.Slots[Info.PhaseSlot];
+			const bool bOpen = !Phase.IsNil() && Phase.GetInt() == 1;
+			const FBangoCommand* Command = BoundCommands.IsValidIndex(Info.Command) ? BoundCommands[Info.Command] : nullptr;
+			if (bOpen && Command && Command->Abandoned)
+			{
+				FBangoCommandCall Call;
+				Call.InstanceId = Id;
+				Call.WorldContext = LastWorldContext;
+				Call.bBlockAbandoned = true;
+				Call.BlockNumber = Block;
+				Call.BlockState = &Frame.Slots[Info.StateSlot];
+				Command->Abandoned(Call);
+			}
+			Frame.Slots[Info.PhaseSlot] = FBangoValue::MakeInt(0);
+		}
+	}
+	bNotifyingAbandoned = false;
 }
 
 bool FBangoInstance::FinishCommand(EBangoCommandResult Result)
@@ -1944,11 +2278,11 @@ bool FBangoInstance::FinishCommand(EBangoCommandResult Result)
 	{
 		return RuntimeFail(TEXT("Internal error: finished command not bound."));
 	}
+	PendingCommandName = -1; // before FinishCall: if the command failed, it isn't told it was abandoned as well
 	if (!FinishCall(Result, *Command, PendingCall))
 	{
 		return false;
 	}
-	PendingCommandName = -1;
 	PendingCall = FBangoCommandCall();
 	return true;
 }
@@ -2833,6 +3167,10 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 
 		case EBangoOp::CallCommand:
 			CallCommand(I.A, I.B, I.C, Context);
+			break;
+
+		case EBangoOp::CloseBlock:
+			CloseBlock(I.A, I.B != 0, Context);
 			break;
 
 		case EBangoOp::CallReflected:

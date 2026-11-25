@@ -213,6 +213,11 @@ namespace BangoDumpPrivate
 			}
 			return Result + TEXT(")");
 		}
+		case EBangoStmtKind::BlockCall:
+		{
+			const FBangoBlockCallStmt& S = *Stmt.As<FBangoBlockCallStmt>();
+			return FString::Printf(TEXT("(block %s %s)"), *Bango::DumpExpr(*S.Call), *DumpBlock(S.Body));
+		}
 		case EBangoStmtKind::Spawn:
 		{
 			const FBangoSpawnStmt& S = *Stmt.As<FBangoSpawnStmt>();

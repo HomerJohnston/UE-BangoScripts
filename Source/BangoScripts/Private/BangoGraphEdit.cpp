@@ -121,6 +121,14 @@ namespace Bango
 			}
 			Source = Text + TEXT(" = spawn\n{\n};");
 			break;
+		case EBangoGraphNodeKind::BlockCall:
+			if (Text.IsEmpty())
+			{
+				OutError = TEXT("The command is missing.");
+				return false;
+			}
+			Source = Text + TEXT("\n{\n};");
+			break;
 		case EBangoGraphNodeKind::Break:
 		case EBangoGraphNodeKind::Continue:
 		case EBangoGraphNodeKind::Sequence:
@@ -157,6 +165,11 @@ namespace Bango
 			return false;
 		}
 		const EBangoStmtKind Parsed = Script.TopLevel[0]->Kind;
+		if (Kind == EBangoGraphNodeKind::BlockCall && Parsed != EBangoStmtKind::BlockCall)
+		{
+			OutError = TEXT("This should be a call to a command that takes a block, like `Speech(0, 1)`.");
+			return false;
+		}
 		if (Kind == EBangoGraphNodeKind::Local)
 		{
 			const FBangoVarDeclStmt* Decl = Script.TopLevel[0]->As<FBangoVarDeclStmt>();
@@ -1089,6 +1102,10 @@ namespace Bango
 				else if (const FBangoSpawnStmt* Spawn = Stmt.As<FBangoSpawnStmt>())
 				{
 					CollectGlobalDecls(Spawn->Body, 0, Out);
+				}
+				else if (const FBangoBlockCallStmt* BlockCall = Stmt.As<FBangoBlockCallStmt>())
+				{
+					CollectGlobalDecls(BlockCall->Body, 0, Out);
 				}
 				else if (const FBangoWaitUntilStmt* Wait = Stmt.As<FBangoWaitUntilStmt>())
 				{

@@ -75,6 +75,12 @@ enum class EBangoGraphNodeKind : uint8
 	 * like one at the top). Text: without `global`, like `bool opened = true` ("Set Global Bool", ...).
 	 */
 	Global,
+	/**
+	 * `@john Speech(0, 1) { ... }`: a command that takes a block (FBangoCommandSignature::Block). Text is the call,
+	 * like a Call node's (`@john Speech(0, 1)`); Branches[0] ("Body") is its block, and Next (Then) what follows.
+	 * (Last in the list: it was added last, and the editor keeps kinds as numbers.)
+	 */
+	BlockCall,
 };
 
 struct BANGOSCRIPTS_API FBangoGraphNode
@@ -105,7 +111,7 @@ struct BANGOSCRIPTS_API FBangoGraphNode
 	int32 Next = INDEX_NONE;
 
 	/**
-	 * If: [Do, Else]. While, For, ForEach: [Do]. Spawn: [Run]. Sequence: one per block ([Scope 0, Scope 1, ...], at least one).
+	 * If: [Do, Else]. While, For, ForEach: [Do]. Spawn: [Run]. BlockCall: [Body]. Sequence: one per block ([Scope 0, Scope 1, ...], at least one).
 	 * Switch: one per case, then Default (CaseValues.Num() + 1). Unused entries are INDEX_NONE. Every kind but Sequence
 	 * and Switch has two entries; see Bango::GetGraphNodeBranchCount for how many are used.
 	 */

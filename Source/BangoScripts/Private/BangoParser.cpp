@@ -947,6 +947,24 @@ namespace BangoParserPrivate
 			}
 			Stmt->Loc = First.Loc;
 
+			if (Stmt->Kind == EBangoStmtKind::Call && Check(EBangoTokenKind::LBrace))
+			{
+				// `@john Speech(0, 1) { ... }`: a command with a block. Its line is the call, up to its ')'.
+				TUniquePtr<FBangoBlockCallStmt> BlockCall = MakeUnique<FBangoBlockCallStmt>();
+				BlockCall->Loc = First.Loc;
+				BlockCall->Call = MoveTemp(Stmt->As<FBangoCallStmt>()->Call);
+				if (!RequireOneLine(First.Loc.Line, Previous().Loc) || !RegisterNode(*BlockCall, First.Loc.Line))
+				{
+					return nullptr;
+				}
+				SetTextSpan(*BlockCall, StartTok, Pos); // the call, up to its ')': the '{' is next
+				if (!ParseBlock(BlockCall->Body) || !ExpectBlockTerminator())
+				{
+					return nullptr;
+				}
+				return MoveTemp(BlockCall);
+			}
+
 			if (!Expect(EBangoTokenKind::Semicolon, TEXT("at the end of the statement"))
 				|| !RequireOneLine(First.Loc.Line, Previous().Loc)
 				|| !RegisterNode(*Stmt, First.Loc.Line))

@@ -435,7 +435,8 @@ FLinearColor UBangoEdGraphNode::GetNodeTitleColor() const
 
 	switch (GetKind())
 	{
-	case EBangoGraphNodeKind::Call:     return FLinearColor(0.10f, 0.35f, 0.75f);
+	case EBangoGraphNodeKind::Call:
+	case EBangoGraphNodeKind::BlockCall: return FLinearColor(0.10f, 0.35f, 0.75f);
 	case EBangoGraphNodeKind::Assign:
 	case EBangoGraphNodeKind::IncDec:
 	case EBangoGraphNodeKind::Local:

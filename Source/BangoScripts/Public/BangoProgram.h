@@ -14,6 +14,13 @@ namespace Bango
 	/** A CallCommandInPlace instruction's C: its argument count is the low bits, and CallIsPure and CallResultUsed are shifted up past it. */
 	constexpr int32 InPlaceArgCountMask = 0xFFFF;
 	constexpr int32 InPlaceFlagShift = 16;
+	/**
+	 * A CallCommand instruction's C, above its flags: 1 + the block command's block (FBangoFunctionCode::Blocks) the
+	 * call opens or is written in, or 0 for a call that has nothing to do with one.
+	 */
+	constexpr int32 CallBlockShift = 8;
+	/** A CallCommand instruction's C: the call opens the block above (it's the block command's own call), rather than being written in it. */
+	constexpr int32 CallOpensBlock = 8;
 	/** A WaitBegin instruction's B: which values it takes off the stack (pushed in this order). */
 	constexpr int32 WaitHasHold = 1;
 	constexpr int32 WaitHasTimeout = 2;
@@ -98,6 +105,7 @@ enum class EBangoOp : uint8
 
 	ForEachNext,        // A = slot holding the array copy (A + 1 holds the int position), B = loop variable slot, C = target when done
 	SpawnBlock,         // A = target: starts another instance at A with a copy of this frame's slots (a spawn block); this one carries on. B = 1: push the new instance's id
+	CloseBlock,         // A = block (FBangoFunctionCode::Blocks): its command's close handler runs, then its state is emptied. B = 1: the script is leaving the block early (return, break, continue, goto)
 
 	// ---- waitUntil (Program.WaitSets) ----
 	WaitBegin,          // A = wait set (one with a heldFor or a timeout), B = which of the Bango::WaitHas... values are there.  [hold seconds] [timeout seconds] [ignoreHold] -> : notes them, before its first WaitCheck
@@ -169,6 +177,29 @@ struct FBangoStatementRange
 	int32 End = 0;
 };
 
+/**
+ * A block command's block (`@john Speech(0, 1) { ... }`), in the function it's written in. Its state is a hidden
+ * local of that function, so it's saved, and copied for a spawn block, as any local is.
+ */
+struct FBangoBlockInfo
+{
+	/** The command, as a name (FBangoProgram::Names), like a CallCommand's A. */
+	int32 Command = 0;
+	/** The slot that holds the block's state while it's open. */
+	int32 StateSlot = 0;
+	/**
+	 * The slot that says where the block is: nil or 0, not open (never reached, skipped, or closed); 1, open; 2,
+	 * closed, with one of the blocks written in it (picked by its close handler) running.
+	 */
+	int32 PhaseSlot = 0;
+	/** The first instruction of the block's statements, after the command's call: where a block picked to run starts. */
+	int32 BodyAt = 0;
+	/** The CloseBlock instruction at its closing brace: where a command that ends the block sends the script. The instruction after it is where one that skips the block does. */
+	int32 CloseAt = 0;
+	/** The block this one's command is written in and belongs to (FBangoCommandSignature::InsideOf), or -1. */
+	int32 Parent = -1;
+};
+
 struct FBangoFunctionCode
 {
 	/** Empty for the script's top level. */
@@ -195,6 +226,8 @@ struct FBangoFunctionCode
 	TArray<FBangoStatementRange> Statements;
 
 	TArray<FBangoPlace> Places;
+	/** The block commands' blocks written in this function, in the order they're written. */
+	TArray<FBangoBlockInfo> Blocks;
 	TArray<FBangoInstruction> Code;
 	/** One entry per instruction. */
 	TArray<FBangoDebugLoc> Debug;

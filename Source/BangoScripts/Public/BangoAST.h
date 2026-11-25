@@ -267,6 +267,7 @@ enum class EBangoStmtKind : uint8
 	ForEach,
 	Sequence,
 	Spawn,
+	BlockCall,
 	Switch,
 	Break,
 	Continue,
@@ -457,6 +458,21 @@ struct FBangoSpawnStmt : FBangoStmt
 	FBangoType IdType;
 	FString IdName;
 	FBangoSourceLocation IdNameLoc;
+	FBangoBlock Body;
+};
+
+/**
+ * `@john Speech(0, 1) { ... }`: a command that takes a block (FBangoCommandSignature::Block). The command runs at the
+ * opening brace and its Close handler at the closing brace; the commands that belong to it (Inside) are called in
+ * the block. The parser makes one of any call followed by a `{`; the compiler says whether the command takes one.
+ */
+struct FBangoBlockCallStmt : FBangoStmt
+{
+	static constexpr EBangoStmtKind StaticKind = EBangoStmtKind::BlockCall;
+	FBangoBlockCallStmt() : FBangoStmt(StaticKind) {}
+
+	/** An FBangoCallExpr. */
+	FBangoExprPtr Call;
 	FBangoBlock Body;
 };
 

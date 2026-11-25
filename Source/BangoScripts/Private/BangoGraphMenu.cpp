@@ -240,7 +240,7 @@ namespace Bango
 					continue;
 				}
 				Menu.Add(Signature->CategoryName.IsEmpty() ? FString(TEXT("Commands")) : Signature->CategoryName,
-					EBangoGraphNodeKind::Call, Name + TEXT("()"), TEXT("command")).bBuiltIn = Signature->bBuiltIn;
+					Signature->bBlock ? EBangoGraphNodeKind::BlockCall : EBangoGraphNodeKind::Call, Name + TEXT("()"), TEXT("command")).bBuiltIn = Signature->bBuiltIn;
 			}
 		}
 

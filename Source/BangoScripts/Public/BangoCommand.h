@@ -152,6 +152,16 @@ struct BANGOSCRIPTS_API FBangoCommandSignature
 	 * checked again when a global or input it reads changes, like one that calls none. See Pure.
 	 */
 	bool bPure = false;
+	/**
+	 * The command takes a block of statements (`@john Speech(0, 1) { ... }`), and must be given one. It runs at the
+	 * opening brace, as any command does, and its Close handler at the closing brace. See Block.
+	 */
+	bool bBlock = false;
+	/**
+	 * The command belongs to a block command's block: this is that command's name, and calling this one anywhere but
+	 * directly in such a block is a compile error. Empty for a command that can be called anywhere. See Inside.
+	 */
+	FString InsideOf;
 	/** What's wrong with how the signature was built (a type parameter that doesn't exist, ...): FBangoCommandTable::Add fails with it. */
 	FString BuildError;
 	/**
@@ -250,6 +260,18 @@ struct BANGOSCRIPTS_API FBangoCommandSignature
 	bool BindTypeParams(const FBangoValue* Target, TArray<FBangoValue>& Args, TArray<FBangoType>& OutTypeArgs, FString& OutError) const;
 	/** A script may call this command on a line of its own and throw its value away. */
 	FBangoCommandSignature& Discardable();
+	/**
+	 * The command takes a block: `Name(args) { statements }`. It's called at the opening brace (Start), where it can
+	 * set the block's state (FBangoCommandCall::BlockState), and its Close handler at the closing brace, or when the
+	 * script leaves the block early. It can't return a value or change its target.
+	 */
+	FBangoCommandSignature& Block();
+	/**
+	 * The command can only be called in the block of the block command named here, directly: at any depth of if,
+	 * loop and so on, but not in another block command's block, a spawn block, or a function called from the block.
+	 * It's handed that block's state (FBangoCommandCall::BlockState), and can end the block (EndBlock).
+	 */
+	FBangoCommandSignature& Inside(const FString& BlockCommand);
 	FBangoCommandSignature& InCategory(const FString& InCategory);
 	FBangoCommandSignature& Describe(const FString& InDescription);
 };
@@ -308,6 +330,59 @@ struct FBangoCommandCall
 	 */
 	bool bResultUsed = false;
 
+	/**
+	 * For a block command (FBangoCommandSignature::Block) and the commands that belong to its block (Inside): the
+	 * block's state, one value of any type, to read and change. It starts as nil when the block opens, is kept with
+	 * the script's variables while the block is open (so it's saved with them: only Bango values), and is thrown
+	 * away after the block closes. Null for any other command. Only valid during this call to Start, Poll or Close:
+	 * don't keep the pointer.
+	 */
+	FBangoValue* BlockState = nullptr;
+	/**
+	 * For a command that belongs to a block and takes one of its own (Inside and Block, like a prompt's option):
+	 * the state of the block it's written in, while BlockState is its own block's. Start and Poll only; null otherwise.
+	 */
+	FBangoValue* OuterBlockState = nullptr;
+	/**
+	 * For a block command, in Start, Poll and Close: its block's number, which is what the command of the block it's
+	 * written in gives RunBlock to have this block run. -1 for any other command.
+	 */
+	int32 BlockNumber = -1;
+	/** Close, and Poll after a Close that returned Pending: the call is the block's closing one. */
+	bool bClosing = false;
+	/** With bClosing: the script is leaving the block early (return, break, continue, goto), not at its closing brace. */
+	bool bLeftEarly = false;
+	/** Set by EndBlock. */
+	bool bEndBlock = false;
+	/**
+	 * Ends the block this command is in, or opens: when the command is done, the script goes straight to the block's
+	 * closing brace (where the block command's Close runs as usual). For a command that isn't in a block, the script
+	 * stops with an error.
+	 */
+	void EndBlock() { bEndBlock = true; }
+	/** Set by SkipBlock. */
+	bool bSkipBlock = false;
+	/**
+	 * For a block command, from Start (or Poll while it waits on Start): its block isn't run now. The script goes on
+	 * after the block, and its Close isn't called. The block can still be run later, by the command of the block it's
+	 * written in (RunBlock).
+	 */
+	void SkipBlock() { bSkipBlock = true; }
+	/** Set by RunBlock: the number of the block to run, or -1. */
+	int32 RunBlockNumber = -1;
+	/**
+	 * For a block command, from Close (or Poll while it waits on Close), at the block's closing brace: one of the
+	 * blocks written directly in its block, and skipped, runs now (Number is that block's BlockNumber). When that
+	 * block ends, its command's Close is called as usual, and the script goes on after this command's block.
+	 * Not when the script is leaving the block early (bLeftEarly).
+	 */
+	void RunBlock(int32 Number) { RunBlockNumber = Number; }
+	/**
+	 * Abandoned only. True: the script ended while this command's block was open. False: it ended while the script
+	 * was waiting on this command (LatentState is what Poll would have had).
+	 */
+	bool bBlockAbandoned = false;
+
 	/** Done with a return value: put it here. */
 	FBangoValue Result;
 	/** Failed: put the reason here. */
@@ -325,6 +400,15 @@ struct FBangoCommandCall
 		DeltaSeconds = 0.0f;
 		LatentState.Reset();
 		bResultUsed = false;
+		BlockState = nullptr;
+		OuterBlockState = nullptr;
+		BlockNumber = -1;
+		bClosing = false;
+		bLeftEarly = false;
+		bEndBlock = false;
+		bSkipBlock = false;
+		RunBlockNumber = -1;
+		bBlockAbandoned = false;
 		Result = FBangoValue();
 		Error.Reset();
 	}
@@ -345,8 +429,27 @@ struct FBangoCommand
 	FBangoCommandSignature Signature;
 	/** Runs when the script calls the command. Required for the command to run. */
 	FBangoCommandHandler Start;
-	/** Runs every frame while Start (or the previous Poll) returned Pending. Required if Start can return Pending. */
+	/**
+	 * Runs every frame while Start, Close or the previous Poll returned Pending. Required if Start or Close can
+	 * return Pending. (FBangoCommandCall::bClosing says which it's waiting on.)
+	 */
 	FBangoCommandHandler Poll;
+	/**
+	 * For a block command (FBangoCommandSignature::Block): runs at the block's closing brace, and before the script
+	 * leaves the block early (FBangoCommandCall::bLeftEarly). It has the block's state, but no target or arguments:
+	 * what it needs of those, Start puts in the state. It may return Pending. Optional: without it nothing happens
+	 * at the closing brace.
+	 */
+	FBangoCommandHandler Close;
+	/**
+	 * Runs when the script stops for good (it failed, or was terminated) while it was waiting on this command, or,
+	 * for a block command, while its block was open (FBangoCommandCall::bBlockAbandoned says which; a block command
+	 * can be told both ways, one after the other). It's the command's chance to stop what it started: a speech
+	 * that's playing, a timer. It has LatentState and BlockState as Poll would have, and WorldContext if the script
+	 * has run since it was loaded. What it returns is ignored, and it must not start or stop scripts. Optional.
+	 * Not called when the script's world is torn down, or for a command that itself returned Failed.
+	 */
+	FBangoCommandHandler Abandoned;
 };
 
 /** Looks up command signatures by name (case-sensitive). */

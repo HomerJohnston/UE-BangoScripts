@@ -1587,6 +1587,456 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			}
 		}
 
+		// Block commands: `Speech(0) { Line(1); }`. The command runs at the opening brace and its Close at the closing
+		// one; the commands that belong to it get the block's state, and can end the block; every way out closes it.
+		{
+			TArray<FString> BlockLog;
+			FBangoCommandTable BlockTable;
+			bool bTableMade = true;
+			auto AddBlockCommand = [&](const FBangoCommand& Command)
+			{
+				FString AddError;
+				if (!BlockTable.Add(Command, AddError))
+				{
+					bTableMade = false;
+					OutFailures.Add(FString::Printf(TEXT("blocks: can't add a test command: %s"), *AddError));
+				}
+			};
+			const auto StateOf = [](const FBangoCommandCall& Call) -> int64
+			{
+				return Call.BlockState && !Call.BlockState->IsNil() ? Call.BlockState->GetInt() : -1;
+			};
+			{
+				// Speech(Mode): mode 1 is "the first line ends it". Its state is the mode in the thousands, plus what its lines add.
+				FBangoCommand Speech;
+				Speech.Signature = FBangoCommandSignature::Make(TEXT("Speech")).Param(TEXT("Mode"), FBangoType::Int()).Block();
+				Speech.Start = [&BlockLog](FBangoCommandCall& Call)
+				{
+					BlockLog.Add(!Call.BlockState ? TEXT("open:no state") : Call.BlockState->IsNil() ? TEXT("open") : TEXT("open:not empty"));
+					if (Call.BlockState)
+					{
+						*Call.BlockState = FBangoValue::MakeInt((int32)Call.Args[0].GetInt() * 1000);
+					}
+					if (Call.Args[0].GetInt() == 2)
+					{
+						Call.EndBlock(); // mode 2: its block is skipped
+					}
+					return EBangoCommandResult::Done;
+				};
+				Speech.Close = [&BlockLog, StateOf](FBangoCommandCall& Call)
+				{
+					BlockLog.Add(FString::Printf(TEXT("close:%lld%s"), (long long)StateOf(Call), Call.bLeftEarly ? TEXT(":early") : TEXT("")));
+					return Call.bClosing ? EBangoCommandResult::Done : Call.Fail(TEXT("Close without bClosing"));
+				};
+				Speech.Abandoned = [&BlockLog, StateOf](FBangoCommandCall& Call)
+				{
+					BlockLog.Add(FString::Printf(TEXT("abandoned:%lld%s"), (long long)StateOf(Call), Call.bBlockAbandoned ? TEXT("") : TEXT(":not a block")));
+					return EBangoCommandResult::Done;
+				};
+				AddBlockCommand(Speech);
+
+				FBangoCommand Line;
+				Line.Signature = FBangoCommandSignature::Make(TEXT("Line")).Param(TEXT("Amount"), FBangoType::Int()).Inside(TEXT("Speech"));
+				Line.Start = [&BlockLog, StateOf](FBangoCommandCall& Call)
+				{
+					if (!Call.BlockState)
+					{
+						return Call.Fail(TEXT("no block state"));
+					}
+					const int64 State = StateOf(Call) + Call.Args[0].GetInt();
+					*Call.BlockState = FBangoValue::MakeInt((int32)State);
+					BlockLog.Add(FString::Printf(TEXT("line %lld"), (long long)Call.Args[0].GetInt()));
+					if (State / 1000 == 1)
+					{
+						Call.EndBlock();
+					}
+					return EBangoCommandResult::Done;
+				};
+				AddBlockCommand(Line);
+
+				// As Line, but it gives a value back (so it can be in the middle of a statement) and always ends the block.
+				FBangoCommand Pick;
+				Pick.Signature = FBangoCommandSignature::Make(TEXT("Pick")).Param(TEXT("Amount"), FBangoType::Int()).Returns(FBangoType::Int()).Inside(TEXT("Speech"));
+				Pick.Start = [&BlockLog](FBangoCommandCall& Call)
+				{
+					BlockLog.Add(TEXT("pick"));
+					Call.Result = FBangoValue::MakeInt((int32)Call.Args[0].GetInt());
+					Call.EndBlock();
+					return EBangoCommandResult::Done;
+				};
+				AddBlockCommand(Pick);
+
+				// As Line, but it waits a frame first, and has its state then too.
+				FBangoCommand SlowLine;
+				SlowLine.Signature = FBangoCommandSignature::Make(TEXT("SlowLine")).Param(TEXT("Amount"), FBangoType::Int()).Inside(TEXT("Speech"));
+				SlowLine.Start = [](FBangoCommandCall& Call)
+				{
+					Call.LatentState.Add(Call.Args[0]);
+					return EBangoCommandResult::Pending;
+				};
+				SlowLine.Poll = [&BlockLog, StateOf](FBangoCommandCall& Call)
+				{
+					if (!Call.BlockState || Call.bClosing)
+					{
+						return Call.Fail(TEXT("no block state in Poll"));
+					}
+					const int64 State = StateOf(Call) + Call.LatentState[0].GetInt();
+					*Call.BlockState = FBangoValue::MakeInt((int32)State);
+					BlockLog.Add(FString::Printf(TEXT("slow line %lld"), (long long)Call.LatentState[0].GetInt()));
+					if (State / 1000 == 1)
+					{
+						Call.EndBlock();
+					}
+					return EBangoCommandResult::Done;
+				};
+				SlowLine.Abandoned = [&BlockLog, StateOf](FBangoCommandCall& Call)
+				{
+					BlockLog.Add(FString::Printf(TEXT("slow line %lld abandoned:%lld%s"), (long long)(Call.LatentState.Num() > 0 ? Call.LatentState[0].GetInt() : -1),
+						(long long)StateOf(Call), Call.bBlockAbandoned ? TEXT(":a block") : TEXT("")));
+					return EBangoCommandResult::Done;
+				};
+				AddBlockCommand(SlowLine);
+
+				// Menu(Pick): its state is the choice to run in the thousands, plus that choice's block number once it
+				// has been reached (999 until then). Each Choice(Id) has its block skipped; the menu's close runs the
+				// picked one's. From 100 up, the close waits a frame first.
+				FBangoCommand Menu;
+				Menu.Signature = FBangoCommandSignature::Make(TEXT("Menu")).Param(TEXT("Pick"), FBangoType::Int()).Block();
+				Menu.Start = [](FBangoCommandCall& Call)
+				{
+					*Call.BlockState = FBangoValue::MakeInt((int32)Call.Args[0].GetInt() * 1000 + 999);
+					return EBangoCommandResult::Done;
+				};
+				const auto PickChoice = [StateOf](FBangoCommandCall& Call)
+				{
+					const int64 State = StateOf(Call);
+					if (State % 1000 != 999 && !Call.bLeftEarly)
+					{
+						Call.RunBlock((int32)(State % 1000));
+					}
+					if (State / 1000 == 50)
+					{
+						Call.RunBlock(55); // not a block of its
+					}
+				};
+				Menu.Close = [&BlockLog, StateOf, PickChoice](FBangoCommandCall& Call)
+				{
+					BlockLog.Add(FString::Printf(TEXT("menu close%s"), Call.bLeftEarly ? TEXT(":early") : TEXT("")));
+					if (StateOf(Call) / 1000 >= 100 && !Call.bLeftEarly)
+					{
+						return EBangoCommandResult::Pending;
+					}
+					PickChoice(Call);
+					return EBangoCommandResult::Done;
+				};
+				Menu.Poll = [&BlockLog, PickChoice](FBangoCommandCall& Call)
+				{
+					BlockLog.Add(Call.bClosing ? TEXT("menu closed late") : TEXT("menu polled, not closing"));
+					PickChoice(Call);
+					return EBangoCommandResult::Done;
+				};
+				AddBlockCommand(Menu);
+
+				FBangoCommand Choice;
+				Choice.Signature = FBangoCommandSignature::Make(TEXT("Choice")).Param(TEXT("Id"), FBangoType::Int()).Inside(TEXT("Menu")).Block();
+				Choice.Start = [&BlockLog](FBangoCommandCall& Call)
+				{
+					if (!Call.OuterBlockState || Call.OuterBlockState->IsNil() || Call.BlockNumber < 0)
+					{
+						return Call.Fail(TEXT("no menu state or block number"));
+					}
+					BlockLog.Add(FString::Printf(TEXT("choice %lld"), (long long)Call.Args[0].GetInt()));
+					const int64 MenuState = Call.OuterBlockState->GetInt();
+					if (MenuState / 1000 % 100 == Call.Args[0].GetInt())
+					{
+						*Call.OuterBlockState = FBangoValue::MakeInt((int32)(MenuState / 1000 * 1000 + Call.BlockNumber));
+					}
+					Call.SkipBlock();
+					return EBangoCommandResult::Done;
+				};
+				Choice.Close = [&BlockLog](FBangoCommandCall& Call)
+				{
+					BlockLog.Add(FString::Printf(TEXT("choice closed%s"), Call.bLeftEarly ? TEXT(":early") : TEXT("")));
+					return EBangoCommandResult::Done;
+				};
+				AddBlockCommand(Choice);
+
+				// Not a block command, but says it skips one.
+				FBangoCommand Skipper;
+				Skipper.Signature = FBangoCommandSignature::Make(TEXT("Skipper"));
+				Skipper.Start = [](FBangoCommandCall& Call)
+				{
+					Call.SkipBlock();
+					return EBangoCommandResult::Done;
+				};
+				AddBlockCommand(Skipper);
+
+				// A block whose close waits a frame.
+				FBangoCommand SlowSpeech;
+				SlowSpeech.Signature = FBangoCommandSignature::Make(TEXT("SlowSpeech")).Block();
+				SlowSpeech.Start = [](FBangoCommandCall& Call)
+				{
+					*Call.BlockState = FBangoValue::MakeInt(5);
+					return EBangoCommandResult::Done;
+				};
+				SlowSpeech.Close = [&BlockLog](FBangoCommandCall&)
+				{
+					BlockLog.Add(TEXT("closing"));
+					return EBangoCommandResult::Pending;
+				};
+				SlowSpeech.Poll = [&BlockLog, StateOf](FBangoCommandCall& Call)
+				{
+					BlockLog.Add(FString::Printf(TEXT("closed:%lld%s%s"), (long long)StateOf(Call), Call.bClosing ? TEXT("") : TEXT(":not closing"), Call.bLeftEarly ? TEXT(":early") : TEXT("")));
+					return EBangoCommandResult::Done;
+				};
+				AddBlockCommand(SlowSpeech);
+
+				// A block with nothing to do at its end, and a command of its own.
+				FBangoCommand Other;
+				Other.Signature = FBangoCommandSignature::Make(TEXT("Other")).Block();
+				Other.Start = [](FBangoCommandCall&) { return EBangoCommandResult::Done; };
+				AddBlockCommand(Other);
+
+				// A command that belongs to a block and takes one of its own.
+				FBangoCommand Option;
+				Option.Signature = FBangoCommandSignature::Make(TEXT("Option")).Inside(TEXT("Speech")).Block();
+				Option.Start = [&BlockLog, StateOf](FBangoCommandCall& Call)
+				{
+					BlockLog.Add(FString::Printf(TEXT("option:%lld"), (long long)StateOf(Call))); // its own state, which is empty
+					return EBangoCommandResult::Done;
+				};
+				AddBlockCommand(Option);
+
+				FBangoCommand Plain;
+				Plain.Signature = FBangoCommandSignature::Make(TEXT("Plain"));
+				Plain.Start = [](FBangoCommandCall&) { return EBangoCommandResult::Done; };
+				AddBlockCommand(Plain);
+
+				// Not in a block, but says it ends one.
+				FBangoCommand Rogue;
+				Rogue.Signature = FBangoCommandSignature::Make(TEXT("Rogue"));
+				Rogue.Start = [](FBangoCommandCall& Call)
+				{
+					Call.EndBlock();
+					return EBangoCommandResult::Done;
+				};
+				AddBlockCommand(Rogue);
+			}
+			{
+				// What a signature can't be.
+				FBangoCommandTable Bad;
+				FString AddError;
+				FBangoCommand Valued;
+				Valued.Signature = FBangoCommandSignature::Make(TEXT("Valued")).Returns(FBangoType::Int()).Block();
+				Expect(!Bad.Add(Valued, AddError) && AddError.Contains(TEXT("can't return a value")), TEXT("blocks: a block command can't return a value"));
+				FBangoCommand Closer;
+				Closer.Signature = FBangoCommandSignature::Make(TEXT("Closer"));
+				Closer.Close = [](FBangoCommandCall&) { return EBangoCommandResult::Done; };
+				Expect(!Bad.Add(Closer, AddError) && AddError.Contains(TEXT("doesn't take a block")), TEXT("blocks: a Close handler needs Block"));
+			}
+
+			struct FBlockRun
+			{
+				FBangoGlobalStore Globals;
+				FBangoInstance Instance;
+				EBangoInstanceStatus Status = EBangoInstanceStatus::None;
+				FString Log;
+			};
+			FBangoExecContext BlockContext = Context;
+			auto RunBlocks = [&](const TCHAR* BlockSource, FBlockRun& Run, int32 Resumes = 1) -> bool
+			{
+				BlockLog.Reset();
+				TSharedPtr<FBangoProgram> BlockProgram = MakeShared<FBangoProgram>();
+				FBangoCompileError BlockCompileError;
+				if (!Bango::CompileSource(BlockSource, TEXT("blocks.bango"), BlockTable, *BlockProgram, BlockCompileError))
+				{
+					OutFailures.Add(FString::Printf(TEXT("blocks: doesn't compile: %s\n%s"), *BlockCompileError.ToString(), BlockSource));
+					return false;
+				}
+				FBangoRuntimeError BlockStartError;
+				if (!Run.Instance.Start(BlockProgram, BlockTable, Run.Globals, 1, BlockStartError))
+				{
+					OutFailures.Add(FString::Printf(TEXT("blocks: doesn't start: %s"), *BlockStartError.Message));
+					return false;
+				}
+				BlockContext.Globals = &Run.Globals;
+				for (int32 Index = 0; Index < Resumes; ++Index)
+				{
+					Run.Status = Run.Instance.Resume(BlockContext);
+					if (Index + 1 < Resumes)
+					{
+						BlockLog.Add(TEXT("|"));
+					}
+				}
+				Run.Log = FString::Join(BlockLog, TEXT(", "));
+				return true;
+			};
+			auto OutOf = [](const FBangoGlobalStore& Store) -> int64
+			{
+				const FBangoValue* Value = Store.Find(TEXT("out"));
+				return Value && !Value->IsNil() ? Value->GetInt() : -1;
+			};
+			struct FBlockCase
+			{
+				const TCHAR* Name;
+				const TCHAR* Source;
+				const TCHAR* Log;
+				int64 Out;       // the global `out` afterwards (-1: never set)
+				int32 Resumes;
+			};
+			const FBlockCase BlockCases[] =
+			{
+				{ TEXT("every line, in order"), TEXT("global int out;\nSpeech(0)\n{\n\tLine(1);\n\tif (true)\n\t{\n\t\tLine(2);\n\t}\n\tLine(4);\n}\nout = 1;"),
+					TEXT("open, line 1, line 2, line 4, close:7"), 1, 1 },
+				{ TEXT("the brace on the command's line"), TEXT("global int out;\nSpeech(0) {\n\tLine(1);\n}\nout = 1;"), TEXT("open, line 1, close:1"), 1, 1 },
+				{ TEXT("an empty block"), TEXT("global int out;\nSpeech(0)\n{\n}\nout = 1;"), TEXT("open, close:0"), 1, 1 },
+				{ TEXT("a line ends the block"), TEXT("global int out;\nSpeech(1)\n{\n\tLine(1);\n\tLine(2);\n\tout = 9;\n}\nout = 1;"), TEXT("open, line 1, close:1001"), 1, 1 },
+				{ TEXT("a block command that skips its block"), TEXT("global int out;\nSpeech(2)\n{\n\tLine(1);\n\tout = 9;\n}\nout = 1;"), TEXT("open, close:2000"), 1, 1 },
+				{ TEXT("a block's command with a block of its own"), TEXT("global int out;\nSpeech(0)\n{\n\tLine(1);\n\tOption()\n\t{\n\t\tout = 4;\n\t}\n\tLine(2);\n}\nout = out + 1;"),
+					TEXT("open, line 1, option:-1, line 2, close:3"), 5, 1 },
+				{ TEXT("a menu runs the choice it picks, then goes on after the menu"),
+					TEXT("global int out;\nMenu(2)\n{\n\tChoice(1)\n\t{\n\t\tout = 10;\n\t}\n\tif (true)\n\t{\n\t\tChoice(2)\n\t\t{\n\t\t\tout = 20;\n\t\t}\n\t}\n\tChoice(3)\n\t{\n\t\tout = 30;\n\t}\n\tout = 99;\n}\nout = out + 1;"),
+					TEXT("choice 1, choice 2, choice 3, menu close, choice closed"), 21, 1 },
+				{ TEXT("a menu that picks nothing runs no choice"), TEXT("global int out;\nMenu(7)\n{\n\tChoice(1)\n\t{\n\t\tout = 10;\n\t}\n\tout = 99;\n}\nout = out + 1;"), TEXT("choice 1, menu close"), 100, 1 },
+				{ TEXT("a choice its if leaves out can't be picked"), TEXT("global int out;\nMenu(1)\n{\n\tif (false)\n\t{\n\t\tChoice(1)\n\t\t{\n\t\t\tout = 10;\n\t\t}\n\t}\n\tChoice(2)\n\t{\n\t\tout = 20;\n\t}\n}\nout = 1;"),
+					TEXT("choice 2, menu close"), 1, 1 },
+				{ TEXT("a menu in a loop picks each time round"), TEXT("global int out;\nout = 0;\nfor (int _i = 0; _i < 2; _i++)\n{\n\tMenu(1)\n\t{\n\t\tChoice(1)\n\t\t{\n\t\t\tout = out + 1;\n\t\t}\n\t}\n}"),
+					TEXT("choice 1, menu close, choice closed, choice 1, menu close, choice closed"), 2, 1 },
+				{ TEXT("break in a picked choice closes it, and the menu isn't closed twice"), TEXT("global int out;\nwhile (true)\n{\n\tMenu(1)\n\t{\n\t\tChoice(1)\n\t\t{\n\t\t\tbreak;\n\t\t}\n\t}\n\tout = 5;\n}\nout = 1;"),
+					TEXT("choice 1, menu close, choice closed:early"), 1, 1 },
+				{ TEXT("return in a picked choice"), TEXT("global int out;\nMenu(1)\n{\n\tChoice(1)\n\t{\n\t\tout = 3;\n\t\treturn;\n\t}\n}\nout = 1;"), TEXT("choice 1, menu close, choice closed:early"), 3, 1 },
+				{ TEXT("leaving a menu before its end picks nothing"), TEXT("global int out;\nwhile (true)\n{\n\tMenu(1)\n\t{\n\t\tChoice(1)\n\t\t{\n\t\t\tout = 10;\n\t\t}\n\t\tbreak;\n\t}\n}\nout = 1;"), TEXT("choice 1, menu close:early"), 1, 1 },
+				{ TEXT("a picked choice with a speech that waits in it"), TEXT("global int out;\nMenu(1)\n{\n\tChoice(1)\n\t{\n\t\tSpeech(0)\n\t\t{\n\t\t\tSlowLine(2);\n\t\t}\n\t\tout = 4;\n\t}\n}\nout = out + 1;"),
+					TEXT("choice 1, menu close, open, |, slow line 2, close:2, choice closed"), 5, 2 },
+				{ TEXT("a menu whose close waits, then picks"), TEXT("global int out;\nMenu(101)\n{\n\tChoice(1)\n\t{\n\t\tout = 10;\n\t}\n}\nout = out + 1;"), TEXT("choice 1, menu close, |, menu closed late, choice closed"), 11, 2 },
+				{ TEXT("ending the block in the middle of a statement"), TEXT("global int out;\nint _x = 3;\nSpeech(0)\n{\n\t_x = _x + 10 * Pick(5);\n\tLine(2);\n}\nout = _x;"),
+					TEXT("open, pick, close:0"), 3, 1 },
+				{ TEXT("the state is empty each time the block opens"), TEXT("global int out;\nfor (int _i = 0; _i < 2; _i++)\n{\n\tSpeech(0)\n\t{\n\t\tLine(1);\n\t}\n}\nout = 1;"),
+					TEXT("open, line 1, close:1, open, line 1, close:1"), 1, 1 },
+				{ TEXT("a block in a block has a state of its own"), TEXT("global int out;\nSpeech(0)\n{\n\tLine(1);\n\tOther()\n\t{\n\t\tSpeech(0)\n\t\t{\n\t\t\tLine(10);\n\t\t}\n\t}\n\tLine(2);\n}\nout = 1;"),
+					TEXT("open, line 1, open, line 10, close:10, line 2, close:3"), 1, 1 },
+				{ TEXT("break leaves it"), TEXT("global int out;\nwhile (true)\n{\n\tSpeech(0)\n\t{\n\t\tLine(1);\n\t\tbreak;\n\t}\n}\nout = 1;"), TEXT("open, line 1, close:1:early"), 1, 1 },
+				{ TEXT("continue leaves it"), TEXT("global int out;\nfor (int _i = 0; _i < 2; _i++)\n{\n\tSpeech(0)\n\t{\n\t\tLine(1);\n\t\tcontinue;\n\t}\n}\nout = 1;"),
+					TEXT("open, line 1, close:1:early, open, line 1, close:1:early"), 1, 1 },
+				{ TEXT("a loop's break inside it doesn't"), TEXT("global int out;\nSpeech(0)\n{\n\twhile (true)\n\t{\n\t\tbreak;\n\t}\n\tLine(1);\n}\nout = 1;"), TEXT("open, line 1, close:1"), 1, 1 },
+				{ TEXT("break leaves two"), TEXT("global int out;\nwhile (true)\n{\n\tSpeech(0)\n\t{\n\t\tOther()\n\t\t{\n\t\t\tSpeech(0)\n\t\t\t{\n\t\t\t\tLine(5);\n\t\t\t\tbreak;\n\t\t\t}\n\t\t}\n\t}\n}\nout = 1;"),
+					TEXT("open, open, line 5, close:5:early, close:0:early"), 1, 1 },
+				{ TEXT("return at the top level leaves it"), TEXT("global int out;\nSpeech(0)\n{\n\tLine(1);\n\treturn;\n}\nout = 1;"), TEXT("open, line 1, close:1:early"), -1, 1 },
+				{ TEXT("a function's return leaves it, with its value"), TEXT("global int out;\nout = Get();\n\nfunction int Get()\n{\n\tSpeech(0)\n\t{\n\t\tLine(2);\n\t\treturn 7;\n\t}\n\treturn 1;\n}"),
+					TEXT("open, line 2, close:2:early"), 7, 1 },
+				{ TEXT("goto leaves it"), TEXT("global int out;\nSpeech(0)\n{\n\tLine(1);\n\tgoto Done;\n}\nout = 5;\nlabel Done;\nout = out + 1;"), TEXT("open, line 1, close:1:early"), -2, 1 },
+				{ TEXT("goto inside it doesn't"), TEXT("global int out;\nSpeech(0)\n{\n\tgoto Skip;\n\tLine(1);\n\tlabel Skip;\n\tLine(2);\n}\nout = 1;"), TEXT("open, line 2, close:2"), 1, 1 },
+				{ TEXT("goto leaves the inner one only"), TEXT("global int out;\nSpeech(0)\n{\n\tSpeech(0)\n\t{\n\t\tLine(1);\n\t\tgoto Outer;\n\t}\n\tLine(5);\n\tlabel Outer;\n\tLine(2);\n}\nout = 1;"),
+					TEXT("open, open, line 1, close:1:early, line 2, close:2"), 1, 1 },
+				{ TEXT("a line that waits"), TEXT("global int out;\nSpeech(0)\n{\n\tLine(1);\n\tSlowLine(2);\n\tLine(4);\n}\nout = 1;"), TEXT("open, line 1, |, slow line 2, line 4, close:7"), 1, 2 },
+				{ TEXT("a line that waits, then ends the block"), TEXT("global int out;\nSpeech(1)\n{\n\tSlowLine(2);\n\tLine(4);\n}\nout = 1;"), TEXT("open, |, slow line 2, close:1002"), 1, 2 },
+				{ TEXT("a close that waits"), TEXT("global int out;\nSlowSpeech()\n{\n\tout = 3;\n}\nout = out + 1;"), TEXT("closing, |, closed:5"), 4, 2 },
+				{ TEXT("a close that waits, left early"), TEXT("global int out;\nwhile (true)\n{\n\tSlowSpeech()\n\t{\n\t\tbreak;\n\t}\n}\nout = 1;"), TEXT("closing, |, closed:5:early"), 1, 2 },
+			};
+			if (bTableMade)
+			{
+				for (const FBlockCase& Case : BlockCases)
+				{
+					FBlockRun Run;
+					if (RunBlocks(Case.Source, Run, Case.Resumes))
+					{
+						// (-2: `out` is nil, so `out + 1` stops the script: the goto case, which must not reach `out = 5`.)
+						const bool bOutRight = Case.Out == -2 ? Run.Status == EBangoInstanceStatus::Failed : OutOf(Run.Globals) == Case.Out && Run.Status == EBangoInstanceStatus::Finished;
+						Expect(Run.Log == Case.Log && bOutRight, *FString::Printf(TEXT("blocks: %s. Log: %s. out = %lld, error: %s"),
+							Case.Name, *Run.Log, (long long)OutOf(Run.Globals), *Run.Instance.GetError().Message));
+					}
+				}
+				{
+					// While a line waits, the script is waiting, with the block open.
+					FBlockRun Run;
+					if (RunBlocks(TEXT("Speech(0)\n{\n\tSlowLine(2);\n}"), Run))
+					{
+						Expect(Run.Status == EBangoInstanceStatus::Waiting && Run.Log == TEXT("open"), *FString::Printf(TEXT("blocks: waiting in a block. Log: %s"), *Run.Log));
+					}
+				}
+				{
+					// A script that's terminated while it waits in a block: the command it waits on is told, then the block's.
+					FBlockRun Run;
+					if (RunBlocks(TEXT("Speech(0)\n{\n\tLine(1);\n\tSlowLine(2);\n}"), Run))
+					{
+						Run.Instance.Terminate();
+						Run.Instance.Terminate();
+						Expect(FString::Join(BlockLog, TEXT(", ")) == TEXT("open, line 1, slow line 2 abandoned:1, abandoned:1"),
+							*FString::Printf(TEXT("blocks: terminated while waiting in a block. Log: %s"), *FString::Join(BlockLog, TEXT(", "))));
+					}
+				}
+				{
+					// A script that fails in a block: the block's command is told. Both of them, innermost first.
+					FBlockRun Run;
+					if (RunBlocks(TEXT("global int out;\nSpeech(0)\n{\n\tLine(1);\n\tSpeech(0)\n\t{\n\t\tLine(5);\n\t\tint _z = 0;\n\t\tout = 1 / _z;\n\t}\n}"), Run))
+					{
+						Expect(Run.Status == EBangoInstanceStatus::Failed && Run.Log == TEXT("open, line 1, open, line 5, abandoned:5, abandoned:1"),
+							*FString::Printf(TEXT("blocks: failing in a block. Log: %s"), *Run.Log));
+					}
+				}
+				{
+					// One that fails in a function called from a block, too; and not a block that has closed.
+					FBlockRun Run;
+					if (RunBlocks(TEXT("global int out;\nSpeech(0)\n{\n}\nSpeech(0)\n{\n\tLine(3);\n\tBreak();\n}\n\nfunction void Break()\n{\n\tint _z = 0;\n\tout = 1 / _z;\n}"), Run))
+					{
+						Expect(Run.Status == EBangoInstanceStatus::Failed && Run.Log == TEXT("open, close:0, open, line 3, abandoned:3"),
+							*FString::Printf(TEXT("blocks: failing in a function called from a block. Log: %s"), *Run.Log));
+					}
+				}
+				{
+					FBlockRun Run;
+					if (RunBlocks(TEXT("Menu(50)\n{\n\tChoice(1)\n\t{\n\t}\n}"), Run))
+					{
+						Expect(Run.Status == EBangoInstanceStatus::Failed && Run.Instance.GetError().Message.Contains(TEXT("asked to run block 55, which isn't a skipped block")),
+							*FString::Printf(TEXT("blocks: running a block that isn't one of its. Got: %s"), *Run.Instance.GetError().Message));
+					}
+				}
+				{
+					FBlockRun Run;
+					if (RunBlocks(TEXT("Skipper();"), Run))
+					{
+						Expect(Run.Status == EBangoInstanceStatus::Failed && Run.Instance.GetError().Message.Contains(TEXT("skipped its block, but it doesn't have one")),
+							*FString::Printf(TEXT("blocks: skipping a block without having one. Got: %s"), *Run.Instance.GetError().Message));
+					}
+				}
+				{
+					FBlockRun Run;
+					if (RunBlocks(TEXT("Rogue();"), Run))
+					{
+						Expect(Run.Status == EBangoInstanceStatus::Failed && Run.Instance.GetError().Message.Contains(TEXT("ended its block, but it isn't in one")),
+							*FString::Printf(TEXT("blocks: ending a block from outside one. Got: %s"), *Run.Instance.GetError().Message));
+					}
+				}
+				struct FBlockError
+				{
+					const TCHAR* Name;
+					const TCHAR* Source;
+					const TCHAR* Contains;
+				};
+				const FBlockError BlockErrors[] =
+				{
+					{ TEXT("a block command without its block"), TEXT("Speech(0);"), TEXT("'Speech' takes a block of statements") },
+					{ TEXT("a block for a command that doesn't take one"), TEXT("Plain()\n{\n}"), TEXT("'Plain' doesn't take a block") },
+					{ TEXT("a block for something that isn't a command"), TEXT("Nothing()\n{\n}"), TEXT("'Nothing' doesn't take a block") },
+					{ TEXT("a block's command outside it"), TEXT("Line(1);"), TEXT("'Line' can only be used in the block of 'Speech'") },
+					{ TEXT("a block's command after it"), TEXT("Speech(0)\n{\n}\nLine(1);"), TEXT("'Line' can only be used in the block of 'Speech'") },
+					{ TEXT("a block's command in another block inside it"), TEXT("Speech(0)\n{\n\tOther()\n\t{\n\t\tLine(1);\n\t}\n}"), TEXT("must be written directly in the block of 'Speech', not in the block of 'Other'") },
+					{ TEXT("a block's command in a spawn block inside it"), TEXT("Speech(0)\n{\n\tspawn\n\t{\n\t\tLine(1);\n\t}\n}"), TEXT("must be written directly in the block of 'Speech', not in a spawn block") },
+					{ TEXT("a block's command in a function"), TEXT("Speech(0)\n{\n\tSay();\n}\n\nfunction void Say()\n{\n\tLine(1);\n}"), TEXT("'Line' can only be used in the block of 'Speech'") },
+					{ TEXT("a block's command with a block of its own, outside its block"), TEXT("Option()\n{\n}"), TEXT("'Option' can only be used in the block of 'Speech'") },
+					{ TEXT("goto into a block"), TEXT("goto In;\nSpeech(0)\n{\n\tlabel In;\n\tLine(1);\n}"), TEXT("jumps into a command's block") },
+					{ TEXT("the block's command line must be one line"), TEXT("Speech(\n0)\n{\n}"), TEXT("must be on one line") },
+				};
+				for (const FBlockError& Case : BlockErrors)
+				{
+					FBangoProgram ErrorProgram;
+					FBangoCompileError BlockCompileError;
+					const bool bCompiled = Bango::CompileSource(Case.Source, TEXT("blocks.bango"), BlockTable, ErrorProgram, BlockCompileError);
+					Expect(!bCompiled && BlockCompileError.Message.Contains(Case.Contains), *FString::Printf(TEXT("blocks: %s. Got: %s"), Case.Name, bCompiled ? TEXT("it compiled") : *BlockCompileError.Message));
+				}
+			}
+		}
+
 		// Conditions (Bango::CompileCondition): a script, or one expression, that returns true or false.
 		{
 			struct FConditionCase

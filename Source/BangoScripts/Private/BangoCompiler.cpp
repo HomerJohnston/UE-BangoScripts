@@ -91,6 +91,16 @@ namespace BangoCompilerPrivate
 		TArray<int32> SlotsInScope;
 	};
 
+	/** A block command's block that a goto is written in: its close, if the goto turns out to leave it (ResolveGotos). */
+	struct FGotoClose
+	{
+		/** A Nop before the goto's jump, made a CloseBlock if the goto leaves the block. */
+		int32 Instruction = 0;
+		/** The block's scope (a BlockParents index) and its place in FBangoFunctionCode::Blocks. */
+		int32 BlockId = 0;
+		int32 Index = 0;
+	};
+
 	struct FGotoFixup
 	{
 		int32 Instruction = 0;
@@ -99,6 +109,21 @@ namespace BangoCompilerPrivate
 		FBangoSourceLocation Loc;
 		const FBangoStmt* Stmt = nullptr;
 		TArray<int32> SlotsInScope;
+		/** The block commands' blocks the goto is in, innermost first. */
+		TArray<FGotoClose> Closes;
+	};
+
+	/** A block command's block being compiled (`@john Speech(0, 1) { ... }`). */
+	struct FOpenBlock
+	{
+		/** Its place in FBangoFunctionCode::Blocks. */
+		int32 Index = 0;
+		/** Its block's scope (a BlockParents index). */
+		int32 BlockId = 0;
+		/** How many loops were open when it started: a break or continue of a loop started later stays inside it. */
+		int32 LoopDepth = 0;
+		/** The command. */
+		FString Name;
 	};
 
 	/** A local (or loop variable) declared somewhere in the graph being compiled, for out-of-scope errors. */
@@ -303,6 +328,14 @@ namespace BangoCompilerPrivate
 		TArray<int32> LoopBlockIds;
 		/** For each spawn block being compiled, inside each other: how many loops were open when it started. */
 		TArray<int32> SpawnLoopBases;
+		/** The block commands' blocks being compiled, inside each other. */
+		TArray<FOpenBlock> OpenBlocks;
+		/** For each spawn block being compiled: how many of OpenBlocks were open when it started (they aren't the copy's). */
+		TArray<int32> SpawnOpenBlockBases;
+		/** The blocks (BlockParents indexes) that are a block command's block: a goto can't jump into one. */
+		TArray<int32> CommandBlockIds;
+		/** Set by CompileBlockCall for the call that opens its block (FBangoFunctionCode::Blocks), and taken by CompileCall; otherwise -1. */
+		int32 OpeningBlock = -1;
 		TBangoNameMap<FLabel> Labels;
 		/** Labels in disabled statements, by name, with their lines: a goto to one gets its own error. */
 		TBangoNameMap<int32> DisabledLabels;
@@ -814,6 +847,8 @@ namespace BangoCompilerPrivate
 				return true;
 			case EBangoStmtKind::Spawn:
 				return CheckNoDeclsInBlock(Stmt.As<FBangoSpawnStmt>()->Body, bInFunction);
+			case EBangoStmtKind::BlockCall:
+				return CheckNoDeclsInBlock(Stmt.As<FBangoBlockCallStmt>()->Body, bInFunction);
 			case EBangoStmtKind::WaitUntil:
 				return CheckNoDeclsInBlock(Stmt.As<FBangoWaitUntilStmt>()->TimeoutBlock, bInFunction);
 			case EBangoStmtKind::Switch:
@@ -1040,6 +1075,8 @@ namespace BangoCompilerPrivate
 				return true;
 			case EBangoStmtKind::Spawn:
 				return CollectGlobalsInBlock(Stmt.As<FBangoSpawnStmt>()->Body);
+			case EBangoStmtKind::BlockCall:
+				return CollectGlobalsInBlock(Stmt.As<FBangoBlockCallStmt>()->Body);
 			case EBangoStmtKind::WaitUntil:
 				return CollectGlobalsInBlock(Stmt.As<FBangoWaitUntilStmt>()->TimeoutBlock);
 			case EBangoStmtKind::Switch:
@@ -1140,6 +1177,10 @@ namespace BangoCompilerPrivate
 			SpawnBlockIds.Reset();
 			LoopBlockIds.Reset();
 			SpawnLoopBases.Reset();
+			OpenBlocks.Reset();
+			SpawnOpenBlockBases.Reset();
+			CommandBlockIds.Reset();
+			OpeningBlock = -1;
 			Labels = TBangoNameMap<FLabel>();
 			DisabledLabels = TBangoNameMap<int32>();
 			Gotos.Reset();
@@ -1390,10 +1431,17 @@ namespace BangoCompilerPrivate
 				int32 Shared = Label->BlockId;
 				bool bEntersLoop = false;
 				bool bEntersSpawn = false;
+				bool bEntersCommandBlock = false;
 				for (; Shared >= 0 && !GotoBlocks.Contains(Shared); Shared = BlockParents[Shared])
 				{
 					bEntersLoop |= LoopBlockIds.Contains(Shared);
 					bEntersSpawn |= SpawnBlockIds.Contains(Shared);
+					bEntersCommandBlock |= CommandBlockIds.Contains(Shared);
+				}
+				if (bEntersCommandBlock)
+				{
+					return Fail(Goto.Loc, FString::Printf(TEXT("'goto %s' jumps into a command's block (label '%s' is on line %d, inside a block this goto is not in), which would skip the command that opens it."),
+						*Goto.Name, *Goto.Name, Label->Line));
 				}
 				bool bLeavesSpawn = false;
 				for (const int32 Block : GotoBlocks)
@@ -1427,6 +1475,22 @@ namespace BangoCompilerPrivate
 					{
 						return Fail(Goto.Loc, FString::Printf(TEXT("'goto %s' jumps past the declaration of local '%s' (line %d), so it would have no value at label '%s'. Declare it before the goto, or after the label."),
 							*Goto.Name, *Fn->SlotNames[Slot], SlotLines.IsValidIndex(Slot) ? SlotLines[Slot] : 0, *Goto.Name));
+					}
+				}
+				// The block commands' blocks it leaves (those the label isn't in) are closed first.
+				for (const FGotoClose& Close : Goto.Closes)
+				{
+					bool bLabelInside = false;
+					for (int32 Block = Label->BlockId; Block >= 0 && !bLabelInside; Block = BlockParents[Block])
+					{
+						bLabelInside = Block == Close.BlockId;
+					}
+					if (!bLabelInside)
+					{
+						FBangoInstruction& Instruction = Fn->Code[Close.Instruction];
+						Instruction.Op = EBangoOp::CloseBlock;
+						Instruction.A = Close.Index;
+						Instruction.B = 1;
 					}
 				}
 				PatchJump(Goto.Instruction, Label->Address);
@@ -1534,6 +1598,9 @@ namespace BangoCompilerPrivate
 				CollectGraphLocals(Spawn.Body, bDisabled);
 				break;
 			}
+			case EBangoStmtKind::BlockCall:
+				CollectGraphLocals(Stmt.As<FBangoBlockCallStmt>()->Body, bDisabled);
+				break;
 			case EBangoStmtKind::WaitUntil:
 				CollectGraphLocals(Stmt.As<FBangoWaitUntilStmt>()->TimeoutBlock, bDisabled);
 				break;
@@ -1698,6 +1765,10 @@ namespace BangoCompilerPrivate
 			{
 				NoteBlock(Spawn->Body);
 			}
+			else if (const FBangoBlockCallStmt* BlockCall = Stmt.As<FBangoBlockCallStmt>())
+			{
+				NoteBlock(BlockCall->Body);
+			}
 			else if (const FBangoWaitUntilStmt* Wait = Stmt.As<FBangoWaitUntilStmt>())
 			{
 				NoteBlock(Wait->TimeoutBlock);
@@ -1754,6 +1825,7 @@ namespace BangoCompilerPrivate
 			case EBangoStmtKind::Sequence: return CompileSequence(*Stmt.As<FBangoSequenceStmt>());
 			case EBangoStmtKind::Switch:   return CompileSwitch(*Stmt.As<FBangoSwitchStmt>());
 			case EBangoStmtKind::Spawn:    return CompileSpawn(*Stmt.As<FBangoSpawnStmt>());
+			case EBangoStmtKind::BlockCall: return CompileBlockCall(*Stmt.As<FBangoBlockCallStmt>());
 			case EBangoStmtKind::Break:
 			case EBangoStmtKind::Continue: return CompileBreakContinue(Stmt);
 			case EBangoStmtKind::Return:   return CompileReturn(*Stmt.As<FBangoReturnStmt>());
@@ -2022,11 +2094,13 @@ namespace BangoCompilerPrivate
 			PatchJump(SpawnAt, Here());
 			SpawnBlockIds.Add(BlockParents.Num()); // the block CompileBlock is about to open
 			SpawnLoopBases.Add(Loops.Num());
+			SpawnOpenBlockBases.Add(OpenBlocks.Num());
 			if (Spawn.bDeclaresId)
 			{
 				Scopes.Last().Vars.Pop(); // not visible in the block (see above)
 			}
 			const bool bCompiled = CompileBlock(Spawn.Body);
+			SpawnOpenBlockBases.Pop();
 			if (Spawn.bDeclaresId)
 			{
 				Scopes.Last().Vars.Add(DeclaredId);
@@ -2040,6 +2114,85 @@ namespace BangoCompilerPrivate
 			CurrentLoc = Spawn.Loc;
 			Emit(EBangoOp::Halt);
 			PatchJump(JumpOver, Here());
+			return true;
+		}
+
+		/** The block commands' blocks open here that are this copy's own: all of them, or in a spawn block those opened in it. */
+		int32 GetOpenBlockBase() const
+		{
+			return SpawnOpenBlockBases.Num() > 0 ? SpawnOpenBlockBases.Last() : 0;
+		}
+
+		/**
+		 * The script is about to leave the block commands' blocks opened in the loop being left (bLoopOnly), or all of
+		 * them (a return): each one's close runs first, innermost first, told it's being left early.
+		 */
+		void EmitEarlyCloses(bool bLoopOnly)
+		{
+			for (int32 i = OpenBlocks.Num() - 1; i >= GetOpenBlockBase(); --i)
+			{
+				if (bLoopOnly && OpenBlocks[i].LoopDepth < Loops.Num())
+				{
+					break; // opened before the loop: the jump stays inside it
+				}
+				Emit(EBangoOp::CloseBlock, OpenBlocks[i].Index, 1);
+			}
+		}
+
+		/**
+		 * `@john Speech(0, 1) { ... }`: the command is called as usual (it opens the block), the block's statements
+		 * run, and CloseBlock calls its close handler. The block's state is a hidden local, so it's saved and copied
+		 * as locals are. Every other way out of the block (EmitEarlyCloses, ResolveGotos) runs a CloseBlock first.
+		 */
+		bool CompileBlockCall(const FBangoBlockCallStmt& BlockCall)
+		{
+			const FBangoCallExpr& Call = *BlockCall.Call->As<FBangoCallExpr>();
+			if (bCondition)
+			{
+				return Fail(BlockCall.Loc, TEXT("A condition can't use a command with a block: it only works out its answer."));
+			}
+			const FBangoCommandSignature* Signature = Call.bReflect ? nullptr : Commands.FindCommand(Call.Name);
+			if (!Signature || !Signature->bBlock)
+			{
+				return Fail(Call.NameLoc, FString::Printf(TEXT("'%s' doesn't take a block, so it can't be followed by '{'. End the line with ';'. (A '{' block belongs to an if, else, while, for, forEach, sequence, spawn, switch case or function, or to a command that takes one.)"),
+					*Call.Name));
+			}
+
+			LoopNodeForSlots = BlockCall.Node.bHasMetadata ? BlockCall.Node.NodeID : -2;
+			FBangoBlockInfo Info;
+			Info.Command = AddName(Call.Name);
+			Info.StateSlot = AllocSlot(FBangoType::Int(), TEXT("(block state)"));
+			Info.PhaseSlot = AllocSlot(FBangoType::Int(), TEXT("(block phase)"));
+			LoopNodeForSlots = -1;
+			const int32 Index = Fn->Blocks.Add(Info);
+
+			OpeningBlock = Index;
+			FExprType Unused;
+			const bool bCalled = CompileCall(Call, false, Unused);
+			OpeningBlock = -1;
+			if (!bCalled)
+			{
+				return false;
+			}
+
+			Fn->Blocks[Index].BodyAt = Here();
+			FOpenBlock Open;
+			Open.Index = Index;
+			Open.BlockId = BlockParents.Num(); // the block CompileBlock is about to open
+			Open.LoopDepth = Loops.Num();
+			Open.Name = Call.Name;
+			CommandBlockIds.Add(Open.BlockId);
+			OpenBlocks.Add(Open);
+			const bool bCompiled = CompileBlock(BlockCall.Body);
+			OpenBlocks.Pop();
+			if (!bCompiled)
+			{
+				return false;
+			}
+			CurrentStmt = &BlockCall;
+			CurrentLoc = BlockCall.Loc;
+			Fn->Blocks[Index].CloseAt = Here();
+			Emit(EBangoOp::CloseBlock, Index, 0);
 			return true;
 		}
 
@@ -2498,6 +2651,7 @@ namespace BangoCompilerPrivate
 			{
 				return Fail(Stmt.Loc, FString::Printf(TEXT("'%s' can only be used inside a while, for or forEach loop."), bBreak ? TEXT("break") : TEXT("continue")));
 			}
+			EmitEarlyCloses(true);
 			FLoop& Loop = Loops.Last();
 			if (bBreak)
 			{
@@ -2523,6 +2677,7 @@ namespace BangoCompilerPrivate
 				{
 					return Fail(Return.Value->Loc, TEXT("In a spawn block, 'return;' ends the spawned copy, so it can't give back a value."));
 				}
+				EmitEarlyCloses(false);
 				Emit(EBangoOp::Halt);
 				return true;
 			}
@@ -2549,6 +2704,7 @@ namespace BangoCompilerPrivate
 				{
 					return Fail(Return.Value->Loc, TEXT("The top level of a script can't return a value. Use 'return;' to end the script."));
 				}
+				EmitEarlyCloses(false);
 				Emit(EBangoOp::Halt);
 				return true;
 			}
@@ -2559,6 +2715,7 @@ namespace BangoCompilerPrivate
 				{
 					return Fail(Return.Value->Loc, FString::Printf(TEXT("Function '%s' is void, so it can't return a value."), *FnAst->Name));
 				}
+				EmitEarlyCloses(false);
 				Emit(EBangoOp::Return);
 				return true;
 			}
@@ -2574,6 +2731,7 @@ namespace BangoCompilerPrivate
 				return false;
 			}
 			EmitConvertIfNeeded(FnAst->ReturnType, ValueType);
+			EmitEarlyCloses(false); // the value waits on the stack while the blocks close
 			Emit(EBangoOp::ReturnValue);
 			return true;
 		}
@@ -2604,6 +2762,15 @@ namespace BangoCompilerPrivate
 				return Fail(Goto.NameLoc, TEXT("This goto doesn't say which label to jump to. Fill it in."));
 			}
 			FGotoFixup Fixup;
+			// Which of the block commands' blocks it leaves isn't known until its label is: room for each one's close.
+			for (int32 i = OpenBlocks.Num() - 1; i >= GetOpenBlockBase(); --i)
+			{
+				FGotoClose Close;
+				Close.Instruction = Emit(EBangoOp::Nop);
+				Close.BlockId = OpenBlocks[i].BlockId;
+				Close.Index = OpenBlocks[i].Index;
+				Fixup.Closes.Add(Close);
+			}
 			Fixup.Instruction = Emit(EBangoOp::Jump);
 			Fixup.Name = Goto.Name;
 			Fixup.BlockId = Scopes.Last().BlockId;
@@ -3660,6 +3827,9 @@ namespace BangoCompilerPrivate
 
 		bool CompileCall(const FBangoCallExpr& Call, bool bValueNeeded, FExprType& OutType)
 		{
+			// The call that opens a block command's block (CompileBlockCall): this one, not a call among its arguments.
+			const int32 Opening = OpeningBlock;
+			OpeningBlock = -1;
 			if (Call.bReflect)
 			{
 				return CompileReflectedCall(Call, bValueNeeded, OutType);
@@ -3715,6 +3885,35 @@ namespace BangoCompilerPrivate
 			if (Signature->bHasTarget && !Call.Target)
 			{
 				return Fail(Call.NameLoc, FString::Printf(TEXT("'%s' needs a target: %s"), *Call.Name, *Signature->ToString()));
+			}
+			// A command with a block, and the commands that belong to a block.
+			if (Signature->bBlock && Opening < 0 && !bInferring)
+			{
+				return Fail(Call.NameLoc, FString::Printf(TEXT("'%s' takes a block of statements: write '%s(...)' with a '{ ... }' block after it, not a ';'."), *Call.Name, *Call.Name));
+			}
+			int32 CallBlock = Opening;
+			if (!Signature->InsideOf.IsEmpty() && !bInferring)
+			{
+				const bool bDirectlyInside = OpenBlocks.Num() > GetOpenBlockBase() && OpenBlocks.Last().Name == Signature->InsideOf;
+				if (!bDirectlyInside)
+				{
+					const bool bSomewhereInside = OpenBlocks.ContainsByPredicate([Signature](const FOpenBlock& Open) { return Open.Name == Signature->InsideOf; });
+					if (!bSomewhereInside)
+					{
+						return Fail(Call.NameLoc, FString::Printf(TEXT("'%s' can only be used in the block of '%s', like '%s(...) { %s(...); }'."),
+							*Call.Name, *Signature->InsideOf, *Signature->InsideOf, *Call.Name));
+					}
+					return Fail(Call.NameLoc, FString::Printf(TEXT("'%s' must be written directly in the block of '%s', not in %s inside it."), *Call.Name, *Signature->InsideOf,
+						OpenBlocks.Num() > GetOpenBlockBase() ? *FString::Printf(TEXT("the block of '%s'"), *OpenBlocks.Last().Name) : TEXT("a spawn block")));
+				}
+				if (Opening >= 0)
+				{
+					Fn->Blocks[Opening].Parent = OpenBlocks.Last().Index; // it opens a block of its own, in the one it belongs to
+				}
+				else
+				{
+					CallBlock = OpenBlocks.Last().Index;
+				}
 			}
 			if (!bValueNeeded && !bInferring && Signature->MustUseResult())
 			{
@@ -3840,7 +4039,7 @@ namespace BangoCompilerPrivate
 			}
 			else
 			{
-				Emit(EBangoOp::CallCommand, AddName(Call.Name), Call.Args.Num(), (Call.Target ? Bango::CallHasTarget : 0) | CallFlags);
+				Emit(EBangoOp::CallCommand, AddName(Call.Name), Call.Args.Num(), (Call.Target ? Bango::CallHasTarget : 0) | CallFlags | (Opening >= 0 ? Bango::CallOpensBlock : 0) | ((CallBlock + 1) << Bango::CallBlockShift));
 			}
 			if (Signature->bReturnsValue && TypeArgs.IsValidIndex(Signature->ReturnTypeVar))
 			{

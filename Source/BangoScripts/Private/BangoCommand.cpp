@@ -488,6 +488,18 @@ FBangoCommandSignature& FBangoCommandSignature::Discardable()
 	return *this;
 }
 
+FBangoCommandSignature& FBangoCommandSignature::Block()
+{
+	bBlock = true;
+	return *this;
+}
+
+FBangoCommandSignature& FBangoCommandSignature::Inside(const FString& BlockCommand)
+{
+	InsideOf = BlockCommand;
+	return *this;
+}
+
 FBangoCommandSignature& FBangoCommandSignature::InCategory(const FString& InCategory)
 {
 	CategoryName = InCategory;
@@ -524,6 +536,21 @@ bool FBangoCommandTable::Add(const FBangoCommand& Command, FString& OutError)
 	if (!Command.Signature.BuildError.IsEmpty())
 	{
 		OutError = Command.Signature.BuildError;
+		return false;
+	}
+	if (Command.Signature.bBlock && Command.Signature.bReturnsValue)
+	{
+		OutError = FString::Printf(TEXT("'%s' takes a block, so it can't return a value."), *Name);
+		return false;
+	}
+	if ((Command.Signature.bBlock || !Command.Signature.InsideOf.IsEmpty()) && Command.Signature.bMutableTarget)
+	{
+		OutError = FString::Printf(TEXT("'%s' takes a block or belongs to one, so it can't change its target (MutableTarget)."), *Name);
+		return false;
+	}
+	if (Command.Close && !Command.Signature.bBlock)
+	{
+		OutError = FString::Printf(TEXT("'%s' has a Close handler, but doesn't take a block (Block)."), *Name);
 		return false;
 	}
 	for (int32 i = 0; i < Command.Signature.TypeParams.Num(); ++i)

@@ -156,6 +156,12 @@ static FString BangoCheckGraphRoundTrip(const TCHAR* Name, const FString& Source
 /** Extra scripts for the round-trip check: comments, disconnected nodes, functions, long lines. */
 static const TCHAR* const GBangoGraphRoundTripSources[] =
 {
+	// Commands with a block (section 7): a node with a Body output; its block's statements are nodes of their own.
+	TEXT("@john Speech(0, 1)\n{\n\tLine(INVTEXT(\"Hello\"));\n\tif (metBefore)\n\t{\n\t\tLine(INVTEXT(\"Again\"));\n\t}\n\tLine(INVTEXT(\"Bye\"));\n}\nWriteLog(\"done\");\n"),
+	TEXT("Speech(0) {\n\tLine(1);\n}\n"),
+	TEXT("Speech(0)        //@4(2, 3)\n{\n}\nSpeech(1)        //@5(2, 6)\n{\n\tLine(1);     //@6(4, 7)\n}\n"),
+	TEXT("global bool hasKey;\n\nwhile (true)\n{\n\t@john Prompt()\n\t{\n\t\tOption(INVTEXT(\"Who are you?\"))\n\t\t{\n\t\t\t@john Speech(0, 1)\n\t\t\t{\n\t\t\t\tLine(INVTEXT(\"I'm John.\"));\n\t\t\t}\n\t\t}\n\t\tif (hasKey)\n\t\t{\n\t\t\tOption(INVTEXT(\"I found your key.\"))\n\t\t\t{\n\t\t\t\thasKey = false;\n\t\t\t}\n\t\t}\n\t\tOption(INVTEXT(\"Goodbye.\"))\n\t\t{\n\t\t\tbreak;\n\t\t}\n\t}\n}\n"),
+	TEXT("function void Talk(entity _who)\n{\n\t_who Speech(0, 1)\n\t{\n\t\tLine(1);\n\t\treturn;\n\t}\n}\n\n/*\nSpeech(0)\n{\n\tLine(1);\n}\n*/\nTalk(@john);\n"),
 	// The spec's example (section 13).
 	TEXT("global int foundThings;            //@1(0, 0)\n")
 	TEXT("global bool playerHasGun;          //@2(0, 1)\n")

@@ -1,8 +1,14 @@
-# Bango Language Spec (draft v0.120)
+# Bango Language Spec (draft v0.123)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.123:** **the graph editor shows commands with a block** (section 7; section 1's table): a block command is its command's node with a **Body** output for its block and **Then** for what follows, and the statements in the block are nodes wired from Body. A script that has one is no longer text-only.
+
+**Changes in v0.122:** **a block command can skip its block, and run one of the skipped blocks written in it** (section 7, Commands with a block): `Call.SkipBlock()`, `Call.RunBlock(Number)`, `Call.BlockNumber` and `Call.OuterBlockState`, which is what a prompt and its options need. **A command is told when its script stops for good**: `FBangoCommand::Abandoned` runs for the command a script was waiting on, and for the command of each block left open, when the script fails or is terminated. A spawn block written in a block command's block now starts with the blocks around it not open (it had a copy of their state).
+
+**Changes in v0.121:** **commands with a block**: a command can take a block of statements of its own, `@john Speech(0, 1) { Line(...); }`, and other commands can belong to that block (section 7, Commands with a block). The command runs at the opening brace and its close handler at the closing one; the block has a state its commands share, kept with the script's variables; a command that belongs to the block can end it; and `return`, `break`, `continue` and `goto` can leave it, with the close handler run first. In C++: `FBangoCommandSignature::Block` and `Inside`, `FBangoCommand::Close`, and `FBangoCommandCall::BlockState`, `bClosing`, `bLeftEarly` and `EndBlock`. The graph editor can't show a script with one yet: it's edited as text. The plugin has no such commands of its own.
 
 **Changes in v0.120:** **an inline script is named for its owner's class, not for the object**: `BP_Door (inline script)`, where it was `Door_3 (inline script)`, so every object of a class with the same script shares one compiled program instead of each compiling its own. **An error about an inline script says which object and which of its scripts**: `... (on 'Door_3', its script 'Lock.OnOpened')`, found by looking through the owner's properties only when there's an error to show (`Bango::DescribeInlineScriptOwner`; section 10).
 
@@ -243,7 +249,7 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
 ## 1. Lines and nodes
 
 - **One statement line = one graph node.** So is a reroute line (below).
-- **A statement must fit on one line**, from its first token to its `;` (or, for `if`, `while`, `for` and `forEach`, to the `)` that ends the header). A statement that continues onto the next line is a compile error.
+- **A statement must fit on one line**, from its first token to its `;` (or, for `if`, `while`, `for` and `forEach`, and a command with a block, to the `)` that ends the header). A statement that continues onto the next line is a compile error.
 - **Several statements can share a line, if it has no node metadata:** `Sleep(4); player AddItem("Pistol"); WriteScreen("You got a pistol!");`, or `if (_a) { WriteScreen(...); } Sleep(1);`. Each is still a node of its own; they just haven't been placed yet. A line with node metadata (`//@`) is one node, so it holds one statement: a second one there is a compile error. The graph editor writes every statement on a line of its own, with its metadata. (This is mostly for inline scripts, section 15, which are often one line.)
 - Lines that contain only `{`, `}`, `};` or `else` are structure. In the graph they become wires and pins, not nodes. Structure tokens may share a line with a statement (`if (a) {`, `} else if (b) {`).
 - Node metadata goes in a trailing comment that the compiler ignores:
@@ -322,6 +328,7 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
 | `forEach (_x in arr)` | exec in → Do, Then |
 | `sequence { ... } { ... }` | exec in → Scope 0, Scope 1, Scope 2, ... (one per block), Then |
 | `spawn { ... }` | exec in → Run, Then |
+| A command with a block, `Name(...) { ... }` (section 7) | exec in → Body (its block), Then; the node is the command's, with its fields |
 | `waitUntil (cond);`, optionally with `heldFor (seconds)` and `timeout (seconds) { ... }` | exec in → Timeout (its block), Then ("Wait Until", showing the condition, the hold's seconds and the timeout's seconds) |
 | `switch (value) { case ...: { } default: { } }` | exec in → one output per case (beside a box with its values), Default, Then |
 | `break;` / `continue;` | exec in → exec out |
@@ -870,6 +877,7 @@ _t = Random(3.0, 5.0);
   - **Variadic:** optionally, any number of extra arguments of any type after the parameters (like `WriteLog`'s `{0}` values).
   - **Return type:** optional. It can be a type parameter: the command then gives back what its arguments made it (`Max`: an `int` for ints, otherwise a `float`).
   - **Pure:** `.Pure()` says the command's answer depends only on its arguments: not on the world, the time, chance or anything else that changes by itself. A condition or `waitUntil` that calls only pure commands isn't polled for them (sections 8 and 10). The plugin's math and vector commands, `Count` and `ToEntity` are pure; `Random`, `Time`, `DeltaTime`, `InterpTo`, `GetPos` and the like aren't. Don't mark a command pure unless it is: a condition calling it would miss its changes.
+  - **Block:** `.Block()` says the command takes a block of statements, and `.Inside(TEXT("Name"))` that it belongs to the block of the command named (Commands with a block, below).
   - **Discardable:** for a command with a return type, whether a script may call it on a line of its own and throw the value away (`.Discardable()`). Without it, the value **must be used** (see below).
 - Calling a command with the wrong number of arguments, or an argument or target of the wrong type, is a compile error. The error shows the command's signature.
 - Arguments and targets that are undeclared globals are type-checked when the script runs.
@@ -921,6 +929,99 @@ A command marked `.MutableTarget()` changes its target in place: `_list Push(4);
 - **It can't wait**: returning `Pending` (or having a `Poll` handler) is an error.
 - Errors say what it was called on: *"Pop on '_list': Pop on an empty array."*
 - `Call.bResultUsed` says whether the script uses the command's result (`_x = _list Pop();`) or threw it away on a line of its own (`_list Pop();`, for a Discardable command): `Pop` uses it to refuse to hand back a `nil` element, which is fine to throw away. Every command's code can read it.
+
+### Commands with a block
+A command can take a **block** of statements of its own, and other commands can **belong** to that block:
+
+```
+@john Speech(0, 1)
+{
+	Line(INVTEXT("Hello World!"));
+	if (metBefore)
+	{
+		Line(INVTEXT("Good to see you again."));
+	}
+	Line(INVTEXT("I'm talking! I'm really talking!"));
+}
+```
+
+`Speech` and `Line` here are a game's commands; the plugin has none of this kind. What a block command does with its block is up to it: play each line as the script reaches it, play only the first, or gather them all and choose one at the closing brace.
+
+- **The block follows the call** the way a block follows an `if (...)`: the `{` on the call's line or on the next. The call, up to its `)`, must be on one line, and is the statement's node; there's no `;`.
+- **Which commands take a block is part of their signature** (`.Block()`). Calling one without a block (`Speech(0, 1);`) is a compile error, and so is a block after any other call: *"'Plain' doesn't take a block, so it can't be followed by '{'."*
+- **A command that belongs to a block** (`.Inside(TEXT("Speech"))`) can only be called there: *"'Line' can only be used in the block of 'Speech', like 'Speech(...) { Line(...); }'."* It must be written **directly** in the block, at any depth of `if`, loop, `switch` or `sequence`, but not in another block command's block inside it, not in a `spawn` block inside it, and not in a function the block calls: *"'Line' must be written directly in the block of 'Speech', not in the block of 'Other'."*
+- **Anything can be in the block**: other statements, other commands, waiting, other block commands (each has a state of its own, below).
+- **How it runs:**
+  1. At the opening brace the command runs as any command does, with its target and arguments. It may pause the script.
+  2. The statements in the block run. A command that belongs to the block can **end the block**: when it's done, the script goes straight to the closing brace, whatever statement it was in the middle of.
+  3. At the closing brace the command's **close** handler runs. It may pause the script too.
+- **Leaving the block early.** `return`, `break`, `continue` and `goto` can leave a block, and the close handler runs first, told that the block is being left early. `break` and `continue` mean what they always do: they act on the nearest loop, and pass through any blocks on the way out to it. A `break` in a loop that is itself inside the block leaves only that loop. `goto` can't jump **into** a block from outside it (the command that opens it wouldn't have run); inside one, it jumps freely.
+- **A block command can't return a value or change its target** (`MutableTarget`), and a command that belongs to a block can't change its target. A condition (section 10) can't use a block command.
+- **The block's state.** While a block is open it has one value, of any type, that its command and the commands that belong to it can read and change: `Call.BlockState`. It's nil when the block opens and thrown away after it closes. It's kept with the script's variables (it's a hidden local), so it's saved and loaded with them: keep in it only Bango values. A `spawn` block written in a block is a separate copy of the script, and for the copy the blocks around it aren't open.
+- **Skipping a block, and running one later.** A block command can have its block **skipped** when the script reaches it: the script goes on after the block, and its close handler isn't called. And at its closing brace, a block command can **pick one of the skipped blocks** written directly in its own block: that block runs, its command's close handler runs at its end as usual, and then the script goes on after the block of the command that picked it. That's how a set of choices is written, each with what it leads to:
+  ```
+  @john Prompt()
+  {
+  	Option(LOCTEXT("Who", "Who are you?"))
+  	{
+  		@john Speech(0, 1)
+  		{
+  			Line(LOCTEXT("Name", "I'm John."));
+  		}
+  	}
+  	if (hasKey)
+  	{
+  		Option(LOCTEXT("Key", "I found your key."))
+  		{
+  			hasKey = false;
+  		}
+  	}
+  	Option(LOCTEXT("Bye", "Goodbye."))
+  	{
+  	}
+  }
+  ```
+  Each `Option` the script reaches tells the prompt about itself and has its block skipped; at the closing brace `Prompt` waits for the player and picks one. Which options there are is settled when the script reaches the closing brace: an `if` around one is checked on the way there, once. A conversation that comes back to the same choices is a loop around the prompt, with `break;` in the option that ends it. Leaving a picked block early (`break`, `return`) closes it, as leaving any block does; the block of the command that picked it has already been closed, and isn't closed again.
+- **When the script stops for good** (it fails, or is terminated) while a block is open, the close handler doesn't run: the block command's **abandoned** handler does, for each open block, innermost first. A command the script was waiting on is told the same way, block or no block. Neither happens when the script's world is torn down.
+- **In the graph** a block command is its command's node, with the same fields as any command's, and two outputs: **Body**, which leads to the statements in its block, and **Then**, what follows the block. The statements in the block are nodes of their own, wired from Body one after another; a command that belongs to the block is an ordinary command node there. A block with nothing in it has nothing wired to Body. In the node menu, a command that takes a block makes this kind of node. (Drawing a whole block as one node with a row per statement isn't there yet.)
+
+In C++:
+
+```cpp
+FBangoCommand Speech;
+Speech.Signature = FBangoCommandSignature::Make(TEXT("Speech"))
+	.Target(FBangoType::Entity()).Param(TEXT("Mood"), FBangoType::Int()).Param(TEXT("Mode"), FBangoType::Int())
+	.Block();
+Speech.Start = [](FBangoCommandCall& Call)
+{
+	// The opening brace. What the lines and the close need goes in the state: here, the mode and a count of lines.
+	*Call.BlockState = FBangoValue::MakeArray(FBangoType::Int(), { Call.Args[1], FBangoValue::MakeInt(0) });
+	return EBangoCommandResult::Done;
+};
+Speech.Close = [](FBangoCommandCall& Call)
+{
+	// The closing brace, or (Call.bLeftEarly) the script leaving the block early. No target or arguments here.
+	return EBangoCommandResult::Done;
+};
+
+FBangoCommand Line;
+Line.Signature = FBangoCommandSignature::Make(TEXT("Line")).Param(TEXT("Text"), FBangoType::Text()).Inside(TEXT("Speech"));
+Line.Start = [](FBangoCommandCall& Call)
+{
+	// Call.BlockState is the Speech block's state. To end the block after this line:
+	Call.EndBlock();
+	return EBangoCommandResult::Done;
+};
+```
+
+- `Start` (and `Poll`, while it waits) of a block command, and of a command that belongs to a block, has `Call.BlockState`: a pointer to the state, good for that one call only. It's null for any other command.
+- `Close` is optional: without it nothing happens at the closing brace. It has `Call.BlockState` and `Call.bLeftEarly`, and no target or arguments. If it returns `Pending`, the command's `Poll` is called until it's done, with `Call.bClosing` true (it's false while `Poll` is waiting on `Start`), so one `Poll` serves both.
+- `Call.EndBlock()` can be called from `Start` or `Poll` of a command that belongs to a block, or of the block command itself (its block's statements are then passed over, and its close runs). From a command that's in no block, the script stops with an error.
+- `Call.SkipBlock()`, from a block command's `Start` (or `Poll` while it waits on `Start`): its block is skipped, and not closed.
+- `Call.BlockNumber` is a block command's own block, in `Start`, `Poll` and `Close`. A command that belongs to a block and takes one of its own (`.Inside(TEXT("Prompt")).Block()`, like `Option`) also has `Call.OuterBlockState` in `Start` and `Poll`: the state of the block it's written in, where it puts its number for that block's command to find. (`Call.BlockState` is its own block's.)
+- `Call.RunBlock(Number)`, from `Close` (or `Poll` while it waits on `Close`) at the closing brace: the block with that number runs. It must be a block written directly in this command's block, and skipped; otherwise, or if the script is leaving the block early (`Call.bLeftEarly`), the script stops with an error.
+- `FBangoCommand::Abandoned` is a fourth handler, optional, for any command: it runs when the script stops for good while it was waiting on the command (`Call.LatentState` is what `Poll` would have had), or, for a block command, while its block was open (`Call.bBlockAbandoned` is then true, and `Call.BlockState` is the block's). A block command whose close was being waited on is told both ways. What it returns is ignored, and it mustn't start or stop scripts. A command that itself returned `Failed` isn't told.
+- `FBangoCommandTable::Add` refuses a block command that returns a value, a `Close` handler on a command without `.Block()`, and `MutableTarget` with either.
 
 ### Calling Blueprint functions (`call`)
 `target call Name(args)` calls a Blueprint function of the target's actor, by reflection, without a C++ command for it:
@@ -1258,6 +1359,7 @@ goto Hub;
   ```
 - It can't jump **into a `for` or `forEach` loop** from outside it (into a block inside the loop either): the loop's start, which gives its variable its value (and a `forEach` its copy of the array), wouldn't have run. *"'goto In' jumps into a for or forEach loop (label 'In' is on line 4, inside a loop this goto is not in), which would skip the loop's start, where its variable gets its value. ..."* Inside the loop, jumping around is fine.
 - It can't jump **into a spawn block**, or out of one (spawn, above): a separate copy of the script runs it.
+- It can't jump **into a command's block** (section 7, Commands with a block) from outside it: the command that opens the block wouldn't have run. It can jump out of one, and the block is closed on the way.
 - `goto` can't jump forward past a local's declaration to a label where that local is visible (section 4, Locals).
 
 ---
