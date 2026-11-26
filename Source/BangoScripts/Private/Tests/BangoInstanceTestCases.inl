@@ -1555,10 +1555,44 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 					*FString::Printf(TEXT("persistent local: an error names it. Got: %s"), *Message));
 			}
 
+			// Which script and which holder: an inline script's ID (the scope) and a component holding it keep theirs apart.
+			if (Counter)
+			{
+				auto RunScoped = [&](const TCHAR* Scope, const TCHAR* Holder)
+				{
+					FBangoScriptOwner ScopedOwner;
+					ScopedOwner.BangoName = TEXT("door");
+					ScopedOwner.Holder = Holder;
+					FBangoInstance ScopedInstance;
+					ScopedInstance.SetOwner(ScopedOwner);
+					ScopedInstance.SetPersistentScope(Scope);
+					FBangoRuntimeError ScopedError;
+					const bool bScopedRan = ScopedInstance.Start(Counter, Commands, Store, ++NextId, ScopedError);
+					ScopedInstance.Resume(PersistContext);
+					const FBangoValue* Kept = Store.Find(ScopedInstance.GetPersistentKey(*Counter, Counter->PersistentLocals[0]));
+					return bScopedRan && Kept && !Kept->IsNil() ? Kept->GetInt() : (int64)-1;
+				};
+				RunScoped(TEXT("inline A"), TEXT(""));
+				const int64 A = RunScoped(TEXT("inline A"), TEXT(""));
+				const int64 B = RunScoped(TEXT("inline B"), TEXT(""));
+				const int64 Held = RunScoped(TEXT("inline A"), TEXT("door|Trigger"));
+				const int64 OtherHeld = RunScoped(TEXT("inline A"), TEXT("door|Trigger2"));
+				Expect(A == 2 && B == 1 && Held == 1 && OtherHeld == 1,
+					*FString::Printf(TEXT("persistent local: kept apart by script ID and by holder (%lld %lld %lld %lld)"), (long long)A, (long long)B, (long long)Held, (long long)OtherHeld));
+				FBangoScriptOwner Door;
+				Door.BangoName = TEXT("door");
+				FBangoInstance KeyInstance;
+				KeyInstance.SetOwner(Door);
+				KeyInstance.SetPersistentScope(TEXT("inline A"));
+				const FString Key = KeyInstance.GetPersistentKey(*Counter, Counter->PersistentLocals[0]);
+				Expect(Key.Contains(TEXT("inline A|door|_count")) && !Key.Contains(TEXT("counter.bango")), *FString::Printf(TEXT("persistent local: the key has the scope in place of the file name. Got: %s"), *Key));
+			}
+
 			// Saved and loaded with the store, and found again by a loaded script.
 			{
 				TSharedPtr<FBangoProgram> Sleeper = CompilePersistent(TEXT("persistent int _k ?= 1;\nSleep();\n_k++;"), TEXT("sleeper.bango"));
 				FBangoInstance Instance;
+				Instance.SetPersistentScope(TEXT("inline S"));
 				Expect(Sleeper && RunFor(Sleeper, TEXT("john"), Instance), TEXT("persistent save: runs"));
 				TArray<uint8> StoreBytes;
 				TArray<uint8> InstanceBytes;
@@ -1583,6 +1617,8 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				FBangoScriptOwner John;
 				John.BangoName = TEXT("john");
 				KeyInstance.SetOwner(John);
+				KeyInstance.SetPersistentScope(TEXT("inline S"));
+				Expect(LoadedInstance.GetPersistentScope() == TEXT("inline S"), TEXT("persistent save: the scope is saved"));
 				const FBangoValue* K = Sleeper ? Loaded.Find(KeyInstance.GetPersistentKey(*Sleeper, Sleeper->PersistentLocals[0])) : nullptr;
 				Expect(K && !K->IsNil() && K->GetInt() == 2 && Loaded.IsPersistent(KeyInstance.GetPersistentKey(*Sleeper, Sleeper->PersistentLocals[0])),
 					TEXT("persistent save: the loaded script carries on with its kept value"));

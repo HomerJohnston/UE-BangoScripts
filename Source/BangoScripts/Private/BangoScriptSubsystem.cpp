@@ -19,6 +19,9 @@
 #include "Serialization/MemoryReader.h"
 #include "Serialization/MemoryWriter.h"
 #include "UObject/SoftObjectPath.h"
+#include "Hash/CityHash.h"
+#include "HAL/IConsoleManager.h"
+#include "Components/ActorComponent.h"
 
 namespace BangoScriptSubsystemPrivate
 {
@@ -289,8 +292,97 @@ FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FBangoInlineScript& Script
 	{
 		Running->InstanceInputs.Add(Input.Decl);
 	}
-	Running->Instance.SetOwner(FindScriptOwner(Owner));
+	FBangoScriptOwner ScriptOwner = FindScriptOwner(Owner);
+	if (Program->PersistentLocals.Num() > 0)
+	{
+		// Only a script with persistent variables needs to know which script and which component it is (they're kept under those).
+		ScriptOwner.Holder = FindScriptHolder(Owner, Script.GetHolder());
+		const FString Scope = GetInlineScriptScope(Script);
+		Running->Instance.SetPersistentScope(Scope);
+#if !UE_BUILD_SHIPPING
+		CheckInlineScriptIds(Owner, Script.GetHolder());
+		if (!Script.ScriptId.IsValid())
+		{
+			bool bWarned = false;
+			WarnedUnnamedScripts.Add(Scope, &bWarned);
+			if (!bWarned)
+			{
+				Bango::ReportNote(FString::Printf(TEXT("%s has persistent variables but no ID, so they're kept for its text: editing it starts them again. Edit it once in the editor and save, to give it one."),
+					*Name), FColor::Yellow, true);
+			}
+		}
+#endif
+	}
+	Running->Instance.SetOwner(MoveTemp(ScriptOwner));
 	return StartScript(Program, Running, Args, &OutError);
+}
+
+#if !UE_BUILD_SHIPPING
+namespace BangoScriptSubsystemPrivate
+{
+	static TAutoConsoleVariable<bool> CVarCheckInlineScriptIds(
+		TEXT("Bango.CheckInlineScriptIds"),
+		true,
+		TEXT("Development and Test builds: the first time an actor spawns an inline script with persistent variables, check its scripts' IDs once, and show a note for two with the same one (they'd share their persistent variables)."));
+}
+
+void UBangoScriptSubsystem::CheckInlineScriptIds(const UObject* Owner, const UActorComponent* HolderHint)
+{
+	if (!BangoScriptSubsystemPrivate::CVarCheckInlineScriptIds.GetValueOnGameThread())
+	{
+		return;
+	}
+	const UActorComponent* OwnerComponent = HolderHint ? HolderHint : Cast<UActorComponent>(Owner);
+	const AActor* Actor = OwnerComponent ? OwnerComponent->GetOwner() : Cast<AActor>(Owner);
+	if (!Actor)
+	{
+		return;
+	}
+	bool bChecked = false;
+	CheckedIdOwners.Add(Actor, &bChecked);
+	if (bChecked)
+	{
+		return; // once for each actor while this world lasts
+	}
+	// Read only here.
+	const TArray<UObject*> Unit = Bango::GetInlineScriptIdUnit(const_cast<AActor*>(Actor));
+	for (const Bango::FBangoInlineScriptIdProblem& Problem : Bango::FindInlineScriptIdProblems(Unit, false))
+	{
+		auto Where = [Actor](const UObject* Object, const FString& Path)
+		{
+			return Object == Actor ? Path : FString::Printf(TEXT("%s.%s"), *Object->GetName(), *Path);
+		};
+		Bango::ReportNote(FString::Printf(TEXT("'%s' has two inline scripts with the same ID, '%s' and '%s', so they share their persistent variables. Validate its Blueprint or level (Asset Actions > Validate) and use the Fix."),
+			*Actor->GetActorNameOrLabel(), *Where(Problem.OtherObject, Problem.OtherPath), *Where(Problem.Object, Problem.Path)), FColor::Yellow, true);
+	}
+}
+#endif
+
+FString UBangoScriptSubsystem::GetInlineScriptScope(const FBangoInlineScriptBase& Script)
+{
+	return Script.ScriptId.IsValid()
+		? FString(TEXT("inline ")) + Script.ScriptId.ToString(EGuidFormats::Digits)
+		: GetTextScope(Script.Source);
+}
+
+FString UBangoScriptSubsystem::GetTextScope(const FString& Source)
+{
+	const uint64 Hash = CityHash64(reinterpret_cast<const char*>(*Source), Source.Len() * sizeof(TCHAR));
+	return FString::Printf(TEXT("text %016llx"), (unsigned long long)Hash);
+}
+
+FString UBangoScriptSubsystem::FindScriptHolder(const UObject* Owner, const UActorComponent* HolderHint)
+{
+	const UActorComponent* Holder = HolderHint ? HolderHint : Cast<UActorComponent>(Owner);
+	if (!Holder)
+	{
+		return FString(); // the actor holds it: kept for the actor
+	}
+	UBangoActorRegistry* Registry = UBangoActorRegistry::Get(Holder);
+	FString Error;
+	const FString ID = Registry ? Registry->GetOrMakeEntityID(Holder, Error) : FString();
+	// Not in a game world (yet): kept for its actor and its name, as a Component ID would be.
+	return !ID.IsEmpty() ? ID : FString::Printf(TEXT("%s|%s"), Holder->GetOwner() ? *Holder->GetOwner()->GetName() : TEXT(""), *Holder->GetName());
 }
 
 FBangoScriptHandle UBangoScriptSubsystem::SpawnChild(int64 ParentId, const FString& ScriptPath, const TArray<FBangoValue>& Args, FString& OutError)
@@ -634,12 +726,22 @@ FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FString& ScriptPath, const
 FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FString& ScriptPath, const TArray<FBangoValue>& Args, const UObject* Owner, FString& OutError)
 {
 	OutError.Reset();
-	return SpawnPath(ScriptPath, Args, FindScriptOwner(Owner), &OutError);
+	return SpawnPath(ScriptPath, Args, FindSpawnOwner(Owner), &OutError);
 }
 
 FBangoScriptHandle UBangoScriptSubsystem::Spawn(const FString& ScriptPath, const TArray<FBangoValue>& Args, const UObject* Owner)
 {
-	return SpawnPath(ScriptPath, Args, FindScriptOwner(Owner), nullptr);
+	return SpawnPath(ScriptPath, Args, FindSpawnOwner(Owner), nullptr);
+}
+
+FBangoScriptOwner UBangoScriptSubsystem::FindSpawnOwner(const UObject* Owner)
+{
+	FBangoScriptOwner Result = FindScriptOwner(Owner);
+	if (Cast<UActorComponent>(Owner))
+	{
+		Result.Holder = FindScriptHolder(Owner, nullptr); // a component as the owner: its script's persistent variables are kept for it
+	}
+	return Result;
 }
 
 FBangoScriptHandle UBangoScriptSubsystem::SpawnPath(const FString& ScriptPath, const TArray<FBangoValue>& Args, const FBangoScriptOwner& Owner, FString* OutError)
@@ -690,7 +792,7 @@ FBangoScriptHandle UBangoScriptSubsystem::Spawn(const UBangoScriptAsset* ScriptA
 	}
 	TSharedPtr<FRunningScript> Script = MakeShared<FRunningScript>();
 	Script->Path = DisplayPath;
-	Script->Instance.SetOwner(FindScriptOwner(Owner));
+	Script->Instance.SetOwner(FindSpawnOwner(Owner));
 	return StartScript(Program, Script, Args, &OutError);
 }
 
@@ -802,7 +904,13 @@ FBangoScriptHandle UBangoScriptSubsystem::SpawnFromSource(const FString& Source,
 	Script->Path = ScriptName;
 	Script->bFromSource = true;
 	Script->Source = MakeShared<FString>(Source);
-	Script->Instance.SetOwner(FindScriptOwner(Owner));
+	FBangoScriptOwner ScriptOwner = FindScriptOwner(Owner);
+	if (Program->PersistentLocals.Num() > 0)
+	{
+		ScriptOwner.Holder = FindScriptHolder(Owner, nullptr);
+		Script->Instance.SetPersistentScope(GetTextScope(Source)); // it has no ID: kept for its text
+	}
+	Script->Instance.SetOwner(MoveTemp(ScriptOwner));
 	return StartScript(Program, Script, Args);
 }
 

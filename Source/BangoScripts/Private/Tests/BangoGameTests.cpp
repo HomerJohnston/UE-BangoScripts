@@ -17,6 +17,7 @@
 #include "BangoScriptAsset.h"
 #include "BangoScriptCache.h"
 #include "BangoScriptSubsystem.h"
+#include "BangoGlobalsSubsystem.h"
 #include "UObject/Package.h"
 #include "BangoIDActorComponent.h"
 #include "BangoEntityTestComponent.h"
@@ -821,6 +822,31 @@ bool FBangoEntityIDsTest::RunTest(const FString& Parameters)
 			TestTrue(TEXT("which script: one that isn't the owner's only names the owner"), OnlyObject.StartsWith(TEXT("on '")) && !OnlyObject.Contains(TEXT("its script")));
 			TestTrue(TEXT("which script: nothing without an owner"), Bango::DescribeInlineScriptOwner(nullptr, &Keeper->OnOpened, nullptr).IsEmpty());
 		}
+		{
+			// Inline script IDs (persistent variables are kept under them): two the same in one actor, and one missing.
+			Keeper->OnOpened.Source = TEXT("WriteScreen(\"opened\");");
+			Keeper->OnClosed.Source = TEXT("WriteScreen(\"closed\");");
+			Keeper->OnOpened.ScriptId = FGuid::NewGuid();
+			Keeper->OnClosed.ScriptId = FGuid::NewGuid();
+			Keeper->Steps[0].Source.Reset();
+			Keeper->Steps[0].ScriptId = FGuid();
+			Keeper->Steps[1].ScriptId = FGuid::NewGuid();
+			const TArray<UObject*> Unit = Bango::GetInlineScriptIdUnit(Door);
+			TestTrue(TEXT("ids: the unit is the actor and its components"), Unit.Num() > 1 && Unit[0] == Door && Unit.Contains(Keeper));
+			TestEqual(TEXT("ids: all different, none missing: no problems"), Bango::FindInlineScriptIdProblems(Unit, true).Num(), 0);
+			TestTrue(TEXT("ids: a script is found by where it is"), Bango::FindInlineScriptAt(Keeper, TEXT("Steps[1]")) == &Keeper->Steps[1]);
+			TestNull(TEXT("ids: nothing where there's none"), Bango::FindInlineScriptAt(Keeper, TEXT("Steps[7]")));
+
+			Keeper->Steps[1].ScriptId = Keeper->OnOpened.ScriptId; // copied from it
+			TArray<Bango::FBangoInlineScriptIdProblem> Problems = Bango::FindInlineScriptIdProblems(Unit, true);
+			TestTrue(TEXT("ids: a copied ID is found, with the one it was copied from"), Problems.Num() == 1 && !Problems[0].bMissing
+				&& Problems[0].Object == Keeper && Problems[0].Path == TEXT("Steps[1]") && Problems[0].OtherObject == Keeper && Problems[0].OtherPath == TEXT("OnOpened"));
+
+			Keeper->Steps[1].ScriptId = FGuid(); // text and no ID
+			Problems = Bango::FindInlineScriptIdProblems(Unit, true);
+			TestTrue(TEXT("ids: a missing ID is found (an empty script without one isn't)"), Problems.Num() == 1 && Problems[0].bMissing && Problems[0].Path == TEXT("Steps[1]"));
+			TestEqual(TEXT("ids: and not looked for without bMissing"), Bango::FindInlineScriptIdProblems(Unit, false).Num(), 0);
+		}
 		// As if loaded from a save: a new component holding that ID, registered as it's initialized, is found by it.
 		Keeper->DestroyComponent();
 		TestNull(TEXT("a removed component isn't found"), Registry->FindEntity(KeptID));
@@ -835,6 +861,59 @@ bool FBangoEntityIDsTest::RunTest(const FString& Parameters)
 		FString CallError;
 		TestTrue(TEXT("call on a component"), Bango::CallBangoCallable(World, FBangoValue::MakeEntity(KeptID), TEXT("Poke"), { FBangoValue::MakeInt(3) }, false, CallResult, CallError));
 		TestEqual(TEXT("it ran on it"), Loaded->Pokes, 3);
+
+		// Persistent variables: kept for each inline script (its ID) and for the component holding it.
+		{
+			UBangoScriptSubsystem* Scripts = World->GetSubsystem<UBangoScriptSubsystem>();
+			UBangoGlobalsSubsystem* Globals = UBangoGlobalsSubsystem::Get(World);
+			if (TestNotNull(TEXT("persistent: script subsystem"), Scripts) && TestNotNull(TEXT("persistent: globals"), Globals))
+			{
+				FBangoInlineScript Counting;
+				Counting.Source = TEXT("persistent int _n ?= 0;\n_n++;");
+				Counting.ScriptId = FGuid::NewGuid();
+				FBangoInlineScript OtherCounting = Counting;
+				OtherCounting.ScriptId = FGuid::NewGuid();
+				const FString DoorID = Registry->GetOrMakeEntityID(Door, Error);
+				auto KeptFor = [&](const FBangoInlineScript& Script, const FString& Holder) -> int64
+				{
+					TSharedPtr<const FBangoProgram> CountProgram;
+					FString CountError;
+					if (!FBangoModule::Get().GetInlineProgram(Script, UBangoScriptSubsystem::GetInlineScriptName(Door), CountProgram, CountError) || CountProgram->PersistentLocals.Num() != 1)
+					{
+						return -2;
+					}
+					FBangoInstance KeyInstance;
+					FBangoScriptOwner KeyOwner;
+					KeyOwner.BangoName = DoorID;
+					KeyOwner.Holder = Holder;
+					KeyInstance.SetOwner(KeyOwner);
+					KeyInstance.SetPersistentScope(UBangoScriptSubsystem::GetInlineScriptScope(Script));
+					const FBangoValue* Kept = Globals->GetStore().Find(KeyInstance.GetPersistentKey(*CountProgram, CountProgram->PersistentLocals[0]));
+					return Kept && !Kept->IsNil() ? Kept->GetInt() : -1;
+				};
+				Scripts->Spawn(Counting, TArray<FBangoValue>(), Door);
+				Scripts->Spawn(Counting, TArray<FBangoValue>(), Door);
+				Scripts->Spawn(OtherCounting, TArray<FBangoValue>(), Door);
+				TestEqual(TEXT("persistent: kept for the script on its actor"), KeptFor(Counting, FString()), (int64)2);
+				TestEqual(TEXT("persistent: another inline script on the same actor has its own"), KeptFor(OtherCounting, FString()), (int64)1);
+				Scripts->Spawn(Counting, TArray<FBangoValue>(), Trigger);
+				TestEqual(TEXT("persistent: a component as the owner has its own"), KeptFor(Counting, TriggerID), (int64)1);
+				FBangoInlineScript Held = Counting;
+				Held.SetHolder(Trigger);
+				Scripts->Spawn(Held, TArray<FBangoValue>(), Door);
+				TestEqual(TEXT("persistent: the holder hint keeps it for the component, with the actor as the owner"), KeptFor(Counting, TriggerID), (int64)2);
+				TestEqual(TEXT("persistent: and not for the actor"), KeptFor(Counting, FString()), (int64)2);
+				// No ID: kept for its text, which an edit changes.
+				FBangoInlineScript Unnamed;
+				Unnamed.Source = Counting.Source;
+				TestTrue(TEXT("persistent: no ID, kept for its text"), UBangoScriptSubsystem::GetInlineScriptScope(Unnamed).StartsWith(TEXT("text "))
+					&& UBangoScriptSubsystem::GetInlineScriptScope(Unnamed) == UBangoScriptSubsystem::GetTextScope(Counting.Source)
+					&& UBangoScriptSubsystem::GetInlineScriptScope(Unnamed) != UBangoScriptSubsystem::GetTextScope(Counting.Source + TEXT(" ")));
+				Scripts->Spawn(Unnamed, TArray<FBangoValue>(), Door);
+				TestEqual(TEXT("persistent: an unnamed script runs, kept for its text"), KeptFor(Unnamed, FString()), (int64)1);
+				TestTrue(TEXT("persistent: an ID is its scope"), UBangoScriptSubsystem::GetInlineScriptScope(Counting).Contains(Counting.ScriptId.ToString(EGuidFormats::Digits)));
+			}
+		}
 
 		// Gone: not found, and the error says which.
 		Trigger->DestroyComponent();

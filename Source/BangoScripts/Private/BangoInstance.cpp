@@ -5,7 +5,7 @@
 
 namespace BangoInstancePrivate
 {
-	constexpr int32 InstanceSaveVersion = 8; // 2: waitUntil. 3: a pending command's type arguments. 4: and whether its result is used. 5: a waitUntil's timeout. 6: and its hold. 7: unknown sides of && and ||. 8: the script's variables, for a spawn block's copy made in a function. Raise it when the save format changes: data in another format is refused, not misread
+	constexpr int32 InstanceSaveVersion = 9; // 2: waitUntil. 3: a pending command's type arguments. 4: and whether its result is used. 5: a waitUntil's timeout. 6: and its hold. 7: unknown sides of && and ||. 8: the script's variables, for a spawn block's copy made in a function. 9: the owner's holder, and the persistent scope. Raise it when the save format changes: data in another format is refused, not misread
 
 	static FString TypeText(const FBangoType& Type)
 	{
@@ -319,6 +319,7 @@ bool FBangoInstance::StartSpawned(const FBangoInstance& Parent, int32 BlockIP, i
 	}
 	Error.FileName = Program->FileName;
 	Owner = Parent.Owner; // a spawn block's copy belongs to the same actor
+	PersistentScope = Parent.PersistentScope; // and is the same script, with the same persistent variables
 	const FBangoFrame& From = Parent.Frames.Last();
 	if (!Program->Functions.IsValidIndex(From.Function) || !Program->Functions[From.Function].Code.IsValidIndex(BlockIP))
 	{
@@ -1014,9 +1015,12 @@ TArray<FBangoValue>& FBangoInstance::GetPlaceSlots(const FBangoPlace& Place)
 
 FString FBangoInstance::GetPersistentKey(const FBangoProgram& InProgram, const FBangoPersistentLocal& Local) const
 {
-	// '|' can't be in a file name's script part, a Bango ID or a variable name, so no two of these are the same.
-	// (Stage 3 of persistent variables puts an inline script's own ID in place of its file name.)
-	return FString::Printf(TEXT("%s%s|%s|%s"), Bango::PersistentLocalPrefix, *InProgram.FileName, *Owner.BangoName, *Local.Name);
+	// The script (an inline script's ID or text hash, or a file's path), the owner (the component holding the script, or
+	// the actor), the variable. Only the owner part can have a '|' (a component's ID), and it's in the middle, so no
+	// two of these are the same.
+	return FString::Printf(TEXT("%s%s|%s|%s"), Bango::PersistentLocalPrefix,
+		PersistentScope.IsEmpty() ? *InProgram.FileName : *PersistentScope,
+		Owner.Holder.IsEmpty() ? *Owner.BangoName : *Owner.Holder, *Local.Name);
 }
 
 void FBangoInstance::MakePersistentKeys() const
@@ -3684,6 +3688,8 @@ void FBangoInstance::Serialize(FArchive& Ar)
 	Ar << Id;
 	Ar << Owner.BangoName;
 	Ar << Owner.Problem;
+	Ar << Owner.Holder;
+	Ar << PersistentScope;
 	if (Ar.IsLoading())
 	{
 		ForgetPersistentKeys();

@@ -134,6 +134,12 @@ public:
 	 * object of a class with the same script shares one compiled program; an error adds which object it was.
 	 */
 	static FString GetInlineScriptName(const UObject* Owner);
+	/**
+	 * Which script an inline script is, for its persistent variables (FBangoInstance::SetPersistentScope): its ID
+	 * (FBangoInlineScriptBase::ScriptId), or without one, a hash of its text. GetTextScope gives the second.
+	 */
+	static FString GetInlineScriptScope(const FBangoInlineScriptBase& Script);
+	static FString GetTextScope(const FString& Source);
 
 	/**
 	 * The name of the running script with this id ("/Game/Quests/Intro.bango"), for paths relative to it (Exec).
@@ -399,4 +405,19 @@ private:
 	static constexpr int32 MaxKnownOwners = 256;
 	/** GetScriptOwner, from KnownOwners when it can be. */
 	FBangoScriptOwner FindScriptOwner(const UObject* Owner);
+	/**
+	 * For a script with persistent variables: Owner's FBangoScriptOwner::Holder, the component holding the script
+	 * (HolderHint, or Owner if it's a component) as an entity ID, or empty if it's held by the actor.
+	 */
+	FString FindScriptHolder(const UObject* Owner, const UActorComponent* HolderHint);
+	/** FindScriptOwner, with the holder if Owner is a component (spawning a script by its path or asset). */
+	FBangoScriptOwner FindSpawnOwner(const UObject* Owner);
+#if !UE_BUILD_SHIPPING
+	/** The inline scripts warned about having persistent variables and no ID, by their text's scope: each once. */
+	TSet<FString> WarnedUnnamedScripts;
+	/** The actors whose inline scripts' IDs have been checked for two the same (CheckInlineScriptIds): each once. */
+	TSet<TWeakObjectPtr<const AActor>> CheckedIdOwners;
+	/** For an inline script with persistent variables: its actor's scripts' IDs, checked once (Bango.CheckInlineScriptIds). */
+	void CheckInlineScriptIds(const UObject* Owner, const UActorComponent* HolderHint);
+#endif
 };

@@ -21,6 +21,8 @@
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "PropertyHandle.h"
 #include "SBangoTextEditor.h"
+#include "BangoInlineScriptId.h"
+#include "ScopedTransaction.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBox.h"
@@ -486,7 +488,10 @@ private:
 			return;
 		}
 		Shown = Text;
-		SourceHandle->SetValue(Text); // one undoable change, for every selected object
+		// One undoable change, for every selected object: the text, and an ID for any that has none (its persistent variables are kept under it).
+		const FScopedTransaction Transaction(NSLOCTEXT("BangoInlineScript", "EditInlineScriptText", "Edit Inline Script"));
+		Bango::GiveInlineScriptIds(StructHandle);
+		SourceHandle->SetValue(Text);
 	}
 
 	FReply OnEditClicked()

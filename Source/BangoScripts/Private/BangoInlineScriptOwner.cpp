@@ -5,9 +5,12 @@
 #include "Components/ActorComponent.h"
 #include "GameFramework/Actor.h"
 #include "UObject/UnrealType.h"
+#include "Engine/BlueprintGeneratedClass.h"
 
 namespace BangoInlineScriptOwnerPrivate
 {
+	using FVisit = TFunctionRef<void(FBangoInlineScriptBase& Script, const FString& Path)>;
+
 	struct FSearch
 	{
 		/** The script to find, by where it is; or null, to find scripts by their text. */
@@ -19,9 +22,9 @@ namespace BangoInlineScriptOwnerPrivate
 	static constexpr int32 MaxDepth = 3;          // structs inside structs
 	static constexpr int32 MaxArrayElements = 1024;
 
-	static void SearchStruct(const UStruct* Type, const void* Container, const FString& Prefix, int32 Depth, FSearch& Search);
+	static void VisitStruct(const UStruct* Type, void* Container, const FString& Prefix, int32 Depth, FVisit Visit);
 
-	static void SearchValue(const FStructProperty* Property, const void* Value, const FString& Name, int32 Depth, FSearch& Search)
+	static void VisitValue(const FStructProperty* Property, void* Value, const FString& Name, int32 Depth, FVisit Visit)
 	{
 		if (!Property->Struct || !Value)
 		{
@@ -29,23 +32,16 @@ namespace BangoInlineScriptOwnerPrivate
 		}
 		if (Property->Struct->IsChildOf(FBangoInlineScriptBase::StaticStruct()))
 		{
-			const FBangoInlineScriptBase* Candidate = static_cast<const FBangoInlineScriptBase*>(Value);
-			const bool bMatches = Search.Script
-				? Candidate == Search.Script
-				: Search.Source != nullptr && Candidate->Source.Equals(*Search.Source, ESearchCase::CaseSensitive);
-			if (bMatches)
-			{
-				Search.Found.AddUnique(Name);
-			}
+			Visit(*static_cast<FBangoInlineScriptBase*>(Value), Name);
 			return;
 		}
 		if (Depth < MaxDepth)
 		{
-			SearchStruct(Property->Struct, Value, Name + TEXT("."), Depth + 1, Search);
+			VisitStruct(Property->Struct, Value, Name + TEXT("."), Depth + 1, Visit);
 		}
 	}
 
-	static void SearchStruct(const UStruct* Type, const void* Container, const FString& Prefix, int32 Depth, FSearch& Search)
+	static void VisitStruct(const UStruct* Type, void* Container, const FString& Prefix, int32 Depth, FVisit Visit)
 	{
 		for (TFieldIterator<FProperty> It(Type); It; ++It)
 		{
@@ -57,7 +53,7 @@ namespace BangoInlineScriptOwnerPrivate
 					const FString Name = Struct->ArrayDim > 1
 						? FString::Printf(TEXT("%s%s[%d]"), *Prefix, *Struct->GetAuthoredName(), Index)
 						: Prefix + Struct->GetAuthoredName();
-					SearchValue(Struct, Struct->ContainerPtrToValuePtr<void>(Container, Index), Name, Depth, Search);
+					VisitValue(Struct, Struct->ContainerPtrToValuePtr<void>(Container, Index), Name, Depth, Visit);
 				}
 			}
 			else if (const FArrayProperty* Array = CastField<FArrayProperty>(Property))
@@ -71,7 +67,7 @@ namespace BangoInlineScriptOwnerPrivate
 				const int32 Count = FMath::Min(Helper.Num(), MaxArrayElements);
 				for (int32 Index = 0; Index < Count; ++Index)
 				{
-					SearchValue(Inner, Helper.GetRawPtr(Index), FString::Printf(TEXT("%s%s[%d]"), *Prefix, *Array->GetAuthoredName(), Index), Depth, Search);
+					VisitValue(Inner, Helper.GetRawPtr(Index), FString::Printf(TEXT("%s%s[%d]"), *Prefix, *Array->GetAuthoredName(), Index), Depth, Visit);
 				}
 			}
 		}
@@ -79,10 +75,33 @@ namespace BangoInlineScriptOwnerPrivate
 
 	static void SearchObject(const UObject* Object, const FString& Prefix, FSearch& Search)
 	{
-		if (IsValid(Object))
+		if (!IsValid(Object))
 		{
-			SearchStruct(Object->GetClass(), Object, Prefix, 0, Search);
+			return;
 		}
+		// Only read here.
+		VisitStruct(Object->GetClass(), const_cast<UObject*>(Object), Prefix, 0, [&Search](FBangoInlineScriptBase& Candidate, const FString& Name)
+		{
+			const bool bMatches = Search.Script
+				? &Candidate == Search.Script
+				: Search.Source != nullptr && Candidate.Source.Equals(*Search.Source, ESearchCase::CaseSensitive);
+			if (bMatches)
+			{
+				Search.Found.AddUnique(Name);
+			}
+		});
+	}
+
+	/** A script's ID as its archetype (a Blueprint's default, or its component's template) has it at the same place, if it's a Blueprint's. */
+	static bool IsInheritedFromBlueprint(const UObject* Object, const FString& Path, const FBangoInlineScriptBase& Script)
+	{
+		const UObject* Archetype = Object ? Object->GetArchetype() : nullptr;
+		if (!Archetype || !Cast<UBlueprintGeneratedClass>(Archetype->GetClass()))
+		{
+			return false; // no archetype, or a C++ class's default: nothing to fix it in but this object
+		}
+		const FBangoInlineScriptBase* There = Bango::FindInlineScriptAt(const_cast<UObject*>(Archetype), Path);
+		return There && There->ScriptId == Script.ScriptId && There->Source.Equals(Script.Source, ESearchCase::CaseSensitive);
 	}
 }
 
@@ -153,5 +172,89 @@ namespace Bango
 			Names += FString::Printf(TEXT("%s'%s'"), Index == 0 ? TEXT("") : TEXT(" or "), *Search.Found[Index]);
 		}
 		return FString::Printf(TEXT("on '%s', its script %s"), *Label, *Names);
+	}
+}
+
+namespace Bango
+{
+	void ForEachInlineScript(UObject* Object, TFunctionRef<void(FBangoInlineScriptBase& Script, const FString& Path)> Visit)
+	{
+		if (IsValid(Object))
+		{
+			BangoInlineScriptOwnerPrivate::VisitStruct(Object->GetClass(), Object, FString(), 0, Visit);
+		}
+	}
+
+	FBangoInlineScriptBase* FindInlineScriptAt(UObject* Object, const FString& Path)
+	{
+		FBangoInlineScriptBase* Found = nullptr;
+		ForEachInlineScript(Object, [&Found, &Path](FBangoInlineScriptBase& Script, const FString& ScriptPath)
+		{
+			if (!Found && ScriptPath.Equals(Path, ESearchCase::CaseSensitive))
+			{
+				Found = &Script;
+			}
+		});
+		return Found;
+	}
+
+	TArray<FBangoInlineScriptIdProblem> FindInlineScriptIdProblems(TConstArrayView<UObject*> Objects, bool bMissing)
+	{
+		using namespace BangoInlineScriptOwnerPrivate;
+		struct FSeen
+		{
+			UObject* Object = nullptr;
+			FString Path;
+		};
+		TMap<FGuid, FSeen> Seen;
+		TArray<FBangoInlineScriptIdProblem> Problems;
+		for (UObject* Object : Objects)
+		{
+			ForEachInlineScript(Object, [&](FBangoInlineScriptBase& Script, const FString& Path)
+			{
+				if (!Script.ScriptId.IsValid())
+				{
+					if (bMissing && !Script.IsEmpty() && !IsInheritedFromBlueprint(Object, Path, Script))
+					{
+						FBangoInlineScriptIdProblem& Problem = Problems.AddDefaulted_GetRef();
+						Problem.bMissing = true;
+						Problem.Object = Object;
+						Problem.Path = Path;
+					}
+					return;
+				}
+				if (const FSeen* First = Seen.Find(Script.ScriptId))
+				{
+					if (!IsInheritedFromBlueprint(Object, Path, Script))
+					{
+						FBangoInlineScriptIdProblem& Problem = Problems.AddDefaulted_GetRef();
+						Problem.Object = Object;
+						Problem.Path = Path;
+						Problem.OtherObject = First->Object;
+						Problem.OtherPath = First->Path;
+					}
+					return;
+				}
+				Seen.Add(Script.ScriptId, FSeen{ Object, Path });
+			});
+		}
+		return Problems;
+	}
+
+	TArray<UObject*> GetInlineScriptIdUnit(AActor* Actor)
+	{
+		TArray<UObject*> Unit;
+		if (IsValid(Actor))
+		{
+			Unit.Add(Actor);
+			for (UActorComponent* Component : Actor->GetComponents())
+			{
+				if (IsValid(Component))
+				{
+					Unit.Add(Component);
+				}
+			}
+		}
+		return Unit;
 	}
 }

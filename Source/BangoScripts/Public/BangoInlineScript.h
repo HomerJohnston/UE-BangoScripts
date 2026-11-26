@@ -2,10 +2,13 @@
 
 #include "CoreMinimal.h"
 #include "UObject/WeakObjectPtrTemplates.h"
+#include "Templates/Function.h"
 #include "BangoProgram.h"
 #include "BangoInlineScript.generated.h"
 
 class UClass;
+class UActorComponent;
+class AActor;
 
 /**
  * What an inline script remembers of the last time it was compiled (FBangoModule::GetInlineProgram), so spawning it
@@ -68,6 +71,18 @@ struct BANGOSCRIPTS_API FBangoInlineScriptBase
 	UPROPERTY(EditAnywhere, Category = "Bango")
 	FString Source;
 
+	/**
+	 * Which script this is, for its persistent variables (spec section 4, Persistent variables): they're kept under it,
+	 * with the owner. Given by the editor the first time the script's text is set, and kept from then on, through
+	 * edits, renames and moves. Every object of a Blueprint class shares its class's (the owner tells them apart); a
+	 * copy pasted into another property of the same object should get a new one (a later check finds those).
+	 * Without one (a script made in C++, or written before scripts had one), the script is told apart by its text, so
+	 * editing the text starts its persistent variables again. VisibleAnywhere so that it's carried over with the
+	 * script's text when Unreal makes a component again; the details panel doesn't show it.
+	 */
+	UPROPERTY(VisibleAnywhere, Category = "Bango")
+	FGuid ScriptId;
+
 	/** True if there's no script (nothing but spaces). */
 	bool IsEmpty() const
 	{
@@ -87,6 +102,16 @@ struct BANGOSCRIPTS_API FBangoInlineScriptBase
 	 * saved, so each object sets it again when it's made, and editing or pasting the script's text doesn't change it.
 	 */
 	void UseInputsSignature(const UObject* Owner, FName Name);
+
+	/**
+	 * For a script kept on a component whose host spawns it with the component's actor as the owner (so `self` is the
+	 * actor): the component, so that its persistent variables are kept for the component, not shared by every such
+	 * component on the actor. Call it when the component is registered (OnRegister), not in its constructor: it's the
+	 * running component that's wanted, not a template. Not saved. A host that spawns with the component itself as the
+	 * owner doesn't need it.
+	 */
+	void SetHolder(const UActorComponent* Component) { Holder = Component; }
+	const UActorComponent* GetHolder() const { return Holder.Get(); }
 
 	/** True if UseInputsSignature gave it one. */
 	bool HasInputsSignature() const { return !InputsSignatureName.IsNone(); }
@@ -150,6 +175,8 @@ private:
 	TWeakObjectPtr<const UClass> InputsSignatureClass;
 	FName InputsSignatureName;
 	bool bGlobalInputsSignature = false;
+	// Set by the owner when it's registered, not saved (SetHolder).
+	TWeakObjectPtr<const UActorComponent> Holder;
 };
 
 /**
@@ -203,4 +230,32 @@ namespace Bango
 	 * the object ("on 'Door_3'"). Empty without an Owner. It searches, so call it only when there's an error to show.
 	 */
 	BANGOSCRIPTS_API FString DescribeInlineScriptOwner(const UObject* Owner, const FBangoInlineScriptBase* Script, const FString* Source);
+
+	/**
+	 * Calls Visit for each inline script and inline condition among Object's own properties (not its components'), in
+	 * arrays and structs too, with where it is ("OnOpened", "Steps[2].Script").
+	 */
+	BANGOSCRIPTS_API void ForEachInlineScript(UObject* Object, TFunctionRef<void(FBangoInlineScriptBase& Script, const FString& Path)> Visit);
+	/** The inline script at Path among Object's properties (as ForEachInlineScript names it), or null. */
+	BANGOSCRIPTS_API FBangoInlineScriptBase* FindInlineScriptAt(UObject* Object, const FString& Path);
+
+	/** An inline script whose ID (FBangoInlineScriptBase::ScriptId) is a problem (FindInlineScriptIdProblems). */
+	struct FBangoInlineScriptIdProblem
+	{
+		/** True: it has text but no ID. False: its ID is also OtherObject's script at OtherPath's. */
+		bool bMissing = false;
+		UObject* Object = nullptr;
+		FString Path;
+		UObject* OtherObject = nullptr;
+		FString OtherPath;
+	};
+	/**
+	 * The ID problems among Objects, which are one owner's (an actor and its components, GetInlineScriptIdUnit; a
+	 * Blueprint's default object and its component templates): two of their scripts with the same ID, which would
+	 * share their persistent variables; and, with bMissing, scripts with text and no ID. A script with the ID and
+	 * text its Blueprint's default (or component template) has is left to the Blueprint, where it's fixed.
+	 */
+	BANGOSCRIPTS_API TArray<FBangoInlineScriptIdProblem> FindInlineScriptIdProblems(TConstArrayView<UObject*> Objects, bool bMissing);
+	/** An actor and its components: the objects whose scripts must all have different IDs (they're one owner). */
+	BANGOSCRIPTS_API TArray<UObject*> GetInlineScriptIdUnit(AActor* Actor);
 }

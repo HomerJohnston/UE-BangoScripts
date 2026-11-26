@@ -7,6 +7,7 @@
 #include "Framework/Docking/TabManager.h"
 #include "PropertyHandle.h"
 #include "SBangoScriptEditor.h"
+#include "BangoInlineScriptId.h"
 #include "ScopedTransaction.h"
 #include "UObject/UnrealType.h"
 #include "Widgets/SWindow.h"
@@ -168,9 +169,14 @@ bool FBangoInlineScriptTarget::Write(const FString& Source, FString& OutError)
 		{
 			Handle->GetOuterObjects(Outers);
 		}
-		if (Outers.Num() == 1 && Outers[0] == Object && SourceHandle->SetValue(Source) == FPropertyAccess::Success)
+		if (Outers.Num() == 1 && Outers[0] == Object)
 		{
-			return true;
+			const FScopedTransaction Transaction(FText::Format(LOCTEXT("EditInlineScript", "Edit {0}"), GetDisplayName()));
+			Bango::GiveInlineScriptIds(Handle); // an ID if it has none: its persistent variables are kept under it
+			if (SourceHandle->SetValue(Source) == FPropertyAccess::Success)
+			{
+				return true;
+			}
 		}
 	}
 
@@ -178,6 +184,7 @@ bool FBangoInlineScriptTarget::Write(const FString& Source, FString& OutError)
 	const FScopedTransaction Transaction(FText::Format(LOCTEXT("EditInlineScript", "Edit {0}"), GetDisplayName()));
 	Object->Modify();
 	Object->PreEditChange(TopProperty);
+	Bango::GiveInlineScriptId(*Script);
 	Script->Source = Source;
 	FPropertyChangedEvent Event(TopProperty, EPropertyChangeType::ValueSet);
 	Object->PostEditChangeProperty(Event);

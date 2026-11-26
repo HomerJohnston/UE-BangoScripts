@@ -16,6 +16,7 @@ public class BangoScriptsEditor : ModuleRules
 				"BlueprintGraph",
 				"KismetCompiler",
 				"UnrealEd",
+				"DataValidation",
 			}
 		);
 	}

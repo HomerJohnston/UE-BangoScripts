@@ -83,6 +83,12 @@ struct FBangoScriptOwner
 	FString BangoName;
 	/** Why `self` can't be used (no owner, an owner with no Bango ID, ...), or empty for the usual "no owner" message. */
 	FString Problem;
+	/**
+	 * The component that holds the script, as an entity ID (`door_1|Trigger`), when the script is kept on a component
+	 * of the actor rather than on the actor itself; else empty. Persistent variables are kept for it instead of for
+	 * the actor (FBangoInstance::GetPersistentKey). Only made when the script has persistent variables.
+	 */
+	FString Holder;
 };
 
 /** What Resume needs from the outside world. */
@@ -184,6 +190,12 @@ public:
 	 * with an error when it's used.
 	 */
 	void SetOwner(const FBangoScriptOwner& InOwner) { Owner = InOwner; ForgetPersistentKeys(); }
+	/**
+	 * Which script this is, for its persistent variables (GetPersistentKey): an inline script's ID, or its text's
+	 * hash; empty for the program's file name (an asset's path). Set before Start, like the owner. Saved.
+	 */
+	void SetPersistentScope(const FString& InScope) { PersistentScope = InScope; ForgetPersistentKeys(); }
+	const FString& GetPersistentScope() const { return PersistentScope; }
 	void SetOwner(FBangoScriptOwner&& InOwner) { Owner = MoveTemp(InOwner); ForgetPersistentKeys(); }
 	const FBangoScriptOwner& GetOwner() const { return Owner; }
 
@@ -564,4 +576,6 @@ private:
 	const FString& GetWaitGlobalName(const FString& Name) const;
 	/** The owner changed: the persistent locals' keys (and the slots found through them) are made again. */
 	void ForgetPersistentKeys() { PersistentKeysProgram = nullptr; PersistentKeys.Reset(); GlobalSlots.Reset(); }
+	/** SetPersistentScope's. */
+	FString PersistentScope;
 };
