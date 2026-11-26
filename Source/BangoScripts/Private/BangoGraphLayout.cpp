@@ -1085,13 +1085,17 @@ namespace BangoGraphLayoutPrivate
 			{
 				++NameTok;
 			}
-			const bool bHasValue = Tok.Is(NameTok + 1, EBangoTokenKind::Assign);
+			// `persistent int _count ?= 0`: kept between runs of the script, and given its first value with `?=`.
+			const bool bPersistentLocal = Tok.Is(0, EBangoTokenKind::KwPersistent);
+			const bool bHasValue = Tok.Is(NameTok + 1, bPersistentLocal ? EBangoTokenKind::QuestionAssign : EBangoTokenKind::Assign);
 			if (NameTok >= N || (NameTok + 1 < N && !bHasValue))
 			{
 				break;
 			}
-			Out.Title = LocalNodeTitle(Type);
-			Out.Description = FString::Printf(TEXT("Declares a local (%s), which exists from here to the end of the block it's in, and gives it its value each time this runs."), *Type);
+			Out.Title = LocalNodeTitle(Type, bPersistentLocal ? TEXT("Persistent Local ") : TEXT("Local "));
+			Out.Description = bPersistentLocal
+				? FString::Printf(TEXT("Declares a persistent local (%s): one this script keeps between runs, for each actor it runs on, which exists from here to the end of the block it's in. Its first value is given only when it has none."), *Type)
+				: FString::Printf(TEXT("Declares a local (%s), which exists from here to the end of the block it's in, and gives it its value each time this runs."), *Type);
 			FBangoNodeField NameField = Tok.Field(TEXT("Name"), FString(), NameTok, NameTok + 1);
 			NameField.bVariable = true;
 			NameField.VariableType = Type;
@@ -1105,7 +1109,7 @@ namespace BangoGraphLayoutPrivate
 			{
 				Value.Begin = Value.End = Value.OuterBegin = Value.OuterEnd = Tok.EndOf(NameTok);
 			}
-			Value.InsertPrefix = TEXT(" = ");
+			Value.InsertPrefix = bPersistentLocal ? TEXT(" ?= ") : TEXT(" = ");
 			Out.Fields.Add(Value);
 			return;
 		}

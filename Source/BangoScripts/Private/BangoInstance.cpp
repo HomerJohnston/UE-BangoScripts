@@ -453,6 +453,22 @@ bool FBangoInstance::DeclareGlobals(const FBangoProgram& InProgram, FBangoGlobal
 			}
 		}
 	}
+	// Persistent locals and script variables: kept for this script and owner, made the first time, given their default when nil.
+	for (const FBangoPersistentLocal& Local : InProgram.PersistentLocals)
+	{
+		const FString Key = GetPersistentKey(InProgram, Local);
+		Globals.DeclarePersistentLocal(Key, Local.Type);
+		if (Local.bHasDefault && !Local.Default.IsNil() && Globals.Find(Key)->IsNil())
+		{
+			FBangoValue Default;
+			if (!ResolveSelf(Local.Default, Default) || !Globals.Set(Key, Default, OutError))
+			{
+				OutLine = Local.Line;
+				OutError = FString::Printf(TEXT("Persistent variable '%s''s first value can't be given: %s"), *Local.Name, OutError.IsEmpty() ? *GetSelfProblem() : *OutError);
+				return false;
+			}
+		}
+	}
 	return true;
 }
 
@@ -717,7 +733,7 @@ bool FBangoInstance::IsWaitConditionDue(const FBangoGlobalStore& Globals) const
 	}
 	for (const FString& Name : Set->Globals)
 	{
-		if (Globals.GetChangeStamp(Name) > WaitStamp)
+		if (Globals.GetChangeStamp(GetWaitGlobalName(Name)) > WaitStamp)
 		{
 			return true;
 		}
@@ -996,6 +1012,54 @@ TArray<FBangoValue>& FBangoInstance::GetPlaceSlots(const FBangoPlace& Place)
 	return Frames.Last().Slots;
 }
 
+FString FBangoInstance::GetPersistentKey(const FBangoProgram& InProgram, const FBangoPersistentLocal& Local) const
+{
+	// '|' can't be in a file name's script part, a Bango ID or a variable name, so no two of these are the same.
+	// (Stage 3 of persistent variables puts an inline script's own ID in place of its file name.)
+	return FString::Printf(TEXT("%s%s|%s|%s"), Bango::PersistentLocalPrefix, *InProgram.FileName, *Owner.BangoName, *Local.Name);
+}
+
+void FBangoInstance::MakePersistentKeys() const
+{
+	if (PersistentKeysProgram != Program.Get())
+	{
+		PersistentKeys.Reset();
+		for (const FBangoPersistentLocal& Local : Program->PersistentLocals)
+		{
+			PersistentKeys.Add(GetPersistentKey(*Program, Local));
+		}
+		PersistentKeysProgram = Program.Get();
+	}
+}
+
+const FString& FBangoInstance::GetGlobalName(int32 NameIndex)
+{
+	const FBangoProgram& Current = *Program;
+	if (!Current.PersistentLocalOfName.IsValidIndex(NameIndex) || Current.PersistentLocalOfName[NameIndex] < 0)
+	{
+		return Current.Names[NameIndex];
+	}
+	MakePersistentKeys();
+	return PersistentKeys[Current.PersistentLocalOfName[NameIndex]];
+}
+
+const FString& FBangoInstance::GetWaitGlobalName(const FString& Name) const
+{
+	if (Program->PersistentLocals.Num() == 0 || !Name.StartsWith(Bango::PersistentLocalPrefix, ESearchCase::CaseSensitive))
+	{
+		return Name;
+	}
+	MakePersistentKeys();
+	for (int32 Index = 0; Index < Program->PersistentLocals.Num(); ++Index)
+	{
+		if (Program->Names[Program->PersistentLocals[Index].NameIndex] == Name)
+		{
+			return PersistentKeys[Index];
+		}
+	}
+	return Name;
+}
+
 int32 FBangoInstance::FindGlobalSlot(const FBangoPlace& Place, const FBangoGlobalStore& Globals)
 {
 	const TArray<FString>& Names = Program->Names;
@@ -1012,7 +1076,7 @@ int32 FBangoInstance::FindGlobalSlot(const FBangoPlace& Place, const FBangoGloba
 	int32& Slot = GlobalSlots[Place.Index];
 	if (Slot == INDEX_NONE)
 	{
-		Slot = Globals.FindSlot(Names[Place.Index]); // still INDEX_NONE if nobody has made it: asked again next time
+		Slot = Globals.FindSlot(GetGlobalName(Place.Index)); // still INDEX_NONE if nobody has made it: asked again next time
 	}
 	return Slot;
 }
@@ -1046,7 +1110,15 @@ const FString& FBangoInstance::DescribePlace(const FBangoPlace& Place) const
 		const FBangoFunctionCode& Function = Program->Functions[Frames.Last().Function];
 		return Function.SlotNames.IsValidIndex(Place.Index) ? Function.SlotNames[Place.Index] : UnknownLocal;
 	}
-	return Program->Names.IsValidIndex(Place.Index) ? Program->Names[Place.Index] : UnknownGlobal;
+	if (!Program->Names.IsValidIndex(Place.Index))
+	{
+		return UnknownGlobal;
+	}
+	if (Program->PersistentLocalOfName.IsValidIndex(Place.Index) && Program->PersistentLocalOfName[Place.Index] >= 0)
+	{
+		return Program->PersistentLocals[Program->PersistentLocalOfName[Place.Index]].Name; // a persistent local: by its own name
+	}
+	return Program->Names[Place.Index];
 }
 
 namespace BangoInstancePrivate
@@ -3612,6 +3684,10 @@ void FBangoInstance::Serialize(FArchive& Ar)
 	Ar << Id;
 	Ar << Owner.BangoName;
 	Ar << Owner.Problem;
+	if (Ar.IsLoading())
+	{
+		ForgetPersistentKeys();
+	}
 	uint8 StatusByte = (uint8)Status;
 	Ar << StatusByte;
 	SerializeError(Ar, Error);

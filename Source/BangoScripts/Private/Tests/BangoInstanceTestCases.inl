@@ -1404,7 +1404,12 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				const FPersistError PersistErrors[] =
 				{
 					{ TEXT("both kinds in one script"), TEXT("persistent global int gold;\ngold = 1;\nglobal int gold = 2;"), TEXT("declared 'global' (without 'persistent') here, but 'persistent global' on line 1") },
-					{ TEXT("persistent without global"), TEXT("persistent int _i = 0;"), TEXT("'persistent' goes before 'global'") },
+					{ TEXT("persistent local with '='"), TEXT("persistent int _i = 0;"), TEXT("so '=' would set it again every time") },
+					{ TEXT("persistent before something else"), TEXT("persistent Talk(\"x\");"), TEXT("'persistent' goes before a declaration") },
+					{ TEXT("persistent local's default worked out"), TEXT("int _n = 2;\npersistent int _i ?= _n;"), TEXT("first value must be a fixed value") },
+					{ TEXT("persistent local twice in a file"), TEXT("persistent int _i ?= 0;\nfunction void F()\n{\n\tpersistent int _i ?= 1;\n}\nF();"), TEXT("is already a persistent variable of this script (line 1)") },
+					{ TEXT("persistent local named like a global"), TEXT("global int count;\npersistent int count ?= 0;"), TEXT("is a global this file declares") },
+					{ TEXT("persistent local out of its block"), TEXT("if (true)\n{\n\tpersistent int _i ?= 0;\n}\n_i++;"), TEXT("isn't visible here") },
 					{ TEXT("persistent in a for loop"), TEXT("for (persistent global int g = 0; g < 2; g++)\n{\n}"), TEXT("A for loop can't declare a global") },
 					{ TEXT("persistent is a reserved word"), TEXT("int persistent = 1;"), TEXT("persistent") },
 				};
@@ -1419,6 +1424,168 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				FBangoCompileError BothError;
 				Expect(Bango::CompileSource(TEXT("persistent global int gold ?= 0;\ngold = 1;\npersistent global int gold = 2;"), TEXT("persist.bango"), Commands, Both, BothError),
 					*FString::Printf(TEXT("persistent: declared persistent twice, at the top and in the code. Got: %s"), *BothError.Message));
+			}
+		}
+
+		// Persistent locals and script variables: kept between runs of a script, for each owner (FBangoPersistentLocal).
+		{
+			FBangoGlobalStore Store;
+			FBangoExecContext PersistContext = Context;
+			PersistContext.Globals = &Store;
+			int32 NextId = 100;
+			auto CompilePersistent = [&Commands](const TCHAR* PersistentSource, const TCHAR* FileName) -> TSharedPtr<FBangoProgram>
+			{
+				TSharedPtr<FBangoProgram> Result = MakeShared<FBangoProgram>();
+				FBangoCompileError Error;
+				if (!Bango::CompileSource(PersistentSource, FileName, Commands, *Result, Error))
+				{
+					return TSharedPtr<FBangoProgram>();
+				}
+				return Result;
+			};
+			// Runs the script once for an owner (none for an empty name), till it ends or pauses.
+			auto RunFor = [&](const TSharedPtr<FBangoProgram>& RunProgram, const TCHAR* OwnerName, FBangoInstance& Instance) -> bool
+			{
+				FBangoScriptOwner RunOwner;
+				RunOwner.BangoName = OwnerName;
+				Instance.SetOwner(RunOwner);
+				FBangoRuntimeError Error;
+				if (!Instance.Start(RunProgram, Commands, Store, ++NextId, Error))
+				{
+					return false;
+				}
+				Instance.Resume(PersistContext);
+				return Instance.GetStatus() != EBangoInstanceStatus::Failed;
+			};
+			auto IntFor = [&Store](const FBangoProgram& KeyProgram, const TCHAR* OwnerName, int32 Local) -> int64
+			{
+				FBangoInstance KeyInstance;
+				FBangoScriptOwner KeyOwner;
+				KeyOwner.BangoName = OwnerName;
+				KeyInstance.SetOwner(KeyOwner);
+				const FBangoValue* Value = Store.Find(KeyInstance.GetPersistentKey(KeyProgram, KeyProgram.PersistentLocals[Local]));
+				return Value && !Value->IsNil() && Value->GetType() == FBangoType::Int() ? Value->GetInt() : -1;
+			};
+
+			TSharedPtr<FBangoProgram> Counter = CompilePersistent(TEXT("persistent int _count ?= 0;\n_count++;"), TEXT("counter.bango"));
+			Expect(Counter && Counter->PersistentLocals.Num() == 1 && Counter->Globals.Num() == 0, TEXT("persistent local: compiles, as a persistent local and not a global"));
+			if (Counter)
+			{
+				for (int32 Run = 0; Run < 3; ++Run)
+				{
+					FBangoInstance Instance;
+					Expect(RunFor(Counter, TEXT("john"), Instance), TEXT("persistent local: runs"));
+				}
+				{
+					FBangoInstance Instance;
+					Expect(RunFor(Counter, TEXT("mary"), Instance), TEXT("persistent local: runs for another owner"));
+				}
+				{
+					FBangoInstance Instance;
+					Expect(RunFor(Counter, TEXT(""), Instance), TEXT("persistent local: runs with no owner"));
+				}
+				Expect(IntFor(*Counter, TEXT("john"), 0) == 3 && IntFor(*Counter, TEXT("mary"), 0) == 1 && IntFor(*Counter, TEXT(""), 0) == 1,
+					*FString::Printf(TEXT("persistent local: kept between runs, for each owner (john %lld, mary %lld, none %lld)"),
+						(long long)IntFor(*Counter, TEXT("john"), 0), (long long)IntFor(*Counter, TEXT("mary"), 0), (long long)IntFor(*Counter, TEXT(""), 0)));
+				Store.ResetWorldGlobals();
+				Expect(IntFor(*Counter, TEXT("john"), 0) == 3 && Store.Num() == 3, TEXT("persistent local: outlives the world"));
+
+				// Another script with a local of that name, on the same owner: its own.
+				TSharedPtr<FBangoProgram> Other = CompilePersistent(TEXT("persistent int _count ?= 40;\n_count++;"), TEXT("other.bango"));
+				FBangoInstance OtherInstance;
+				Expect(Other && RunFor(Other, TEXT("john"), OtherInstance) && IntFor(*Other, TEXT("john"), 0) == 41 && IntFor(*Counter, TEXT("john"), 0) == 3,
+					TEXT("persistent local: another script's of the same name is another variable"));
+
+				// The script changes the variable's type: what was kept is thrown away.
+				TSharedPtr<FBangoProgram> Retyped = CompilePersistent(TEXT("persistent string _count;"), TEXT("counter.bango"));
+				FBangoInstance RetypedInstance;
+				Expect(Retyped && RunFor(Retyped, TEXT("john"), RetypedInstance), TEXT("persistent local: retyped runs"));
+				FBangoInstance KeyInstance;
+				FBangoScriptOwner John;
+				John.BangoName = TEXT("john");
+				KeyInstance.SetOwner(John);
+				const FBangoValue* Retyped0 = Retyped ? Store.Find(KeyInstance.GetPersistentKey(*Retyped, Retyped->PersistentLocals[0])) : nullptr;
+				Expect(Retyped0 && Retyped0->IsNil() && Retyped0->GetType() == FBangoType::String(), TEXT("persistent local: a new type throws the kept value away"));
+				Store.ResetAll();
+				Expect(Store.Num() == 0, TEXT("persistent local: ResetAll clears them"));
+			}
+
+			// A persistent script variable, which the script's functions see.
+			TSharedPtr<FBangoProgram> Bumps = CompilePersistent(TEXT("persistent scriptVar int _n ?= 10;\nfunction void AddOne()\n{\n\t_n += 1;\n}\nAddOne();\nAddOne();"), TEXT("bumps.bango"));
+			if (Bumps)
+			{
+				FBangoInstance First;
+				FBangoInstance Second;
+				Expect(RunFor(Bumps, TEXT("john"), First) && RunFor(Bumps, TEXT("john"), Second) && IntFor(*Bumps, TEXT("john"), 0) == 14,
+					*FString::Printf(TEXT("persistent scriptVar: a function changes it, and it's kept (%lld)"), (long long)IntFor(*Bumps, TEXT("john"), 0)));
+			}
+			else
+			{
+				Expect(false, TEXT("persistent scriptVar: compiles"));
+			}
+
+			// A waitUntil on one: another copy of the script on the same owner changes it.
+			TSharedPtr<FBangoProgram> Waits = CompilePersistent(TEXT("persistent int _x ?= 0;\nif (_x == 0)\n{\n\t_x = 1;\n\twaitUntil (_x == 2);\n}\nelse\n{\n\t_x = 2;\n}"), TEXT("waits.bango"));
+			if (Waits)
+			{
+				FBangoInstance Waiter;
+				Expect(RunFor(Waits, TEXT("john"), Waiter) && Waiter.GetStatus() == EBangoInstanceStatus::Waiting && !Waiter.IsWaitDue(Store), TEXT("persistent local: waits on it"));
+				FBangoInstance Elsewhere;
+				Expect(RunFor(Waits, TEXT("mary"), Elsewhere) && !Waiter.IsWaitDue(Store), TEXT("persistent local: another owner's doesn't wake the wait"));
+				FBangoInstance Setter;
+				Expect(RunFor(Waits, TEXT("mary"), Setter), TEXT("persistent local: mary's second copy runs"));
+				FBangoInstance JohnSetter;
+				Expect(RunFor(Waits, TEXT("john"), JohnSetter) && Waiter.IsWaitDue(Store), TEXT("persistent local: the same owner's change wakes the wait"));
+				Waiter.Resume(PersistContext);
+				Expect(Waiter.GetStatus() == EBangoInstanceStatus::Finished, TEXT("persistent local: the wait ends"));
+			}
+			else
+			{
+				Expect(false, TEXT("persistent local: the waiting script compiles"));
+			}
+
+			// A runtime error names it as the script does.
+			TSharedPtr<FBangoProgram> Nil = CompilePersistent(TEXT("persistent int _i;\n_i = _i + 1;"), TEXT("nil.bango"));
+			if (Nil)
+			{
+				FBangoInstance Instance;
+				RunFor(Nil, TEXT("john"), Instance);
+				const FString Message = Instance.GetError().Message;
+				Expect(Instance.GetStatus() == EBangoInstanceStatus::Failed && Message.Contains(TEXT("_i")) && !Message.Contains(TEXT("%")),
+					*FString::Printf(TEXT("persistent local: an error names it. Got: %s"), *Message));
+			}
+
+			// Saved and loaded with the store, and found again by a loaded script.
+			{
+				TSharedPtr<FBangoProgram> Sleeper = CompilePersistent(TEXT("persistent int _k ?= 1;\nSleep();\n_k++;"), TEXT("sleeper.bango"));
+				FBangoInstance Instance;
+				Expect(Sleeper && RunFor(Sleeper, TEXT("john"), Instance), TEXT("persistent save: runs"));
+				TArray<uint8> StoreBytes;
+				TArray<uint8> InstanceBytes;
+				{
+					FMemoryWriter Writer(StoreBytes);
+					Store.Serialize(Writer);
+					FMemoryWriter InstanceWriter(InstanceBytes);
+					Instance.Serialize(InstanceWriter);
+				}
+				FBangoGlobalStore Loaded;
+				FMemoryReader Reader(StoreBytes);
+				Loaded.Serialize(Reader);
+				FBangoInstance LoadedInstance;
+				FMemoryReader InstanceReader(InstanceBytes);
+				LoadedInstance.Serialize(InstanceReader);
+				FString RestoreError;
+				Expect(Sleeper && LoadedInstance.Bind(Sleeper, Commands, RestoreError), *FString::Printf(TEXT("persistent save: binds. %s"), *RestoreError));
+				FBangoExecContext LoadedContext = Context;
+				LoadedContext.Globals = &Loaded;
+				LoadedInstance.Resume(LoadedContext);
+				FBangoInstance KeyInstance;
+				FBangoScriptOwner John;
+				John.BangoName = TEXT("john");
+				KeyInstance.SetOwner(John);
+				const FBangoValue* K = Sleeper ? Loaded.Find(KeyInstance.GetPersistentKey(*Sleeper, Sleeper->PersistentLocals[0])) : nullptr;
+				Expect(K && !K->IsNil() && K->GetInt() == 2 && Loaded.IsPersistent(KeyInstance.GetPersistentKey(*Sleeper, Sleeper->PersistentLocals[0])),
+					TEXT("persistent save: the loaded script carries on with its kept value"));
 			}
 		}
 

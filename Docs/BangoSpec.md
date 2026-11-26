@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.124)
+# Bango Language Spec (draft v0.125)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.125:** **persistent locals and script variables** (section 4, Persistent variables). `persistent int _count ?= 0;` declares a local the script **keeps between runs**: the next time the script runs on the same actor, `_count` has the value it was left with. `persistent scriptVar` does the same for a script variable (one a function can declare too). Each is kept for each script and each actor it runs on (`self`), in the game instance with the persistent globals, so it carries over between levels, is saved and loaded with them, and is cleared by Reset Bango State. Its first value is given with `?=`, only when it has none, and must be a fixed value; `=` on one is a compile error, and so is using a persistent variable's name twice in a file. A script that changes one's type throws away what was kept. `?=` is now allowed on these as well as on globals. In the graph, a persistent local is a **Persistent Local** node ("Persistent Local Int"), and the Script Vars list keeps `persistent` on script variables (it doesn't show it yet). In C++: `FBangoProgram::PersistentLocals`, `FBangoInstance::GetPersistentKey` (what one is kept under), and `FBangoGlobalStore::DeclarePersistentLocal`.
 
 **Changes in v0.124:** **globals are world globals or persistent globals** (section 4, Globals). A global declared `global` now belongs to the world and is gone when the level ends; one declared **`persistent global`** lasts the whole game, as every global did before. Both are saved and loaded together, and a name is one kind or the other in every script. `persistent` is a reserved word. In C++: `FBangoGlobalStore::Declare` takes whether the global is persistent, `IsPersistent` says, and `ResetWorldGlobals` (which the script subsystem calls when its world ends) removes the world globals. The graph editor keeps `persistent` on globals in the Globals list and in Set Global nodes ("Set Persistent Global"); the list doesn't show it yet.
 
@@ -552,6 +554,7 @@ if (_count > 3)
 - The values are given when the graph starts running: when the instance starts for the main graph (so before any function can be called), and on each call for a function.
 - They're for values a level designer sets up front and tunes, without nodes: the graph editor lists them in its **Script Vars** list (section 12), not as nodes. Scripts typed as text rarely need them; a local does the same job.
 - Two script variables of one graph can't share a name, or share one with a parameter of that graph.
+- `persistent scriptVar` keeps one between runs of the script (Persistent variables, below).
 
 ```
 #inputs (int _rounds = 3)
@@ -565,6 +568,36 @@ _count = _count + 1;
 _count += 2;
 _count++;
 ```
+
+#### Persistent variables
+A **persistent** local or script variable keeps its value between runs of the script, like a `static` local in C: `persistent int _count ?= 0;` (a local) or `persistent scriptVar int _count ?= 0;` (a script variable). The next time the script runs, it has the value the last run left it with.
+```
+persistent int _visits ?= 0;
+_visits++;
+if (_visits == 1)
+{
+	self Speak("Welcome!");
+}
+else
+{
+	self Speak(Format("Back again? That's {0} times.", _visits));
+}
+```
+- **It's kept for each script and each actor it runs on** (its owner, `self`). Two shopkeepers running the same script each have their own `_visits`; two different scripts on one actor each have their own, even with the same name. A script with no owner (one started without one) has one value, shared by all its runs.
+  - For now a script is told apart by its file name (for an asset, its path). An inline script's is its owner's class (section 10, From C++), so two inline scripts on one actor that declare a persistent variable of the same name share it: give them different names. (A later version gives each inline script its own ID.)
+- **It lasts the whole game**, like a persistent global: it's kept in the game instance with the globals, carries over from level to level, is saved and loaded with them, and is cleared by **Reset Bango State**. Loading a save replaces them all, as it does the globals.
+- **Every copy of the script on that actor shares it**, as running scripts share a global: one running while another changes it sees the change, and a `waitUntil` that reads it wakes when another copy changes it. A `spawn` block's copy shares it too.
+- **Its first value is given with `?=`**, and only when it has none, as a global's default is: the first time the script runs on that actor (or whenever it's `nil`). It must be a fixed value (above). It's given when the script starts, before any of its code runs, wherever the declaration is.
+  - Without `?=` it starts as `nil`.
+  - `=` on one is a compile error: *"A persistent variable keeps its value between runs of the script, so '=' would set it again every time. Give it its first value with '?=', which only does that when it has none: 'persistent int _count ?= ...;'."* To set it each run, set it on a line of its own.
+  - A value that isn't a fixed value is a compile error that says to set it when it's `nil` instead: `if (isNil(_x)) { _x = ...; }`.
+- **It's visible like any local or script variable**: a persistent local from its declaration to the end of its block, a persistent script variable in its whole graph (the main graph's in the functions too). A `goto` can jump past a persistent local's declaration, since it exists from the start.
+- **Its name is used once in a file**, functions included, since that's what it's kept under: *"'_count' is already a persistent variable of this script (line 1): a persistent variable's name is used once in a file, functions included, since that's what it's kept under. Use a different name."* It can't be a global's name either.
+- **Changing its type** in the script throws away what was kept: the next run starts it again, as `nil` or its `?=` value.
+- A `for` header can't declare one: *"A for loop's variable can't be persistent: it starts again each time the loop does..."* A condition (section 10, Conditions) can't have any.
+- `persistent` before anything other than `global`, `scriptVar` or a type is a compile error.
+- **In the graph**, a persistent local is a **Persistent Local** node ("Persistent Local Int"), with a Name row and a Value row (its `?=` value). A persistent script variable is in the **Script Vars** list like any other, and is written back with `persistent` and `?=`; the list doesn't show that it's persistent yet, or let it be changed.
+- **In C++**, the program lists them (`FBangoProgram::PersistentLocals`, each `FBangoPersistentLocal`: its name, type, line and first value). Each is kept in the globals store (`FBangoGlobalStore`) as a persistent entry, under a name no script can write: `FBangoInstance::GetPersistentKey(Program, Local)` gives it (`%persistent ` + the script's file name + `|` + the owner's Bango ID + `|` + the variable's name). `FBangoGlobalStore::DeclarePersistentLocal(Key, Type)` makes one, or clears it on a type change. Errors and the debugger show the variable's own name.
 
 ### Fixed values
 A **fixed value** is one written out, with nothing to work out: a number (`5`, `-2.5`), a string, `true`, `false`, `nil`, a Bango ID (`@john`, or `player`), a text (`INVTEXT("...")`, `NSLOCTEXT(...)`, and in a script `LOCTEXT(...)`), or an array of those (`[1, -2]`, and `[0, 0, 100]` for a vector). Script variables' starting values, globals' defaults and inputs' defaults are fixed values.
@@ -615,7 +648,7 @@ if (_pulled)
 - In the wrong place, each kind says what to do instead:
   - A global **without a value** below the top: *"A global declared in the code must be given a value, like 'global bool open = ...;' (it's set to it each time this runs). To only declare it, put 'global bool open;' at the top of the file..."* The script text pane's **Apply** moves it to the top itself (section 12).
   - A **default** below the top (or after a global set in the code, which is code): *"A global's default ('?=') goes in its declaration at the top of the file...: move 'global bool open ?= ...;' up there. To set it here, each time this runs, write '=': 'global bool open = ...;'."* Apply moves it to the top, default and all.
-  - `?=` anywhere else (a local's or script variable's value, or `gold ?= 1;` as a statement) is an error saying it's only for a global's default.
+  - `?=` anywhere else (a plain local's or script variable's value, or `gold ?= 1;` as a statement) is an error saying it's only for a global's or a persistent variable's default (Persistent variables, above).
 - **All of a script's global declarations take effect when an instance starts, before any of its code runs**, in order, the ones in the code included: each global that doesn't exist yet is created, and given its default if it has one (or it's nil and has one).
 - Each global is declared once at the top of the file. Declaring the same one twice there is a compile error.
 - A `for` header can't declare a global.
@@ -1757,7 +1790,7 @@ The graph editor shows a script as nodes and wires and saves it back as text. Th
 ### Graphs and nodes
 - A file has a **main graph** (the top-level code) and **one graph per function**.
 - Each graph starts at its **entry node**, node 0 at (0,0) (section 1). The main graph's entry, **Script Start**, shows the `#inputs` list under an **Input Params** heading (left out when there are none). The `#LOCTEXT_NAMESPACE` line isn't shown on it; it's edited in the script editor's Script Config panel. A function's entry shows its signature, like `int AddScore(int _amount)`.
-- **Global and script variable declarations at the top aren't nodes.** A graph's script variables, and the file's globals declared at the top, are listed in the script editor's **Script Vars** and **Global Vars** lists and edited there (below); in the text they're the declarations at the top (section 4). The Script Start node and a function's entry node don't show them. A local's declaration is a **Local** node: "Local Int", "Local Float Array" and so on, by its type, with a **Name** row and a **Value** row. A global set in the code (`global bool open = true;`) is a **Set Global** node: "Set Global Bool", "Set Global Int Array" and so on, with a **Name** row and a **To** row (of its type); it's green like the other variable nodes. Its text is written without `global` (`bool open = true`), and it must have a value.
+- **Global and script variable declarations at the top aren't nodes.** A graph's script variables, and the file's globals declared at the top, are listed in the script editor's **Script Vars** and **Global Vars** lists and edited there (below); in the text they're the declarations at the top (section 4). The Script Start node and a function's entry node don't show them. A local's declaration is a **Local** node: "Local Int", "Local Float Array" and so on, by its type, with a **Name** row and a **Value** row. A persistent local's (`persistent int _count ?= 0;`, section 4) is a **Persistent Local** node ("Persistent Local Int"), whose Value row is its `?=` value. A global set in the code (`global bool open = true;`) is a **Set Global** node: "Set Global Bool", "Set Global Int Array" and so on, with a **Name** row and a **To** row (of its type); it's green like the other variable nodes. Its text is written without `global` (`bool open = true`), and it must have a value.
 - Every other statement line is one node, and so is every reroute line (a line with only `//@` metadata, section 1). A reroute is drawn like Blueprint's: one dot that is both its input and its output, with a larger area around it to grab and move it. Dragging from the dot to the left wires its input, and to the right its output; Ctrl-dragging it moves it. Its grab area is two grid squares each way with the dot in the middle, so the dot is on a grid line. Every node's pins are a whole number of grid squares apart (currently two) and on grid lines too, so a wire between a pin and a reroute at the same height on the grid runs straight. **Double-clicking a wire adds a reroute** on it there, like in Blueprint; it gets the next free NodeID. **Deleting a reroute keeps its wire**: what led into it is wired to where it led.
 - A node shows its kind as the title and its text as one editable line, without keywords, brackets or `;`: the condition of `if`/`while`, the header of `for`/`forEach`, the name of `label`/`goto`, the value of `return`, and the whole statement for assignments and calls.
 

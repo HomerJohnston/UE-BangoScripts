@@ -641,7 +641,10 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 			TEXT("\t_n += 2;    //@7(1, 6)\n")
 			TEXT("\tfloat _d = 1.5;    //@40(1, 7)\n")
 			TEXT("\t_d = 2.5;    //@41(1, 8)\n")
-			TEXT("\tint _k;    //@43(1, 9)\n}\nelse\n{\n")
+			TEXT("\tint _k;    //@43(1, 9)\n")
+			TEXT("\tpersistent int _seen ?= 2;    //@45(1, 10)\n")
+			TEXT("\tpersistent bool _told;    //@46(1, 11)\n")
+			TEXT("\t_seen = 3;    //@47(1, 12)\n}\nelse\n{\n")
 			TEXT("\t_n = 4;    //@9(2, 6)\n")
 			TEXT("\t_d = 3;    //@42(2, 7)\n};\n")
 			TEXT("int _t = spawn    //@44(0, 16)\n{\n};\n")
@@ -668,6 +671,9 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 			{ 41, TEXT("Set (Generic) | Var (x float): `_d` | To <float>: `2.5`") },
 			{ 42, TEXT("Set (Generic) | Var (x): `_d` | To: `3`") },
 			{ 43, TEXT("Local Int (Generic) | Name (x int): `_k` | Value <int>: -") },
+			{ 45, TEXT("Persistent Local Int (Generic) | Name (x int): `_seen` | Value <int>: `2`") },
+			{ 46, TEXT("Persistent Local Bool (Generic) | Name (x bool): `_told` | Value <bool>: -") },
+			{ 47, TEXT("Set (Generic) | Var (x int): `_seen` | To <int>: `3`") },
 			{ 44, TEXT("Spawn (Generic) | Var (x int) <int>: `int _t`?") },
 			{ 9,  TEXT("Set (Generic) | Var (x int): `_n` | To <int>: `4`") },
 			{ 10, TEXT("Set (Generic) | Var (x): `_name` | To: `3`") },

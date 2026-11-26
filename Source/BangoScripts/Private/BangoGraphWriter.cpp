@@ -211,17 +211,17 @@ namespace BangoGraphWriterPrivate
 			return false;
 		}
 
-		/** `global int gold ?= 0;` or `scriptVar int _count = 0;`, each under its comment. Declarations have no metadata. */
+		/** `global int gold ?= 0;`, `scriptVar int _count = 0;` or `persistent scriptVar int _count ?= 0;`, each under its comment. Declarations have no metadata. */
 		void WriteDecls(const TArray<FBangoGraphDecl>& Decls, bool bGlobal, int32 Indent)
 		{
 			for (const FBangoGraphDecl& Decl : Decls)
 			{
 				AddComment(Decl.Comment, Indent, -1);
-				FString Code = bGlobal ? FString(Decl.bPersistent ? TEXT("persistent global ") : TEXT("global ")) : FString(TEXT("scriptVar "));
+				FString Code = FString(Decl.bPersistent ? TEXT("persistent ") : TEXT("")) + (bGlobal ? TEXT("global ") : TEXT("scriptVar "));
 				Code += Decl.Type + TEXT(" ") + Decl.Name;
-				if (Decl.bHasValue) // a script variable's starting value, or a global's default
+				if (Decl.bHasValue) // a script variable's starting value, or a global's or persistent one's default
 				{
-					Code += (bGlobal ? TEXT(" ?= ") : TEXT(" = ")) + Decl.Value;
+					Code += (bGlobal || Decl.bPersistent ? TEXT(" ?= ") : TEXT(" = ")) + Decl.Value;
 				}
 				AddCode(Indent, -1, Code + TEXT(";"), nullptr);
 			}

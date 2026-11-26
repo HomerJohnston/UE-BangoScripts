@@ -52,6 +52,12 @@ public:
 	void ResetAll();
 
 	/**
+	 * For a persistent local (FBangoPersistentLocal): its value, under Key, which isn't a name a script can write.
+	 * Persistent. A different type than the one stored throws the old value away (it's nil, as this type).
+	 */
+	void DeclarePersistentLocal(const FString& Key, const FBangoType& Type);
+
+	/**
 	 * Removes the world globals and keeps the persistent ones: the world they belong to has ended (the player left
 	 * the level). Every slot is renewed (GetLayout), as for ResetAll.
 	 */

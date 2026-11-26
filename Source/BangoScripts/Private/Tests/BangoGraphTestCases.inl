@@ -159,6 +159,9 @@ static const TCHAR* const GBangoGraphRoundTripSources[] =
 	// World and persistent globals: in the Globals list, and set in the code (a Global node).
 	TEXT("global int level ?= 1;\npersistent global int gold ?= 5;\n// Kept between levels.\npersistent global string[] log;\n\ngold = gold + level;\npersistent global bool rich = gold > 100;\nglobal bool here = true;\n"),
 	TEXT("persistent global int gold;\n\nfunction void Pay()\n{\n\tpersistent global bool paid = true;\n}\n\n/*\npersistent global bool off = true;\n*/\nPay();\n"),
+	// Persistent locals (a Local node) and script variables (in the Script Variables list), kept between runs.
+	TEXT("persistent scriptVar int _visits ?= 0;\npersistent scriptVar string[] _said;\nscriptVar int _now = 1;\n\npersistent int _count ?= 0;\n_count++;\nif (_count > 2)\n{\n\tpersistent bool _told;\n\t_told = true;\n}\n/*\npersistent float _off ?= 1.5;\n*/\n"),
+	TEXT("function int Visit()\n{\n\tpersistent scriptVar int _calls ?= 0;\n\tpersistent int _seen ?= 3;\n\t_calls++;\n\treturn _calls + _seen;\n}\n\nVisit();\n"),
 	// Commands with a block (section 7): a node with a Body output; its block's statements are nodes of their own.
 	TEXT("@john Speech(0, 1)\n{\n\tLine(INVTEXT(\"Hello\"));\n\tif (metBefore)\n\t{\n\t\tLine(INVTEXT(\"Again\"));\n\t}\n\tLine(INVTEXT(\"Bye\"));\n}\nWriteLog(\"done\");\n"),
 	TEXT("Speech(0) {\n\tLine(1);\n}\n"),

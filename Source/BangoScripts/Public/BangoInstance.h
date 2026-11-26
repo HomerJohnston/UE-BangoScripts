@@ -183,8 +183,8 @@ public:
 	 * keeps it, StartSpawned copies the parent's, and it's saved with the instance. Without one, `self` stops the script
 	 * with an error when it's used.
 	 */
-	void SetOwner(const FBangoScriptOwner& InOwner) { Owner = InOwner; }
-	void SetOwner(FBangoScriptOwner&& InOwner) { Owner = MoveTemp(InOwner); }
+	void SetOwner(const FBangoScriptOwner& InOwner) { Owner = InOwner; ForgetPersistentKeys(); }
+	void SetOwner(FBangoScriptOwner&& InOwner) { Owner = MoveTemp(InOwner); ForgetPersistentKeys(); }
 	const FBangoScriptOwner& GetOwner() const { return Owner; }
 
 	/**
@@ -292,6 +292,13 @@ private:
 	 * declaration has a default, that's warned about (once per global). False, with OutError and OutLine, on a type clash.
 	 */
 	bool DeclareGlobals(const FBangoProgram& InProgram, FBangoGlobalStore& Globals, FString& OutError, int32& OutLine);
+public:
+	/**
+	 * What one of a program's persistent locals is kept under in the store of globals: the script (its file name),
+	 * its owner (what `self` is; none for a script without one) and the variable's name, as a name no script can write.
+	 */
+	FString GetPersistentKey(const FBangoProgram& InProgram, const FBangoPersistentLocal& Local) const;
+private:
 	TArray<FString> Warnings;
 
 	bool BindCommands(const FBangoCommandTable& Commands, FString& OutError);
@@ -546,4 +553,15 @@ private:
 	UObject* LastWorldContext = nullptr;
 	/** NotifyAbandoned is at work: a failure or a Terminate while it is doesn't start it again. */
 	bool bNotifyingAbandoned = false;
+	/** GetPersistentKey's, for each of Program's persistent locals, and the program they were made for. */
+	mutable TArray<FString> PersistentKeys;
+	mutable const FBangoProgram* PersistentKeysProgram = nullptr;
+	/** Makes PersistentKeys for Program, if they aren't. */
+	void MakePersistentKeys() const;
+	/** The name a global place's name (FBangoProgram::Names) is kept under: itself, or for a persistent local, its key. */
+	const FString& GetGlobalName(int32 NameIndex);
+	/** A name in a wait set (FBangoWaitSet::Globals): as GetGlobalName, from the name itself. */
+	const FString& GetWaitGlobalName(const FString& Name) const;
+	/** The owner changed: the persistent locals' keys (and the slots found through them) are made again. */
+	void ForgetPersistentKeys() { PersistentKeysProgram = nullptr; PersistentKeys.Reset(); GlobalSlots.Reset(); }
 };

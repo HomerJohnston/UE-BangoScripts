@@ -103,6 +103,28 @@ bool FBangoGlobalStore::IsDefined(const FString& Name) const
 	return Value && !Value->IsNil();
 }
 
+void FBangoGlobalStore::DeclarePersistentLocal(const FString& Key, const FBangoType& Type)
+{
+	if (const int32* ExistingSlot = Slots.Find(Key))
+	{
+		FEntry& Existing = Entries[*ExistingSlot];
+		if (Existing.Value.GetType() != Type)
+		{
+			// The script now says it's another type: what was kept is thrown away.
+			Existing.Value = FBangoValue::MakeNil(Type);
+			Existing.Stamp = ++ChangeStamp;
+		}
+		Existing.bPersistent = true;
+		return;
+	}
+	FEntry& Entry = Entries.AddDefaulted_GetRef();
+	Entry.Name = Key;
+	Entry.Value = FBangoValue::MakeNil(Type);
+	Entry.Stamp = ++ChangeStamp;
+	Entry.bPersistent = true;
+	Slots.Add(Key, Entries.Num() - 1);
+}
+
 void FBangoGlobalStore::ResetAll()
 {
 	Entries.Reset();

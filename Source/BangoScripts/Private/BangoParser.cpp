@@ -993,26 +993,40 @@ namespace BangoParserPrivate
 		}
 
 		/** `global T name [= e | ?= e]` or `T _name [= e]`, without the ';'. */
-		/** `persistent global int gold;`: a global that outlives the world. */
+		/**
+		 * `persistent global int gold;` (a global that outlives the world), `persistent int _count ?= 0;` (a local
+		 * kept between runs of the script) or `persistent scriptVar int _count ?= 0;`.
+		 */
 		FBangoStmtPtr ParsePersistentDecl()
 		{
 			const FBangoSourceLocation Loc = Cur().Loc;
 			Advance();
-			if (!Check(EBangoTokenKind::KwGlobal))
+			FBangoStmtPtr Stmt;
+			if (Check(EBangoTokenKind::KwGlobal))
 			{
-				Fail(Loc, FString::Printf(TEXT("'persistent' goes before 'global', like 'persistent global int gold;', for a global that lasts the whole game. Found %s after it."), *Bango::DescribeToken(Cur())));
+				Stmt = ParseVarDecl(true, false, true);
+			}
+			else if (Check(EBangoTokenKind::KwScriptVar))
+			{
+				Stmt = ParseVarDecl(false, true, true);
+			}
+			else if (IsTypeKeyword(Cur().Kind))
+			{
+				Stmt = ParseVarDecl(false, false, true);
+			}
+			else
+			{
+				Fail(Loc, FString::Printf(TEXT("'persistent' goes before a declaration: 'persistent global int gold;' for a global that lasts the whole game, or 'persistent int _count ?= 0;' for a variable this script keeps between runs. Found %s after it."), *Bango::DescribeToken(Cur())));
 				return nullptr;
 			}
-			FBangoStmtPtr Stmt = ParseVarDecl(true);
 			if (Stmt)
 			{
 				Stmt->Loc = Loc;
-				Stmt->As<FBangoVarDeclStmt>()->bPersistent = true;
 			}
 			return Stmt;
 		}
 
-		FBangoStmtPtr ParseVarDecl(bool bGlobal, bool bScriptVar = false)
+		FBangoStmtPtr ParseVarDecl(bool bGlobal, bool bScriptVar = false, bool bPersistent = false)
 		{
 			TUniquePtr<FBangoVarDeclStmt> Decl = MakeUnique<FBangoVarDeclStmt>();
 			Decl->Loc = Cur().Loc;
@@ -1041,9 +1055,10 @@ namespace BangoParserPrivate
 				return nullptr;
 			}
 
-			if (Check(EBangoTokenKind::QuestionAssign) && !bGlobal)
+			Decl->bPersistent = bPersistent;
+			if (Check(EBangoTokenKind::QuestionAssign) && !bGlobal && !bPersistent)
 			{
-				Fail(Cur().Loc, FString::Printf(TEXT("'?=' gives a global its default, like 'global int gold ?= 0;'. To give %s '%s' its value, write '='."),
+				Fail(Cur().Loc, FString::Printf(TEXT("'?=' gives a global or a persistent variable its default, like 'global int gold ?= 0;'. To give %s '%s' its value, write '='."),
 					bScriptVar ? TEXT("script variable") : TEXT("local"), *Decl->Name));
 				return nullptr;
 			}
@@ -1768,7 +1783,10 @@ namespace BangoParserPrivate
 				const FBangoSourceLocation InitLoc = Cur().Loc;
 				if (Check(EBangoTokenKind::KwGlobal) || Check(EBangoTokenKind::KwScriptVar) || Check(EBangoTokenKind::KwPersistent))
 				{
-					Fail(InitLoc, !Check(EBangoTokenKind::KwScriptVar)
+					const bool bPersistentLocal = Check(EBangoTokenKind::KwPersistent) && Ahead(1).Kind != EBangoTokenKind::KwGlobal;
+					Fail(InitLoc, bPersistentLocal
+						? TEXT("A for loop's variable can't be persistent: it starts again each time the loop does. Declare a persistent variable before the loop, and set the loop's from it.")
+						: !Check(EBangoTokenKind::KwScriptVar)
 						? TEXT("A for loop can't declare a global. Declare it at the top of the file.")
 						: TEXT("A for loop can't declare a scriptVar. Its variable is declared with just a type: 'for (int _i = 0; ...)'."));
 					return nullptr;

@@ -67,6 +67,8 @@ namespace BangoCompilerPrivate
 		FString Name;
 		FBangoType Type;
 		int32 Slot = 0;
+		/** A persistent local or script variable: it has no slot, and is read and written as this global name (FBangoPersistentLocal). -1 otherwise. */
+		int32 PersistentName = -1;
 	};
 
 	struct FScope
@@ -246,6 +248,14 @@ namespace BangoCompilerPrivate
 			if (bCondition && Program.Functions.Num() > 0)
 			{
 				Program.ConditionDependencies = Bango::FindDependencies(Program, 0, 0, Program.Functions[0].Code.Num());
+			}
+			if (Program.PersistentLocals.Num() > 0)
+			{
+				Program.PersistentLocalOfName.Init(-1, Program.Names.Num());
+				for (int32 Index = 0; Index < Program.PersistentLocals.Num(); ++Index)
+				{
+					Program.PersistentLocalOfName[Program.PersistentLocals[Index].NameIndex] = Index;
+				}
 			}
 			// Last, once everything that reads the code has: the common runs of instructions, for the VM to run in one go.
 			Bango::FuseInstructions(Program);
@@ -1530,7 +1540,10 @@ namespace BangoCompilerPrivate
 			{
 				for (const FLocalVar& Var : Scope.Vars)
 				{
-					Slots.Add(Var.Slot);
+					if (Var.PersistentName < 0) // a persistent one has no slot, and exists from the start: a goto can jump past it
+					{
+						Slots.Add(Var.Slot);
+					}
 				}
 			}
 			return Slots;
@@ -1677,7 +1690,7 @@ namespace BangoCompilerPrivate
 			if (const FLocalVar* Var = FindScriptVar(Name))
 			{
 				return Fail(Loc, FString::Printf(TEXT("'%s' is one of this script's %s, which its functions see too, so function '%s' can't declare its own '%s'. Rename one of them, or use the script's here."),
-					*Name, Var->Slot < Program.Functions[0].NumParams ? TEXT("inputs") : TEXT("script variables"), *FnAst->Name, *Name));
+					*Name, Var->PersistentName < 0 && Var->Slot < Program.Functions[0].NumParams ? TEXT("inputs") : TEXT("script variables"), *FnAst->Name, *Name));
 			}
 			return true;
 		}
@@ -1885,6 +1898,10 @@ namespace BangoCompilerPrivate
 			{
 				return Fail(Decl.Loc, FString::Printf(TEXT("'%s' is already declared (as a local, a parameter or a loop's variable). Use a different name."), *Decl.Name));
 			}
+			if (Decl.bPersistent)
+			{
+				return CompilePersistentDecl(Decl);
+			}
 			if (Decl.Init)
 			{
 				FExprType ValueType;
@@ -1928,6 +1945,66 @@ namespace BangoCompilerPrivate
 			{
 				ScriptVars.Add(Scopes.Last().Vars.Last());
 			}
+			return true;
+		}
+
+		/**
+		 * `persistent int _count ?= 0;` (or a scriptVar): kept in the store of globals, under a name of its own for
+		 * each script and owner, and declared, with its default, when the script starts (FBangoInstance::DeclareGlobals).
+		 * The line itself does nothing. Read and written as a global (ResolvePlace), so it's saved, waited on and
+		 * shared by every running copy of the script on the same owner.
+		 */
+		bool CompilePersistentDecl(const FBangoVarDeclStmt& Decl)
+		{
+			if (bCondition)
+			{
+				return Fail(Decl.Loc, TEXT("A condition can't have persistent variables: it isn't a script that runs again."));
+			}
+			if (Decl.Init.IsValid() && !Decl.bDefault)
+			{
+				return Fail(Decl.Init->Loc, FString::Printf(TEXT("A persistent variable keeps its value between runs of the script, so '=' would set it again every time. Give it its first value with '?=', which only does that when it has none: 'persistent %s %s ?= ...;'."),
+					*Decl.Type.ToString(), *Decl.Name));
+			}
+			if (!CheckNotAGlobal(Decl.Name, Decl.Loc))
+			{
+				return false;
+			}
+			if (const FBangoPersistentLocal* Same = Program.PersistentLocals.FindByPredicate([&Decl](const FBangoPersistentLocal& Other) { return Other.Name.Equals(Decl.Name, ESearchCase::CaseSensitive); }))
+			{
+				return Fail(Decl.Loc, FString::Printf(TEXT("'%s' is already a persistent variable of this script (line %d): a persistent variable's name is used once in a file, functions included, since that's what it's kept under. Use a different name."),
+					*Decl.Name, Same->Line));
+			}
+			FBangoPersistentLocal Persistent;
+			Persistent.Name = Decl.Name;
+			Persistent.Type = Decl.Type;
+			Persistent.Line = Decl.Loc.Line;
+			Persistent.NameIndex = AddName(FString(Bango::PersistentLocalPrefix) + Decl.Name);
+			if (Decl.Init.IsValid())
+			{
+				if (!IsFixedValue(*Decl.Init))
+				{
+					return Fail(Decl.Init->Loc, FString::Printf(TEXT("A persistent variable's first value must be a fixed value: a number, a string, true, false, nil, a Bango ID like @john, a text, or an array of those. To work one out, give it none here and set it when it's nil: 'if (isNil(%s)) { %s = ...; }'."),
+						*Decl.Name, *Decl.Name));
+				}
+				if (!EvaluateConstant(*Decl.Init, Decl.Type, Decl.Name, Persistent.Default))
+				{
+					return false;
+				}
+				Persistent.bHasDefault = true;
+			}
+			Program.PersistentLocals.Add(Persistent);
+
+			FLocalVar Var;
+			Var.Name = Decl.Name;
+			Var.Type = Decl.Type;
+			Var.Slot = MAX_int32;
+			Var.PersistentName = Persistent.NameIndex;
+			Scopes.Last().Vars.Add(Var);
+			if (Decl.bScriptVar && !FnAst)
+			{
+				ScriptVars.Add(Var);
+			}
+			Emit(EBangoOp::Nop);
 			return true;
 		}
 
@@ -2820,15 +2897,15 @@ namespace BangoCompilerPrivate
 
 			if (const FLocalVar* Local = FindLocal(Root->Name))
 			{
-				Kind = EBangoPlaceKind::Local;
-				Index = Local->Slot;
+				Kind = Local->PersistentName >= 0 ? EBangoPlaceKind::Global : EBangoPlaceKind::Local;
+				Index = Local->PersistentName >= 0 ? Local->PersistentName : Local->Slot;
 				RootType = FExprType::MakeKnown(Local->Type);
 			}
 			else if (const FLocalVar* ScriptVar = FindScriptVar(Root->Name))
 			{
 				// In a function: one of the script's inputs or script variables, in the main graph's frame.
-				Kind = EBangoPlaceKind::Script;
-				Index = ScriptVar->Slot;
+				Kind = ScriptVar->PersistentName >= 0 ? EBangoPlaceKind::Global : EBangoPlaceKind::Script;
+				Index = ScriptVar->PersistentName >= 0 ? ScriptVar->PersistentName : ScriptVar->Slot;
 				RootType = FExprType::MakeKnown(ScriptVar->Type);
 			}
 			else if (const FGraphLocal* Elsewhere = GraphLocals.Find(Root->Name))

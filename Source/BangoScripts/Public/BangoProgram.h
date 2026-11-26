@@ -295,6 +295,27 @@ struct FBangoInputsSignature
 	BANGOSCRIPTS_API FString GetNames() const;
 };
 
+/**
+ * A persistent local or script variable (`persistent int _i ?= 0;`): kept in the game instance's store of globals,
+ * under a name of its own for each script and owner (FBangoInstance::GetPersistentKey), so the program reads and
+ * writes it as a global, through the name Names[NameIndex] (Bango::PersistentLocalPrefix + its name).
+ */
+struct FBangoPersistentLocal
+{
+	FString Name;
+	FBangoType Type;
+	int32 NameIndex = 0;
+	int32 Line = 0;
+	bool bHasDefault = false;
+	FBangoValue Default;
+};
+
+namespace Bango
+{
+	/** What a persistent local's name in FBangoProgram::Names begins with: not a name a script can write, so it's no global's. */
+	inline const TCHAR* PersistentLocalPrefix = TEXT("%persistent ");
+}
+
 struct FBangoGlobalDecl
 {
 	FString Name;
@@ -406,8 +427,12 @@ struct FBangoProgram
 	bool bIsCondition = false;
 
 	TArray<FBangoValue> Constants;
-	/** Global names and command names. */
+	/** Global names and command names (and persistent locals', FBangoPersistentLocal). */
 	TArray<FString> Names;
+	/** The persistent locals and script variables the script declares, in all its functions. */
+	TArray<FBangoPersistentLocal> PersistentLocals;
+	/** For each of Names: its persistent local (an index into PersistentLocals), or -1. Empty if there are none. */
+	TArray<int32> PersistentLocalOfName;
 	TArray<FBangoType> Types;
 
 	/** Functions[0] is the top level (the entry point). */
