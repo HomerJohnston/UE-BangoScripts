@@ -163,6 +163,8 @@ struct BANGOSCRIPTS_API FBangoCommandSignature
 	 * directly in such a block is a compile error. Empty for a command that can be called anywhere. See Inside.
 	 */
 	FString InsideOf;
+	/** With InsideOf: the command may also be called anywhere else, where it belongs to no block. See Inside. */
+	bool bInsideOptional = false;
 	/** What's wrong with how the signature was built (a type parameter that doesn't exist, ...): FBangoCommandTable::Add fails with it. */
 	FString BuildError;
 	/**
@@ -271,8 +273,13 @@ struct BANGOSCRIPTS_API FBangoCommandSignature
 	 * The command can only be called in the block of the block command named here, directly: at any depth of if,
 	 * loop and so on, but not in another block command's block, a spawn block, or a function called from the block.
 	 * It's handed that block's state (FBangoCommandCall::BlockState), and can end the block (EndBlock).
+	 *
+	 * With bOptional, it may also be called anywhere else (the top level, a function, another block command's block, a
+	 * spawn block), where it belongs to no block: there BlockState is null (and OuterBlockState, for one that takes a
+	 * block of its own), and ending the block is an error. Written directly in the block, it's as without bOptional.
+	 * For a command that works on its own as well as in the block, like a line said outside any speech.
 	 */
-	FBangoCommandSignature& Inside(const FString& BlockCommand);
+	FBangoCommandSignature& Inside(const FString& BlockCommand, bool bOptional = false);
 	FBangoCommandSignature& InCategory(const FString& InCategory);
 	FBangoCommandSignature& Describe(const FString& InDescription);
 };

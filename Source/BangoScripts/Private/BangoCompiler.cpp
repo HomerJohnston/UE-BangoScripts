@@ -4054,7 +4054,11 @@ namespace BangoCompilerPrivate
 			if (!Signature->InsideOf.IsEmpty() && !bInferring)
 			{
 				const bool bDirectlyInside = OpenBlocks.Num() > GetOpenBlockBase() && OpenBlocks.Last().Name == Signature->InsideOf;
-				if (!bDirectlyInside)
+				if (!bDirectlyInside && Signature->bInsideOptional)
+				{
+					// It may be called anywhere: here it belongs to no block (its BlockState is null).
+				}
+				else if (!bDirectlyInside)
 				{
 					const bool bSomewhereInside = OpenBlocks.ContainsByPredicate([Signature](const FOpenBlock& Open) { return Open.Name == Signature->InsideOf; });
 					if (!bSomewhereInside)
@@ -4065,7 +4069,7 @@ namespace BangoCompilerPrivate
 					return Fail(Call.NameLoc, FString::Printf(TEXT("'%s' must be written directly in the block of '%s', not in %s inside it."), *Call.Name, *Signature->InsideOf,
 						OpenBlocks.Num() > GetOpenBlockBase() ? *FString::Printf(TEXT("the block of '%s'"), *OpenBlocks.Last().Name) : TEXT("a spawn block")));
 				}
-				if (Opening >= 0)
+				else if (Opening >= 0)
 				{
 					Fn->Blocks[Opening].Parent = OpenBlocks.Last().Index; // it opens a block of its own, in the one it belongs to
 				}

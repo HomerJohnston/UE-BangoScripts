@@ -494,9 +494,10 @@ FBangoCommandSignature& FBangoCommandSignature::Block()
 	return *this;
 }
 
-FBangoCommandSignature& FBangoCommandSignature::Inside(const FString& BlockCommand)
+FBangoCommandSignature& FBangoCommandSignature::Inside(const FString& BlockCommand, bool bOptional)
 {
 	InsideOf = BlockCommand;
+	bInsideOptional = bOptional;
 	return *this;
 }
 

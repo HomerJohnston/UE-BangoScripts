@@ -2133,6 +2133,24 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				};
 				AddBlockCommand(Pick);
 
+				// A line that may be on its own too (Inside, optional): it says which it is.
+				FBangoCommand MaybeLine;
+				MaybeLine.Signature = FBangoCommandSignature::Make(TEXT("MaybeLine")).Param(TEXT("Amount"), FBangoType::Int()).Inside(TEXT("Speech"), /*bOptional*/ true);
+				MaybeLine.Start = [&BlockLog, StateOf](FBangoCommandCall& Call)
+				{
+					if (Call.BlockState)
+					{
+						*Call.BlockState = FBangoValue::MakeInt((int32)(StateOf(Call) + Call.Args[0].GetInt()));
+					}
+					BlockLog.Add(FString::Printf(TEXT("maybe %lld %s"), (long long)Call.Args[0].GetInt(), Call.BlockState ? TEXT("in") : TEXT("alone")));
+					if (Call.Args[0].GetInt() == 9)
+					{
+						Call.EndBlock(); // ends the block it's in; on its own, an error
+					}
+					return EBangoCommandResult::Done;
+				};
+				AddBlockCommand(MaybeLine);
+
 				// As Line, but it waits a frame first, and has its state then too.
 				FBangoCommand SlowLine;
 				SlowLine.Signature = FBangoCommandSignature::Make(TEXT("SlowLine")).Param(TEXT("Amount"), FBangoType::Int()).Inside(TEXT("Speech"));
@@ -2436,6 +2454,13 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				{ TEXT("a line that waits"), TEXT("global int out;\nSpeech(0)\n{\n\tLine(1);\n\tSlowLine(2);\n\tLine(4);\n}\nout = 1;"), TEXT("open, line 1, |, slow line 2, line 4, close:7"), 1, 2 },
 				{ TEXT("a line that waits, then ends the block"), TEXT("global int out;\nSpeech(1)\n{\n\tSlowLine(2);\n\tLine(4);\n}\nout = 1;"), TEXT("open, |, slow line 2, close:1002"), 1, 2 },
 				{ TEXT("a close that waits"), TEXT("global int out;\nSlowSpeech()\n{\n\tout = 3;\n}\nout = out + 1;"), TEXT("closing, |, closed:5"), 4, 2 },
+				{ TEXT("an optional line in its block"), TEXT("global int out;\nSpeech(0)\n{\n\tMaybeLine(2);\n\tif (true)\n\t{\n\t\tMaybeLine(3);\n\t}\n}\nout = 1;"), TEXT("open, maybe 2 in, maybe 3 in, close:5"), 1, 1 },
+				{ TEXT("an optional line on its own"), TEXT("global int out;\nMaybeLine(2);\nout = 1;"), TEXT("maybe 2 alone"), 1, 1 },
+				{ TEXT("an optional line in another block, a function, or after its block"),
+					TEXT("global int out;\nSpeech(0)\n{\n\tOther()\n\t{\n\t\tMaybeLine(1);\n\t}\n\tSay();\n}\nMaybeLine(3);\nout = 1;\n\nfunction void Say()\n{\n\tMaybeLine(2);\n}"),
+					TEXT("open, maybe 1 alone, maybe 2 alone, close:0, maybe 3 alone"), 1, 1 },
+				{ TEXT("an optional line ends its block"), TEXT("global int out;\nSpeech(0)\n{\n\tMaybeLine(9);\n\tMaybeLine(1);\n}\nout = 1;"), TEXT("open, maybe 9 in, close:9"), 1, 1 },
+				{ TEXT("an optional line can't end a block it isn't in"), TEXT("global int out;\nMaybeLine(9);\nout = 1;"), TEXT("maybe 9 alone"), -2, 1 },
 				{ TEXT("a close that waits, left early"), TEXT("global int out;\nwhile (true)\n{\n\tSlowSpeech()\n\t{\n\t\tbreak;\n\t}\n}\nout = 1;"), TEXT("closing, |, closed:5:early"), 1, 2 },
 			};
 			if (bTableMade)
