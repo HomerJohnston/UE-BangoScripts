@@ -52,6 +52,7 @@ enum class EBangoSyntaxKind : uint8
 	Function,           // (planned)
 	Parameter,          // a script or function parameter (FBangoScriptNames)
 	UndeclaredGlobal,   // a global the file uses but doesn't declare (FBangoScriptNames)
+	Define,             // one of the project's defines, like SELECT_RANDOM (FBangoScriptNames; spec section 4, Defines)
 
 	Count
 };

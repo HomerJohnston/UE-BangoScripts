@@ -1,8 +1,12 @@
-# Bango Language Spec (draft v0.130)
+# Bango Language Spec (draft v0.132)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.132:** **other plugins can give defines of their own** (section 4, Defines from plugins): `Bango::RegisterDefines(TEXT("BangoYap"), { { TEXT("SELECT_RANDOM"), TEXT("int"), TEXT("3"), TEXT("Speech"), TEXT("...") } })` in a module's `StartupModule`, `Bango::UnregisterDefines(TEXT("BangoYap"))` in its `ShutdownModule`. A plugin's defines come before the project's, in the order the plugins registered: a name given twice keeps the first, and the other is left out with a warning in the log (and, for a project row, beside the row). Project Settings lists them under the project's own, read only; errors and the editors say which plugin a define is from. `FBangoDefineEntry::Source`, `Bango::DescribeDefineSource`, `GetRegisteredDefineError`.
+
+**Changes in v0.131:** **defines**: project-wide named values every script can use by name and none can change, like `SELECT_RANDOM = 3` (section 4, Defines). They're in Project Settings > Plugins > Bango > Defines, each a SHOUTING_SNAKE_CASE name, a type and a fixed value. A use **compiles to the value**, so a define works wherever a fixed value does: a `case`, a global's default, a script variable's start, inside an array (`[SELECT_RANDOM, 1]`), and in `Bango::ParseFixedValue`. Writing to one, or declaring anything with a define's name, is a compile error. A script that uses one is compiled again when the defines change (`FBangoProgram::DefinesFingerprint`). The text editor colours them and offers them in autocomplete, as do node fields; the graph editor's side panel lists them (DEFINES). Blueprint: **Get Bango Define** Bool / Int / Float / String / Text, and **Is Bango Define**. C++: `BangoDefines.h` (`Bango::FindDefine`, `GetDefines`, `GetDefinesFingerprint`, `IsDefineName`, `SetProjectDefines`).
 
 **Changes in v0.130:** **node decorators**: another editor module can change how the graph editor draws the nodes of its commands, by command name (section 15, Node decorators): the title, its colour and icon, the tooltip, the widget for any field's value, which fields are left out, and something more under the fields. The node's text is still what's saved; a decorator's widget sets a field through `FBangoNodeDecoratorContext::SetFieldValue`, as typing in it would. `Bango::RegisterNodeDecorator` / `UnregisterNodeDecorator` and `IBangoNodeDecorator`, in `BangoNodeDecorator.h` (the BangoScriptsScriptEditor module). Also checked: a text value keeps its key and namespace through the VM, copies, saving and loading (the Unreal test `Bango.Game.TextKeys`).
 
@@ -513,12 +517,13 @@ WriteScreen(ToString(NSLOCTEXT("Shared.UI", "Continue", "Continue")));
 - **Names are case-sensitive**: `john` and `John` are different names. This covers variables, globals, functions, labels, commands, keywords, type names and Bango ID names (`@john` and `@John` are different actors).
 - Calling a command or function with the wrong capitalisation is a compile error that suggests the right name: *"Unknown command or function 'writeScreen'. Did you mean 'WriteScreen'? Names are case-sensitive."*
 - A name is letters, digits and `_`, and doesn't start with a digit.
+- A **define**'s name (section 4, Defines) can't be used for anything a script declares: it always means the define.
 - Keywords and type names can't be used as names: `if else while for forEach in sequence spawn waitUntil switch case default break continue return label goto function global scriptVar persistent call isNil player self true false nil bool int float string entity text vector2 vector3 void LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
 
 ### Locals and script variables
 A graph (the main script, or a function) has two kinds of variables of its own, besides its parameters and loop variables. Both only exist inside the running script instance.
 - Any name will do; a leading `_` is allowed but not needed (`count` and `_count` are both fine). The same goes for function parameters, script parameters and loop variables.
-- **Name lookup:** a name means the local, script variable, parameter or loop variable of that name that's visible there, if there is one, and otherwise a global. A local, script variable, parameter or loop variable **can't have the name of a global the file declares**: that's a compile error, *"'gold' is a global this file declares, so it can't also be a local, a parameter or a loop's variable here. Rename one of them."* It can have the name of a global the file doesn't declare, and then that name means the local in its graph. A misspelled name that's only read compiles as a read of a global, which stops the script when it runs if there's no such global (section 4, Undeclared globals); a misspelled name that's written is a compile error, since only declared globals can be written.
+- **Name lookup:** a name that's one of the project's defines (section 4, Defines) means the define. Otherwise a name means the local, script variable, parameter or loop variable of that name that's visible there, if there is one, and otherwise a global. A local, script variable, parameter or loop variable **can't have the name of a global the file declares**: that's a compile error, *"'gold' is a global this file declares, so it can't also be a local, a parameter or a loop's variable here. Rename one of them."* It can have the name of a global the file doesn't declare, and then that name means the local in its graph. A misspelled name that's only read compiles as a read of a global, which stops the script when it runs if there's no such global (section 4, Undeclared globals); a misspelled name that's written is a compile error, since only declared globals can be written.
 - Writing to a name that isn't declared (as a local, script variable, parameter, loop variable or global) is a **compile error**. Reading one is a read of an undeclared global (see Name lookup above).
 - **Functions see the script's inputs and script variables**: the main graph's `scriptVar`s and its script parameters (section 10) are visible in every function of the file, to read and to change, and a change is seen by the main graph and the other functions. They exist for as long as the script runs, so they're there whenever a function is called. This is how a script's functions share its state without passing it around:
   ```
@@ -627,6 +632,60 @@ if (!Bango::ParseFixedValue(TEXT("vector3"), TEXT("[0, 0, 100]"), Value, Error))
 - **`self` can't be written** here: it means the actor a script belongs to, and a value on its own has none.
 - **A text** is written `INVTEXT("...")` (never translated) or `NSLOCTEXT("Namespace", "Key", "...")`. A plain `LOCTEXT` takes its namespace from a script's `#LOCTEXT_NAMESPACE`, which there isn't one of here. Texts written this way **aren't gathered for translation** yet, wherever they're kept (as an inline script's aren't, section 15): until that's built, an `NSLOCTEXT` here is only translated if its namespace and key are gathered some other way.
 - It needs no editor: it works in packaged games.
+- **A define is a fixed value** (next): `[SELECT_RANDOM, 1]` is one.
+
+### Defines
+A **define** is a named value that every script in the project can use, and none can change: a dialogue plugin's `int runMode` takes `3` for "pick a line at random", and with a define `SELECT_RANDOM = 3` scripts write `runMode = SELECT_RANDOM;`. They're the project's, kept in **Project Settings > Plugins > Bango > Defines** (`DefaultGame.ini`), one row each: a name, a type, a value, and optionally a category and a description (shown in autocomplete and the lists).
+
+```
+int _mode = SELECT_RANDOM;
+if (_mode == SELECT_RANDOM) { ... }
+switch (_mode)
+{
+	case SELECT_RANDOM:
+	{
+		...
+	}
+}
+global int defaultMode ?= SELECT_RANDOM;
+_level = BOSS_LEVELS[1];              // an int[] define, indexed
+```
+
+- **Names are SHOUTING_SNAKE_CASE**: capital letters, digits and `_`, starting with a letter, words joined by one `_` (`SELECT_RANDOM`, `MAX_PARTY_2`). Nothing else can be: a script's own names, which never are all capitals in Bango's style, can't be mistaken for one.
+- **Compiled in place**: a use is compiled to the define's value, as if the value had been written there. So a define **works wherever a fixed value does**: a `case` value, a global's default, a script variable's start, an element of an array literal, and in `Bango::ParseFixedValue` (an object's constants). Its type is the define's: `SELECT_RANDOM` is an `int` wherever it's used.
+- **It can't be changed**: `SELECT_RANDOM = 4;`, `SELECT_RANDOM++;` and `BOSS_LEVELS[0] = 1;` are compile errors (*"'SELECT_RANDOM' is a define (in Project Settings > Plugins > Bango > Defines): it can't be changed."*; for a plugin's, *"(registered by BangoYap)"*). Nor can anything a script declares have a define's name: a local, script variable, persistent local, parameter, loop variable, global or function (*"'SELECT_RANDOM' is a define (int SELECT_RANDOM = 3, in Project Settings > Plugins > Bango > Defines), so nothing in a script can be named that."*).
+- **The value** is written as a script variable's starting value is, and checked the same way (section 4, Fixed values): `3`, `"north"`, `@narrator`, `[5, 10]`, `nil`. It can use the defines above it (`[5, 10, SELECT_RANDOM]`), not those below. **A text is `INVTEXT("...")`**: a define isn't gathered for translation, so `LOCTEXT` and `NSLOCTEXT` are refused; put a text to be translated in the script.
+- **A row that can't be a define** (a name that isn't SHOUTING_SNAKE_CASE or is used twice, a value that doesn't fit its type) is left out, and the output log says why; in Project Settings, a warning beside the row does. Scripts that use it then say it's unknown.
+- **Changing the defines** recompiles the scripts that use one the next time they're spawned or checked (each program keeps the defines' fingerprint it was compiled with, `FBangoProgram::DefinesFingerprint`; one that uses none has 0 and isn't affected). Copies already running keep the version they have, as they would after an edit; with Reload Running Scripts on (section 11), a script asset's running copies switch to the new version. A registered condition (section 10) keeps the version it was registered with.
+- **In the editors**: the text editor colours a define as one (teal, bold), offers it in autocomplete with its type, and its tooltip shows `define int SELECT_RANDOM = 3` and its description; node fields offer it too. The graph editor's side panel has a **DEFINES** list (shown, not edited; **Edit** opens the Project Settings page). An open script is coloured and checked again when the defines change.
+- **Blueprint**: **Get Bango Define** Bool / Int / Float / String / Text (by name; `Is Defined` false if there's none of that type, and an `int` reads as a float) and **Is Bango Define** (section 11, Blueprint API).
+- **C++** (`BangoDefines.h`): `Bango::FindDefine(Name)` (an `FBangoDefineEntry`: `Name`, `Value`, `ValueText`, `TypeName`, `Category`, `Description`, or null), `Bango::GetDefines()`, `Bango::GetDefinesFingerprint()`, `Bango::IsDefineName(Name, &Why)`, and `Bango::SetProjectDefines(Rows, &Errors)`, which replaces the project's rows (the settings are given to it when the module starts and whenever they change, `Bango::ApplyDefineSettings`). `FBangoDefineEntry::Source` is empty for the project's, or the plugin that gave it (next); `Bango::DescribeDefineSource` says which for a message. Use these from the game thread.
+
+### Defines from plugins
+Another plugin can give defines of its own, for its own commands: BangoYap's `Speech` takes a run mode, and BangoYap can name its values so that every project using it has them.
+
+```cpp
+void FBangoYapModule::StartupModule()
+{
+	// Each row: name, type, value (as Bango text), category, description.
+	Bango::RegisterDefines(TEXT("BangoYap"), {
+		{ TEXT("RUN_ALL"),       TEXT("int"), TEXT("1"), TEXT("Speech"), TEXT("Speech run mode: play every line.") },
+		{ TEXT("SELECT_ONE"),    TEXT("int"), TEXT("2"), TEXT("Speech"), TEXT("Speech run mode: play the first line reached.") },
+		{ TEXT("SELECT_RANDOM"), TEXT("int"), TEXT("3"), TEXT("Speech"), TEXT("Speech run mode: play one line, picked at random.") },
+	});
+}
+
+void FBangoYapModule::ShutdownModule()
+{
+	Bango::UnregisterDefines(TEXT("BangoYap"));
+}
+```
+
+- **The first argument names the plugin**: it's the category of a row that has none, and what errors, tooltips and lists say a define is from (*"registered by BangoYap"*). Registering again for the same name replaces that plugin's defines.
+- **Each row is checked as a project row is** (above): a SHOUTING_SNAKE_CASE name, a fixed value of its type (which may use the defines before it, a plugin's own or an earlier plugin's), an `INVTEXT` text.
+- **Which one wins**: a plugin's defines come **before the project's**, in the order the plugins registered (the plugin's commands are written for its values, so a project row can't change one). A name given twice keeps the first, and the other is left out: a warning in the output log (*"Bango defines: OtherPlugin: 'RUN_ALL' is already a define, registered by BangoYap, so this one is left out..."*), and for a project row, the warning beside its row in Project Settings. Scripts never see two meanings. `RegisterDefines` also gives these errors back, in its optional last argument, and `Bango::GetRegisteredDefineError(Owner, Row)` says why one of a plugin's rows was left out.
+- **Registering and unregistering change the fingerprint** (when anything changed), so scripts compiled before a plugin's module started, or that use one of its defines, are compiled again when they're next used. A module that depends on BangoScripts starts after it, so its defines are there before its scripts are compiled.
+- **Project Settings** shows a plugin's defines under the project's, under **From plugins**, read only (name, type, value and plugin; the description in the tooltip). The graph editor's DEFINES list and autocomplete show them with the project's.
 
 ### Globals
 - Any name will do, including one starting with `_`. A local, script variable, parameter or loop variable can't have the name of a global the file declares (see Name lookup above).
@@ -1695,6 +1754,8 @@ The **Spawn Bango Script** node reads the script's `inputs` line and creates one
 | **Is Bango Global Persistent** | True if the global exists and is a persistent global; false for a world global, or one that doesn't exist. |
 | **Get Bango Global** Bool / Int / Float / String / Text / Vector2 / Vector3 | Reads a global. `Is Defined` is false if it doesn't exist or is nil. A different type is an error. |
 | **Clear Bango Global** | Makes a global nil. |
+| **Get Bango Define** Bool / Int / Float / String / Text | Reads a define (section 4, Defines) by name. `Is Defined` is false if there's none, or it isn't that type (an int define reads as a float). |
+| **Is Bango Define** | True if there's a define of that name. |
 | **Save Bango State** → bytes | Saves all running scripts and all globals, for storing in a SaveGame. |
 | **Load Bango State** (bytes) | Replaces all running scripts and globals with saved ones. |
 | **Reset Bango State** | Stops all scripts and clears all globals, world and persistent, e.g. for a new game. |

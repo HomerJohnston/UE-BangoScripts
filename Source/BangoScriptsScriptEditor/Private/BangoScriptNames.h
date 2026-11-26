@@ -60,8 +60,8 @@ public:
 	/**
 	 * What a name on a line is: Parameter (in a function, the script's too), Local (a local, script variable or loop
 	 * variable visible on that line; in a function, the script's script variables too),
-	 * Global (declared in this file), or UndeclaredGlobal (used here, declared elsewhere, a misspelling, or a local
-	 * used outside its block).
+	 * Global (declared in this file), Define (one of the project's defines, Bango::FindDefine), or UndeclaredGlobal
+	 * (used here, declared elsewhere, a misspelling, or a local used outside its block).
 	 */
 	EBangoSyntaxKind Classify(int32 LineIndex, const FString& Name) const;
 

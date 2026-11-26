@@ -337,6 +337,8 @@ private:
 	TAttribute<AActor*> SelfActor;
 	/** The text changed since it was last compiled; it's compiled once typing has stopped for the preference's delay. */
 	bool bCompileDirty = false;
+	/** Bango::GetDefinesFingerprint when the text was last coloured: when the defines change, it's coloured and compiled again. */
+	uint64 DefinesFingerprint = 0;
 	double LastEditSeconds = 0.0;
 	/** The first compile error, if the last compile had one (hidden again as soon as the text changes). */
 	bool bHasCompileError = false;

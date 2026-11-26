@@ -27,6 +27,7 @@
 #include "Widgets/Input/SMenuAnchor.h"
 #include "BangoCommand.h"
 #include "BangoNodeDecorator.h"
+#include "BangoDefines.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SGridPanel.h"
@@ -1454,6 +1455,7 @@ namespace BangoNodeCompletionPrivate
 		case EBangoCompletionKind::Local:    return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("9CDCFE")));
 		case EBangoCompletionKind::Global:   return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("4FC1FF")));
 		case EBangoCompletionKind::Function: return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("DCDCAA")));
+		case EBangoCompletionKind::Define:   return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("56B6C2")));
 		case EBangoCompletionKind::Keyword:  return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("569CD6")));
 		default:                             return FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("4EC9B0")));
 		}
@@ -1466,6 +1468,7 @@ namespace BangoNodeCompletionPrivate
 		case EBangoCompletionKind::Parameter: return TEXT("P");
 		case EBangoCompletionKind::Local:     return TEXT("L");
 		case EBangoCompletionKind::Global:    return TEXT("G");
+		case EBangoCompletionKind::Define:    return TEXT("D");
 		case EBangoCompletionKind::Function:  return TEXT("F");
 		case EBangoCompletionKind::Keyword:   return TEXT("K");
 		default:                              return TEXT("C");
@@ -1585,6 +1588,16 @@ void SBangoGraphNode::GatherCompletionItems()
 				Item.Kind = Variable.Key.StartsWith(TEXT("_")) ? EBangoCompletionKind::Local : EBangoCompletionKind::Global;
 				AddItem(Item);
 			}
+		}
+		// The project's defines (spec section 4, Defines).
+		for (const FBangoDefineEntry& Define : Bango::GetDefines())
+		{
+			FBangoCompletionItem Item;
+			Item.Name = Define.Name;
+			Item.Detail = Define.TypeName + TEXT(" = ") + Define.ValueText;
+			Item.Description = Define.Description;
+			Item.Kind = EBangoCompletionKind::Define;
+			AddItem(Item);
 		}
 		for (const FBangoCommandSignature& Function : Context->Functions)
 		{

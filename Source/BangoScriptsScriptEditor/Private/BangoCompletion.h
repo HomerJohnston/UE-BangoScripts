@@ -16,6 +16,8 @@ enum class EBangoCompletionKind : uint8
 	Global,
 	Function,
 	Command,
+	/** One of the project's defines (Bango::GetDefines), like SELECT_RANDOM. */
+	Define,
 	/** A keyword or type name, like `while`, `switch`, `int` or `nil`. */
 	Keyword,
 };

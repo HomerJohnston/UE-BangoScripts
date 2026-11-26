@@ -27,6 +27,7 @@
 #include "BangoEditorSettings.h"
 #include "Bango.h"
 #include "BangoCompiler.h"
+#include "BangoDefines.h"
 #include "BangoParser.h"
 #include "BangoProgram.h"
 #include "Widgets/Layout/SBox.h"
@@ -878,6 +879,14 @@ void SBangoTextEditor::Tick(const FGeometry& AllottedGeometry, const double InCu
 		BangoScriptReferences::TouchActiveScript(this, Cursor.GetLineIndex(), Cursor.GetOffset(), SelfActor.Get(nullptr));
 	}
 
+	// The project's defines changed (Project Settings > Plugins > Bango > Defines): a name may be one now, or no longer.
+	if (DefinesFingerprint != Bango::GetDefinesFingerprint())
+	{
+		DefinesFingerprint = Bango::GetDefinesFingerprint();
+		Marshaller->MakeDirty();
+		bCompileDirty = bCompileAsYouType;
+	}
+
 	// Compile as you type: once typing has stopped for the preference's delay.
 	if (bCompileAsYouType && bCompileDirty)
 	{
@@ -1623,6 +1632,7 @@ TSharedRef<ITableRow> SBangoTextEditor::MakeCompletionRow(TSharedPtr<FBangoCompl
 	case EBangoCompletionKind::Parameter: Kind = EBangoSyntaxKind::Parameter; Letter = TEXT("P"); break;
 	case EBangoCompletionKind::Local:     Kind = EBangoSyntaxKind::Local;     Letter = TEXT("L"); break;
 	case EBangoCompletionKind::Global:    Kind = EBangoSyntaxKind::Global;    Letter = TEXT("G"); break;
+	case EBangoCompletionKind::Define:    Kind = EBangoSyntaxKind::Define;    Letter = TEXT("D"); break;
 	case EBangoCompletionKind::Function:  Kind = EBangoSyntaxKind::Function;  Letter = TEXT("F"); break;
 	case EBangoCompletionKind::Command:   Kind = EBangoSyntaxKind::Command;   Letter = TEXT("C"); break;
 	case EBangoCompletionKind::Keyword:

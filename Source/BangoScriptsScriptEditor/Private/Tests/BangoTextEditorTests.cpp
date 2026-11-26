@@ -17,7 +17,7 @@ namespace BangoLineTokenizerTests
 			TEXT("Number"), TEXT("String"), TEXT("StringEscape"), TEXT("Placeholder"), TEXT("LocMacro"), TEXT("LocKey"),
 			TEXT("LocNotes"), TEXT("VectorPart"), TEXT("Call"), TEXT("Comment"), TEXT("Metadata"),
 			TEXT("DisconnectedMarker"), TEXT("DisabledMarker"), TEXT("Structure"), TEXT("Operator"), TEXT("Punctuation"), TEXT("Error"),
-			TEXT("Command"), TEXT("Function"), TEXT("Parameter"), TEXT("UndeclaredGlobal"),
+			TEXT("Command"), TEXT("Function"), TEXT("Parameter"), TEXT("UndeclaredGlobal"), TEXT("Define"),
 		};
 		static_assert(UE_ARRAY_COUNT(Names) == static_cast<int32>(EBangoSyntaxKind::Count), "Update the names");
 		return Names[static_cast<int32>(Kind)];
@@ -527,6 +527,8 @@ bool FBangoEditingAidsTest::RunTest(const FString& Parameters)
 // ---- Autocomplete (FBangoCompletion) ----
 
 #include "BangoCompletion.h"
+#include "BangoDefines.h"
+#include "BangoSettings.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoCompletionTest, "Bango.ScriptEditor.TextEditor.Completion",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -718,6 +720,25 @@ bool FBangoCompletionTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Hovering a waitUntil's timeout"), HoverTitle(TEXT("waitUntil (ready) timeout (5)"), 20), FString(TEXT("keyword timeout")));
 	TestEqual(TEXT("Hovering a waitUntil's heldFor"), HoverTitle(TEXT("waitUntil (ready) heldFor (2) timeout (5, true)"), 20), FString(TEXT("keyword heldFor")));
 	TestEqual(TEXT("Hovering a timeout after a heldFor"), HoverTitle(TEXT("waitUntil (ready) heldFor (2) timeout (5, true)"), 32), FString(TEXT("keyword timeout")));
+
+	// Defines (spec section 4, Defines): coloured as defines, offered, and hovered. The project's are put back after.
+	{
+		Bango::FBangoDefineText Define;
+		Define.Name = TEXT("SELECT_RANDOM");
+		Define.TypeName = TEXT("int");
+		Define.ValueText = TEXT("3");
+		Define.Description = TEXT("Pick a line at random.");
+		Bango::SetProjectDefines({ Define });
+		TestTrue(TEXT("A define is classed as one"), Names.Classify(4, TEXT("SELECT_RANDOM")) == EBangoSyntaxKind::Define);
+		TArray<FBangoCompletionItem> DefineItems;
+		FBangoCompletion::GatherItems(Names, 4, Commands, DefineItems);
+		TestTrue(TEXT("Autocomplete offers a define"), DefineItems.ContainsByPredicate([](const FBangoCompletionItem& Item)
+			{
+				return Item.Kind == EBangoCompletionKind::Define && Item.Name == TEXT("SELECT_RANDOM") && Item.Detail == TEXT("int");
+			}));
+		TestEqual(TEXT("Hovering a define"), HoverTitle(TEXT("_mode = SELECT_RANDOM;"), 10), FString(TEXT("define int SELECT_RANDOM = 3")));
+		Bango::ApplyDefineSettings();
+	}
 
 	return true;
 }

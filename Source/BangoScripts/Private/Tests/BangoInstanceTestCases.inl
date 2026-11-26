@@ -2,6 +2,7 @@
 
 #include "BangoText.h"
 #include "BangoConditionWatches.h"
+#include "BangoDefines.h"
 
 // Interpreter test cases, shared by the Unreal automation test (BangoInstanceTests.cpp)
 // and the stand-alone test harness used during development.
@@ -1425,6 +1426,173 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				Expect(Bango::CompileSource(TEXT("persistent global int gold ?= 0;\ngold = 1;\npersistent global int gold = 2;"), TEXT("persist.bango"), Commands, Both, BothError),
 					*FString::Printf(TEXT("persistent: declared persistent twice, at the top and in the code. Got: %s"), *BothError.Message));
 			}
+		}
+
+		// Defines: project-wide named values, compiled in place (FBangoDefineEntry). The project's are put back after.
+		{
+			TArray<Bango::FBangoDefineText> ProjectDefines;
+			for (const FBangoDefineEntry& Entry : Bango::GetDefines())
+			{
+				Bango::FBangoDefineText& Text = ProjectDefines.AddDefaulted_GetRef();
+				Text.Name = Entry.Name;
+				Text.TypeName = Entry.TypeName;
+				Text.ValueText = Entry.ValueText;
+				Text.Category = Entry.Category;
+				Text.Description = Entry.Description;
+			}
+			TArray<Bango::FBangoDefineText> Rows;
+			auto Row = [&Rows](const TCHAR* Name, const TCHAR* Type, const TCHAR* Value)
+			{
+				Bango::FBangoDefineText& Text = Rows.AddDefaulted_GetRef();
+				Text.Name = Name;
+				Text.TypeName = Type;
+				Text.ValueText = Value;
+			};
+			Row(TEXT("SELECT_RANDOM"), TEXT("int"), TEXT("3"));
+			Row(TEXT("NARRATOR"), TEXT("entity"), TEXT("@narrator"));
+			Row(TEXT("BOSS_LEVELS"), TEXT("int[]"), TEXT("[5, 10, SELECT_RANDOM]"));
+			Row(TEXT("GREETING"), TEXT("text"), TEXT("INVTEXT(\"Hello\")"));
+			Row(TEXT("lowercase"), TEXT("int"), TEXT("1"));
+			Row(TEXT("SELECT_RANDOM"), TEXT("int"), TEXT("4"));
+			Row(TEXT("BAD_VALUE"), TEXT("int"), TEXT("\"three\""));
+			Row(TEXT("TRANSLATED"), TEXT("text"), TEXT("LOCTEXT(\"Key\", \"Hi\")"));
+			Row(TEXT("TRAILING_"), TEXT("int"), TEXT("1"));
+			Row(TEXT("USES_LATER"), TEXT("int"), TEXT("LATER"));
+			Row(TEXT("LATER"), TEXT("int"), TEXT("2"));
+			TArray<FString> DefineErrors;
+			const uint64 FingerprintBefore = Bango::GetDefinesFingerprint();
+			Bango::SetProjectDefines(Rows, &DefineErrors);
+			Expect(Bango::GetDefines().Num() == 5 && Bango::FindDefine(TEXT("BOSS_LEVELS")) && Bango::FindDefine(TEXT("BOSS_LEVELS"))->Value.ArrayCount() == 3
+				&& Bango::FindDefine(TEXT("BOSS_LEVELS"))->Value.GetElement(2)->GetInt() == 3 && !Bango::FindDefine(TEXT("lowercase")) && Bango::FindDefine(TEXT("SELECT_RANDOM"))->Value.GetInt() == 3,
+				*FString::Printf(TEXT("defines: the good rows are kept, and a define can use those before it. Got %d"), Bango::GetDefines().Num()));
+			Expect(DefineErrors.Num() == 6, *FString::Printf(TEXT("defines: a bad row is left out, with why. Got: %s"), *FString::Join(DefineErrors, TEXT(" | "))));
+			Expect(Bango::GetDefinesFingerprint() != FingerprintBefore, TEXT("defines: changing them changes the fingerprint"));
+			const uint64 FingerprintSet = Bango::GetDefinesFingerprint();
+			Bango::SetProjectDefines(Rows);
+			Expect(Bango::GetDefinesFingerprint() == FingerprintSet, TEXT("defines: setting the same ones again keeps the fingerprint"));
+			FString NameWhy;
+			Expect(Bango::IsDefineName(TEXT("MAX_PARTY_2")) && !Bango::IsDefineName(TEXT("Select_Random"), &NameWhy) && NameWhy.Contains(TEXT("SHOUTING_SNAKE_CASE"))
+				&& !Bango::IsDefineName(TEXT("_HIDDEN")) && !Bango::IsDefineName(TEXT("A__B")) && !Bango::IsDefineName(TEXT("2_FAST")),
+				TEXT("defines: names are SHOUTING_SNAKE_CASE"));
+
+			auto RunDefines = [&](const TCHAR* DefineSource, FBangoGlobalStore& DefineGlobals, TSharedPtr<FBangoProgram>* OutProgram = nullptr) -> bool
+			{
+				TSharedPtr<FBangoProgram> DefineProgram = MakeShared<FBangoProgram>();
+				FBangoCompileError DefineCompileError;
+				if (!Bango::CompileSource(DefineSource, TEXT("defines.bango"), Commands, *DefineProgram, DefineCompileError))
+				{
+					OutFailures.Add(FString::Printf(TEXT("defines: doesn't compile: %s"), *DefineCompileError.ToString()));
+					return false;
+				}
+				if (OutProgram)
+				{
+					*OutProgram = DefineProgram;
+				}
+				FBangoInstance DefineInstance;
+				FBangoRuntimeError DefineStartError;
+				if (!DefineInstance.Start(DefineProgram, Commands, DefineGlobals, 1, DefineStartError))
+				{
+					OutFailures.Add(FString::Printf(TEXT("defines: doesn't start: %s"), *DefineStartError.Message));
+					return false;
+				}
+				FBangoExecContext DefineContext = Context;
+				DefineContext.Globals = &DefineGlobals;
+				return DefineInstance.Resume(DefineContext) == EBangoInstanceStatus::Finished;
+			};
+			auto IntOf = [](const FBangoGlobalStore& Store, const TCHAR* Name) -> int64
+			{
+				const FBangoValue* Value = Store.Find(Name);
+				return Value && !Value->IsNil() && Value->GetType() == FBangoType::Int() ? Value->GetInt() : -1;
+			};
+			{
+				FBangoGlobalStore DefineGlobals;
+				TSharedPtr<FBangoProgram> Used;
+				const bool bRan = RunDefines(TEXT("global int out;\nglobal int second;\nglobal int picked;\nglobal int fallback ?= SELECT_RANDOM;\nscriptVar int[] _levels = [SELECT_RANDOM, 1];\n")
+					TEXT("int _mode = SELECT_RANDOM;\nout = _mode + 1;\nsecond = BOSS_LEVELS[1];\n")
+					TEXT("switch (_mode)\n{\ncase SELECT_RANDOM:\n{\n\tpicked = 1;\n}\ndefault:\n{\n\tpicked = 2;\n}\n}\n")
+					TEXT("out = out + _levels[0];"), DefineGlobals, &Used);
+				Expect(bRan && IntOf(DefineGlobals, TEXT("out")) == 7 && IntOf(DefineGlobals, TEXT("second")) == 10 && IntOf(DefineGlobals, TEXT("picked")) == 1
+					&& IntOf(DefineGlobals, TEXT("fallback")) == 3 && DefineGlobals.Find(TEXT("SELECT_RANDOM")) == nullptr,
+					TEXT("defines: a define is its value: in a calculation, indexed, as a case value, a global's default and a script variable's start"));
+				Expect(Used.IsValid() && Used->DefinesFingerprint == Bango::GetDefinesFingerprint() && Used->IsCompiledWithCurrentDefines(),
+					TEXT("defines: a program that uses one keeps the fingerprint"));
+				TSharedPtr<FBangoProgram> Plain;
+				RunDefines(TEXT("int _x = 3;"), DefineGlobals, &Plain);
+				Expect(Plain.IsValid() && Plain->DefinesFingerprint == 0, TEXT("defines: a program that uses none has no fingerprint"));
+
+				FBangoValue Fixed;
+				FString FixedError;
+				Expect(Bango::ParseFixedValue(TEXT("int[]"), TEXT("[SELECT_RANDOM, 1]"), Fixed, FixedError) && Fixed.ArrayCount() == 2 && Fixed.GetElement(0)->GetInt() == 3,
+					*FString::Printf(TEXT("defines: a define is a fixed value. Got: %s"), *FixedError));
+
+				// Changing the defines leaves the program out of date.
+				TArray<Bango::FBangoDefineText> Changed = Rows;
+				Changed[0].ValueText = TEXT("7");
+				Bango::SetProjectDefines(Changed);
+				Expect(Used.IsValid() && !Used->IsCompiledWithCurrentDefines() && Plain.IsValid() && Plain->IsCompiledWithCurrentDefines(),
+					*FString::Printf(TEXT("defines: a change leaves a program that uses one out of date (and only that). Got %llu, %llu, now %llu"),
+						Used.IsValid() ? Used->DefinesFingerprint : 0ull, Plain.IsValid() ? Plain->DefinesFingerprint : 0ull, Bango::GetDefinesFingerprint()));
+				Bango::SetProjectDefines(Rows);
+			}
+			struct FDefineErrorCase { const TCHAR* Name; const TCHAR* Source; const TCHAR* Contains; };
+			const FDefineErrorCase DefineErrorCases[] = {
+				{ TEXT("assigned"), TEXT("SELECT_RANDOM = 4;"), TEXT("can't be changed") },
+				{ TEXT("incremented"), TEXT("SELECT_RANDOM++;"), TEXT("can't be changed") },
+				{ TEXT("element assigned"), TEXT("BOSS_LEVELS[0] = 1;"), TEXT("can't be changed") },
+				{ TEXT("a local"), TEXT("int SELECT_RANDOM = 1;"), TEXT("is a define") },
+				{ TEXT("a global"), TEXT("global int NARRATOR;"), TEXT("is a define") },
+				{ TEXT("a scriptVar"), TEXT("scriptVar int LATER = 1;"), TEXT("is a define") },
+				{ TEXT("a persistent local"), TEXT("persistent int LATER ?= 1;"), TEXT("is a define") },
+				{ TEXT("a function"), TEXT("function void LATER()\n{\n}"), TEXT("is a define") },
+				{ TEXT("a parameter"), TEXT("function void F(int LATER)\n{\n}"), TEXT("is a define") },
+				{ TEXT("a loop variable"), TEXT("forEach (LATER in BOSS_LEVELS)\n{\n}"), TEXT("is a define") },
+				{ TEXT("a case of the wrong type"), TEXT("string _s = \"a\";\nswitch (_s)\n{\ncase SELECT_RANDOM:\n{\n}\n}"), TEXT("is a define of type int") },
+			};
+			for (const FDefineErrorCase& Case : DefineErrorCases)
+			{
+				FBangoProgram ErrorProgram;
+				FBangoCompileError DefineError;
+				const bool bCompiled = Bango::CompileSource(Case.Source, TEXT("defines.bango"), Commands, ErrorProgram, DefineError);
+				Expect(!bCompiled && DefineError.Message.Contains(Case.Contains), *FString::Printf(TEXT("defines: %s. Got: %s"), Case.Name, bCompiled ? TEXT("it compiled") : *DefineError.Message));
+			}
+			// A plugin's defines (RegisterDefines): before the project's, and taken away again.
+			{
+				TArray<FString> PluginErrors;
+				Bango::RegisterDefines(TEXT("TestPlugin"), {
+					{ TEXT("RUN_ALL"), TEXT("int"), TEXT("1"), TEXT(""), TEXT("Play every line.") },
+					{ TEXT("SELECT_RANDOM"), TEXT("int"), TEXT("30"), TEXT("Speech"), TEXT("") },
+					{ TEXT("RUN_TWICE"), TEXT("int"), TEXT("RUN_ALL + 1"), TEXT(""), TEXT("") },
+				}, &PluginErrors);
+				const FBangoDefineEntry* RunAll = Bango::FindDefine(TEXT("RUN_ALL"));
+				const FBangoDefineEntry* Random = Bango::FindDefine(TEXT("SELECT_RANDOM"));
+				Expect(RunAll && RunAll->Source == TEXT("TestPlugin") && RunAll->Category == TEXT("TestPlugin") && Random && Random->Value.GetInt() == 30
+					&& Random->Source == TEXT("TestPlugin") && Random->Category == TEXT("Speech"),
+					TEXT("defines: a plugin's are used, before the project's, with the plugin as their category if they have none"));
+				Expect(PluginErrors.Num() == 3 && Bango::GetRegisteredDefineError(TEXT("TestPlugin"), 2).Contains(TEXT("fixed value"))
+					&& Bango::GetDefineRowError(0).Contains(TEXT("registered by TestPlugin")),
+					*FString::Printf(TEXT("defines: a plugin's bad row, and the project's row it now clashes with, say why. Got: %s"), *FString::Join(PluginErrors, TEXT(" | "))));
+				FBangoProgram ClashProgram;
+				FBangoCompileError ClashError;
+				Expect(!Bango::CompileSource(TEXT("RUN_ALL = 2;"), TEXT("defines.bango"), Commands, ClashProgram, ClashError) && ClashError.Message.Contains(TEXT("registered by TestPlugin")),
+					*FString::Printf(TEXT("defines: an error names the plugin a define is from. Got: %s"), *ClashError.Message));
+				TArray<FString> SecondErrors;
+				Bango::RegisterDefines(TEXT("OtherPlugin"), { { TEXT("RUN_ALL"), TEXT("int"), TEXT("5"), TEXT(""), TEXT("") } }, &SecondErrors);
+				Expect(Bango::FindDefine(TEXT("RUN_ALL"))->Value.GetInt() == 1 && SecondErrors.Num() == 1 && SecondErrors[0].StartsWith(TEXT("OtherPlugin: "), ESearchCase::CaseSensitive)
+					&& SecondErrors[0].Contains(TEXT("registered by TestPlugin")), TEXT("defines: two plugins with one name: the first registered keeps it"));
+				const uint64 BeforeUnregister = Bango::GetDefinesFingerprint();
+				Bango::UnregisterDefines(TEXT("TestPlugin"));
+				Expect(Bango::GetDefinesFingerprint() != BeforeUnregister && Bango::FindDefine(TEXT("RUN_ALL"))->Value.GetInt() == 5
+					&& Bango::FindDefine(TEXT("SELECT_RANDOM"))->Value.GetInt() == 3 && Bango::GetDefineRowError(0).IsEmpty(),
+					TEXT("defines: unregistering takes a plugin's away, and the names are free for the others again"));
+				Bango::UnregisterDefines(TEXT("OtherPlugin"));
+				Expect(!Bango::FindDefine(TEXT("RUN_ALL")), TEXT("defines: unregistered"));
+			}
+			Bango::SetProjectDefines(TArray<Bango::FBangoDefineText>());
+			FBangoProgram Undefined;
+			FBangoCompileError UndefinedError;
+			Expect(Bango::CompileSource(TEXT("int SELECT_RANDOM = 1;"), TEXT("defines.bango"), Commands, Undefined, UndefinedError) && Bango::GetDefines().Num() == 0,
+				TEXT("defines: without the define, the name is free again"));
+			Bango::SetProjectDefines(ProjectDefines);
 		}
 
 		// Persistent locals and script variables: kept between runs of a script, for each owner (FBangoPersistentLocal).

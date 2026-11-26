@@ -1,4 +1,10 @@
 #include "BangoProgram.h"
+#include "BangoDefines.h"
+
+bool FBangoProgram::IsCompiledWithCurrentDefines() const
+{
+	return DefinesFingerprint == 0 || DefinesFingerprint == Bango::GetDefinesFingerprint();
+}
 
 namespace BangoProgramPrivate
 {

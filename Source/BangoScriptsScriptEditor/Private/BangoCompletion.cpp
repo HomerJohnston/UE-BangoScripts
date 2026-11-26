@@ -4,6 +4,7 @@
 #include "BangoCompletion.h"
 
 #include "BangoTypes.h"
+#include "BangoDefines.h"
 
 namespace BangoCompletionPrivate
 {
@@ -68,6 +69,7 @@ namespace BangoCompletionPrivate
 		case EBangoSyntaxKind::Local:
 		case EBangoSyntaxKind::Parameter:
 		case EBangoSyntaxKind::UndeclaredGlobal:
+		case EBangoSyntaxKind::Define:
 		case EBangoSyntaxKind::Call:
 		case EBangoSyntaxKind::Keyword:
 		case EBangoSyntaxKind::JumpKeyword:
@@ -227,6 +229,7 @@ void FBangoCompletion::GatherItems(const FBangoScriptNames& Names, int32 LineInd
 		{
 		case EBangoSyntaxKind::Parameter: Item.Kind = EBangoCompletionKind::Parameter; break;
 		case EBangoSyntaxKind::Global:    Item.Kind = EBangoCompletionKind::Global; break;
+		case EBangoSyntaxKind::Define:    Item.Kind = EBangoCompletionKind::Define; break;
 		case EBangoSyntaxKind::Function:
 			// Its "type" is its signature, `int AddScore(int amount)`, which ends in `()` when it has no parameters.
 			Item.Kind = EBangoCompletionKind::Function;
@@ -381,6 +384,13 @@ FString FBangoCompletion::GetHoverTitle(const FBangoCompletionItem& Item)
 		// `type int`, `value nil`, `entity player`; anything else is a `keyword`.
 		const bool bOwnKind = Item.Detail == TEXT("type") || Item.Detail == TEXT("value") || Item.Detail == TEXT("entity");
 		return (bOwnKind ? Item.Detail : FString(TEXT("keyword"))) + TEXT(" ") + Item.Name;
+	}
+	if (Item.Kind == EBangoCompletionKind::Define)
+	{
+		// `define int SELECT_RANDOM = 3`
+		const FBangoDefineEntry* Define = Bango::FindDefine(Item.Name);
+		return Define ? FString::Printf(TEXT("define %s %s = %s"), *Define->TypeName, *Define->Name, *Define->ValueText)
+			: FString::Printf(TEXT("define %s %s"), *Item.Detail, *Item.Name);
 	}
 	const TCHAR* Kind = Item.Kind == EBangoCompletionKind::Parameter ? TEXT("parameter")
 		: Item.Kind == EBangoCompletionKind::Global ? TEXT("global") : TEXT("local");

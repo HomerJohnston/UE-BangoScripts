@@ -1,5 +1,6 @@
 #include "BangoCompiler.h"
 #include "BangoText.h"
+#include "BangoDefines.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 
 namespace BangoCompilerPrivate
@@ -772,6 +773,10 @@ namespace BangoCompilerPrivate
 			{
 				return true; // an empty value fails later, as missing
 			}
+			if (const FBangoNameExpr* Named = Expr.As<FBangoNameExpr>())
+			{
+				return Bango::FindDefine(Named->Name) != nullptr; // a define is its value
+			}
 			if (const FBangoUnaryExpr* Unary = Expr.As<FBangoUnaryExpr>())
 			{
 				const FBangoLiteralExpr* Operand = Unary->Operand.IsValid() ? Unary->Operand->As<FBangoLiteralExpr>() : nullptr;
@@ -1054,6 +1059,11 @@ namespace BangoCompilerPrivate
 					}
 					return true;
 				}
+				if (!CheckNotADefine(Decl.Name, Decl.Loc))
+				{
+					CurrentStmt = &Stmt;
+					return false;
+				}
 				DeclaredGlobals.Add(Decl.Name, Decl.Type);
 				FBangoGlobalDecl Global;
 				Global.Name = Decl.Name;
@@ -1161,6 +1171,10 @@ namespace BangoCompilerPrivate
 				{
 					return Fail(Function.Loc, FString::Printf(TEXT("'%s' is already a command, so it can't be used as a function name."), *Function.Name));
 				}
+				if (!CheckNotADefine(Function.Name, Function.Loc))
+				{
+					return false;
+				}
 
 				for (int32 p = 0; p < Function.Params.Num(); ++p)
 				{
@@ -1265,7 +1279,11 @@ namespace BangoCompilerPrivate
 		bool EvaluateConstant(const FBangoExpr& Expr, const FBangoType& Type, const FString& ParamName, FBangoValue& OutValue)
 		{
 			FBangoValue Raw;
-			if (const FBangoLiteralExpr* Lit = Expr.As<FBangoLiteralExpr>())
+			if (const FBangoDefineEntry* Define = FindDefineAt(Expr))
+			{
+				Raw = Define->Value;
+			}
+			else if (const FBangoLiteralExpr* Lit = Expr.As<FBangoLiteralExpr>())
 			{
 				switch (Lit->LiteralKind)
 				{
@@ -1656,9 +1674,39 @@ namespace BangoCompilerPrivate
 		/** A local, parameter or loop variable can't have the name of a global this file declares: which would it mean? */
 		bool CheckNotAGlobal(const FString& Name, const FBangoSourceLocation& Loc)
 		{
+			if (!CheckNotADefine(Name, Loc))
+			{
+				return false;
+			}
 			if (DeclaredGlobals.Find(Name))
 			{
 				return Fail(Loc, FString::Printf(TEXT("'%s' is a global this file declares, so it can't also be a local, a parameter or a loop's variable here. Rename one of them."), *Name));
+			}
+			return true;
+		}
+
+		// ---- Defines (spec section 4, Defines) ----
+
+		/** The define Expr names (a bare name, `SELECT_RANDOM`), or null. Notes that the program uses defines. */
+		const FBangoDefineEntry* FindDefineAt(const FBangoExpr& Expr)
+		{
+			const FBangoNameExpr* Named = Expr.As<FBangoNameExpr>();
+			const FBangoDefineEntry* Define = Named ? Bango::FindDefine(Named->Name) : nullptr;
+			if (Define)
+			{
+				Program.DefinesFingerprint = Bango::GetDefinesFingerprint();
+			}
+			return Define;
+		}
+
+		/** Nothing a script declares can have a define's name: it always means the define. */
+		bool CheckNotADefine(const FString& Name, const FBangoSourceLocation& Loc)
+		{
+			if (const FBangoDefineEntry* Define = Bango::FindDefine(Name))
+			{
+				Program.DefinesFingerprint = Bango::GetDefinesFingerprint(); // so that removing the define re-checks it
+				return Fail(Loc, FString::Printf(TEXT("'%s' is a define (%s %s = %s, %s), so nothing in a script can be named that. Use a different name."),
+					*Name, *Define->TypeName, *Name, *Define->ValueText, *Bango::DescribeDefineSource(*Define)));
 			}
 			return true;
 		}
@@ -2304,6 +2352,17 @@ namespace BangoCompilerPrivate
 			const TCHAR* Wanted = Type.Base == EBangoBaseType::Int ? TEXT("an int, like 3 or -1")
 				: Type.Base == EBangoBaseType::String ? TEXT("a string in quotes, like \"north\"")
 				: TEXT("a Bango ID, like @guard");
+			if (const FBangoDefineEntry* Define = FindDefineAt(Expr))
+			{
+				// A define, as its value (`case SELECT_RANDOM:`).
+				if (Define->Value.GetType() != Type)
+				{
+					return Fail(Expr.Loc, FString::Printf(TEXT("'%s' is a define of type %s, but this switch's value is %s: a case value must be %s."),
+						*Define->Name, *Define->TypeName, *Article(Type), Wanted));
+				}
+				OutValue = Define->Value;
+				return true;
+			}
 			const FBangoLiteralExpr* Lit = Expr.As<FBangoLiteralExpr>();
 			bool bNegate = false;
 			if (const FBangoUnaryExpr* Unary = Expr.As<FBangoUnaryExpr>())
@@ -2890,6 +2949,12 @@ namespace BangoCompilerPrivate
 			}
 			const FBangoNameExpr* Root = Current->As<FBangoNameExpr>();
 			check(Root);
+			if (const FBangoDefineEntry* Define = FindDefineAt(*Root))
+			{
+				return Fail(Root->Loc, Use == EPlaceUse::Write
+					? FString::Printf(TEXT("'%s' is a define (%s): it can't be changed."), *Root->Name, *Bango::DescribeDefineSource(*Define))
+					: FString::Printf(TEXT("'%s' is a define, a fixed value, so it can't be used as a variable here. Copy it into a local first: 'int _x = %s;'."), *Root->Name, *Root->Name));
+			}
 
 			EBangoPlaceKind Kind = EBangoPlaceKind::Local;
 			int32 Index = 0;
@@ -3156,7 +3221,8 @@ namespace BangoCompilerPrivate
 			{
 				Current = IndexExpr->Array.Get();
 			}
-			return Current->Kind == EBangoExprKind::Name;
+			// A define is a value, not a variable: `BOSS_LEVELS[1]` indexes its value.
+			return Current->Kind == EBangoExprKind::Name && !Bango::FindDefine(Current->As<FBangoNameExpr>()->Name);
 		}
 
 		// ---- Expressions ----
@@ -3178,6 +3244,13 @@ namespace BangoCompilerPrivate
 			case EBangoExprKind::ArrayLiteral: return CompileArrayLiteral(*Expr.As<FBangoArrayLiteralExpr>(), Expected, OutType);
 			case EBangoExprKind::Name:
 			case EBangoExprKind::Index:
+				if (const FBangoDefineEntry* Define = FindDefineAt(Expr))
+				{
+					// A define compiles to its value, as if it had been written here.
+					Emit(EBangoOp::PushConst, AddConstant(Define->Value));
+					OutType = FExprType::MakeKnown(Define->Value.GetType());
+					return true;
+				}
 				if (IsPlaceExpr(Expr))
 				{
 					FPlaceInfo Place;

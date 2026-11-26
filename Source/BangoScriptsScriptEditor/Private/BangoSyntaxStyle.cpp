@@ -52,6 +52,7 @@ namespace BangoSyntaxStylePrivate
 		case EBangoSyntaxKind::Function:           return { TEXT("8FB8DE"), false, false };
 		case EBangoSyntaxKind::Parameter:          return { TEXT("9CDCFE"), false, true  };
 		case EBangoSyntaxKind::UndeclaredGlobal:   return { TEXT("FFCB6B"), true,  false };
+		case EBangoSyntaxKind::Define:             return { TEXT("56B6C2"), true,  false }; // a value, like true and nil, but named
 		case EBangoSyntaxKind::Default:
 		default:                                  return { TEXT("D4D4D4"), false, false };
 		}

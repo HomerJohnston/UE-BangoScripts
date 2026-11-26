@@ -156,6 +156,8 @@ static FString BangoCheckGraphRoundTrip(const TCHAR* Name, const FString& Source
 /** Extra scripts for the round-trip check: comments, disconnected nodes, functions, long lines. */
 static const TCHAR* const GBangoGraphRoundTripSources[] =
 {
+	// Defines (spec section 4, Defines): names like any other in a field, and a case value.
+	TEXT("global int mode ?= SELECT_RANDOM;\nint _pick = BOSS_LEVELS[1] + SELECT_RANDOM;\nswitch (mode)\n{\ncase SELECT_RANDOM:\n{\n\tmode = 0;\n}\ncase 2:\n{\n}\n}\n"),
 	// World and persistent globals: in the Globals list, and set in the code (a Global node).
 	TEXT("global int level ?= 1;\npersistent global int gold ?= 5;\n// Kept between levels.\npersistent global string[] log;\n\ngold = gold + level;\npersistent global bool rich = gold > 100;\nglobal bool here = true;\n"),
 	TEXT("persistent global int gold;\n\nfunction void Pay()\n{\n\tpersistent global bool paid = true;\n}\n\n/*\npersistent global bool off = true;\n*/\nPay();\n"),

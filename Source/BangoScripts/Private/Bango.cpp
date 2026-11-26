@@ -4,6 +4,8 @@
 #include "BangoCompiler.h"
 #include "BangoInlineScript.h"
 #include "BangoLog.h"
+#include "BangoSettings.h"
+#include "BangoDefines.h"
 #include "UObject/Object.h"
 
 #define LOCTEXT_NAMESPACE "FBangoModule"
@@ -37,6 +39,12 @@ void FBangoModule::StartupModule()
 {
 	BangoModulePrivate::Loaded = this;
 	Bango::RegisterBuiltinCommands(Commands);
+	// Another plugin's defines (Bango::RegisterDefines) that can't be used say why in the log.
+	Bango::SetDefineErrorReporter([](const FString& Error)
+	{
+		UE_LOG(LogBango, Warning, TEXT("Bango defines: %s This define is left out."), *Error);
+	});
+	Bango::ApplyDefineSettings(); // before any script is compiled
 }
 
 bool FBangoModule::GetInlineProgram(const FBangoInlineScript& Script, const FString& Name, TSharedPtr<const FBangoProgram>& OutProgram, FString& OutError,
@@ -45,7 +53,7 @@ bool FBangoModule::GetInlineProgram(const FBangoInlineScript& Script, const FStr
 	// The usual case, a script spawned again unchanged: what it remembers is still right if it was compiled from the
 	// same text under the same name with the same inputs. Comparing the text is far cheaper than looking it up.
 	const FBangoInlineCompiled* Last = Script.LastCompiled.Get(); // stays alive until LastCompiled is replaced, below
-	const bool bSameText = Last && Last->Source.IsValid() && Last->Program.IsValid()
+	const bool bSameText = Last && Last->Source.IsValid() && Last->Program.IsValid() && Last->Program->IsCompiledWithCurrentDefines()
 		&& Last->Source->Equals(Script.Source, ESearchCase::CaseSensitive) && Last->Name.Equals(Name, ESearchCase::CaseSensitive);
 	if (bSameText && !Script.HasGivenInputs() && !Last->Signature.IsValid())
 	{
@@ -97,7 +105,7 @@ bool FBangoModule::GetInlineProgram(const FString& Source, const FBangoInputsSig
 {
 	// The signature is part of what it was compiled as: the same text with other inputs is another program.
 	const FString Key = Name + TEXT("\n") + (Signature ? Signature->Label + TEXT(": ") + Signature->ToInputsText() : FString()) + TEXT("\n") + Source;
-	if (const TSharedPtr<const FBangoProgram>* Found = InlinePrograms.Find(Key))
+	if (const TSharedPtr<const FBangoProgram>* Found = InlinePrograms.Find(Key); Found && (*Found)->IsCompiledWithCurrentDefines())
 	{
 		OutProgram = *Found;
 		return true;
@@ -123,6 +131,7 @@ bool FBangoModule::GetInlineProgram(const FString& Source, const FBangoInputsSig
 void FBangoModule::ShutdownModule()
 {
 	BangoModulePrivate::Loaded = nullptr;
+	Bango::SetDefineErrorReporter(nullptr); // its code is going
 	InlinePrograms.Reset();
 	ScriptCache.Clear();
 }

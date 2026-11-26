@@ -1,6 +1,9 @@
 #include "BangoConnectionDrawingPolicy.h"
 #include "BangoConstant.h"
 #include "BangoConstantCustomization.h"
+#include "BangoDefineSettingCustomization.h"
+#include "BangoSettingsCustomization.h"
+#include "BangoSettings.h"
 #include "BangoInlineScript.h"
 #include "BangoInlineScriptCustomization.h"
 #include "BangoLevelStartScriptMenu.h"
@@ -75,6 +78,12 @@ public:
 		// Constants (FBangoConstant properties): a name, the type picker and the value box on one row; actors for an entity.
 		PropertyEditor.RegisterCustomPropertyTypeLayout(FBangoConstant::StaticStruct()->GetFName(),
 			FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FBangoConstantCustomization::MakeInstance));
+		// Defines (Project Settings > Plugins > Bango > Defines): the same row, with why one can't be a define.
+		PropertyEditor.RegisterCustomPropertyTypeLayout(FBangoDefineSetting::StaticStruct()->GetFName(),
+			FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FBangoDefineSettingCustomization::MakeInstance));
+		// ...and under them, the defines other plugins registered.
+		PropertyEditor.RegisterCustomClassLayout(UBangoSettings::StaticClass()->GetFName(),
+			FOnGetDetailCustomizationInstance::CreateStatic(&FBangoSettingsCustomization::MakeInstance));
 		PropertyEditor.NotifyCustomizationModuleChanged();
 
 		PinFactory = MakeShared<FBangoGraphPinFactory>();
@@ -119,6 +128,8 @@ public:
 			PropertyEditor->UnregisterCustomPropertyTypeLayout(FBangoInlineCondition::StaticStruct()->GetFName());
 			PropertyEditor->UnregisterCustomPropertyTypeLayout(FBangoIDName::StaticStruct()->GetFName());
 			PropertyEditor->UnregisterCustomPropertyTypeLayout(FBangoConstant::StaticStruct()->GetFName());
+			PropertyEditor->UnregisterCustomPropertyTypeLayout(FBangoDefineSetting::StaticStruct()->GetFName());
+			PropertyEditor->UnregisterCustomClassLayout(UBangoSettings::StaticClass()->GetFName());
 		}
 		if (LevelStartScriptMenu.IsValid())
 		{

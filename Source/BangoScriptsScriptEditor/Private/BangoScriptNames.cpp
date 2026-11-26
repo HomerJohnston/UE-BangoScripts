@@ -4,6 +4,7 @@
 #include "BangoScriptNames.h"
 
 #include "BangoProgram.h"
+#include "BangoDefines.h"
 
 namespace BangoScriptNamesPrivate
 {
@@ -272,6 +273,10 @@ void FBangoScriptNames::Build(const TArray<FString>& Lines, const TArray<TArray<
 
 EBangoSyntaxKind FBangoScriptNames::Classify(int32 LineIndex, const FString& Name) const
 {
+	if (Bango::FindDefine(Name))
+	{
+		return EBangoSyntaxKind::Define; // always the define: nothing in a script can have its name
+	}
 	const int32 Graph = LineIndex >= 0 && LineIndex < LineGraph.Num() ? LineGraph[LineIndex] : 0;
 	if (Graphs.IsValidIndex(Graph))
 	{
@@ -456,6 +461,12 @@ void FBangoScriptNames::GetVisibleNames(int32 LineIndex, TArray<FBangoVisibleNam
 	for (int32 I = 0; I < Globals.Num(); ++I)
 	{
 		Add(Globals[I], GlobalTypes.IsValidIndex(I) ? GlobalTypes[I] : FString(), EBangoSyntaxKind::Global);
+	}
+
+	// The project's defines (spec section 4, Defines), with their description.
+	for (const FBangoDefineEntry& Define : Bango::GetDefines())
+	{
+		Add(Define.Name, Define.TypeName, EBangoSyntaxKind::Define, Define.Description);
 	}
 
 	// Functions, with their signature as the "type": `int AddScore(int amount, entity who)`.

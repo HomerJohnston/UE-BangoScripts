@@ -2,6 +2,7 @@
 
 #include "Bango.h"
 #include "BangoActorRegistry.h"
+#include "BangoDefines.h"
 #include "BangoGlobalsSubsystem.h"
 #include "BangoScriptAsset.h"
 #include "BangoLog.h"
@@ -48,6 +49,13 @@ namespace BangoBlueprintPrivate
 	}
 
 	/** The global's value if it exists, isn't nil and has the given type; otherwise nullptr (with an error for a wrong type). */
+	/** The define named Name as Type (converted, as an int to a float), or false. */
+	static bool GetDefine(const FString& Name, const FBangoType& Type, FBangoValue& OutValue)
+	{
+		const FBangoDefineEntry* Define = Bango::FindDefine(Name);
+		return Define && !Define->Value.IsNil() && Define->Value.TryConvertTo(Type, OutValue);
+	}
+
 	static const FBangoValue* GetGlobal(UObject* WorldContextObject, const FString& Name, const FBangoType& Type, const TCHAR* What)
 	{
 		FBangoGlobalStore* Store = GetStore(WorldContextObject, What);
@@ -449,6 +457,46 @@ FVector UBangoBlueprintLibrary::GetBangoGlobalVector3(UObject* WorldContextObjec
 	const FBangoValue* Value = GetGlobal(WorldContextObject, Name, FBangoType::Vector3(), TEXT("Get Bango Global Vector3"));
 	bIsDefined = Value != nullptr;
 	return Value ? FVector(Value->GetVectorPart(0), Value->GetVectorPart(1), Value->GetVectorPart(2)) : FVector::ZeroVector;
+}
+
+bool UBangoBlueprintLibrary::GetBangoDefineBool(const FString& Name, bool& bIsDefined)
+{
+	FBangoValue Value;
+	bIsDefined = GetDefine(Name, FBangoType::Bool(), Value);
+	return bIsDefined && Value.GetBool();
+}
+
+int32 UBangoBlueprintLibrary::GetBangoDefineInt(const FString& Name, bool& bIsDefined)
+{
+	FBangoValue Value;
+	bIsDefined = GetDefine(Name, FBangoType::Int(), Value);
+	return bIsDefined ? Value.GetInt() : 0;
+}
+
+double UBangoBlueprintLibrary::GetBangoDefineDouble(const FString& Name, bool& bIsDefined)
+{
+	FBangoValue Value;
+	bIsDefined = GetDefine(Name, FBangoType::Double(), Value);
+	return bIsDefined ? Value.GetDouble() : 0.0;
+}
+
+FString UBangoBlueprintLibrary::GetBangoDefineString(const FString& Name, bool& bIsDefined)
+{
+	FBangoValue Value;
+	bIsDefined = GetDefine(Name, FBangoType::String(), Value);
+	return bIsDefined ? Value.GetString() : FString();
+}
+
+FText UBangoBlueprintLibrary::GetBangoDefineText(const FString& Name, bool& bIsDefined)
+{
+	FBangoValue Value;
+	bIsDefined = GetDefine(Name, FBangoType::Text(), Value);
+	return bIsDefined ? Value.GetText() : FText::GetEmpty();
+}
+
+bool UBangoBlueprintLibrary::IsBangoDefine(const FString& Name)
+{
+	return Bango::FindDefine(Name) != nullptr;
 }
 
 void UBangoBlueprintLibrary::ClearBangoGlobal(UObject* WorldContextObject, const FString& Name)

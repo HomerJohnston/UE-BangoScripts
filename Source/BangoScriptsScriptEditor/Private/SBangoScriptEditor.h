@@ -124,6 +124,22 @@ private:
 	TArray<TSharedPtr<FGraphEntry>> FunctionItems;
 	TSharedPtr<SListView<TSharedPtr<FGraphEntry>>> FunctionList;
 
+	// DEFINES: the project's (Bango::GetDefines), shown, not edited here (Project Settings > Plugins > Bango > Defines).
+	struct FDefineEntry
+	{
+		FString Name;
+		FString Type;
+		FString Value;
+		FString Category;
+		FString Description;
+	};
+	TArray<TSharedPtr<FDefineEntry>> DefineItems;
+	TSharedPtr<SListView<TSharedPtr<FDefineEntry>>> DefineList;
+	/** Bango::GetDefinesFingerprint when DefineItems were made and the script was last checked against them. */
+	uint64 PolledDefinesFingerprint = 0;
+	void RefreshDefineList();
+	TSharedRef<ITableRow> OnGenerateDefineRow(TSharedPtr<FDefineEntry> Item, const TSharedRef<STableViewBase>& Owner);
+
 	// INPUTS: the shown graph's parameters (the script's #inputs, or the function's), from its entry node.
 	struct FInputEntry
 	{
@@ -212,6 +228,7 @@ private:
 	bool bGlobalsExpanded = true;
 	bool bLocalsExpanded = true;
 	bool bNodeLocalsExpanded = true;
+	bool bDefinesExpanded = false;
 	/** One of the reference pane's tabs (COMMANDS or NODES): a search box, an order, and a list in group foldouts. */
 	struct FReferenceList
 	{

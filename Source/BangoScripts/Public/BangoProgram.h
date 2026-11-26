@@ -427,6 +427,13 @@ struct FBangoProgram
 	bool bIsCondition = false;
 
 	TArray<FBangoValue> Constants;
+	/**
+	 * Bango::GetDefinesFingerprint when it was compiled, if it uses a define (spec section 4, Defines); 0 if it uses
+	 * none. A program whose fingerprint isn't the current one is compiled again before it's used (IsCompiledWithCurrentDefines).
+	 */
+	uint64 DefinesFingerprint = 0;
+	/** False if the defines have changed since it was compiled, and it uses one: compile it again. */
+	bool IsCompiledWithCurrentDefines() const;
 	/** Global names and command names (and persistent locals', FBangoPersistentLocal). */
 	TArray<FString> Names;
 	/** The persistent locals and script variables the script declares, in all its functions. */

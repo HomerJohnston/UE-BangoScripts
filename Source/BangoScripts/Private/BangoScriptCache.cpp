@@ -59,7 +59,7 @@ bool FBangoScriptCache::GetProgram(const UBangoScriptAsset& Asset, const IBangoC
 	const FName PackageName = Package ? Package->GetFName() : FName();
 	if (const FBangoScriptCompiled* Last = Asset.LastCompiled.Get())
 	{
-		if (Last->Generation == Generation && Last->Package == PackageName && Last->Program.IsValid()
+		if (Last->Generation == Generation && Last->Package == PackageName && Last->Program.IsValid() && Last->Program->IsCompiledWithCurrentDefines()
 			&& Last->Source.Equals(Asset.Source, ESearchCase::CaseSensitive))
 		{
 			OutProgram = Last->Program;
@@ -82,7 +82,8 @@ bool FBangoScriptCache::GetProgram(const UBangoScriptAsset& Asset, const IBangoC
 	OutDisplayPath = Name + TEXT(".bango");
 	if (const FEntry* Entry = Entries.Find(Name))
 	{
-		if (Entry->Source.Equals(Asset.Source, ESearchCase::CaseSensitive))
+		// A define it uses having changed since is like its text having changed (spec section 4, Defines).
+		if (Entry->Source.Equals(Asset.Source, ESearchCase::CaseSensitive) && Entry->Program.IsValid() && Entry->Program->IsCompiledWithCurrentDefines())
 		{
 			OutProgram = Entry->Program;
 			Remember(OutProgram, OutDisplayPath);

@@ -61,6 +61,8 @@
 #include "SBangoTextEditor.h"
 #include "SBangoScriptAssetList.h"
 #include "BangoCompletion.h"
+#include "BangoDefines.h"
+#include "ISettingsModule.h"
 #include "Framework/Text/TextLayout.h"
 #include "Styling/StyleColors.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
@@ -476,6 +478,41 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 									SNew(STextBlock).Text(LOCTEXT("AddFunction", "+ Add"))
 								])
 						]
+
+						// DEFINES: the project's named values (spec section 4, Defines). Shown, not edited: they're in
+						// Project Settings, where Edit goes.
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(0.0f, 0.0f, 0.0f, 2.0f)
+						[
+							MakeFoldout(LOCTEXT("DefinesHeading", "DEFINES"), &bDefinesExpanded,
+								SNew(SBox)
+								.HeightOverride_Lambda([this]() { return VariableListHeight(DefineItems.Num()); })
+								[
+									SAssignNew(DefineList, SListView<TSharedPtr<FDefineEntry>>)
+									.ListItemsSource(&DefineItems)
+									.SelectionMode(ESelectionMode::None)
+									.ScrollbarVisibility(EVisibility::Collapsed)
+									.ConsumeMouseWheel(EConsumeMouseWheel::Never)
+									.AllowOverscroll(EAllowOverscroll::No)
+									.OnGenerateRow(this, &SBangoScriptEditor::OnGenerateDefineRow)
+								],
+								SNew(SButton)
+								.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+								.ContentPadding(FMargin(4.0f, 0.0f))
+								.ToolTipText(LOCTEXT("EditDefinesTooltip", "Defines are named values every script can use, and none can change, like SELECT_RANDOM. They're the project's: edit them in Project Settings > Plugins > Bango > Defines."))
+								.OnClicked_Lambda([]()
+								{
+									if (ISettingsModule* Settings = FModuleManager::GetModulePtr<ISettingsModule>(TEXT("Settings")))
+									{
+										Settings->ShowViewer(TEXT("Project"), TEXT("Plugins"), TEXT("Bango"));
+									}
+									return FReply::Handled();
+								})
+								[
+									SNew(STextBlock).Text(LOCTEXT("EditDefines", "Edit"))
+								])
+						]
 					]
 					]
 					+ SOverlay::Slot()
@@ -782,6 +819,65 @@ void SBangoScriptEditor::RebuildFunctionItems()
 		FunctionItems.Add(GraphItems[i]);
 	}
 	FunctionList->RequestListRefresh();
+}
+
+void SBangoScriptEditor::RefreshDefineList()
+{
+	PolledDefinesFingerprint = Bango::GetDefinesFingerprint();
+	DefineItems.Reset();
+	for (const FBangoDefineEntry& Define : Bango::GetDefines())
+	{
+		TSharedPtr<FDefineEntry> Item = MakeShared<FDefineEntry>();
+		Item->Name = Define.Name;
+		Item->Type = Define.TypeName;
+		Item->Value = Define.ValueText;
+		Item->Category = Define.Source.IsEmpty() ? Define.Category
+			: Define.Category == Define.Source ? FString::Printf(TEXT("from %s"), *Define.Source)
+			: FString::Printf(TEXT("%s, from %s"), *Define.Category, *Define.Source);
+		Item->Description = Define.Description;
+		DefineItems.Add(Item);
+	}
+	if (DefineList.IsValid())
+	{
+		DefineList->RequestListRefresh();
+	}
+}
+
+TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateDefineRow(TSharedPtr<FDefineEntry> Item, const TSharedRef<STableViewBase>& Owner)
+{
+	// `SELECT_RANDOM   int = 3`, and its category and description in the tooltip.
+	FString Tooltip = FString::Printf(TEXT("define %s %s = %s"), *Item->Type, *Item->Name, *Item->Value);
+	if (!Item->Category.IsEmpty())
+	{
+		Tooltip += FString::Printf(TEXT(" (%s)"), *Item->Category);
+	}
+	if (!Item->Description.IsEmpty())
+	{
+		Tooltip += TEXT("\n") + Item->Description;
+	}
+	return SNew(STableRow<TSharedPtr<FDefineEntry>>, Owner)
+		.ToolTipText(FText::FromString(Tooltip))
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(4.0f, 1.0f, 8.0f, 1.0f)
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(Item->Name))
+				.ColorAndOpacity(FLinearColor::FromSRGBColor(FColor::FromHex(TEXT("56B6C2"))))
+			]
+			+ SHorizontalBox::Slot()
+			.FillWidth(1.0f)
+			.VAlign(VAlign_Center)
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(FString::Printf(TEXT("%s = %s"), *Item->Type, *Item->Value)))
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+			]
+		];
 }
 
 TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateFunctionRow(TSharedPtr<FGraphEntry> Item, const TSharedRef<STableViewBase>& Owner)
@@ -5422,6 +5518,14 @@ EActiveTimerReturnType SBangoScriptEditor::OnPoll(double CurrentTime, float Delt
 {
 	// First, so a script whose text didn't read is reloaded once it's fixed elsewhere.
 	CheckFileOnDisk();
+
+	// The project's defines changed: the list follows, and the script counts as not compiled yet (a name may be a
+	// define now, or no longer). The text pane colours and checks its text again itself.
+	if (PolledDefinesFingerprint != Bango::GetDefinesFingerprint())
+	{
+		RefreshDefineList();
+		CompileStatus = ECompileStatus::Unknown;
+	}
 
 	// The inputs an inline script is given can change while it's open (its owner's own ones, SetInstanceInputs): the
 	// text is checked with the new ones, and the script counts as not compiled yet. The lists and nodes follow below.

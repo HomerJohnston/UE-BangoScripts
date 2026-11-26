@@ -253,6 +253,29 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Bango|Globals", meta = (WorldContext = "WorldContextObject"))
 	static FVector GetBangoGlobalVector3(UObject* WorldContextObject, const FString& Name, bool& bIsDefined);
 
+	// ---- Defines ----
+	// The project's defines (Project Settings > Plugins > Bango > Defines; spec section 4, Defines), by name. One that
+	// isn't there, or isn't that type, returns false in bIsDefined (an int one reads as a float too).
+
+	UFUNCTION(BlueprintPure, Category = "Bango|Defines")
+	static bool GetBangoDefineBool(const FString& Name, bool& bIsDefined);
+
+	UFUNCTION(BlueprintPure, Category = "Bango|Defines")
+	static int32 GetBangoDefineInt(const FString& Name, bool& bIsDefined);
+
+	UFUNCTION(BlueprintPure, Category = "Bango|Defines", meta = (DisplayName = "Get Bango Define Float"))
+	static double GetBangoDefineDouble(const FString& Name, bool& bIsDefined);
+
+	UFUNCTION(BlueprintPure, Category = "Bango|Defines")
+	static FString GetBangoDefineString(const FString& Name, bool& bIsDefined);
+
+	UFUNCTION(BlueprintPure, Category = "Bango|Defines")
+	static FText GetBangoDefineText(const FString& Name, bool& bIsDefined);
+
+	/** True if there's a define named Name. */
+	UFUNCTION(BlueprintPure, Category = "Bango|Defines")
+	static bool IsBangoDefine(const FString& Name);
+
 	/** Makes a global nil (undefined). Does nothing if it doesn't exist. */
 	UFUNCTION(BlueprintCallable, Category = "Bango|Globals", meta = (WorldContext = "WorldContextObject"))
 	static void ClearBangoGlobal(UObject* WorldContextObject, const FString& Name);
