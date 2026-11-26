@@ -5,7 +5,7 @@
 #include "BangoInstance.h"
 
 struct FBangoProgram;
-class FBangoGlobalStore;
+struct FBangoGlobalStore;
 
 /**
  * Watching conditions (spec section 10, Watching conditions): a condition checked for many things (a trigger's, for

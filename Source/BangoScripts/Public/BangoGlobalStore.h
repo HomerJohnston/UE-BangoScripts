@@ -21,7 +21,7 @@
  * - Every global has a slot, a number that stays its own until every global is replaced (ResetAll, loading). The
  *   VM finds a global by name once and by slot after that (FindSlot, GetLayout).
  */
-class BANGOSCRIPTS_API FBangoGlobalStore
+struct BANGOSCRIPTS_API FBangoGlobalStore
 {
 public:
 	bool Declare(const FString& Name, const FBangoType& Type, FString& OutError, bool bPersistent = false);
