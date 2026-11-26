@@ -565,6 +565,9 @@ private:
 	UObject* LastWorldContext = nullptr;
 	/** NotifyAbandoned is at work: a failure or a Terminate while it is doesn't start it again. */
 	bool bNotifyingAbandoned = false;
+	friend struct FBangoCommandCall;
+	/** FBangoCommandCall::FindOpenBlock: the state of the nearest open block of the command named, in any frame. */
+	const FBangoValue* FindOpenBlock(const FString& CommandName) const;
 	/** GetPersistentKey's, for each of Program's persistent locals, and the program they were made for. */
 	mutable TArray<FString> PersistentKeys;
 	mutable const FBangoProgram* PersistentKeysProgram = nullptr;

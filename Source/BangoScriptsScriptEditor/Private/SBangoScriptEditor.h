@@ -447,6 +447,11 @@ private:
 	/** Sets a local's starting value, or a global's default, from what was typed in its box (empty: none). */
 	/** Sets a declaration's value from its Bango text (empty: none), as the value box reports it. */
 	void SetDeclValueText(bool bGlobal, int32 Index, const FString& Value);
+	/**
+	 * Makes a global a persistent global or a world global, or a script variable persistent or not (spec section 4).
+	 * For a global, its Set Global nodes in every graph are changed to match, since a name is one kind in a script.
+	 */
+	void SetDeclPersistent(bool bGlobal, int32 Index, bool bPersistent);
 	void MoveDecl(bool bGlobal, int32 From, int32 To);
 	/** Why NewName can't be the name of declaration Index, or empty if it can. */
 	FString CheckDeclName(bool bGlobal, int32 Index, const FString& NewName) const;

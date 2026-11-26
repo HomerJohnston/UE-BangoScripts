@@ -246,8 +246,16 @@ public:
 	/** The case an output pin is for, or INDEX_NONE (Default, Then, the input, or not a switch). */
 	int32 GetCaseOfPin(const UEdGraphPin* Pin) const;
 
+	/** The decorator another module registered for the command this node calls (Bango::RegisterNodeDecorator), or null. */
+	TSharedPtr<class IBangoNodeDecorator> GetNodeDecorator() const;
+	/** What a decorator is told about this node; SetFieldValue sets a field as an undoable edit (SetFieldValue, below). */
+	struct FBangoNodeDecoratorContext MakeDecoratorContext() const;
+
 	//~ Begin UEdGraphNode
 	virtual void AllocateDefaultPins() override;
+	/** A decorated command's icon, if its decorator gives one. */
+	virtual FSlateIcon GetIconAndTint(FLinearColor& OutColor) const override;
+	virtual bool ShowPaletteIconOnNode() const override;
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
 	virtual FLinearColor GetNodeTitleColor() const override;
 	virtual FText GetTooltipText() const override;

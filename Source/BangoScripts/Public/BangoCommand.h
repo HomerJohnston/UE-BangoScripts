@@ -5,6 +5,7 @@
 #include "BangoTypes.h"
 
 class UObject;
+class FBangoInstance;
 
 /**
  * Names one of a signature's type parameters (FBangoCommandSignature::TypeParam), where a type goes:
@@ -297,6 +298,8 @@ struct FBangoCommandCall
 {
 	/** The instance making the call. */
 	int64 InstanceId = 0;
+	/** The instance itself, for FindOpenBlock. Set by the VM for every handler it calls; null in a call made any other way. */
+	const FBangoInstance* Instance = nullptr;
 	/** The world the script runs in, if any. Commands use it to find actors, timers, etc. */
 	UObject* WorldContext = nullptr;
 
@@ -383,6 +386,15 @@ struct FBangoCommandCall
 	 */
 	bool bBlockAbandoned = false;
 
+	/**
+	 * Any handler (Start, Poll, Close, Abandoned), of any command: the state of the nearest open block of the block
+	 * command named, in this running script, counting blocks opened by the callers of the function the command is in.
+	 * Innermost first. Null if none is open (a spawn block's copy, or another script, has none of this script's open).
+	 * Read only, and only during this call, like BlockState. A block that has picked one of its blocks to run (RunBlock)
+	 * is closed, so it isn't found.
+	 */
+	BANGOSCRIPTS_API const FBangoValue* FindOpenBlock(const FString& CommandName) const;
+
 	/** Done with a return value: put it here. */
 	FBangoValue Result;
 	/** Failed: put the reason here. */
@@ -392,6 +404,7 @@ struct FBangoCommandCall
 	void Reset()
 	{
 		InstanceId = 0;
+		Instance = nullptr;
 		WorldContext = nullptr;
 		bHasTarget = false;
 		Target = FBangoValue();

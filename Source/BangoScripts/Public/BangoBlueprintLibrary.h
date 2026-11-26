@@ -196,32 +196,38 @@ public:
 	static bool IsValidBangoScriptHandle(FBangoScriptHandle Handle) { return Handle.IsValid(); }
 
 	// ---- Global variables ----
-	// Setting a global that doesn't exist yet declares it with that type. Setting one that exists with
-	// another type is an error. Getting one that doesn't exist or is nil returns false in bIsDefined.
+	// Setting a global that doesn't exist yet declares it with that type: a world global (gone when the level ends),
+	// or with Persistent (an advanced pin), a persistent global (lasting the whole game). One that exists keeps its
+	// kind. Setting one that exists with another type is an error. Getting one that doesn't exist or is nil returns
+	// false in bIsDefined.
 
-	UFUNCTION(BlueprintCallable, Category = "Bango|Globals", meta = (WorldContext = "WorldContextObject"))
-	static bool SetBangoGlobalBool(UObject* WorldContextObject, const FString& Name, bool Value);
+	/** True if the global exists and is a persistent global (it lasts the whole game); false for a world global, or none. */
+	UFUNCTION(BlueprintPure, Category = "Bango|Globals", meta = (WorldContext = "WorldContextObject"))
+	static bool IsBangoGlobalPersistent(UObject* WorldContextObject, const FString& Name);
 
-	UFUNCTION(BlueprintCallable, Category = "Bango|Globals", meta = (WorldContext = "WorldContextObject"))
-	static bool SetBangoGlobalInt(UObject* WorldContextObject, const FString& Name, int32 Value);
+	UFUNCTION(BlueprintCallable, Category = "Bango|Globals", meta = (WorldContext = "WorldContextObject", AdvancedDisplay = "bPersistent"))
+	static bool SetBangoGlobalBool(UObject* WorldContextObject, const FString& Name, bool Value, bool bPersistent = false);
+
+	UFUNCTION(BlueprintCallable, Category = "Bango|Globals", meta = (WorldContext = "WorldContextObject", AdvancedDisplay = "bPersistent"))
+	static bool SetBangoGlobalInt(UObject* WorldContextObject, const FString& Name, int32 Value, bool bPersistent = false);
 
 	/** Sets a Bango float global (a double underneath). Named Double in C++ so existing Blueprints keep working. */
-	UFUNCTION(BlueprintCallable, Category = "Bango|Globals", meta = (WorldContext = "WorldContextObject", DisplayName = "Set Bango Global Float"))
-	static bool SetBangoGlobalDouble(UObject* WorldContextObject, const FString& Name, double Value);
+	UFUNCTION(BlueprintCallable, Category = "Bango|Globals", meta = (WorldContext = "WorldContextObject", AdvancedDisplay = "bPersistent", DisplayName = "Set Bango Global Float"))
+	static bool SetBangoGlobalDouble(UObject* WorldContextObject, const FString& Name, double Value, bool bPersistent = false);
 
-	UFUNCTION(BlueprintCallable, Category = "Bango|Globals", meta = (WorldContext = "WorldContextObject"))
-	static bool SetBangoGlobalString(UObject* WorldContextObject, const FString& Name, const FString& Value);
+	UFUNCTION(BlueprintCallable, Category = "Bango|Globals", meta = (WorldContext = "WorldContextObject", AdvancedDisplay = "bPersistent"))
+	static bool SetBangoGlobalString(UObject* WorldContextObject, const FString& Name, const FString& Value, bool bPersistent = false);
 
-	UFUNCTION(BlueprintCallable, Category = "Bango|Globals", meta = (WorldContext = "WorldContextObject"))
-	static bool SetBangoGlobalText(UObject* WorldContextObject, const FString& Name, const FText& Value);
+	UFUNCTION(BlueprintCallable, Category = "Bango|Globals", meta = (WorldContext = "WorldContextObject", AdvancedDisplay = "bPersistent"))
+	static bool SetBangoGlobalText(UObject* WorldContextObject, const FString& Name, const FText& Value, bool bPersistent = false);
 
 	/** Sets a Bango vector2 global from a Vector 2D. */
-	UFUNCTION(BlueprintCallable, Category = "Bango|Globals", meta = (WorldContext = "WorldContextObject"))
-	static bool SetBangoGlobalVector2(UObject* WorldContextObject, const FString& Name, FVector2D Value);
+	UFUNCTION(BlueprintCallable, Category = "Bango|Globals", meta = (WorldContext = "WorldContextObject", AdvancedDisplay = "bPersistent"))
+	static bool SetBangoGlobalVector2(UObject* WorldContextObject, const FString& Name, FVector2D Value, bool bPersistent = false);
 
 	/** Sets a Bango vector3 global from a Vector. */
-	UFUNCTION(BlueprintCallable, Category = "Bango|Globals", meta = (WorldContext = "WorldContextObject"))
-	static bool SetBangoGlobalVector3(UObject* WorldContextObject, const FString& Name, FVector Value);
+	UFUNCTION(BlueprintCallable, Category = "Bango|Globals", meta = (WorldContext = "WorldContextObject", AdvancedDisplay = "bPersistent"))
+	static bool SetBangoGlobalVector3(UObject* WorldContextObject, const FString& Name, FVector Value, bool bPersistent = false);
 
 	UFUNCTION(BlueprintCallable, Category = "Bango|Globals", meta = (WorldContext = "WorldContextObject"))
 	static bool GetBangoGlobalBool(UObject* WorldContextObject, const FString& Name, bool& bIsDefined);

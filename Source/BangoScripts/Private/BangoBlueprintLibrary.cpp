@@ -31,7 +31,7 @@ namespace BangoBlueprintPrivate
 		return &Globals->GetStore();
 	}
 
-	static bool SetGlobal(UObject* WorldContextObject, const FString& Name, const FBangoValue& Value, const TCHAR* What)
+	static bool SetGlobal(UObject* WorldContextObject, const FString& Name, const FBangoValue& Value, const TCHAR* What, bool bPersistent = false)
 	{
 		FBangoGlobalStore* Store = GetStore(WorldContextObject, What);
 		if (!Store)
@@ -39,7 +39,7 @@ namespace BangoBlueprintPrivate
 			return false;
 		}
 		FString Error;
-		if ((!Store->Find(Name) && !Store->Declare(Name, Value.GetType(), Error)) || !Store->Set(Name, Value, Error))
+		if ((!Store->Find(Name) && !Store->Declare(Name, Value.GetType(), Error, bPersistent)) || !Store->Set(Name, Value, Error))
 		{
 			Bango::ReportError(FString::Printf(TEXT("%s: %s"), What, *Error));
 			return false;
@@ -361,39 +361,45 @@ bool UBangoBlueprintLibrary::IsBangoScriptRunning(UObject* WorldContextObject, F
 	return Subsystem && Subsystem->IsRunning(Handle);
 }
 
-bool UBangoBlueprintLibrary::SetBangoGlobalBool(UObject* WorldContextObject, const FString& Name, bool Value)
+bool UBangoBlueprintLibrary::IsBangoGlobalPersistent(UObject* WorldContextObject, const FString& Name)
 {
-	return SetGlobal(WorldContextObject, Name, FBangoValue::MakeBool(Value), TEXT("Set Bango Global Bool"));
+	FBangoGlobalStore* Store = GetStore(WorldContextObject, TEXT("Is Bango Global Persistent"));
+	return Store && Store->IsPersistent(Name);
 }
 
-bool UBangoBlueprintLibrary::SetBangoGlobalInt(UObject* WorldContextObject, const FString& Name, int32 Value)
+bool UBangoBlueprintLibrary::SetBangoGlobalBool(UObject* WorldContextObject, const FString& Name, bool Value, bool bPersistent)
 {
-	return SetGlobal(WorldContextObject, Name, FBangoValue::MakeInt(Value), TEXT("Set Bango Global Int"));
+	return SetGlobal(WorldContextObject, Name, FBangoValue::MakeBool(Value), TEXT("Set Bango Global Bool"), bPersistent);
 }
 
-bool UBangoBlueprintLibrary::SetBangoGlobalDouble(UObject* WorldContextObject, const FString& Name, double Value)
+bool UBangoBlueprintLibrary::SetBangoGlobalInt(UObject* WorldContextObject, const FString& Name, int32 Value, bool bPersistent)
 {
-	return SetGlobal(WorldContextObject, Name, FBangoValue::MakeDouble(Value), TEXT("Set Bango Global Float"));
+	return SetGlobal(WorldContextObject, Name, FBangoValue::MakeInt(Value), TEXT("Set Bango Global Int"), bPersistent);
 }
 
-bool UBangoBlueprintLibrary::SetBangoGlobalString(UObject* WorldContextObject, const FString& Name, const FString& Value)
+bool UBangoBlueprintLibrary::SetBangoGlobalDouble(UObject* WorldContextObject, const FString& Name, double Value, bool bPersistent)
 {
-	return SetGlobal(WorldContextObject, Name, FBangoValue::MakeString(Value), TEXT("Set Bango Global String"));
+	return SetGlobal(WorldContextObject, Name, FBangoValue::MakeDouble(Value), TEXT("Set Bango Global Float"), bPersistent);
 }
 
-bool UBangoBlueprintLibrary::SetBangoGlobalText(UObject* WorldContextObject, const FString& Name, const FText& Value)
+bool UBangoBlueprintLibrary::SetBangoGlobalString(UObject* WorldContextObject, const FString& Name, const FString& Value, bool bPersistent)
 {
-	return SetGlobal(WorldContextObject, Name, FBangoValue::MakeText(Value), TEXT("Set Bango Global Text"));
+	return SetGlobal(WorldContextObject, Name, FBangoValue::MakeString(Value), TEXT("Set Bango Global String"), bPersistent);
 }
 
-bool UBangoBlueprintLibrary::SetBangoGlobalVector2(UObject* WorldContextObject, const FString& Name, FVector2D Value)
+bool UBangoBlueprintLibrary::SetBangoGlobalText(UObject* WorldContextObject, const FString& Name, const FText& Value, bool bPersistent)
 {
-	return SetGlobal(WorldContextObject, Name, FBangoValue::MakeVector2(Value.X, Value.Y), TEXT("Set Bango Global Vector2"));
+	return SetGlobal(WorldContextObject, Name, FBangoValue::MakeText(Value), TEXT("Set Bango Global Text"), bPersistent);
 }
 
-bool UBangoBlueprintLibrary::SetBangoGlobalVector3(UObject* WorldContextObject, const FString& Name, FVector Value)
+bool UBangoBlueprintLibrary::SetBangoGlobalVector2(UObject* WorldContextObject, const FString& Name, FVector2D Value, bool bPersistent)
 {
-	return SetGlobal(WorldContextObject, Name, FBangoValue::MakeVector3(Value.X, Value.Y, Value.Z), TEXT("Set Bango Global Vector3"));
+	return SetGlobal(WorldContextObject, Name, FBangoValue::MakeVector2(Value.X, Value.Y), TEXT("Set Bango Global Vector2"), bPersistent);
+}
+
+bool UBangoBlueprintLibrary::SetBangoGlobalVector3(UObject* WorldContextObject, const FString& Name, FVector Value, bool bPersistent)
+{
+	return SetGlobal(WorldContextObject, Name, FBangoValue::MakeVector3(Value.X, Value.Y, Value.Z), TEXT("Set Bango Global Vector3"), bPersistent);
 }
 
 bool UBangoBlueprintLibrary::GetBangoGlobalBool(UObject* WorldContextObject, const FString& Name, bool& bIsDefined)

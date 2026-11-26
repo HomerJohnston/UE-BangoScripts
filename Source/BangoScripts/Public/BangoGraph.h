@@ -145,6 +145,12 @@ namespace Bango
 	BANGOSCRIPTS_API FString MakeGlobalNodeStatement(const FString& Text);
 	/** The other way: the node text for a `global ...` or `persistent global ...` statement's text. */
 	BANGOSCRIPTS_API FString MakeGlobalNodeText(const FString& Statement);
+	/**
+	 * A Set Global node's text (MakeGlobalNodeText's, `bool open = true` or `persistent bool open = true`) for the
+	 * global Name made a persistent global or a world global: true, with Text changed, if it declares Name and
+	 * wasn't already that kind. For the editor's Globals list, which keeps a global's nodes the same kind as it.
+	 */
+	BANGOSCRIPTS_API bool SetGlobalNodePersistent(FString& Text, const FString& Name, bool bPersistent);
 }
 
 struct BANGOSCRIPTS_API FBangoGraphDecl

@@ -11,6 +11,7 @@
 #include "EdGraph/EdGraph.h"
 #include "Logging/TokenizedMessage.h"
 #include "ScopedTransaction.h"
+#include "BangoNodeDecorator.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(BangoEdGraphNode)
 
@@ -413,8 +414,67 @@ void UBangoEdGraphNode::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeCon
 	Section.AddMenuEntry(FBangoGraphCommands::Get().ToggleNodesDisabled, Label);
 }
 
+TSharedPtr<IBangoNodeDecorator> UBangoEdGraphNode::GetNodeDecorator() const
+{
+	const bool bCallsCommand = Layout.Style == EBangoNodeStyle::Command || GetKind() == EBangoGraphNodeKind::BlockCall;
+	return bCallsCommand && !IsEntry() ? Bango::FindNodeDecorator(Layout.CallName) : nullptr;
+}
+
+FBangoNodeDecoratorContext UBangoEdGraphNode::MakeDecoratorContext() const
+{
+	FBangoNodeDecoratorContext Context;
+	Context.CommandName = Layout.CallName;
+	Context.Layout = &Layout;
+	Context.NodeText = Text;
+	Context.bBlock = GetKind() == EBangoGraphNodeKind::BlockCall;
+	Context.bDisabled = IsDisabledNode();
+	TWeakObjectPtr<UBangoEdGraphNode> WeakNode(const_cast<UBangoEdGraphNode*>(this));
+	Context.SetFieldValue = [WeakNode](int32 FieldIndex, const FString& Value, FString& OutError)
+	{
+		UBangoEdGraphNode* Node = WeakNode.Get();
+		if (!Node)
+		{
+			OutError = TEXT("The node is gone.");
+			return false;
+		}
+		return Node->SetFieldValue(FieldIndex, Value, OutError);
+	};
+	return Context;
+}
+
+FSlateIcon UBangoEdGraphNode::GetIconAndTint(FLinearColor& OutColor) const
+{
+	if (const TSharedPtr<IBangoNodeDecorator> Decorator = GetNodeDecorator())
+	{
+		const FSlateIcon Icon = Decorator->GetTitleIcon(MakeDecoratorContext(), OutColor);
+		if (Icon.IsSet())
+		{
+			return Icon;
+		}
+	}
+	return Super::GetIconAndTint(OutColor);
+}
+
+bool UBangoEdGraphNode::ShowPaletteIconOnNode() const
+{
+	if (const TSharedPtr<IBangoNodeDecorator> Decorator = GetNodeDecorator())
+	{
+		FLinearColor Tint;
+		return Decorator->GetTitleIcon(MakeDecoratorContext(), Tint).IsSet();
+	}
+	return false;
+}
+
 FText UBangoEdGraphNode::GetNodeTitle(ENodeTitleType::Type TitleType) const
 {
+	if (const TSharedPtr<IBangoNodeDecorator> Decorator = GetNodeDecorator())
+	{
+		const TOptional<FText> Title = Decorator->GetTitle(MakeDecoratorContext());
+		if (Title.IsSet())
+		{
+			return Title.GetValue();
+		}
+	}
 	if (!Layout.Title.IsEmpty())
 	{
 		return FText::FromString(Layout.Title);
@@ -424,6 +484,14 @@ FText UBangoEdGraphNode::GetNodeTitle(ENodeTitleType::Type TitleType) const
 
 FLinearColor UBangoEdGraphNode::GetNodeTitleColor() const
 {
+	if (const TSharedPtr<IBangoNodeDecorator> Decorator = GetNodeDecorator())
+	{
+		const TOptional<FLinearColor> Color = Decorator->GetTitleColor(MakeDecoratorContext());
+		if (Color.IsSet())
+		{
+			return Color.GetValue();
+		}
+	}
 	switch (Layout.Style)
 	{
 	case EBangoNodeStyle::ScriptEntry:
@@ -480,6 +548,14 @@ FText UBangoEdGraphNode::GetTooltipText() const
 			: LOCTEXT("ScriptEntryTooltip", "Where the script starts (node 0). Shows the script's parameters.");
 	}
 	const FText Id = FText::Format(LOCTEXT("NodeId", "Node {0}"), FText::AsNumber(NodeID));
+	if (const TSharedPtr<IBangoNodeDecorator> Decorator = GetNodeDecorator())
+	{
+		const TOptional<FText> Tooltip = Decorator->GetTooltip(MakeDecoratorContext());
+		if (Tooltip.IsSet())
+		{
+			return FText::Format(LOCTEXT("DecoratedTooltip", "{0}\n\n{1}"), Tooltip.GetValue(), Id);
+		}
+	}
 	if (!Layout.Description.IsEmpty())
 	{
 		return FText::Format(LOCTEXT("DescribedTooltip", "{0}\n\n{1}"), FText::FromString(Layout.Description), Id);

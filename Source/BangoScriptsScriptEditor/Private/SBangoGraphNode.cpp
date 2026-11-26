@@ -26,6 +26,7 @@
 #include "Widgets/Input/SEditableText.h"
 #include "Widgets/Input/SMenuAnchor.h"
 #include "BangoCommand.h"
+#include "BangoNodeDecorator.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SGridPanel.h"
@@ -125,7 +126,7 @@ TSharedRef<SWidget> SBangoGraphNode::CreateNodeContentArea()
 			.FillWidth(1.0f)
 			.Padding(FieldsSideGap, 2.0f, FieldsSideGap, 6.0f)
 			[
-				MakeFieldsArea()
+				MakeFieldsAndExtras()
 			]
 			+ SHorizontalBox::Slot()
 			.AutoWidth()
@@ -522,6 +523,47 @@ FReply SBangoGraphNode::OnCaseKeyDown(const FGeometry& Geometry, const FKeyEvent
 	return FReply::Handled();
 }
 
+TSharedRef<SWidget> SBangoGraphNode::MakeFieldsAndExtras()
+{
+	// A decorator (another module's, for its commands) is asked again each time the node is drawn again.
+	Decorator = BangoNode ? BangoNode->GetNodeDecorator() : nullptr;
+	DecoratorContext.Reset();
+	if (Decorator.IsValid())
+	{
+		DecoratorContext = MakeShared<FBangoNodeDecoratorContext>(BangoNode->MakeDecoratorContext());
+		// A field set from the decorator's widget draws the node again, as one typed in does.
+		TWeakPtr<SBangoGraphNode> WeakThis = StaticCastSharedRef<SBangoGraphNode>(AsShared());
+		TFunction<bool(int32, const FString&, FString&)> SetOnNode = DecoratorContext->SetFieldValue;
+		DecoratorContext->SetFieldValue = [WeakThis, SetOnNode](int32 FieldIndex, const FString& Value, FString& OutError)
+		{
+			const bool bSet = SetOnNode && SetOnNode(FieldIndex, Value, OutError);
+			if (TSharedPtr<SBangoGraphNode> This = WeakThis.Pin())
+			{
+				This->RefreshSoon();
+			}
+			return bSet;
+		};
+	}
+	const TSharedRef<SWidget> Fields = MakeFieldsArea();
+	const TSharedPtr<SWidget> Extra = Decorator.IsValid() ? Decorator->MakeExtraContent(*DecoratorContext) : nullptr;
+	if (!Extra.IsValid())
+	{
+		return Fields;
+	}
+	return SNew(SVerticalBox)
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		[
+			Fields
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(2.0f, 4.0f, 2.0f, 2.0f)
+		[
+			Extra.ToSharedRef()
+		];
+}
+
 TSharedRef<SWidget> SBangoGraphNode::MakeFieldsArea()
 {
 	EditBoxes.Reset();
@@ -554,6 +596,11 @@ TSharedRef<SWidget> SBangoGraphNode::MakeFieldsArea()
 	for (int32 FieldIndex = 0; FieldIndex < BangoNode->Layout.Fields.Num(); ++FieldIndex, ++Row)
 	{
 		const FBangoNodeField& Field = BangoNode->Layout.Fields[FieldIndex];
+		if (Decorator.IsValid() && Decorator->HidesField(*DecoratorContext, FieldIndex))
+		{
+			--Row; // left out: the next field takes this row
+			continue;
+		}
 		if (!Field.SectionHeader.IsEmpty())
 		{
 			// A heading row across all the columns, with a little space above it unless it's the first row.
@@ -733,6 +780,14 @@ TSharedRef<SWidget> SBangoGraphNode::MakeFieldValue(int32 FieldIndex)
 	{
 		// A row that only shows information (like a function parameter): its icon and name say it all.
 		return SNullWidget::NullWidget;
+	}
+	if (Decorator.IsValid())
+	{
+		// Another module's widget for this value (its edits come back through DecoratorContext->SetFieldValue).
+		if (const TSharedPtr<SWidget> Custom = Decorator->MakeFieldValueWidget(*DecoratorContext, FieldIndex))
+		{
+			return Custom.ToSharedRef();
+		}
 	}
 
 	const bool bEditable = Bango::CanEditField(BangoNode->Layout, FieldIndex);

@@ -1394,6 +1394,16 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			Expect(Bango::WriteGraphText(Doc, Text, WriteError) && Text.Contains(TEXT("global bool open = isNil(gold);")) && Text.Contains(TEXT("global int gold ?= 0;"))
 				&& Text.Contains(TEXT("/* global int stage = 1; */")), FString(TEXT("set global: written back: ")) + Text + WriteError);
 
+			{
+				// The Globals list making a global persistent (or not) changes its Set Global nodes to match.
+				FString Kind = TEXT("bool open = isNil(gold)");
+				Expect(Bango::SetGlobalNodePersistent(Kind, TEXT("open"), true) && Kind == FString(TEXT("persistent bool open = isNil(gold)")), FString(TEXT("set global kind: made persistent: ")) + Kind);
+				Expect(!Bango::SetGlobalNodePersistent(Kind, TEXT("open"), true), TEXT("set global kind: already persistent"));
+				Expect(Bango::SetGlobalNodePersistent(Kind, TEXT("open"), false) && Kind == FString(TEXT("bool open = isNil(gold)")), FString(TEXT("set global kind: made a world global: ")) + Kind);
+				Expect(!Bango::SetGlobalNodePersistent(Kind, TEXT("op"), true) && !Bango::SetGlobalNodePersistent(Kind, TEXT("opened"), true), TEXT("set global kind: only that global's"));
+				FString ArrayKind = TEXT("int [] [] grid = [[1]]");
+				Expect(Bango::SetGlobalNodePersistent(ArrayKind, TEXT("grid"), true) && ArrayKind == FString(TEXT("persistent int [] [] grid = [[1]]")), FString(TEXT("set global kind: an array: ")) + ArrayKind);
+			}
 			const FBangoNodeLayoutContext Context = Bango::MakeNodeLayoutContext(Doc, nullptr);
 			if (N.Num() == 5)
 			{

@@ -40,6 +40,7 @@
 #include "ScopedTransaction.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSplitter.h"
@@ -2324,6 +2325,54 @@ void SBangoScriptEditor::SetDeclValueText(bool bGlobal, int32 Index, const FStri
 	ApplyDecls(bGlobal, Decls, bGlobal ? LOCTEXT("SetGlobalValueTransaction", "Change Bango Global Default") : LOCTEXT("SetScriptVarValueTransaction", "Change Bango Script Variable Value"));
 }
 
+void SBangoScriptEditor::SetDeclPersistent(bool bGlobal, int32 Index, bool bPersistent)
+{
+	TArray<FBangoGraphDecl> Decls = GetDecls(bGlobal);
+	if (!Decls.IsValidIndex(Index) || Decls[Index].bPersistent == bPersistent)
+	{
+		return;
+	}
+	FBangoGraphDecl& Decl = Decls[Index];
+	Decl.bPersistent = bPersistent;
+	const FScopedTransaction Transaction(bGlobal
+		? (bPersistent ? LOCTEXT("MakeGlobalPersistentTransaction", "Make Bango Global Persistent") : LOCTEXT("MakeGlobalWorldTransaction", "Make Bango Global a World Global"))
+		: (bPersistent ? LOCTEXT("MakeScriptVarPersistentTransaction", "Make Bango Script Variable Persistent") : LOCTEXT("MakeScriptVarPlainTransaction", "Make Bango Script Variable Not Persistent")));
+	if (!ApplyDecls(bGlobal, Decls, FText::GetEmpty()))
+	{
+		return;
+	}
+	if (!bGlobal)
+	{
+		return;
+	}
+	// The global's Set Global nodes, in every graph, are made the same kind: a name is one kind or the other in a script.
+	for (int32 g = 0; g < EdGraphs.Num(); ++g)
+	{
+		UEdGraph* Graph = EdGraphs[g].Get();
+		if (!Graph)
+		{
+			continue;
+		}
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			UBangoEdGraphNode* BangoNode = Cast<UBangoEdGraphNode>(Node);
+			if (!BangoNode || BangoNode->GetKind() != EBangoGraphNodeKind::Global)
+			{
+				continue;
+			}
+			FString NodeText = BangoNode->Text;
+			if (Bango::SetGlobalNodePersistent(NodeText, Decl.Name, bPersistent))
+			{
+				BangoNode->Modify();
+				BangoNode->Text = NodeText;
+				BangoNode->UpdateLayout();
+				Graph->NotifyNodeChanged(BangoNode);
+			}
+		}
+	}
+	UpdateVariablesNow();
+}
+
 void SBangoScriptEditor::MoveDecl(bool bGlobal, int32 From, int32 To)
 {
 	TArray<FBangoGraphDecl> Decls = GetDecls(bGlobal);
@@ -2646,6 +2695,19 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateDeclRow(TSharedPtr<FDeclEntr
 						RenameDecl(bGlobal, Index, NewText.ToString().TrimStartAndEnd());
 					}
 				})
+			]
+			// Persistent: a global that lasts the whole game, or a script variable kept between runs (spec section 4).
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(6.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(SCheckBox)
+				.IsChecked(Entry.Decl.bPersistent ? ECheckBoxState::Checked : ECheckBoxState::Unchecked)
+				.ToolTipText(bGlobal
+					? LOCTEXT("PersistentGlobalTooltip", "Persistent: the global lasts the whole game, carrying over from level to level (persistent global). Unchecked, it's a world global, gone when the level ends. Its Set Global nodes are changed to match.")
+					: LOCTEXT("PersistentScriptVarTooltip", "Persistent: the script keeps this variable between runs, for each actor it runs on (persistent scriptVar), and its value is a first value, given only when it has none. Unchecked, it starts again each run."))
+				.OnCheckStateChanged_Lambda([this, bGlobal, Index](ECheckBoxState State) { SetDeclPersistent(bGlobal, Index, State == ECheckBoxState::Checked); })
 			]
 			// (No type column: the type is its icon, which says it when hovered.) The value column has a fixed width,
 			// so it lines up from row to row.

@@ -472,6 +472,8 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 			{ TEXT("Set"),         TEXT("="),                         0 },
 			{ TEXT("Add To"),      TEXT("+="),                        0 },
 			{ TEXT("Increment"),   TEXT("++"),                        0 },
+			{ TEXT("Persistent Local Int"), TEXT("persistent int _newInt"), INDEX_NONE },
+			{ TEXT("Set Persistent Global Bool"), TEXT("persistent bool newBool ="), -2 }, // its value is missing
 			{ TEXT("Reroute"),     TEXT(""),                          INDEX_NONE },
 			{ TEXT("Twice"),       TEXT("Twice()"),                   -2 },  // fails (its argument is missing), on the node
 		};

@@ -2120,6 +2120,35 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 					return EBangoCommandResult::Done;
 				};
 				AddBlockCommand(Rogue);
+
+				// Finds the nearest open block of the command named (FBangoCommandCall::FindOpenBlock), in no block itself.
+				const auto LogFind = [&BlockLog](const FBangoCommandCall& Call, const FString& Named)
+				{
+					const FBangoValue* Found = Call.FindOpenBlock(Named);
+					BlockLog.Add(FString::Printf(TEXT("find %s:%s"), *Named, !Found ? TEXT("none") : Found->IsNil() ? TEXT("nil") : *FString::Printf(TEXT("%lld"), (long long)Found->GetInt())));
+				};
+				FBangoCommand Find;
+				Find.Signature = FBangoCommandSignature::Make(TEXT("Find")).Param(TEXT("Name"), FBangoType::String());
+				Find.Start = [LogFind](FBangoCommandCall& Call)
+				{
+					LogFind(Call, Call.Args[0].GetString());
+					return EBangoCommandResult::Done;
+				};
+				AddBlockCommand(Find);
+				// The same, a frame later (from Poll).
+				FBangoCommand FindLater;
+				FindLater.Signature = FBangoCommandSignature::Make(TEXT("FindLater")).Param(TEXT("Name"), FBangoType::String());
+				FindLater.Start = [](FBangoCommandCall& Call)
+				{
+					Call.LatentState.Add(Call.Args[0]);
+					return EBangoCommandResult::Pending;
+				};
+				FindLater.Poll = [LogFind](FBangoCommandCall& Call)
+				{
+					LogFind(Call, Call.LatentState[0].GetString());
+					return EBangoCommandResult::Done;
+				};
+				AddBlockCommand(FindLater);
 			}
 			{
 				// What a signature can't be.
@@ -2189,6 +2218,15 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 					TEXT("open, line 1, line 2, line 4, close:7"), 1, 1 },
 				{ TEXT("the brace on the command's line"), TEXT("global int out;\nSpeech(0) {\n\tLine(1);\n}\nout = 1;"), TEXT("open, line 1, close:1"), 1, 1 },
 				{ TEXT("an empty block"), TEXT("global int out;\nSpeech(0)\n{\n}\nout = 1;"), TEXT("open, close:0"), 1, 1 },
+				{ TEXT("find: no block open"), TEXT("global int out;\nFind(\"Speech\");\nout = 1;"), TEXT("find Speech:none"), 1, 1 },
+				{ TEXT("find: the block it's in"), TEXT("global int out;\nSpeech(0)\n{\n\tLine(3);\n\tFind(\"Speech\");\n\tFind(\"Menu\");\n}\nFind(\"Speech\");\nout = 1;"),
+					TEXT("open, line 3, find Speech:3, find Menu:none, close:3, find Speech:none"), 1, 1 },
+				{ TEXT("find: through a function the block calls"), TEXT("global int out;\nSpeech(0)\n{\n\tLine(4);\n\tTell();\n}\nout = 1;\n\nfunction void Tell()\n{\n\tFind(\"Speech\");\n\tFindLater(\"Speech\");\n}"),
+					TEXT("open, line 4, find Speech:4, |, find Speech:4, close:4"), 1, 2 },
+				{ TEXT("find: the innermost"), TEXT("global int out;\nSpeech(0)\n{\n\tLine(1);\n\tOther()\n\t{\n\t\tSpeech(0)\n\t\t{\n\t\t\tLine(20);\n\t\t\tFind(\"Speech\");\n\t\t}\n\t\tFind(\"Speech\");\n\t}\n}\nout = 1;"),
+					TEXT("open, line 1, open, line 20, find Speech:20, close:20, find Speech:1, close:1"), 1, 1 },
+				{ TEXT("find: a block in a function, and one its caller opened"), TEXT("global int out;\nSpeech(0)\n{\n\tLine(5);\n\tTell();\n}\nout = 1;\n\nfunction void Tell()\n{\n\tOther()\n\t{\n\t\tFind(\"Other\");\n\t\tFind(\"Speech\");\n\t}\n}"),
+					TEXT("open, line 5, find Other:nil, find Speech:5, close:5"), 1, 1 },
 				{ TEXT("a line ends the block"), TEXT("global int out;\nSpeech(1)\n{\n\tLine(1);\n\tLine(2);\n\tout = 9;\n}\nout = 1;"), TEXT("open, line 1, close:1001"), 1, 1 },
 				{ TEXT("a block command that skips its block"), TEXT("global int out;\nSpeech(2)\n{\n\tLine(1);\n\tout = 9;\n}\nout = 1;"), TEXT("open, close:2000"), 1, 1 },
 				{ TEXT("a block's command with a block of its own"), TEXT("global int out;\nSpeech(0)\n{\n\tLine(1);\n\tOption()\n\t{\n\t\tout = 4;\n\t}\n\tLine(2);\n}\nout = out + 1;"),

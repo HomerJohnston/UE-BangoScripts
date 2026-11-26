@@ -895,6 +895,7 @@ EBangoInstanceStatus FBangoInstance::Resume(const FBangoExecContext& Context)
 			return Status;
 		}
 		PendingCall.InstanceId = Id;
+		PendingCall.Instance = this;
 		PendingCall.WorldContext = Context.WorldContext;
 		PendingCall.DeltaSeconds = Context.DeltaSeconds;
 		// A command with a block, or one in a block: which block, and whether this is its close, is worked out
@@ -1902,6 +1903,7 @@ bool FBangoInstance::CallCommandInPlace(const FBangoPlace& Place, int32 NameInde
 	FCallScope CallScope(*this);
 	FBangoCommandCall& Call = CallScope.Call;
 	Call.InstanceId = Id;
+	Call.Instance = this;
 	Call.WorldContext = Context.WorldContext;
 	Call.DeltaSeconds = Context.DeltaSeconds;
 	Call.bResultUsed = bResultUsed;
@@ -2001,6 +2003,7 @@ bool FBangoInstance::CallCommand(int32 NameIndex, int32 ArgCount, int32 Flags, c
 	FCallScope CallScope(*this);
 	FBangoCommandCall& Call = CallScope.Call;
 	Call.InstanceId = Id;
+	Call.Instance = this;
 	Call.WorldContext = Context.WorldContext;
 	Call.DeltaSeconds = Context.DeltaSeconds;
 	Call.bResultUsed = (Flags & Bango::CallResultUsed) != 0;
@@ -2257,6 +2260,7 @@ bool FBangoInstance::CloseBlock(int32 Block, bool bLeftEarly, const FBangoExecCo
 	FCallScope CallScope(*this);
 	FBangoCommandCall& Call = CallScope.Call;
 	Call.InstanceId = Id;
+	Call.Instance = this;
 	Call.WorldContext = Context.WorldContext;
 	Call.DeltaSeconds = Context.DeltaSeconds;
 	Call.bClosing = true;
@@ -2300,6 +2304,7 @@ void FBangoInstance::NotifyAbandoned()
 		if (Pending->Abandoned)
 		{
 			PendingCall.InstanceId = Id;
+		PendingCall.Instance = this;
 			PendingCall.WorldContext = LastWorldContext;
 			PendingCall.bClosing = bPendingClose;
 			PendingCall.bLeftEarly = bPendingEarly;
@@ -2335,6 +2340,7 @@ void FBangoInstance::NotifyAbandoned()
 			{
 				FBangoCommandCall Call;
 				Call.InstanceId = Id;
+				Call.Instance = this;
 				Call.WorldContext = LastWorldContext;
 				Call.bBlockAbandoned = true;
 				Call.BlockNumber = Block;
@@ -2345,6 +2351,49 @@ void FBangoInstance::NotifyAbandoned()
 		}
 	}
 	bNotifyingAbandoned = false;
+}
+
+const FBangoValue* FBangoInstance::FindOpenBlock(const FString& CommandName) const
+{
+	if (!Program)
+	{
+		return nullptr;
+	}
+	// The function on top first, then its callers. In one frame the open blocks are nested in one another, and a
+	// block inside another comes after it in the list, so the last open one is the innermost.
+	for (int32 FrameIndex = Frames.Num() - 1; FrameIndex >= 0; --FrameIndex)
+	{
+		const FBangoFrame& Frame = Frames[FrameIndex];
+		if (!Program->Functions.IsValidIndex(Frame.Function))
+		{
+			continue;
+		}
+		const FBangoFunctionCode& Code = Program->Functions[Frame.Function];
+		for (int32 Block = Code.Blocks.Num() - 1; Block >= 0; --Block)
+		{
+			const FBangoBlockInfo& Info = Code.Blocks[Block];
+			if (!Frame.Slots.IsValidIndex(Info.PhaseSlot) || !Frame.Slots.IsValidIndex(Info.StateSlot))
+			{
+				continue;
+			}
+			const FBangoValue& Phase = Frame.Slots[Info.PhaseSlot];
+			if (Phase.IsNil() || Phase.GetInt() != 1)
+			{
+				continue;
+			}
+			const FBangoCommand* Command = BoundCommands.IsValidIndex(Info.Command) ? BoundCommands[Info.Command] : nullptr;
+			if (Command && Command->Signature.Name.Equals(CommandName, ESearchCase::CaseSensitive))
+			{
+				return &Frame.Slots[Info.StateSlot];
+			}
+		}
+	}
+	return nullptr;
+}
+
+const FBangoValue* FBangoCommandCall::FindOpenBlock(const FString& CommandName) const
+{
+	return Instance ? Instance->FindOpenBlock(CommandName) : nullptr;
 }
 
 bool FBangoInstance::FinishCommand(EBangoCommandResult Result)

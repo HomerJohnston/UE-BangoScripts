@@ -58,6 +58,48 @@ FString Bango::MakeGlobalNodeStatement(const FString& Text)
 	return FString(TEXT("global ")) + Text;
 }
 
+bool Bango::SetGlobalNodePersistent(FString& Text, const FString& Name, bool bPersistent)
+{
+	FString Rest;
+	const bool bWas = BangoGraphGlobalPrivate::TakeWord(Text, TEXT("persistent"), Rest);
+	const FString Declaration = bWas ? Rest : Text.TrimStart();
+	// `type[] [] name = ...`: the type's word, its brackets, then the name.
+	auto IsNameChar = [](TCHAR C) { return (C >= TEXT('a') && C <= TEXT('z')) || (C >= TEXT('A') && C <= TEXT('Z')) || (C >= TEXT('0') && C <= TEXT('9')) || C == TEXT('_'); };
+	int32 At = 0;
+	while (At < Declaration.Len() && IsNameChar(Declaration[At]))
+	{
+		++At;
+	}
+	if (At == 0)
+	{
+		return false;
+	}
+	for (;;)
+	{
+		while (At < Declaration.Len() && (Declaration[At] == TEXT(' ') || Declaration[At] == TEXT('\t')))
+		{
+			++At;
+		}
+		if (At + 1 < Declaration.Len() && Declaration[At] == TEXT('[') && Declaration[At + 1] == TEXT(']'))
+		{
+			At += 2;
+			continue;
+		}
+		break;
+	}
+	const int32 NameStart = At;
+	while (At < Declaration.Len() && IsNameChar(Declaration[At]))
+	{
+		++At;
+	}
+	if (!Declaration.Mid(NameStart, At - NameStart).Equals(Name, ESearchCase::CaseSensitive) || bWas == bPersistent)
+	{
+		return false;
+	}
+	Text = bPersistent ? FString(TEXT("persistent ")) + Declaration : Declaration;
+	return true;
+}
+
 FString Bango::MakeGlobalNodeText(const FString& Statement)
 {
 	FString Rest;

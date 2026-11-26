@@ -118,6 +118,11 @@ private:
 
 	/** The fields, for the middle of the body (an empty widget for a node with no fields). */
 	TSharedRef<SWidget> MakeFieldsArea();
+	/** MakeFieldsArea, with what a decorator adds under the fields (IBangoNodeDecorator::MakeExtraContent). */
+	TSharedRef<SWidget> MakeFieldsAndExtras();
+	/** The node's decorator (BangoNodeDecorator.h) and what it's told, made by MakeFieldsAndExtras; null if none. */
+	TSharedPtr<class IBangoNodeDecorator> Decorator;
+	TSharedPtr<struct FBangoNodeDecoratorContext> DecoratorContext;
 
 	/**
 	 * Adds the rows of an expanded text field, from row Row on: Translated (LOCTEXT or INVTEXT), then, for a translated

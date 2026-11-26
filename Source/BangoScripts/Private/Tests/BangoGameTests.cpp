@@ -27,6 +27,9 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/WorldSettings.h"
+#include "Internationalization/Text.h"
+#include "Serialization/MemoryReader.h"
+#include "Serialization/MemoryWriter.h"
 
 // Run from the editor: Tools > Session Frontend > Automation, filter "Bango".
 
@@ -912,6 +915,14 @@ bool FBangoEntityIDsTest::RunTest(const FString& Parameters)
 				Scripts->Spawn(Unnamed, TArray<FBangoValue>(), Door);
 				TestEqual(TEXT("persistent: an unnamed script runs, kept for its text"), KeptFor(Unnamed, FString()), (int64)1);
 				TestTrue(TEXT("persistent: an ID is its scope"), UBangoScriptSubsystem::GetInlineScriptScope(Counting).Contains(Counting.ScriptId.ToString(EGuidFormats::Digits)));
+
+				// Blueprint's Set Bango Global: Persistent declares a persistent global; one that exists keeps its kind.
+				TestTrue(TEXT("persistent: Blueprint sets a persistent global"), UBangoBlueprintLibrary::SetBangoGlobalInt(World, TEXT("bpGold"), 3, true)
+					&& UBangoBlueprintLibrary::IsBangoGlobalPersistent(World, TEXT("bpGold")));
+				TestTrue(TEXT("persistent: setting it again without Persistent keeps its kind"), UBangoBlueprintLibrary::SetBangoGlobalInt(World, TEXT("bpGold"), 4)
+					&& UBangoBlueprintLibrary::IsBangoGlobalPersistent(World, TEXT("bpGold")));
+				TestTrue(TEXT("persistent: without it, a world global"), UBangoBlueprintLibrary::SetBangoGlobalInt(World, TEXT("bpStage"), 1)
+					&& !UBangoBlueprintLibrary::IsBangoGlobalPersistent(World, TEXT("bpStage")) && !UBangoBlueprintLibrary::IsBangoGlobalPersistent(World, TEXT("bpNothing")));
 			}
 		}
 
@@ -926,6 +937,108 @@ bool FBangoEntityIDsTest::RunTest(const FString& Parameters)
 	World->DestroyWorld(false);
 	GameInstance->Shutdown();
 	GameInstance->RemoveFromRoot();
+	return true;
+}
+
+// A text value keeps its key and namespace (which BangoYap takes a line's ID from) through the VM, copies, saving and
+// loading; INVTEXT and ToText give none.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoTextKeyTest, "Bango.Game.TextKeys",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FBangoTextKeyTest::RunTest(const FString& Parameters)
+{
+	FBangoCommandTable Commands;
+	Bango::RegisterBuiltinCommands(Commands);
+	TArray<FText> Kept;
+	FBangoCommand Keep;
+	Keep.Signature = FBangoCommandSignature::Make(TEXT("Keep")).Param(TEXT("Line"), FBangoType::Text());
+	Keep.Start = [&Kept](FBangoCommandCall& Call)
+	{
+		Kept.Add(Call.Args[0].GetText());
+		return EBangoCommandResult::Done;
+	};
+	FString AddError;
+	TestTrue(TEXT("text keys: Keep is added"), Commands.Add(Keep, AddError));
+
+	const TCHAR* Source =
+		TEXT("#LOCTEXT_NAMESPACE \"Yap.Test\"\n")
+		TEXT("global text heard;\n")
+		TEXT("Keep(LOCTEXT(\"UXA010\", \"Hello\"));\n")
+		TEXT("text _t = LOCTEXT(\"UXA011\", \"Hi\");\n")
+		TEXT("text[] _list = [_t];\n")
+		TEXT("Keep(_list[0]);\n")
+		TEXT("Keep(NSLOCTEXT(\"Other\", \"K2\", \"There\"));\n")
+		TEXT("Keep(INVTEXT(\"plain\"));\n")
+		TEXT("Keep(ToText(\"made\"));\n")
+		TEXT("heard = _t;\n")
+		TEXT("Sleep(1);\n")
+		TEXT("Keep(_t);\n");
+	TSharedPtr<FBangoProgram> Program = MakeShared<FBangoProgram>();
+	FBangoCompileError CompileError;
+	if (!TestTrue(FString::Printf(TEXT("text keys: compiles: %s"), *CompileError.ToString()), Bango::CompileSource(Source, TEXT("textkeys.bango"), Commands, *Program, CompileError)))
+	{
+		return false;
+	}
+	FBangoGlobalStore Globals;
+	FBangoInstance Instance;
+	FBangoRuntimeError StartError;
+	if (!TestTrue(TEXT("text keys: starts"), Instance.Start(Program, Commands, Globals, 1, StartError)))
+	{
+		return false;
+	}
+	FBangoExecContext Context;
+	Context.Globals = &Globals;
+	Context.DeltaSeconds = 0.25f;
+	Instance.Resume(Context);
+	TestEqual(TEXT("text keys: five texts before the sleep"), Kept.Num(), 5);
+
+	auto KeyOf = [](const FText& Text) { const TOptional<FString> Key = FTextInspector::GetKey(Text); return Key.IsSet() ? Key.GetValue() : FString(TEXT("<none>")); };
+	auto NamespaceOf = [](const FText& Text) { const TOptional<FString> Namespace = FTextInspector::GetNamespace(Text); return Namespace.IsSet() ? Namespace.GetValue() : FString(TEXT("<none>")); };
+	if (Kept.Num() == 5)
+	{
+		TestEqual(TEXT("text keys: LOCTEXT's key"), KeyOf(Kept[0]), FString(TEXT("UXA010")));
+		TestEqual(TEXT("text keys: LOCTEXT's namespace is the script's"), NamespaceOf(Kept[0]), FString(TEXT("Yap.Test")));
+		TestEqual(TEXT("text keys: through a local and an array"), KeyOf(Kept[1]), FString(TEXT("UXA011")));
+		TestEqual(TEXT("text keys: through a local and an array, its namespace"), NamespaceOf(Kept[1]), FString(TEXT("Yap.Test")));
+		TestEqual(TEXT("text keys: NSLOCTEXT's key"), KeyOf(Kept[2]), FString(TEXT("K2")));
+		TestEqual(TEXT("text keys: NSLOCTEXT's namespace"), NamespaceOf(Kept[2]), FString(TEXT("Other")));
+		TestTrue(FString::Printf(TEXT("text keys: INVTEXT has no key (%s)"), *KeyOf(Kept[3])), KeyOf(Kept[3]) == TEXT("<none>") || KeyOf(Kept[3]).IsEmpty());
+		TestTrue(FString::Printf(TEXT("text keys: ToText has no key (%s)"), *KeyOf(Kept[4])), KeyOf(Kept[4]) == TEXT("<none>") || KeyOf(Kept[4]).IsEmpty());
+		TestEqual(TEXT("text keys: and its string"), Kept[4].ToString(), FString(TEXT("made")));
+	}
+
+	// Saved and loaded: a local the script is waiting with, and a global.
+	TArray<uint8> InstanceBytes;
+	TArray<uint8> GlobalBytes;
+	{
+		FMemoryWriter InstanceWriter(InstanceBytes, true);
+		Instance.Serialize(InstanceWriter);
+		FMemoryWriter GlobalWriter(GlobalBytes, true);
+		Globals.Serialize(GlobalWriter);
+	}
+	FBangoGlobalStore LoadedGlobals;
+	FMemoryReader GlobalReader(GlobalBytes, true);
+	LoadedGlobals.Serialize(GlobalReader);
+	FBangoInstance Loaded;
+	FMemoryReader InstanceReader(InstanceBytes, true);
+	Loaded.Serialize(InstanceReader);
+	FString BindError;
+	TestTrue(FString::Printf(TEXT("text keys: the loaded script binds: %s"), *BindError), Loaded.Bind(Program, Commands, BindError));
+	const FBangoValue* Heard = LoadedGlobals.Find(TEXT("heard"));
+	TestTrue(TEXT("text keys: a loaded global keeps its key"), Heard && !Heard->IsNil() && KeyOf(Heard->GetText()) == TEXT("UXA011") && NamespaceOf(Heard->GetText()) == TEXT("Yap.Test"));
+	Context.Globals = &LoadedGlobals;
+	Context.DeltaSeconds = 2.0f;
+	for (int32 Step = 0; Step < 4 && Loaded.IsRunning(); ++Step)
+	{
+		Loaded.Resume(Context);
+	}
+	TestEqual(TEXT("text keys: the loaded script keeps its text"), Kept.Num(), 6);
+	if (Kept.Num() == 6)
+	{
+		TestEqual(TEXT("text keys: a loaded local keeps its key"), KeyOf(Kept[5]), FString(TEXT("UXA011")));
+		TestEqual(TEXT("text keys: a loaded local keeps its namespace"), NamespaceOf(Kept[5]), FString(TEXT("Yap.Test")));
+		TestEqual(TEXT("text keys: and its source"), Kept[5].ToString(), FString(TEXT("Hi")));
+	}
 	return true;
 }
 

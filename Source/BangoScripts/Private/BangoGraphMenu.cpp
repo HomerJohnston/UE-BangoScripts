@@ -208,6 +208,17 @@ namespace Bango
 					FString(TEXT("local declare new variable ")) + Type + (bArray ? TEXT(" array list") : TEXT("")));
 			}
 		}
+		// Persistent Local nodes: `persistent int _newInt ?= ...;`, kept between runs of the script, for each actor.
+		for (const TCHAR* Type : { TEXT("bool"), TEXT("int"), TEXT("float"), TEXT("string"), TEXT("entity"), TEXT("text"), TEXT("vector2"), TEXT("vector3") })
+		{
+			for (const bool bArray : { false, true })
+			{
+				const FString TypeText = FString(Type) + (bArray ? TEXT("[]") : TEXT(""));
+				const FString Base = FString(TEXT("_new")) + CapitalizeFirst(Type) + (bArray ? TEXT("Array") : TEXT(""));
+				Menu.Add(Vars, EBangoGraphNodeKind::Local, FString(TEXT("persistent ")) + TypeText + TEXT(" ") + Bango::MakeUniqueName(Base, Used),
+					FString(TEXT("persistent static keep remember local declare new variable ")) + Type + (bArray ? TEXT(" array list") : TEXT("")));
+			}
+		}
 		// Set Global nodes: `global bool newBool = ...;`, declaring the global for the whole script.
 		for (const TCHAR* Type : { TEXT("bool"), TEXT("int"), TEXT("float"), TEXT("string"), TEXT("entity"), TEXT("text"), TEXT("vector2"), TEXT("vector3") })
 		{
@@ -217,6 +228,8 @@ namespace Bango
 				const FString Base = FString(TEXT("new")) + CapitalizeFirst(Type) + (bArray ? TEXT("Array") : TEXT(""));
 				Menu.Add(Vars, EBangoGraphNodeKind::Global, TypeText + TEXT(" ") + Bango::MakeUniqueName(Base, Used) + TEXT(" ="),
 					FString(TEXT("global set declare new variable ")) + Type + (bArray ? TEXT(" array list") : TEXT("")));
+				Menu.Add(Vars, EBangoGraphNodeKind::Global, FString(TEXT("persistent ")) + TypeText + TEXT(" ") + Bango::MakeUniqueName(Base, Used) + TEXT(" ="),
+					FString(TEXT("persistent global set declare new variable whole game ")) + Type + (bArray ? TEXT(" array list") : TEXT("")));
 			}
 		}
 		Menu.Add(Vars, EBangoGraphNodeKind::Assign, TEXT("="), TEXT("set assign =")).Description = TEXT("Gives a variable a new value.");
