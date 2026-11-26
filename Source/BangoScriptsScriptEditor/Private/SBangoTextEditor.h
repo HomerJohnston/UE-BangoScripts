@@ -339,6 +339,14 @@ private:
 	bool bCompileDirty = false;
 	/** Bango::GetDefinesFingerprint when the text was last coloured: when the defines change, it's coloured and compiled again. */
 	uint64 DefinesFingerprint = 0;
+	/**
+	 * After SetText put new text in a box that had text (the graph was saved or changed): where the view and the cursor
+	 * were, put back over the next two frames, once the new text is laid out. 0: nothing to do; 1: scroll the line that
+	 * was at the top back to the top; 2: then put the cursor back (it's in view by then, so nothing scrolls).
+	 */
+	int32 RestorePlaceStep = 0;
+	int32 RestoreTopLine = 0;
+	FTextLocation RestoreCursor;
 	double LastEditSeconds = 0.0;
 	/** The first compile error, if the last compile had one (hidden again as soon as the text changes). */
 	bool bHasCompileError = false;

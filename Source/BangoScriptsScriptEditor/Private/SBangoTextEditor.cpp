@@ -407,9 +407,31 @@ void SBangoTextEditor::SetText(const FText& InText)
 	bCompileDirty = true;
 	LastEditSeconds = 0.0;
 	UpdateGutter();
-	if (TextBox.IsValid())
+	if (!TextBox.IsValid())
 	{
-		TextBox->SetText(FText::FromString(VisibleText));
+		return;
+	}
+	const FString Current = TextBox->GetText().ToString();
+	if (Current.Equals(VisibleText, ESearchCase::CaseSensitive))
+	{
+		return; // what the box shows is the same (a save often changes only the hidden //@ metadata): nothing moves
+	}
+	// New text in a box that had some (the graph was saved or changed): the view and the cursor stay where they were,
+	// rather than going to the end. Text put in an empty box (a script opened) starts at the top as usual.
+	const bool bKeepPlace = !Current.IsEmpty();
+	const FTextLocation Cursor = TextBox->GetCursorLocation();
+	int32 OldLines = 1;
+	for (const TCHAR Char : Current)
+	{
+		OldLines += Char == TEXT('\n') ? 1 : 0;
+	}
+	const float TopFraction = VScrollBar.IsValid() ? VScrollBar->DistanceFromTop() : 0.0f;
+	TextBox->SetText(FText::FromString(VisibleText));
+	if (bKeepPlace)
+	{
+		RestoreTopLine = FMath::RoundToInt(TopFraction * OldLines);
+		RestoreCursor = Cursor;
+		RestorePlaceStep = 1;
 	}
 }
 
@@ -843,6 +865,23 @@ void SBangoTextEditor::UpdateGutter()
 void SBangoTextEditor::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
 {
 	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+
+	// Putting the view and the cursor back after SetText (RestorePlaceStep): the top line first, then the cursor.
+	if (RestorePlaceStep > 0 && TextBox.IsValid())
+	{
+		const int32 NumLines = FMath::Max(Metadata.GetLines().Num(), 1);
+		if (RestorePlaceStep == 1)
+		{
+			// Scrolling up to a line puts it at the top of the view (the box is at the end after SetText).
+			TextBox->ScrollTo(FTextLocation(FMath::Clamp(RestoreTopLine, 0, NumLines - 1), 0));
+			RestorePlaceStep = 2;
+		}
+		else
+		{
+			RestorePlaceStep = 0;
+			GoTo(RestoreCursor); // clamped to the new text
+		}
+	}
 
 	// The cursor's highlights (brackets, the other uses of a name) show only while the text has keyboard focus.
 	Marshaller->SetCursorHighlightsShown(TextBox.IsValid() && TextBox->HasKeyboardFocus());

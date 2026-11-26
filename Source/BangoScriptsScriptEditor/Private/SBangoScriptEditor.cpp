@@ -192,13 +192,24 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 
 			+ SSplitter::Slot()
 			// Sized to its content, a width it keeps when the window is resized; dragging the splitter changes it (ScriptDataWidth).
+			// Hidden and shown by its Script Data tab, sliding like the other side panes (ScriptDataPaneOpenness).
 			.SizeRule(SSplitter::SizeToContent)
 			.Resizable(true) // a sized-to-content slot is only dragged if it says so (and has OnSlotResized)
-			.MinSize(MinSidePaneWidth)
-			.OnSlotResized_Lambda([this](float NewWidth) { ScriptDataWidth = FMath::Max(NewWidth, MinSidePaneWidth); })
+			.OnSlotResized_Lambda([this](float NewWidth)
+			{
+				if (ScriptDataPaneOpenness >= 1.0f)
+				{
+					ScriptDataWidth = FMath::Max(NewWidth, MinSidePaneWidth);
+				}
+			})
 			[
 				SNew(SBox)
-				.WidthOverride_Lambda([this]() { return ScriptDataWidth; })
+				.WidthOverride_Lambda([this]() { return ScriptDataWidth * FMath::InterpEaseInOut(0.0f, 1.0f, ScriptDataPaneOpenness, 2.0f); })
+				.Clipping(EWidgetClipping::ClipToBounds)
+				.Visibility_Lambda([this]() { return ScriptDataPaneOpenness > 0.0f ? EVisibility::Visible : EVisibility::Collapsed; })
+				[
+				SNew(SBox)
+				.WidthOverride_Lambda([this]() { return ScriptDataWidth; }) // its full width while it slides, clipped by the box around it
 				// While the text pane has typed text that isn't applied, the text is what counts: the lists wait for it.
 				.IsEnabled_Lambda([this]() { return !bTextEdited; })
 				.ToolTipText_Lambda([this]() { return bTextEdited ? LOCTEXT("PaneLockedTooltip", "The script's text has been edited. Apply it (Ctrl+Enter) or Revert it to use these again.") : FText::GetEmpty(); })
@@ -524,6 +535,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 					]
 					]
 				]
+				]
 			]
 
 			// The rest, which takes up any change in the window's width.
@@ -760,6 +772,16 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 						MakeAssetsPane()
 					]
 				]
+				]
+
+				// The Script Data tab, on the script data pane's right edge (the left edge of everything else), below the
+				// Source Editor tab. Opening the pane pulls the tab out with it.
+				+ SOverlay::Slot()
+				.HAlign(HAlign_Left)
+				.VAlign(VAlign_Top)
+				.Padding(TAttribute<FMargin>::CreateSP(this, &SBangoScriptEditor::GetScriptDataTabPadding))
+				[
+					MakeScriptDataTab()
 				]
 
 				// The Script Assets tab, on its pane's left edge: over the right side of the reference pane when that's
@@ -3949,6 +3971,91 @@ TSharedRef<SWidget> SBangoScriptEditor::MakeTextTab()
 				]
 			]
 		];
+}
+
+TSharedRef<SWidget> SBangoScriptEditor::MakeScriptDataTab()
+{
+	// Like the Source Editor tab: square on the left, rounded on the right, reading bottom to top.
+	static const FSlateRoundedBoxBrush TabBrush(FLinearColor::White, FVector4(0.0f, 6.0f, 6.0f, 0.0f), FSlateColor(FStyleColors::InputOutline), 1.0f);
+
+	return SAssignNew(ScriptDataTabButton, SButton)
+		.ButtonStyle(FAppStyle::Get(), "NoBorder")
+		.ContentPadding(FMargin(0.0f))
+		.ToolTipText_Lambda([this]()
+		{
+			return bScriptDataPaneOpen
+				? LOCTEXT("HideScriptDataTooltip", "Put the script's data away (description, settings, inputs, variables, functions and defines), to give the graph more room.")
+				: LOCTEXT("ShowScriptDataTooltip", "Pull out the script's data: its description, settings, inputs, variables, functions and the project's defines.");
+		})
+		.OnClicked_Lambda([this]()
+		{
+			SetScriptDataPaneOpen(!bScriptDataPaneOpen, true);
+			return FReply::Handled();
+		})
+		[
+			SNew(SBorder)
+			.BorderImage(&TabBrush)
+			.Padding(FMargin(4.0f, 12.0f, 5.0f, 12.0f))
+			.BorderBackgroundColor_Lambda([this]() -> FSlateColor
+			{
+				if (bScriptDataPaneOpen)
+				{
+					return FSlateColor(FStyleColors::Primary); // pulled out
+				}
+				return ScriptDataTabButton.IsValid() && ScriptDataTabButton->IsHovered() ? FSlateColor(FStyleColors::Hover) : FSlateColor(FStyleColors::Dropdown);
+			})
+			[
+				SNew(BangoScriptEditorPrivate::SBangoSidewaysBox)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("ScriptDataTab", "Script Data"))
+					.Font(FAppStyle::GetFontStyle("BoldFont"))
+					.ColorAndOpacity_Lambda([this]() -> FSlateColor
+					{
+						return bScriptDataPaneOpen || (ScriptDataTabButton.IsValid() && ScriptDataTabButton->IsHovered()) ? FSlateColor::UseForeground() : FSlateColor::UseSubduedForeground();
+					})
+				]
+			]
+		];
+}
+
+FMargin SBangoScriptEditor::GetScriptDataTabPadding() const
+{
+	// Below where the Source Editor tab is (90 down the graph's left edge, and as tall as its label), whether that tab
+	// is showing or not, so this one never moves up and down; like the Script Assets tab on the right.
+	static constexpr float TextTabTop = 90.0f;
+	static constexpr float Gap = 6.0f;
+	const float TextTabHeight = TextTabButton.IsValid() ? TextTabButton->GetDesiredSize().Y : 130.0f;
+	return FMargin(0.0f, TextTabTop + TextTabHeight + Gap, 0.0f, 0.0f);
+}
+
+void SBangoScriptEditor::SetScriptDataPaneOpen(bool bOpen, bool bAnimate)
+{
+	bScriptDataPaneOpen = bOpen;
+	if (!bAnimate)
+	{
+		ScriptDataPaneOpenness = bOpen ? 1.0f : 0.0f;
+		return;
+	}
+	if (!bScriptDataPaneSliding)
+	{
+		bScriptDataPaneSliding = true;
+		RegisterActiveTimer(0.0f, FWidgetActiveTimerDelegate::CreateSP(this, &SBangoScriptEditor::AnimateScriptDataPane));
+	}
+}
+
+EActiveTimerReturnType SBangoScriptEditor::AnimateScriptDataPane(double, float InDeltaTime)
+{
+	static constexpr float SlideSeconds = 0.18f;
+	const float Target = bScriptDataPaneOpen ? 1.0f : 0.0f;
+	ScriptDataPaneOpenness = FMath::FInterpConstantTo(ScriptDataPaneOpenness, Target, InDeltaTime, 1.0f / SlideSeconds);
+	if (FMath::IsNearlyEqual(ScriptDataPaneOpenness, Target))
+	{
+		ScriptDataPaneOpenness = Target;
+		bScriptDataPaneSliding = false;
+		return EActiveTimerReturnType::Stop;
+	}
+	return EActiveTimerReturnType::Continue;
 }
 
 TSharedRef<SWidget> SBangoScriptEditor::MakeGraphSwitch()

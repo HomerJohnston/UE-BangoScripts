@@ -311,6 +311,19 @@ private:
 	float TextPaneWidth = 480.0f;
 	/** The left pane's width (SCRIPT DESCRIPTION ... FUNCTIONS): kept when the window is resized; the splitter sets it. */
 	float ScriptDataWidth = 280.0f;
+	/**
+	 * The left pane (the script data pane: SCRIPT DESCRIPTION ... DEFINES), shown or hidden with its Script Data tab,
+	 * like the other side panes. Open to start with.
+	 */
+	bool bScriptDataPaneOpen = true;
+	float ScriptDataPaneOpenness = 1.0f;
+	bool bScriptDataPaneSliding = false;
+	TSharedPtr<SButton> ScriptDataTabButton;
+	TSharedRef<SWidget> MakeScriptDataTab();
+	void SetScriptDataPaneOpen(bool bOpen, bool bAnimate);
+	EActiveTimerReturnType AnimateScriptDataPane(double InCurrentTime, float InDeltaTime);
+	/** The tab's place over the panes: on the script data pane's right edge, just below the Source Editor tab. */
+	FMargin GetScriptDataTabPadding() const;
 	/** The side panes can't be dragged narrower than this. */
 	static constexpr float MinSidePaneWidth = 120.0f;
 	TSharedPtr<SButton> TextTabButton;
