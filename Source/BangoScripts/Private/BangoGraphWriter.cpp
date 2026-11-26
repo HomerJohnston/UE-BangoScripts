@@ -73,7 +73,7 @@ namespace BangoGraphWriterPrivate
 				}
 				if (Doc.bHasLocNamespace)
 				{
-					AddCode(0, -1, FString(TEXT("#LOCTEXT_NAMESPACE ")) + Bango::MakeStringLiteral(Doc.LocNamespace), nullptr);
+					AddCode(0, -1, FString(TEXT("#TEXT_NAMESPACE ")) + Bango::MakeStringLiteral(Doc.LocNamespace), nullptr);
 				}
 				if (bWriteUsesGraphEditor)
 				{

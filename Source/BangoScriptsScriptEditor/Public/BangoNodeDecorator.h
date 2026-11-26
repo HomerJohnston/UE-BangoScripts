@@ -41,7 +41,7 @@ struct FBangoNodeDecoratorContext
 	bool bDisabled = false;
 	/**
 	 * Sets field FieldIndex (an index into Layout->Fields) to Value, written as it would be in the script
-	 * (`"Happy"`, `LOCTEXT("UXA010", "Hello")`, `2`; Bango::GetFieldValueFromTyped, in BangoGraphEdit.h, makes that from what a person
+	 * (`"Happy"`, `TEXT("UXA010", "Hello")`, `2`; Bango::GetFieldValueFromTyped, in BangoGraphEdit.h, makes that from what a person
 	 * typed), as one undoable change, and draws the node again. False, with why, if it can't be set. Empty (unbound)
 	 * where the node can't be changed, as for a title.
 	 */

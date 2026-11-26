@@ -14,7 +14,7 @@ struct FSlateBrush;
  * or graph around them: just a type, a value's text, and callbacks. Spec section 15, Value widgets.
  *
  * A value here is **Bango text**: what a script would have after `=` (`[0, 0, 100]`, `"hello"`, `@john`,
- * `INVTEXT("Hi")`), or empty for none. Bango::ParseFixedValue (BangoCompiler.h, in the runtime module) checks one and
+ * `TEXT_INV("Hi")`), or empty for none. Bango::ParseFixedValue (BangoCompiler.h, in the runtime module) checks one and
  * gives its FBangoValue, in the editor and in a packaged game alike.
  *
  * When the type changes, SCRIPT VARS clears the value (a value made for the old type rarely fits the new one),
@@ -125,11 +125,11 @@ public:
 		/** Shown, greyed, while the box is empty ("nil", say). */
 		SLATE_ATTRIBUTE(FText, HintText)
 		/**
-		 * For a `text` value typed as plain words: the namespace it's given, as NSLOCTEXT("Namespace", "<a new key>",
-		 * "words"). Empty (the default): it's written INVTEXT("words"), a text that's never translated.
+		 * For a `text` value typed as plain words: the namespace it's given, as TEXT_NS("Namespace", "<a new key>",
+		 * "words"). Empty (the default): it's written TEXT_INV("words"), a text that's never translated.
 		 */
 		SLATE_ARGUMENT(FString, TextNamespace)
-		/** For a value inside a script (SCRIPT VARS): a `text` typed as plain words is a LOCTEXT, using the script's own namespace. */
+		/** For a value inside a script (SCRIPT VARS): a `text` typed as plain words is a TEXT, using the script's own namespace. */
 		SLATE_ARGUMENT(bool, UseScriptNamespace)
 		/** Checks a value. Not bound: Bango::ParseFixedValue, so it's checked just as it will be read. */
 		SLATE_EVENT(FOnCheckBangoValue, OnCheckValue)

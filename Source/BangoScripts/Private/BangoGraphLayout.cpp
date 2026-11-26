@@ -219,7 +219,7 @@ namespace BangoGraphLayoutPrivate
 		int32 VariadicFirstIndex = 1;
 		FString VariadicLabelSuffix;
 		int32 PlaceholderParam = INDEX_NONE;
-		/** True if the placeholder parameter is text (a LOCTEXT), otherwise a string; both have {0} placeholders. */
+		/** True if the placeholder parameter is text (a TEXT), otherwise a string; both have {0} placeholders. */
 		bool bTextPlaceholders = false;
 		bool bReturnsValue = false;
 		/** Its value must be used (see FBangoCommandSignature::MustUseResult), so it can't be a line of its own. */
@@ -1635,9 +1635,9 @@ namespace Bango
 		}
 		const FString& Name = Tok.T[0].Text;
 		FBangoTextLiteral Literal;
-		if (Name.Equals(TEXT("INVTEXT"), ESearchCase::CaseSensitive))
+		if (Name.Equals(TEXT("TEXT_INV"), ESearchCase::CaseSensitive))
 		{
-			// INVTEXT("Source"): never translated.
+			// TEXT_INV("Source"): never translated.
 			if (Tok.Num() != 4 || !Tok.Is(2, EBangoTokenKind::StringLiteral))
 			{
 				return false;
@@ -1647,12 +1647,16 @@ namespace Bango
 			OutLiteral = Literal;
 			return true;
 		}
-		Literal.bHasNamespace = Name.StartsWith(TEXT("NS"), ESearchCase::CaseSensitive);
-		Literal.bHasNotes = Name.Contains(TEXT("NOTE"), ESearchCase::CaseSensitive);
-		const bool bKnown = Name.Equals(TEXT("LOCTEXT"), ESearchCase::CaseSensitive) || Name.Equals(TEXT("NSLOCTEXT"), ESearchCase::CaseSensitive)
-			|| Name.Equals(TEXT("NOTELOCTEXT"), ESearchCase::CaseSensitive) || Name.Equals(TEXT("NSNOTELOCTEXT"), ESearchCase::CaseSensitive);
-		const int32 NumStrings = 2 + (Literal.bHasNamespace ? 1 : 0) + (Literal.bHasNotes ? 1 : 0);
-		if (!bKnown || Tok.Num() != 2 + NumStrings * 2)
+		// TEXT("Key", "Source"[, "Notes"]) or TEXT_NS("Namespace", "Key", "Source"[, "Notes"]).
+		Literal.bHasNamespace = Name.Equals(TEXT("TEXT_NS"), ESearchCase::CaseSensitive);
+		if (!Literal.bHasNamespace && !Name.Equals(TEXT("TEXT"), ESearchCase::CaseSensitive))
+		{
+			return false;
+		}
+		const int32 WithoutNotes = Literal.bHasNamespace ? 3 : 2;
+		const int32 NumStrings = (Tok.Num() - 2) / 2;
+		Literal.bHasNotes = NumStrings == WithoutNotes + 1;
+		if ((NumStrings != WithoutNotes && !Literal.bHasNotes) || Tok.Num() != 2 + NumStrings * 2)
 		{
 			return false;
 		}
@@ -1685,10 +1689,10 @@ namespace Bango
 	{
 		if (Literal.bInvariant)
 		{
-			return TEXT("INVTEXT(") + MakeStringLiteral(Literal.Source) + TEXT(")");
+			return TEXT("TEXT_INV(") + MakeStringLiteral(Literal.Source) + TEXT(")");
 		}
 		const bool bNotes = !Literal.Notes.IsEmpty();
-		FString Result = Literal.bHasNamespace ? (bNotes ? TEXT("NSNOTELOCTEXT(") : TEXT("NSLOCTEXT(")) : (bNotes ? TEXT("NOTELOCTEXT(") : TEXT("LOCTEXT("));
+		FString Result = Literal.bHasNamespace ? TEXT("TEXT_NS(") : TEXT("TEXT(");
 		if (Literal.bHasNamespace)
 		{
 			Result += MakeStringLiteral(Literal.Namespace) + TEXT(", ");

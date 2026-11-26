@@ -1,6 +1,7 @@
 #include "BangoDefines.h"
 
 #include "BangoCompiler.h"
+#include "BangoTypes.h"
 
 namespace BangoDefinesPrivate
 {
@@ -75,6 +76,10 @@ bool Bango::IsDefineName(const FString& Name, FString* OutWhy)
 	{
 		return Refuse(TEXT("its words are joined by one '_', with none at the end."));
 	}
+	if (IsReservedWord(Name))
+	{
+		return Refuse(TEXT("it's a word Bango uses (like TEXT)."));
+	}
 	return bHasLetter;
 }
 
@@ -117,9 +122,9 @@ bool Bango::CheckDefine(const FBangoDefineText& Define, const TSet<FString>* Tak
 		OutError = FString::Printf(TEXT("'%s' is defined twice. Each define has a name of its own."), *Name);
 		return false;
 	}
-	if (Define.ValueText.Contains(TEXT("LOCTEXT(")))
+	if (Define.ValueText.Contains(TEXT("TEXT("), ESearchCase::CaseSensitive) || Define.ValueText.Contains(TEXT("TEXT_NS("), ESearchCase::CaseSensitive))
 	{
-		OutError = FString::Printf(TEXT("'%s': a define's text isn't gathered for translation, so it's written INVTEXT(\"...\"). Put a text to be translated in the script."), *Name);
+		OutError = FString::Printf(TEXT("'%s': a define's text isn't gathered for translation, so it's written TEXT_INV(\"...\"). Put a text to be translated in the script."), *Name);
 		return false;
 	}
 	if (Define.ValueText.TrimStartAndEnd().IsEmpty())

@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.132)
+# Bango Language Spec (draft v0.133)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.133:** **the text macros are Bango's own, three instead of five** (section 3, Localized text): `TEXT("Key", "Source")` (was `LOCTEXT`), `TEXT("Key", "Source", "Notes")` (was `NOTELOCTEXT`), `TEXT_NS("Namespace", "Key", "Source")` (was `NSLOCTEXT`), `TEXT_NS("Namespace", "Key", "Source", "Notes")` (was `NSNOTELOCTEXT`), and `TEXT_INV("Source")` (was `INVTEXT`). Notes for translators are an optional last string, and a text with a namespace of its own stands out. `#LOCTEXT_NAMESPACE` is now **`#TEXT_NAMESPACE`**. The old names are errors that say what they're called now (*"'LOCTEXT' is now TEXT: TEXT("Key", "Text")"*), and stay reserved; `TEXT`, `TEXT_NS` and `TEXT_INV` are reserved too, so they can't be defines. Autocomplete offers the three. Scripts written before this need their texts renaming. In C++: `Bango::GetRenamedTextMacro`.
 
 **Changes in v0.132:** **other plugins can give defines of their own** (section 4, Defines from plugins): `Bango::RegisterDefines(TEXT("BangoYap"), { { TEXT("SELECT_RANDOM"), TEXT("int"), TEXT("3"), TEXT("Speech"), TEXT("...") } })` in a module's `StartupModule`, `Bango::UnregisterDefines(TEXT("BangoYap"))` in its `ShutdownModule`. A plugin's defines come before the project's, in the order the plugins registered: a name given twice keeps the first, and the other is left out with a warning in the log (and, for a project row, beside the row). Project Settings lists them under the project's own, read only; errors and the editors say which plugin a define is from. `FBangoDefineEntry::Source`, `Bango::DescribeDefineSource`, `GetRegisteredDefineError`.
 
@@ -302,7 +304,7 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
   - Text after the `)`
   - The same NodeID used twice in a file
   - NodeID 0 on any line
-  - Metadata on a settings line (`#inputs`, `#LOCTEXT_NAMESPACE`, `#USES_GRAPH_EDITOR`), or on a declaration
+  - Metadata on a settings line (`#inputs`, `#TEXT_NAMESPACE`, `#USES_GRAPH_EDITOR`), or on a declaration
   - Metadata on a line with no statement, including a `function` line or a line with only `{`, `}` or `};`
   - A reroute line where a statement couldn't go
 - Errors about the `inputs` line, and argument errors for a script with no `inputs` line, show `[node 0]`.
@@ -328,10 +330,10 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
   ```
 - Unlike C++ comments, the markers **nest**: a statement inside a disabled block keeps its own setting (above, `WriteLog("not yet")` stays disabled when the `if` is enabled again). Each `/*` must be closed by a `*/` in the same block. `/*` and `*/` inside strings and `//` comments don't count.
 - What's between the markers is **read as code**: it must be statements, each on its own line as usual, and can have `//` comments and reroutes among them. Prose there is an error that says to write notes as `//` comments. Disabled statements are parsed but not compiled: their names, types and commands aren't checked, and they can use names that don't exist.
-- Only statements can be disabled. A declaration, a settings line (`#inputs`, `#LOCTEXT_NAMESPACE`, `#USES_GRAPH_EDITOR`) or a `function` can't be: each is an error.
+- Only statements can be disabled. A declaration, a settings line (`#inputs`, `#TEXT_NAMESPACE`, `#USES_GRAPH_EDITOR`) or a `function` can't be: each is an error.
 - A disabled `label` isn't in the compiled script, so a `goto` to it (or to a label inside a disabled block) is a compile error that says the label is disabled. A disabled `goto`, `break`, `continue` or `return` does nothing.
 - `//~` lines are still only for disconnected nodes (section 12). A disconnected node can be disabled too: `//~ /* WriteLog("x"); */`.
-- **Lines starting with `#` are the script's settings**, at the top of the script, each a `#` and the setting's name: `#inputs (...)` (section 10), `#LOCTEXT_NAMESPACE "Name"` (section 3) and `#USES_GRAPH_EDITOR` (a flag with nothing after it, section 12). They come before any statement or function, in any order (the graph editor saves them as namespace, `USES_GRAPH_EDITOR`, then inputs), each once. They start their line, don't end with `;`, aren't graph nodes and can't have metadata. Any other `#` line is a compile error (*"Unknown '#DEBUG'. Lines starting with '#' are the script's settings: ..."*). Future settings will use the same form. `inputs`, `LOCTEXT_NAMESPACE` and `USES_GRAPH_EDITOR` without the `#` are ordinary names.
+- **Lines starting with `#` are the script's settings**, at the top of the script, each a `#` and the setting's name: `#inputs (...)` (section 10), `#TEXT_NAMESPACE "Name"` (section 3) and `#USES_GRAPH_EDITOR` (a flag with nothing after it, section 12). They come before any statement or function, in any order (the graph editor saves them as namespace, `USES_GRAPH_EDITOR`, then inputs), each once. They start their line, don't end with `;`, aren't graph nodes and can't have metadata. Any other `#` line is a compile error (*"Unknown '#DEBUG'. Lines starting with '#' are the script's settings: ..."*). Future settings will use the same form. `inputs`, `TEXT_NAMESPACE` and `USES_GRAPH_EDITOR` without the `#` are ordinary names.
 
 ### Statements that become nodes
 
@@ -401,7 +403,7 @@ else
 | `float` | A 64-bit (double-precision) number, the same as a Blueprint Float. There's no 32-bit float type. |
 | `string` | `"..."` with escapes `\" \\ \n \t` |
 | `entity` | Names an actor that has a Bango ID component. Written `@john`. Stored as the name and looked up each time it's used. |
-| `text` | Localized text the player reads, the same as an Unreal `FText`. Written `LOCTEXT("Key", "Hello")` (see Localized text below). |
+| `text` | Localized text the player reads, the same as an Unreal `FText`. Written `TEXT("Key", "Hello")` (see Localized text below). |
 | `vector2` | Two floats, `x` and `y`. The same as an Unreal `FVector2D`. |
 | `vector3` | Three floats, `x`, `y` and `z`. The same as an Unreal `FVector`, so it holds positions, directions and sizes. |
 | `T[]` | Array of any type, including other arrays (`int[][]`), up to **8 levels** deep (see section 6). |
@@ -447,31 +449,41 @@ _height = GetPos(_who).z;
 - Strings must end on the line they start. Any other escape than `\" \\ \n \t` is a compile error.
 - Entities: `@` followed directly by a Bango ID name, like `@john` or `@door17` (section 4), or the keywords **`player`** (the player's pawn) and **`self`** (the script's owner), both in section 4. No space is allowed after the `@`. An entity literal is a fixed value with the type `entity`, so it can be a parameter default and the compiler knows its type.
 - Entity literals are never checked when the script compiles, since which actors exist depends on the level. Using one whose actor isn't in the level stops the script (see Conversions below).
-- Texts: `LOCTEXT("Key", "Source")`, `NSLOCTEXT("Namespace", "Key", "Source")`, `NOTELOCTEXT("Key", "Source", "Notes")`, `NSNOTELOCTEXT("Namespace", "Key", "Source", "Notes")`, and `INVTEXT("Source")` for a text that isn't translated. Every part must be a string literal.
+- Texts: `TEXT("Key", "Source")` and `TEXT_NS("Namespace", "Key", "Source")`, each with notes for translators as an optional last string, and `TEXT_INV("Source")` for a text that isn't translated. Every part must be a string literal.
 
 ### Localized text
 `string` is for names, ids and debug output; `text` is for anything the player reads, so it can be translated. The two are separate types: a string can't be passed where a text is expected, or the other way round, without `ToText` / `ToString` (section 7).
 
-A text literal copies Unreal's macros. Each text has a **namespace**, a **key** and its **source** (the native-language text), and optionally **notes** for translators:
+A text is written with one of three macros. Each translated text has a **namespace**, a **key** and its **source** (the native-language text), and optionally **notes** for translators:
+
+| Macro | Means |
+|---|---|
+| `TEXT("Key", "Source")` | A text in the script's namespace (`#TEXT_NAMESPACE`). |
+| `TEXT("Key", "Source", "Notes")` | The same, with notes for translators. |
+| `TEXT_NS("Namespace", "Key", "Source")` | A text in a namespace of its own. |
+| `TEXT_NS("Namespace", "Key", "Source", "Notes")` | The same, with notes for translators. |
+| `TEXT_INV("Source")` | A text that's never translated. |
+
+The notes are always the last string, and how many strings there are says whether there are any: `TEXT` takes 2 or 3, `TEXT_NS` 3 or 4, `TEXT_INV` 1. A text with its own namespace is the only kind written `TEXT_NS`, so it stands out in a script. (These are Bango's names. Unreal's C++ macros, `LOCTEXT` and the rest, were the names before v0.133; using one now is an error that says what it's called now, like *"'NSLOCTEXT' is now TEXT_NS: TEXT_NS("Namespace", "Key", "Text")"*, and so is `#LOCTEXT_NAMESPACE`.)
 
 ```
-#LOCTEXT_NAMESPACE "Quest.Intro"
+#TEXT_NAMESPACE "Quest.Intro"
 #inputs (text _line = nil)
 
 if (isNil(_line))
 {
-	_line = LOCTEXT("GuardHello", "Halt! Who goes there?");
+	_line = TEXT("GuardHello", "Halt! Who goes there?");
 }
 WriteScreen(ToString(_line));
-WriteScreen(ToString(NOTELOCTEXT("GuardBye", "Move along.", "Said by the gate guard, annoyed")));
-WriteScreen(ToString(NSLOCTEXT("Shared.UI", "Continue", "Continue")));
+WriteScreen(ToString(TEXT("GuardBye", "Move along.", "Said by the gate guard, annoyed")));
+WriteScreen(ToString(TEXT_NS("Shared.UI", "Continue", "Continue")));
 ```
 
-- **`#LOCTEXT_NAMESPACE "..."`** gives the namespace for every `LOCTEXT` / `NOTELOCTEXT` in the script, exactly as in Unreal C++ source, so Unreal's localization tools read it (section 11). It must come at the top of the script, before or after the `#inputs` line (the graph editor saves it before), before any other statement or function, and only once. The namespace is a string and can't be empty. `NSLOCTEXT` / `NSNOTELOCTEXT` give their own namespace instead.
-- A `LOCTEXT` in a script with no `#LOCTEXT_NAMESPACE` is a compile error that says to add one.
+- **`#TEXT_NAMESPACE "..."`** gives the namespace for every `TEXT` in the script (section 11, Translation). It must come at the top of the script, before or after the `#inputs` line (the graph editor saves it before), before any other statement or function, and only once. The namespace is a string and can't be empty. `TEXT_NS` gives its own namespace instead.
+- A `TEXT` in a script with no `#TEXT_NAMESPACE` is a compile error that says to add one.
 - Keys and namespaces can't be empty. **The same key can't be used for two different texts** in one namespace: *"The key 'GuardHello' is already used in namespace 'Quest.Intro' for a different text, on line 2."* Writing the same text with the same key twice is fine.
 - Keys made in the graph editor are random: 32 hex digits, like Unreal's own (`9F3A...`). They can be changed to something readable, in the graph or the text.
-- **`INVTEXT("Source")`** is a text that is **never translated**: it's shown as it is in every language, like Unreal's `INVTEXT`. It has no namespace, key or notes, so it needs no `#LOCTEXT_NAMESPACE`, and Unreal's gatherer doesn't pick it up. Use it for text the player sees that isn't words to translate, like a name, a number pattern (`INVTEXT("{0} / {1}")`) or a debug message. It works anywhere a text does, with the same `{0}` placeholders. `INVTEXT("x")` is the same as `ToText("x")`, but written as a literal, so its placeholders are checked when compiling.
+- **`TEXT_INV("Source")`** is a text that is **never translated**: it's shown as it is in every language, like Unreal's `INVTEXT`. It has no namespace, key or notes, so it needs no `#TEXT_NAMESPACE`, and Unreal's gatherer doesn't pick it up. Use it for text the player sees that isn't words to translate, like a name, a number pattern (`TEXT_INV("{0} / {1}")`) or a debug message. It works anywhere a text does, with the same `{0}` placeholders. `TEXT_INV("x")` is the same as `ToText("x")`, but written as a literal, so its placeholders are checked when compiling.
 - Texts can't be joined with `+`; use `FormatText` (section 7). Texts can only be compared with `==` and `!=`, which compare what they show in the current language.
 - Text parameters can't have a text default (section 10); default them to `nil` and set the text in the script, as above.
 - `Format("{0}", _text)` shows the text in the current language.
@@ -518,7 +530,7 @@ WriteScreen(ToString(NSLOCTEXT("Shared.UI", "Continue", "Continue")));
 - Calling a command or function with the wrong capitalisation is a compile error that suggests the right name: *"Unknown command or function 'writeScreen'. Did you mean 'WriteScreen'? Names are case-sensitive."*
 - A name is letters, digits and `_`, and doesn't start with a digit.
 - A **define**'s name (section 4, Defines) can't be used for anything a script declares: it always means the define.
-- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn waitUntil switch case default break continue return label goto function global scriptVar persistent call isNil player self true false nil bool int float string entity text vector2 vector3 void LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT`. This doesn't apply to Bango ID names, since the `@` sets them apart.
+- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn waitUntil switch case default break continue return label goto function global scriptVar persistent call isNil player self true false nil bool int float string entity text vector2 vector3 void TEXT TEXT_NS TEXT_INV`, and the old text macros' names (`LOCTEXT`, `NSLOCTEXT`, `NOTELOCTEXT`, `NSNOTELOCTEXT`, `INVTEXT`), which say what they're called now. This doesn't apply to Bango ID names, since the `@` sets them apart.
 
 ### Locals and script variables
 A graph (the main script, or a function) has two kinds of variables of its own, besides its parameters and loop variables. Both only exist inside the running script instance.
@@ -565,7 +577,7 @@ if (_count > 3)
 #### Script variables
 - Declared with **`scriptVar`**, **at the top of their graph**: the main graph's after the settings lines and the global declarations, and a function's at the top of its body, before its first statement (a local's declaration is a statement, so they come before any of those too). A `scriptVar` line anywhere else is a compile error that says to move it to the top, or drop `scriptVar` to make it a local.
 - **A script variable is visible in its whole graph**, and holds its value until something changes it. The main graph's are visible in the file's functions too (see above); a function's are its own.
-- **Its value must be a fixed value**, like a parameter default (section 10): a number (including negatives like `-2.5`), a string, `true`, `false`, `nil`, a Bango ID (`@john`), a text (`LOCTEXT(...)` and the like, section 3), or an array of those (`[1, -2]`, `[[0, 0, 1]]`, a vector literal like `[0, 0, 100]`). It must fit the type (int → float is allowed). Anything else is a compile error that suggests a local instead. A script variable without a value holds `nil`.
+- **Its value must be a fixed value**, like a parameter default (section 10): a number (including negatives like `-2.5`), a string, `true`, `false`, `nil`, a Bango ID (`@john`), a text (`TEXT(...)` and the like, section 3), or an array of those (`[1, -2]`, `[[0, 0, 1]]`, a vector literal like `[0, 0, 100]`). It must fit the type (int → float is allowed). Anything else is a compile error that suggests a local instead. A script variable without a value holds `nil`.
 - The values are given when the graph starts running: when the instance starts for the main graph (so before any function can be called), and on each call for a function.
 - They're for values a level designer sets up front and tunes, without nodes: the graph editor lists them in its **Script Vars** list (section 12), not as nodes. Scripts typed as text rarely need them; a local does the same job.
 - Two script variables of one graph can't share a name, or share one with a parameter of that graph.
@@ -617,7 +629,7 @@ else
 - **In C++**, the program lists them (`FBangoProgram::PersistentLocals`, each `FBangoPersistentLocal`: its name, type, line and first value). Each is kept in the globals store (`FBangoGlobalStore`) as a persistent entry, under a name no script can write: `FBangoInstance::GetPersistentKey(Program, Local)` gives it (`%persistent ` + the script + `|` + the owner + `|` + the variable's name). The script is the instance's **persistent scope** (`SetPersistentScope`, set before `Start`, like the owner, and saved): `inline ` and the ID for an inline script (`UBangoScriptSubsystem::GetInlineScriptScope`), `text ` and a hash of the text without one (`GetTextScope`), or empty for the program's file name (an asset's path). The owner is `FBangoScriptOwner::Holder`, the holding component's entity ID (`door_1|Trigger`), or else the owner's Bango ID. The script subsystem sets both when it spawns a script, and only works out which component holds it for a script with persistent variables (or one spawned with a component as its owner). `FBangoGlobalStore::DeclarePersistentLocal(Key, Type)` makes one, or clears it on a type change. Errors and the debugger show the variable's own name.
 
 ### Fixed values
-A **fixed value** is one written out, with nothing to work out: a number (`5`, `-2.5`), a string, `true`, `false`, `nil`, a Bango ID (`@john`, or `player`), a text (`INVTEXT("...")`, `NSLOCTEXT(...)`, and in a script `LOCTEXT(...)`), or an array of those (`[1, -2]`, and `[0, 0, 100]` for a vector). Script variables' starting values, globals' defaults and inputs' defaults are fixed values.
+A **fixed value** is one written out, with nothing to work out: a number (`5`, `-2.5`), a string, `true`, `false`, `nil`, a Bango ID (`@john`, or `player`), a text (`TEXT_INV("...")`, `TEXT_NS(...)`, and in a script `TEXT(...)`), or an array of those (`[1, -2]`, and `[0, 0, 100]` for a vector). Script variables' starting values, globals' defaults and inputs' defaults are fixed values.
 
 C++ can read one from text, outside any script, for values a designer types into a property (an object's constants, passed to its scripts as instance inputs, section 15):
 ```cpp
@@ -630,7 +642,7 @@ if (!Bango::ParseFixedValue(TEXT("vector3"), TEXT("[0, 0, 100]"), Value, Error))
 - **Empty text is `nil`** (of that type), as is `nil` written out.
 - **A Bango ID isn't looked up**: `@john` is a value whether or not an actor has that ID, as in a script. Which actors exist depends on the level, and is found out when the value is used.
 - **`self` can't be written** here: it means the actor a script belongs to, and a value on its own has none.
-- **A text** is written `INVTEXT("...")` (never translated) or `NSLOCTEXT("Namespace", "Key", "...")`. A plain `LOCTEXT` takes its namespace from a script's `#LOCTEXT_NAMESPACE`, which there isn't one of here. Texts written this way **aren't gathered for translation** yet, wherever they're kept (as an inline script's aren't, section 15): until that's built, an `NSLOCTEXT` here is only translated if its namespace and key are gathered some other way.
+- **A text** is written `TEXT_INV("...")` (never translated) or `TEXT_NS("Namespace", "Key", "...")`. A plain `TEXT` takes its namespace from a script's `#TEXT_NAMESPACE`, which there isn't one of here. Texts written this way **aren't gathered for translation** yet, wherever they're kept (as an inline script's aren't, section 15): until that's built, a `TEXT_NS` here is only translated if its namespace and key are gathered some other way.
 - It needs no editor: it works in packaged games.
 - **A define is a fixed value** (next): `[SELECT_RANDOM, 1]` is one.
 
@@ -651,10 +663,10 @@ global int defaultMode ?= SELECT_RANDOM;
 _level = BOSS_LEVELS[1];              // an int[] define, indexed
 ```
 
-- **Names are SHOUTING_SNAKE_CASE**: capital letters, digits and `_`, starting with a letter, words joined by one `_` (`SELECT_RANDOM`, `MAX_PARTY_2`). Nothing else can be: a script's own names, which never are all capitals in Bango's style, can't be mistaken for one.
+- **Names are SHOUTING_SNAKE_CASE**: capital letters, digits and `_`, starting with a letter, words joined by one `_` (`SELECT_RANDOM`, `MAX_PARTY_2`), and not a word Bango uses (`TEXT`, `TEXT_NS`, `TEXT_INV`). Nothing else can be: a script's own names, which never are all capitals in Bango's style, can't be mistaken for one.
 - **Compiled in place**: a use is compiled to the define's value, as if the value had been written there. So a define **works wherever a fixed value does**: a `case` value, a global's default, a script variable's start, an element of an array literal, and in `Bango::ParseFixedValue` (an object's constants). Its type is the define's: `SELECT_RANDOM` is an `int` wherever it's used.
 - **It can't be changed**: `SELECT_RANDOM = 4;`, `SELECT_RANDOM++;` and `BOSS_LEVELS[0] = 1;` are compile errors (*"'SELECT_RANDOM' is a define (in Project Settings > Plugins > Bango > Defines): it can't be changed."*; for a plugin's, *"(registered by BangoYap)"*). Nor can anything a script declares have a define's name: a local, script variable, persistent local, parameter, loop variable, global or function (*"'SELECT_RANDOM' is a define (int SELECT_RANDOM = 3, in Project Settings > Plugins > Bango > Defines), so nothing in a script can be named that."*).
-- **The value** is written as a script variable's starting value is, and checked the same way (section 4, Fixed values): `3`, `"north"`, `@narrator`, `[5, 10]`, `nil`. It can use the defines above it (`[5, 10, SELECT_RANDOM]`), not those below. **A text is `INVTEXT("...")`**: a define isn't gathered for translation, so `LOCTEXT` and `NSLOCTEXT` are refused; put a text to be translated in the script.
+- **The value** is written as a script variable's starting value is, and checked the same way (section 4, Fixed values): `3`, `"north"`, `@narrator`, `[5, 10]`, `nil`. It can use the defines above it (`[5, 10, SELECT_RANDOM]`), not those below. **A text is `TEXT_INV("...")`**: a define isn't gathered for translation, so `TEXT` and `TEXT_NS` are refused; put a text to be translated in the script.
 - **A row that can't be a define** (a name that isn't SHOUTING_SNAKE_CASE or is used twice, a value that doesn't fit its type) is left out, and the output log says why; in Project Settings, a warning beside the row does. Scripts that use it then say it's unknown.
 - **Changing the defines** recompiles the scripts that use one the next time they're spawned or checked (each program keeps the defines' fingerprint it was compiled with, `FBangoProgram::DefinesFingerprint`; one that uses none has 0 and isn't affected). Copies already running keep the version they have, as they would after an edit; with Reload Running Scripts on (section 11), a script asset's running copies switch to the new version. A registered condition (section 10) keeps the version it was registered with.
 - **In the editors**: the text editor colours a define as one (teal, bold), offers it in autocomplete with its type, and its tooltip shows `define int SELECT_RANDOM = 3` and its description; node fields offer it too. The graph editor's side panel has a **DEFINES** list (shown, not edited; **Edit** opens the Project Settings page). An open script is coloured and checked again when the defines change.
@@ -682,7 +694,7 @@ void FBangoYapModule::ShutdownModule()
 ```
 
 - **The first argument names the plugin**: it's the category of a row that has none, and what errors, tooltips and lists say a define is from (*"registered by BangoYap"*). Registering again for the same name replaces that plugin's defines.
-- **Each row is checked as a project row is** (above): a SHOUTING_SNAKE_CASE name, a fixed value of its type (which may use the defines before it, a plugin's own or an earlier plugin's), an `INVTEXT` text.
+- **Each row is checked as a project row is** (above): a SHOUTING_SNAKE_CASE name, a fixed value of its type (which may use the defines before it, a plugin's own or an earlier plugin's), a `TEXT_INV` text.
 - **Which one wins**: a plugin's defines come **before the project's**, in the order the plugins registered (the plugin's commands are written for its values, so a project row can't change one). A name given twice keeps the first, and the other is left out: a warning in the output log (*"Bango defines: OtherPlugin: 'RUN_ALL' is already a define, registered by BangoYap, so this one is left out..."*), and for a project row, the warning beside its row in Project Settings. Scripts never see two meanings. `RegisterDefines` also gives these errors back, in its optional last argument, and `Bango::GetRegisteredDefineError(Owner, Row)` says why one of a plugin's rows was left out.
 - **Registering and unregistering change the fingerprint** (when anything changed), so scripts compiled before a plugin's module started, or that use one of its defines, are compiled again when they're next used. A module that depends on BangoScripts starts after it, so its defines are there before its scripts are compiled.
 - **Project Settings** shows a plugin's defines under the project's, under **From plugins**, read only (name, type, value and plugin; the description in the tooltip). The graph editor's DEFINES list and autocomplete show them with the project's.
@@ -1048,12 +1060,12 @@ A command can take a **block** of statements of its own, and other commands can 
 ```
 @john Speech(0, 1)
 {
-	Line(INVTEXT("Hello World!"));
+	Line(TEXT_INV("Hello World!"));
 	if (metBefore)
 	{
-		Line(INVTEXT("Good to see you again."));
+		Line(TEXT_INV("Good to see you again."));
 	}
-	Line(INVTEXT("I'm talking! I'm really talking!"));
+	Line(TEXT_INV("I'm talking! I'm really talking!"));
 }
 ```
 
@@ -1074,21 +1086,21 @@ A command can take a **block** of statements of its own, and other commands can 
   ```
   @john Prompt()
   {
-  	Option(LOCTEXT("Who", "Who are you?"))
+  	Option(TEXT("Who", "Who are you?"))
   	{
   		@john Speech(0, 1)
   		{
-  			Line(LOCTEXT("Name", "I'm John."));
+  			Line(TEXT("Name", "I'm John."));
   		}
   	}
   	if (hasKey)
   	{
-  		Option(LOCTEXT("Key", "I found your key."))
+  		Option(TEXT("Key", "I found your key."))
   		{
   			hasKey = false;
   		}
   	}
-  	Option(LOCTEXT("Bye", "Goodbye."))
+  	Option(TEXT("Bye", "Goodbye."))
   	{
   	}
   }
@@ -1163,13 +1175,13 @@ if (@door call IsLocked()) { ... }
 Strings and texts use the same placeholders, Unreal's: `{0}`, `{1}`, ..., with a backtick escaping the next character (`` `{ `` is a literal `{`, ``` `` ``` a backtick). `%` is just a character.
 
 - **Strings** (`WriteLog`, `Format`): described below.
-- **Texts** (`FormatText`): filled by `FText::Format`, so translators can move them around: `FormatText(LOCTEXT("Left", "{0} things left"), _count)`. Ints and floats are formatted as numbers for the current language, texts are inserted as they are, and anything else (strings, entities, arrays, bools) is inserted as it would be by `Format`, untranslated. A backtick escapes the next character (`` `{ `` is a literal `{`). Named placeholders like `{Name}` aren't supported: they're a compile error when the text is a literal, and stop the script otherwise. Unreal's plural and gender forms (`{0}|plural(one=thing,other=things)`) work, since they're part of the translated text.
+- **Texts** (`FormatText`): filled by `FText::Format`, so translators can move them around: `FormatText(TEXT("Left", "{0} things left"), _count)`. Ints and floats are formatted as numbers for the current language, texts are inserted as they are, and anything else (strings, entities, arrays, bools) is inserted as it would be by `Format`, untranslated. A backtick escapes the next character (`` `{ `` is a literal `{`). Named placeholders like `{Name}` aren't supported: they're a compile error when the text is a literal, and stop the script otherwise. Unreal's plural and gender forms (`{0}|plural(one=thing,other=things)`) work, since they're part of the translated text.
 
 The rules for which placeholders need values below apply to both kinds.
 
 `WriteLog` and `Format` replace `{0}`, `{1}`, ... in their text with the extra arguments, in one pass, with `FText::Format`'s rules: a backtick makes the next character literal, and anything else that isn't a numbered placeholder (`{Name}`, a `{` with no `}`) is shown as it is. Strings appear without quotes, entities as their name, arrays as `[1, 2]`. A `nil` value shows as `nil`.
 
-Every placeholder needs a value. When the text is written as a literal (`WriteLog("{0} and {1}", _a);`, `_t = FormatText(LOCTEXT("K", "{0} and {1}"), _a);`), a placeholder with no value after it is a **compile error**: *"This text uses {1}, but only 1 value comes after it."* This applies to any command marked `.WithPlaceholders()`, wherever the call is (`_s = Format("{0}", _a) + Format("{1}", _b);` fails on the second). When the text is worked out while the script runs (`WriteLog(_text, 1);`), a placeholder with no value stops the script. A `nil` value for a text placeholder stops the script too.
+Every placeholder needs a value. When the text is written as a literal (`WriteLog("{0} and {1}", _a);`, `_t = FormatText(TEXT("K", "{0} and {1}"), _a);`), a placeholder with no value after it is a **compile error**: *"This text uses {1}, but only 1 value comes after it."* This applies to any command marked `.WithPlaceholders()`, wherever the call is (`_s = Format("{0}", _a) + Format("{1}", _b);` fails on the second). When the text is worked out while the script runs (`WriteLog(_text, 1);`), a placeholder with no value stops the script. A `nil` value for a text placeholder stops the script too.
 
 ### Built-in commands
 
@@ -1527,7 +1539,7 @@ for (int _i = 0; _i < _repeats; _i++)
 ```
 
 ### Declaring
-- **`#inputs (...)` is optional.** If present, it must be the **first line in the file** (comments aside, and after the `#LOCTEXT_NAMESPACE` line if that comes first), before any other statement or function, and can appear only once. A `#inputs` line anywhere else (later in the file, in a block, in a function) is a compile error, and so is `inputs` written without `#set`. Like every `#` line, it has no `;` and must fit on one line.
+- **`#inputs (...)` is optional.** If present, it must be the **first line in the file** (comments aside, and after the `#TEXT_NAMESPACE` line if that comes first), before any other statement or function, and can appear only once. A `#inputs` line anywhere else (later in the file, in a block, in a function) is a compile error, and so is `inputs` written without `#set`. Like every `#` line, it has no `;` and must fit on one line.
 - Parameters are comma-separated `type _name` or `type _name = default`. `#inputs ()` is allowed and means the same as no inputs line.
 - **Parameters without a default are required. Parameters with a default are optional**, as with C++ default arguments.
 - **All required parameters must come first.** A required parameter after one with a default is a compile error.
@@ -1764,13 +1776,13 @@ The **Spawn Bango Script** node reads the script's `inputs` line and creates one
 The script subsystem (`UBangoScriptSubsystem`) also has a Blueprint event, **OnScriptFailed** (handle, error), fired when a script stops with an error.
 
 ### Translation
-Bango scripts are translated with Unreal's localization tools. Each Bango Script asset (section 15) reports its texts to Unreal's asset gathering itself: every `LOCTEXT`, `NSLOCTEXT`, `NOTELOCTEXT` and `NSNOTELOCTEXT`, with its namespace (from `#LOCTEXT_NAMESPACE` for `LOCTEXT` and `NOTELOCTEXT`), its key, and for `NOTELOCTEXT` its notes for translators. This happens when the asset is saved (the texts are kept in the package), so a script saved before this existed needs saving once more (or a gather with the gather cache skipped).
+Bango scripts are translated with Unreal's localization tools. Each Bango Script asset (section 15) reports its texts to Unreal's asset gathering itself: every `TEXT` and `TEXT_NS`, with its namespace (from `#TEXT_NAMESPACE` for `TEXT`), its key, and its notes for translators, if it has some. This happens when the asset is saved (the texts are kept in the package), so a script saved before this existed needs saving once more (or a gather with the gather cache skipped).
 
 To set it up, in the **Localization Dashboard**, make sure the game target's **Gather from Packages** is on and includes the folders the scripts are in (Content, by default). Then gather as usual. The scripts aren't gathered as text files any more: remove any **Gather from Text Files** entries for `Content/Bango` or `*.bango`, which would gather linked scripts' files a second time, and wrongly.
 
 - Only texts that run are gathered: not those on lines disabled with `//~`, or in disabled nodes (between `/*` and `*/`), however they're nested. (Gathering `.bango` files as C++ text used to pick up some texts in nested disabled nodes.)
 - Each namespace and key is gathered once per script. A key used for two different texts in one script is a compile error; across scripts, the gatherer reports it.
-- Texts made with `INVTEXT` or `ToText` aren't gathered; they're never translated.
+- Texts made with `TEXT_INV` or `ToText` aren't gathered; they're never translated.
 - Parameter defaults can't be texts (section 10).
 - A script that doesn't parse has nothing gathered, and the output log says so when it's saved.
 - At runtime nothing changes: a text is looked up by its namespace and key, as before.
@@ -1864,7 +1876,7 @@ The graph editor shows a script as nodes and wires and saves it back as text. Th
 
 ### Graphs and nodes
 - A file has a **main graph** (the top-level code) and **one graph per function**.
-- Each graph starts at its **entry node**, node 0 at (0,0) (section 1). The main graph's entry, **Script Start**, shows the `#inputs` list under an **Input Params** heading (left out when there are none). The `#LOCTEXT_NAMESPACE` line isn't shown on it; it's edited in the script editor's Script Config panel. A function's entry shows its signature, like `int AddScore(int _amount)`.
+- Each graph starts at its **entry node**, node 0 at (0,0) (section 1). The main graph's entry, **Script Start**, shows the `#inputs` list under an **Input Params** heading (left out when there are none). The `#TEXT_NAMESPACE` line isn't shown on it; it's edited in the script editor's Script Config panel. A function's entry shows its signature, like `int AddScore(int _amount)`.
 - **Global and script variable declarations at the top aren't nodes.** A graph's script variables, and the file's globals declared at the top, are listed in the script editor's **Script Vars** and **Global Vars** lists and edited there (below); in the text they're the declarations at the top (section 4). The Script Start node and a function's entry node don't show them. A local's declaration is a **Local** node: "Local Int", "Local Float Array" and so on, by its type, with a **Name** row and a **Value** row. A persistent local's (`persistent int _count ?= 0;`, section 4) is a **Persistent Local** node ("Persistent Local Int"), whose Value row is its `?=` value. A global set in the code (`global bool open = true;`) is a **Set Global** node: "Set Global Bool", "Set Global Int Array" and so on, with a **Name** row and a **To** row (of its type); it's green like the other variable nodes. Its text is written without `global` (`bool open = true`), and it must have a value.
 - Every other statement line is one node, and so is every reroute line (a line with only `//@` metadata, section 1). A reroute is drawn like Blueprint's: one dot that is both its input and its output, with a larger area around it to grab and move it. Dragging from the dot to the left wires its input, and to the right its output; Ctrl-dragging it moves it. Its grab area is two grid squares each way with the dot in the middle, so the dot is on a grid line. Every node's pins are a whole number of grid squares apart (currently two) and on grid lines too, so a wire between a pin and a reroute at the same height on the grid runs straight. **Double-clicking a wire adds a reroute** on it there, like in Blueprint; it gets the next free NodeID. **Deleting a reroute keeps its wire**: what led into it is wired to where it led.
 - A node shows its kind as the title and its text as one editable line, without keywords, brackets or `;`: the condition of `if`/`while`, the header of `for`/`forEach`, the name of `label`/`goto`, the value of `return`, and the whole statement for assignments and calls.
@@ -1905,13 +1917,13 @@ The graph editor shows a script as nodes and wires and saves it back as text. Th
 - `//` comment lines directly above a statement become that node's **comment bubble**. A comment after the code on a statement line joins that node's bubble too.
 - Other comments go to the next node below them in the same graph, or to the graph's last node if none follows. Comments just above a `function` line go to that function's entry node, and comments above the settings lines go to the main entry node.
 - When saved, each bubble is written as `//` lines directly above its node. So a comment at the end of a block, or after a `}`, moves down to the node that follows it.
-- A main-graph entry bubble with no parameters is saved above an empty `#inputs ()` line, which means the same as no inputs line. A comment on (or just above) the `#LOCTEXT_NAMESPACE` line, other than the description, is also read as Script Start's, so it moves above the inputs line when saved.
+- A main-graph entry bubble with no parameters is saved above an empty `#inputs ()` line, which means the same as no inputs line. A comment on (or just above) the `#TEXT_NAMESPACE` line, other than the description, is also read as Script Start's, so it moves above the inputs line when saved.
 - Carriage returns in comments are dropped, so comments read the same whatever the file's line endings.
 
 ### Saved layout
 When the graph editor saves, it writes the whole file in a fixed layout:
 0. The script's description, if it has one, as `//` lines from the first line of the file (see Comments above).
-1. After a blank line (unless it's the first line of the file), the `#LOCTEXT_NAMESPACE` line, if the script has a namespace, then the `#USES_GRAPH_EDITOR` line, if it has one (not in a compact script).
+1. After a blank line (unless it's the first line of the file), the `#TEXT_NAMESPACE` line, if the script has a namespace, then the `#USES_GRAPH_EDITOR` line, if it has one (not in a compact script).
 2. The entry node's comment, then the `#inputs` line (if there are parameters or a comment).
 3. The global declarations, in the order the Globals list shows them; then the main graph's script variables, in the order of the Script Vars list. Each declaration's comment goes directly above it. (A local's declaration is a Local node, so it's in the code.)
 4. The main graph's code, then its disconnected chains.
@@ -1946,7 +1958,7 @@ The graph editor is the **Bango Scripts** tab (Tools menu). It doesn't need the 
 - **The script editor** (under the tabs): everything for one open script. It's a self-contained pane, so it can also be shown in a window of its own (planned).
   - **Toolbar** (across the top, styled like an asset editor's, such as Blueprint's: each button an icon with its label): **Save** (also Ctrl+S) and **Reload** or **Revert**, followed by **(LINKED)** in light blue when the script is a script asset linked to its `.bango` file (its tooltip names the file), then **Compile Test**, then the **Debug** dropdown, with a separator between each group. At the toolbar's far right is the **Graph** switch: a slide switch with "Graph" on it. Slid right (blue), the graph is shown. Slid left, the graph is hidden, and the script text pane and the command palette fill its place side by side, open whether or not they were, with their Source Editor and Command Palette tabs hidden. The command palette keeps its width (the splitter between them sets it) and the script text takes the rest, as the graph does, so resizing the window only changes the text's width. Sliding it right again puts both back as they were. **A script sets the switch when it's opened** (a script asset's editor, or an inline script's window): on if it has a `#USES_GRAPH_EDITOR` line, off if it doesn't, so a script kept as plain text opens as its text and the command palette. Only on opening: after that the switch is the user's for that window, and reloading the script leaves it alone. The position last chosen by hand is remembered between sessions, but only decides for a script that can't say: one whose text doesn't read, or a condition written as one expression. Compile Test is only a check: scripts are always compiled when they're loaded at runtime. Its icon shows its status as Blueprint's does. The script is test-compiled quietly when it's opened (only the icon changes: no notification, nothing marked on its nodes), and the icon shows a yellow `?` once it's changed (or its text is typed in) after, a green tick when it compiled without errors, a warning when it compiled with warnings, a red cross when it didn't compile (its tooltip says which). The tab shows the script's name, with a `*` while it has unsaved changes. The button is **Reload** for a script whose text is a `.bango` file (a linked script asset): it reads the file again, so edits made to it elsewhere show up. It works on a script whose text didn't read too, so the text can be fixed in the file and reloaded. For an embedded script asset or an inline script, whose text nothing else edits behind the editor's back (outside changes to those are picked up by themselves, below), it's **Revert**: it throws away the unsaved changes, going back to the script as last saved, and is only enabled while there are some. Either way, with unsaved changes it asks first, OK / Cancel, saying they'll be thrown away (Cancel keeps them). Both keep the shown graph (if the script still has it) and its view.
   - **Script Description** (left, first): a box holding the script's description (section 12, Comments), as several lines of text. Enter starts a new line; clicking elsewhere applies it, as one undoable edit (trailing spaces and empty lines at the end are dropped). Saving while typing in it saves what's typed.
-  - **Script Config** (left, after Script Description): the script's settings. Under a small **LOCALIZATION NAMESPACE** heading, a box the width of the pane holds the `#LOCTEXT_NAMESPACE` name (section 3), typed without quotes. Typing a name adds or changes the line, and clearing it removes it, as one undoable edit when the box loses focus or Enter is pressed. Spaces around the name are dropped. Saving while typing in the box saves what's typed. (`#USES_GRAPH_EDITOR` has no box: the editor adds it when nodes are moved, section 12.)
+  - **Script Config** (left, after Script Description): the script's settings. Under a small **LOCALIZATION NAMESPACE** heading, a box the width of the pane holds the `#TEXT_NAMESPACE` name (section 3), typed without quotes. Typing a name adds or changes the line, and clearing it removes it, as one undoable edit when the box loses focus or Enter is pressed. Spaces around the name are dropped. Saving while typing in the box saves what's typed. (`#USES_GRAPH_EDITOR` has no box: the editor adds it when nodes are moved, section 12.)
   - **Functions** (left, last, after Script Vars): the script's functions, in the order they are in the file. Clicking one shows its graph. **+ Add** adds `function void NewFunction()` (numbered if that name is taken), shows it, and starts renaming it. Double-clicking a function, or clicking it again once it's selected, renames it: the name must be a valid identifier that no other function and no command has, and every call to it in the script is renamed too, as one undoable edit. Dragging a function onto a graph adds a call to it where it's dropped (dropped on a pin, the call is wired to it, as with a node from the add-node menu). Its × deletes it, after asking; calls to it are left alone and won't compile until they're removed. Deleting a function can't be undone with Undo (Reload brings it back while it's unsaved). An option to sort functions alphabetically is planned.
   - **Script Description**, **Script Config**, **Script Inputs**, **Global Vars**, **Script Vars** and **Functions** are one after another in a single scrolling pane on the left, in the order their parts come in the script's text, and with the same names as its section headings. Each list is as tall as its rows, so only the pane scrolls; the splitter between the pane and the graph area sets its width.
   - **Side panes keep their width.** The Scripts list, the left pane, the script text pane and the reference pane each have a width in pixels, set by dragging the splitter beside it (no narrower than 120 pixels); resizing the window only changes the graph's width. The Scripts list's width is remembered between sessions.
@@ -2025,11 +2037,11 @@ Problems visible from the line alone show Blueprint's **ERROR!** banner on the n
 - **Fields:** click a value to edit it. Enter or clicking elsewhere applies it; Escape cancels. Every edit is checked before it's applied: the node's text must still read as code for its kind (one line, valid syntax). A refused edit leaves the node alone and a notification says why. Types and names aren't checked until Compile.
   - Clearing an optional field removes it with its separator (`, ` or ` = `). Only the last argument can be removed. An optional argument after a missing one is locked ("fill in the values above first").
   - **Text fields** (any field whose type is `string`, like WriteLog's Msg or a string default) are typed as plain text, without quotes: typing `Say "hi"` saves `"Say \"hi\""`. The string escapes of section 3 are added when saving and removed for editing, so quotes never need escaping. Typing `\n` or `\t` gives a line break or tab, and `\\` a backslash; a backslash before anything else is just a backslash. The field shows the text itself in a normal font (line breaks and tabs as `\n` and `\t`), or *empty text* for `""`.
-  - **Localized text fields** (type `text`, like FormatText's Text) are typed the same way, and show the source text. Typing in an empty one makes a `LOCTEXT` with a new random key; retyping one keeps its key, namespace and notes (or keeps an `INVTEXT` an `INVTEXT`). The arrow at the end of the field opens rows under it, like an FText property's advanced options:
-    - **Translated**: a checkbox. Unchecking it makes the text an `INVTEXT` (its key, namespace and notes are dropped, and the rows below are hidden); checking it makes it a `LOCTEXT` again, with a new key.
+  - **Localized text fields** (type `text`, like FormatText's Text) are typed the same way, and show the source text. Typing in an empty one makes a `TEXT` with a new random key; retyping one keeps its key, namespace and notes (or keeps a `TEXT_INV` a `TEXT_INV`). The arrow at the end of the field opens rows under it, like an FText property's advanced options:
+    - **Translated**: a checkbox. Unchecking it makes the text a `TEXT_INV` (its key, namespace and notes are dropped, and the rows below are hidden); checking it makes it a `TEXT` again, with a new key.
     - **Key**: can't be empty.
-    - **Namespace**: empty means the script's namespace, from Script Start (`LOCTEXT`); filling it in gives `NSLOCTEXT`.
-    - **Notes**: for translators; filling it in gives `NOTELOCTEXT` / `NSNOTELOCTEXT`.
+    - **Namespace**: empty means the script's namespace, from Script Start (`TEXT`); filling it in gives `TEXT_NS`.
+    - **Notes**: for translators; filling it in adds them as the text's last string.
 
     Which rows are open isn't saved.
   - A text field can hold a variable or expression instead: type it after a `=`, like `=_name` or `=Format("{0}", _n)`. Such a field shows `=` and the expression. To start the text itself with `=`, type `\=`. Clearing an optional text field removes it; type `=""` for an empty text.
@@ -2065,7 +2077,7 @@ Problems visible from the line alone show Blueprint's **ERROR!** banner on the n
 ## 14. Example
 
 ```
-#LOCTEXT_NAMESPACE "Examples.Things"
+#TEXT_NAMESPACE "Examples.Things"
 
 global int foundThings;
 global bool playerHasGun;
@@ -2079,13 +2091,13 @@ function void Nag()
 
 if (!isNil(foundThings) && foundThings >= 10)   //@4(0, 3)
 {
-	WriteScreen(ToString(LOCTEXT("FoundTen", "You found at least 10 things!")));    //@5(1, 4)
+	WriteScreen(ToString(TEXT("FoundTen", "You found at least 10 things!")));    //@5(1, 4)
 	questLog Push("Found 10 things");              //@6(1, 5)
 }
 
 for (int _i = 0; _i < 3; _i++)     //@7(0, 6)
 {
-	WriteScreen(ToString(FormatText(LOCTEXT("Countdown", "Countdown: {0}"), 3 - _i)));    //@8(1, 7)
+	WriteScreen(ToString(FormatText(TEXT("Countdown", "Countdown: {0}"), 3 - _i)));    //@8(1, 7)
 	Sleep(1.0);                    //@9(1, 8)
 }
 
@@ -2219,7 +2231,7 @@ An **`FBangoInlineScript`** (a struct, usable in C++ and Blueprint) holds a scri
   - **Another list is another program**: the compiled-program cache, registered conditions and watch groups tell scripts apart by their inputs' names and types as well as their text. Scripts with the same signature and the same list share one (`FindInputsSignature` gives them the same object, with `NumInstanceInputs` saying how many of its inputs, at the end, are the object's own).
   - **A running copy is saved with them** (their declarations; their values are saved as its parameters), so it compiles and carries on the same after loading, whatever its owner's list is by then.
   - **In the editor** they're treated as the signature's are: compiled with as you type, offered by autocomplete with their descriptions, coloured as parameters, listed read-only in SCRIPT INPUTS after the signature's (their tooltips say *Given by this object (its own inputs)*), and listed on the Script Start node. When the owner changes its list, an open box or script editor window checks the script again within a moment, without its text being edited. With several objects selected whose lists differ, the box uses no given inputs, as for different signatures.
-- *Still to come (stage 3):* gathering their `LOCTEXT`s for translation, through an editor-only list of `FText`s kept in the struct, which Gather from Packages finds like any text property.
+- *Still to come (stage 3):* gathering their `TEXT`s for translation, through an editor-only list of `FText`s kept in the struct, which Gather from Packages finds like any text property.
 
 ### Value widgets
 The script editor's widgets for a value's type and a fixed value are public, in the editor module **BangoScriptsScriptEditor** (`BangoValueWidgets.h`), so another editor module can use them: a details panel row for a constant, say. They need no script editor, document or graph: a type, a value's text and callbacks. SCRIPT VARS and GLOBAL VARS use these same widgets. A value is kept as **Bango text** (what a script would have after `=`), which `Bango::ParseFixedValue` (section 4, Fixed values) turns into a value, in the editor and while playing.
@@ -2238,7 +2250,7 @@ SNew(SBangoValueBox)
 - **`SBangoValueBox`**: a one-line box for a fixed value of a type, **typed as a graph node's field is**: a string or a text as plain words, without quotes (`=` first to write code instead, like `=nil`), and anything else as code (`5`, `[0, 0, 100]`, `@john`, `true`).
   - It's **checked as it's typed**: a value that isn't right shows an error mark on the box, with why. Unless `OnCheckValue` is given, the check is `Bango::ParseFixedValue`, so it's the same check as when the value is read.
   - **Committing** (Enter, or the focus leaving): a value that passes is reported as Bango text (`OnValueCommitted`; empty for none); one that doesn't is dropped, the box goes back to the value it had, and `OnValueRejected` gets why. Escape goes back too.
-  - A **`text`** typed as plain words is written `INVTEXT("words")`, or, with a `TextNamespace`, `NSLOCTEXT("Namespace", "<a new key>", "words")` (retyping it keeps its key). `UseScriptNamespace` is for values inside a script, where it's a `LOCTEXT`.
+  - A **`text`** typed as plain words is written `TEXT_INV("words")`, or, with a `TextNamespace`, `TEXT_NS("Namespace", "<a new key>", "words")` (retyping it keeps its key). `UseScriptNamespace` is for values inside a script, where it's a `TEXT`.
   - It's a plain text box: no autocomplete or colouring (SCRIPT VARS has none either). For an entity, a caller can show an actor picker instead, as a constant's row does (Constants, below).
 - **`SBangoActorNamePicker`**: a small button, with the entity icon, whose menu lists **the actors in the open level that have a Bango ID component with a name**, as `@name`, sorted, with each actor's level label as its tooltip; typing in the open menu searches it. It reports the name picked (`OnActorNamePicked`) and changes nothing itself. It's for an entity kept as text, which only a named Bango ID can be: an actor without one isn't listed (a constant's row picks any actor, Constants below). While no level is open in the editor, or none of its actors has a name, the menu says so.
   - **A value box shows one beside the box when its type is `entity` or `entity[]`**: picking an actor makes an `entity`'s value `@name`, and adds `@name` to the end of an `entity[]`'s list (`[@mary]` becomes `[@mary, @john]`; none or `nil` becomes `[@john]`), reported like a typed value (`OnValueCommitted`). So SCRIPT VARS and GLOBAL VARS rows of those types have it.
@@ -2273,7 +2285,7 @@ Bango::UnregisterNodeDecorator(TEXT("SpeechLine"));
 - It's used for the nodes that call the command: a command's node, or a block command's (the command's name is the layout's `CallName`).
 - **What it can change** (`IBangoNodeDecorator`; each is optional, and by default the node is drawn as usual): `GetTitle`, `GetTitleColor`, `GetTitleIcon` (an `FSlateIcon` before the title, and its tint), `GetTooltip` (the node's number still follows it), `MakeFieldValueWidget` (the widget for one field's value, in place of the usual box; the field's label and type icon stay), `HidesField` (leaves a field's row out; it's still in the text), and `MakeExtraContent` (something under the fields).
 - **What stays the graph editor's**: the pins and wires, the other fields and typing in them, autocomplete, undo, compile errors, the debugger's outline, disabling, copying and pasting.
-- **The node's text is still what's saved.** `FBangoNodeDecoratorContext` gives the command's name, the node's layout (its fields, each with its text as written), its text, whether it's a block command's node and whether it's disabled, and `SetFieldValue(FieldIndex, Value, OutError)`: it sets a field to `Value` written as it would be in the script (`"Happy"` with its quotes, `LOCTEXT("UXA010", "Hello")`, `2`; `Bango::GetFieldValueFromTyped`, in `BangoGraphEdit.h`, makes that from what a person typed), as one undoable change, the same as typing it in, and the node is drawn again. A value the field can't take is refused, with why.
+- **The node's text is still what's saved.** `FBangoNodeDecoratorContext` gives the command's name, the node's layout (its fields, each with its text as written), its text, whether it's a block command's node and whether it's disabled, and `SetFieldValue(FieldIndex, Value, OutError)`: it sets a field to `Value` written as it would be in the script (`"Happy"` with its quotes, `TEXT("UXA010", "Hello")`, `2`; `Bango::GetFieldValueFromTyped`, in `BangoGraphEdit.h`, makes that from what a person typed), as one undoable change, the same as typing it in, and the node is drawn again. A value the field can't take is refused, with why.
 - The field widgets and the extra content are made again each time the node is drawn again (after every change), so they can simply show what the layout says. The title, colour, icon and tooltip are asked for as the graph is drawn.
 - Registering again for the same name replaces the decorator. Nodes already on screen pick it up when they're next drawn again. **Unregister it when the module shuts down**: the graph editor would otherwise keep a decorator whose code is gone.
 - Drawing a whole block as one node with a row per statement isn't there yet: a block command's node is decorated like any other, and the statements in its block are nodes of their own.

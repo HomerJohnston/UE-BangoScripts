@@ -172,7 +172,7 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 	{
 		FBangoGraphNode Node;
 		Node.Kind = EBangoGraphNodeKind::Call;
-		Node.Text = TEXT("Say(NOTELOCTEXT(\"Greet\", \"Hello {0}, {1}\", \"Friendly\"), 1)");
+		Node.Text = TEXT("Say(TEXT(\"Greet\", \"Hello {0}, {1}\", \"Friendly\"), 1)");
 		const FBangoNodeLayout Layout = Bango::GetNodeLayout(Node, false, Context);
 		const bool bRows = Layout.Fields.Num() == 3 && Layout.Fields[0].TypeHint == TEXT("text") && Layout.Fields[1].Label == TEXT("{0}")
 			&& Layout.Fields[2].Label == TEXT("{1}") && Layout.Fields[2].bPlaceholder && !Layout.Fields[2].bPresent;
@@ -188,7 +188,7 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 				OutFailures.Add(FString(TEXT("text: the field shows and edits the words, got ")) + Bango::GetFieldDisplayText(Field));
 			}
 			const FString Retyped = Bango::GetFieldValueFromTyped(Field, TEXT("Bye \"{0}\""));
-			if (Retyped != TEXT("NOTELOCTEXT(\"Greet\", \"Bye \\\"{0}\\\"\", \"Friendly\")"))
+			if (Retyped != TEXT("TEXT(\"Greet\", \"Bye \\\"{0}\\\"\", \"Friendly\")"))
 			{
 				OutFailures.Add(FString(TEXT("text: retyping keeps the key and notes, got ")) + Retyped);
 			}
@@ -211,7 +211,7 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 		const FString Fresh = Bango::GetFieldValueFromTyped(Empty, TEXT("New words"));
 		if (!Bango::ParseTextLiteral(Fresh, New) || New.bHasNamespace || New.bHasNotes || New.Key.Len() != 32 || New.Source != TEXT("New words"))
 		{
-			OutFailures.Add(FString(TEXT("text: a new text gets LOCTEXT with a 32-character key, got ")) + Fresh);
+			OutFailures.Add(FString(TEXT("text: a new text gets TEXT with a 32-character key, got ")) + Fresh);
 		}
 		FBangoTextLiteral Other;
 		if (!Bango::ParseTextLiteral(Bango::GetFieldValueFromTyped(Empty, TEXT("New words")), Other) || Other.Key == New.Key)
@@ -219,7 +219,7 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 			OutFailures.Add(TEXT("text: every new text gets its own key"));
 		}
 
-		// Clearing the notes gives LOCTEXT again; a namespace gives NSLOCTEXT.
+		// Clearing the notes gives TEXT again; a namespace gives TEXT_NS.
 		FBangoTextLiteral Literal;
 		Literal.Key = TEXT("K");
 		Literal.Source = TEXT("S");
@@ -230,28 +230,28 @@ static void BangoRunGraphEditScenarios(TArray<FString>& OutFailures)
 		Literal.bHasNamespace = true;
 		Literal.Namespace = TEXT("Ns");
 		const FString WithNamespace = Bango::MakeTextLiteral(Literal);
-		if (WithNotes != TEXT("NOTELOCTEXT(\"K\", \"S\", \"N\")") || WithoutNotes != TEXT("LOCTEXT(\"K\", \"S\")") || WithNamespace != TEXT("NSLOCTEXT(\"Ns\", \"K\", \"S\")"))
+		if (WithNotes != TEXT("TEXT(\"K\", \"S\", \"N\")") || WithoutNotes != TEXT("TEXT(\"K\", \"S\")") || WithNamespace != TEXT("TEXT_NS(\"Ns\", \"K\", \"S\")"))
 		{
 			OutFailures.Add(FString::Printf(TEXT("text: literals written as %s, %s, %s"), *WithNotes, *WithoutNotes, *WithNamespace));
 		}
-		// INVTEXT: only the source.
+		// TEXT_INV: only the source.
 		FBangoTextLiteral Invariant;
-		if (!Bango::ParseTextLiteral(TEXT("INVTEXT(\"Hi \\\"you\\\"\")"), Invariant) || !Invariant.bInvariant || Invariant.Source != TEXT("Hi \"you\"")
-			|| Bango::MakeTextLiteral(Invariant) != TEXT("INVTEXT(\"Hi \\\"you\\\"\")"))
+		if (!Bango::ParseTextLiteral(TEXT("TEXT_INV(\"Hi \\\"you\\\"\")"), Invariant) || !Invariant.bInvariant || Invariant.Source != TEXT("Hi \"you\"")
+			|| Bango::MakeTextLiteral(Invariant) != TEXT("TEXT_INV(\"Hi \\\"you\\\"\")"))
 		{
-			OutFailures.Add(TEXT("text: INVTEXT is read and written with only its source"));
+			OutFailures.Add(TEXT("text: TEXT_INV is read and written with only its source"));
 		}
 		FBangoNodeField InvariantField;
 		InvariantField.TypeHint = TEXT("text");
 		InvariantField.bPresent = true;
-		InvariantField.Text = TEXT("INVTEXT(\"Old\")");
-		if (Bango::GetFieldValueFromTyped(InvariantField, TEXT("New")) != TEXT("INVTEXT(\"New\")") || Bango::GetFieldDisplayText(InvariantField) != TEXT("Old"))
+		InvariantField.Text = TEXT("TEXT_INV(\"Old\")");
+		if (Bango::GetFieldValueFromTyped(InvariantField, TEXT("New")) != TEXT("TEXT_INV(\"New\")") || Bango::GetFieldDisplayText(InvariantField) != TEXT("Old"))
 		{
-			OutFailures.Add(TEXT("text: retyping an INVTEXT keeps it invariant, and it shows its source"));
+			OutFailures.Add(TEXT("text: retyping a TEXT_INV keeps it invariant, and it shows its source"));
 		}
 
 		FBangoTextLiteral Bad;
-		if (Bango::ParseTextLiteral(TEXT("LOCTEXT(\"K\")"), Bad) || Bango::ParseTextLiteral(TEXT("LOCTEXT(\"K\", _s)"), Bad) || Bango::ParseTextLiteral(TEXT("Talk(\"K\", \"S\")"), Bad))
+		if (Bango::ParseTextLiteral(TEXT("TEXT(\"K\")"), Bad) || Bango::ParseTextLiteral(TEXT("TEXT(\"K\", _s)"), Bad) || Bango::ParseTextLiteral(TEXT("Talk(\"K\", \"S\")"), Bad))
 		{
 			OutFailures.Add(TEXT("text: only real text literals are read as one"));
 		}

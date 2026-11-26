@@ -123,7 +123,7 @@ namespace Bango
 	// `=Format("{0}", _n)`); to start the text itself with `=`, type `\=`.
 	//
 	// A field whose type is text (localized) works the same way, but the node gets a text literal: typing `Hello`
-	// gives `LOCTEXT("<new key>", "Hello")`, and retyping an existing text keeps its namespace, key and notes. The
+	// gives `TEXT("<new key>", "Hello")`, and retyping an existing text keeps its namespace, key and notes. The
 	// key, namespace and notes are edited separately (see FBangoTextLiteral).
 
 	/** True if the field holds a string or a text: its value is shown and typed as plain text (see above). */

@@ -847,6 +847,27 @@ namespace Bango
 		return IsPlayerEntityName(Name) ? TEXT("player") : IsSelfEntityName(Name) ? TEXT("self") : nullptr;
 	}
 
+	const TCHAR* GetRenamedTextMacro(const FString& Name)
+	{
+		// v0.133 renamed Unreal's five macros to Bango's three.
+		static const TCHAR* const Renames[][2] =
+		{
+			{ TEXT("LOCTEXT"),       TEXT("TEXT: TEXT(\"Key\", \"Text\")") },
+			{ TEXT("NOTELOCTEXT"),   TEXT("TEXT, with the notes last: TEXT(\"Key\", \"Text\", \"Notes\")") },
+			{ TEXT("NSLOCTEXT"),     TEXT("TEXT_NS: TEXT_NS(\"Namespace\", \"Key\", \"Text\")") },
+			{ TEXT("NSNOTELOCTEXT"), TEXT("TEXT_NS, with the notes last: TEXT_NS(\"Namespace\", \"Key\", \"Text\", \"Notes\")") },
+			{ TEXT("INVTEXT"),       TEXT("TEXT_INV: TEXT_INV(\"Text\")") },
+		};
+		for (const auto& Rename : Renames)
+		{
+			if (Name.Equals(Rename[0], ESearchCase::CaseSensitive))
+			{
+				return Rename[1];
+			}
+		}
+		return nullptr;
+	}
+
 	bool IsReservedWord(const FString& Name)
 	{
 		static const TCHAR* Words[] =
@@ -856,8 +877,12 @@ namespace Bango
 			TEXT("function"), TEXT("global"), TEXT("scriptVar"), TEXT("persistent"), TEXT("true"), TEXT("false"), TEXT("nil"),
 			TEXT("bool"), TEXT("int"), TEXT("float"), TEXT("string"), TEXT("entity"), TEXT("void"),
 			TEXT("text"), TEXT("vector2"), TEXT("vector3"), TEXT("isNil"), TEXT("call"), TEXT("player"), TEXT("self"),
-			TEXT("LOCTEXT"), TEXT("NSLOCTEXT"), TEXT("NOTELOCTEXT"), TEXT("NSNOTELOCTEXT"), TEXT("INVTEXT"),
+			TEXT("TEXT"), TEXT("TEXT_NS"), TEXT("TEXT_INV"),
 		};
+		if (GetRenamedTextMacro(Name))
+		{
+			return true; // the old names, so that using one says what it's called now
+		}
 		for (const TCHAR* Word : Words)
 		{
 			if (Name.Equals(Word, ESearchCase::CaseSensitive))

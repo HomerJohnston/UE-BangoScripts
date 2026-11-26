@@ -21,7 +21,7 @@ struct FBangoTextLiteral;
  * Clicking a value edits it in place. Enter or clicking elsewhere applies the change (if it's valid; otherwise
  * a notification says why and the value stays as it was); Escape cancels.
  *
- * A localized text field (type text, written as LOCTEXT(...) or INVTEXT(...)) shows its source text, plus an arrow
+ * A localized text field (type text, written as TEXT(...) or TEXT_INV(...)) shows its source text, plus an arrow
  * that opens a Translated checkbox and, for a translated text, Key, Namespace and Notes rows under it, like an FText
  * property's advanced options.
  *
@@ -125,12 +125,12 @@ private:
 	TSharedPtr<struct FBangoNodeDecoratorContext> DecoratorContext;
 
 	/**
-	 * Adds the rows of an expanded text field, from row Row on: Translated (LOCTEXT or INVTEXT), then, for a translated
+	 * Adds the rows of an expanded text field, from row Row on: Translated (TEXT or TEXT_INV), then, for a translated
 	 * one, Key, Namespace and Notes. Returns the next free row.
 	 */
 	int32 AddTextPartRows(const TSharedRef<class SGridPanel>& Grid, int32 Row, int32 LabelColumn, int32 ValueColumn, int32 FieldIndex);
 	void OnTextPartCommitted(const FText& NewText, ETextCommit::Type CommitType, int32 FieldIndex, ETextPart Part);
-	/** The Translated checkbox: makes the text a LOCTEXT (with a new key) or an INVTEXT. */
+	/** The Translated checkbox: makes the text a TEXT (with a new key) or a TEXT_INV. */
 	void OnTextTranslatedChanged(ECheckBoxState NewState, int32 FieldIndex);
 	/** Sets a text field to Literal, or shows why it can't be. */
 	void SetTextLiteral(int32 FieldIndex, const FBangoTextLiteral& Literal, FString Error);

@@ -17,7 +17,7 @@ namespace BangoScriptEditor
 	 */
 	UEdGraph* CreateEdGraph(const FBangoGraph& Graph, const TSharedPtr<const FBangoNodeLayoutContext>& LayoutContext);
 
-	/** Puts the script's #LOCTEXT_NAMESPACE on the main graph's Script Start node. */
+	/** Puts the script's #TEXT_NAMESPACE on the main graph's Script Start node. */
 	void SetLocNamespace(UEdGraph* MainGraph, bool bHasLocNamespace, const FString& LocNamespace);
 
 	/** Puts the script's #USES_GRAPH_EDITOR on the main graph's Script Start node. */

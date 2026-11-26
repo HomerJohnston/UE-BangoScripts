@@ -165,10 +165,10 @@ static const TCHAR* const GBangoGraphRoundTripSources[] =
 	TEXT("persistent scriptVar int _visits ?= 0;\npersistent scriptVar string[] _said;\nscriptVar int _now = 1;\n\npersistent int _count ?= 0;\n_count++;\nif (_count > 2)\n{\n\tpersistent bool _told;\n\t_told = true;\n}\n/*\npersistent float _off ?= 1.5;\n*/\n"),
 	TEXT("function int Visit()\n{\n\tpersistent scriptVar int _calls ?= 0;\n\tpersistent int _seen ?= 3;\n\t_calls++;\n\treturn _calls + _seen;\n}\n\nVisit();\n"),
 	// Commands with a block (section 7): a node with a Body output; its block's statements are nodes of their own.
-	TEXT("@john Speech(0, 1)\n{\n\tLine(INVTEXT(\"Hello\"));\n\tif (metBefore)\n\t{\n\t\tLine(INVTEXT(\"Again\"));\n\t}\n\tLine(INVTEXT(\"Bye\"));\n}\nWriteLog(\"done\");\n"),
+	TEXT("@john Speech(0, 1)\n{\n\tLine(TEXT_INV(\"Hello\"));\n\tif (metBefore)\n\t{\n\t\tLine(TEXT_INV(\"Again\"));\n\t}\n\tLine(TEXT_INV(\"Bye\"));\n}\nWriteLog(\"done\");\n"),
 	TEXT("Speech(0) {\n\tLine(1);\n}\n"),
 	TEXT("Speech(0)        //@4(2, 3)\n{\n}\nSpeech(1)        //@5(2, 6)\n{\n\tLine(1);     //@6(4, 7)\n}\n"),
-	TEXT("global bool hasKey;\n\nwhile (true)\n{\n\t@john Prompt()\n\t{\n\t\tOption(INVTEXT(\"Who are you?\"))\n\t\t{\n\t\t\t@john Speech(0, 1)\n\t\t\t{\n\t\t\t\tLine(INVTEXT(\"I'm John.\"));\n\t\t\t}\n\t\t}\n\t\tif (hasKey)\n\t\t{\n\t\t\tOption(INVTEXT(\"I found your key.\"))\n\t\t\t{\n\t\t\t\thasKey = false;\n\t\t\t}\n\t\t}\n\t\tOption(INVTEXT(\"Goodbye.\"))\n\t\t{\n\t\t\tbreak;\n\t\t}\n\t}\n}\n"),
+	TEXT("global bool hasKey;\n\nwhile (true)\n{\n\t@john Prompt()\n\t{\n\t\tOption(TEXT_INV(\"Who are you?\"))\n\t\t{\n\t\t\t@john Speech(0, 1)\n\t\t\t{\n\t\t\t\tLine(TEXT_INV(\"I'm John.\"));\n\t\t\t}\n\t\t}\n\t\tif (hasKey)\n\t\t{\n\t\t\tOption(TEXT_INV(\"I found your key.\"))\n\t\t\t{\n\t\t\t\thasKey = false;\n\t\t\t}\n\t\t}\n\t\tOption(TEXT_INV(\"Goodbye.\"))\n\t\t{\n\t\t\tbreak;\n\t\t}\n\t}\n}\n"),
 	TEXT("function void Talk(entity _who)\n{\n\t_who Speech(0, 1)\n\t{\n\t\tLine(1);\n\t\treturn;\n\t}\n}\n\n/*\nSpeech(0)\n{\n\tLine(1);\n}\n*/\nTalk(@john);\n"),
 	// The spec's example (section 13).
 	TEXT("global int foundThings;            //@1(0, 0)\n")
@@ -456,7 +456,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 	// ---- Large Script Threshold: below it, written compact (no headings, no metadata) ----
 	{
 		const TCHAR* Source =
-			TEXT("#LOCTEXT_NAMESPACE \"N\"\n")
+			TEXT("#TEXT_NAMESPACE \"N\"\n")
 			TEXT("\n")
 			TEXT("// ============ SCRIPT INPUTS ===================\n")
 			TEXT("\n")
@@ -468,7 +468,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			TEXT("                          //@3(5, 0)\n")
 			TEXT("Talk(\"You got a pistol!\");    //@2(10, 0)\n");
 		const TCHAR* Compact =
-			TEXT("#LOCTEXT_NAMESPACE \"N\"\n")
+			TEXT("#TEXT_NAMESPACE \"N\"\n")
 			TEXT("\n")
 			TEXT("#inputs (int _n)\n")
 			TEXT("\n")
@@ -491,7 +491,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		FBangoGraphDocument Own;
 		const bool bOwnBuilt = Bango::BuildGraph(FString(TEXT("#USES_GRAPH_EDITOR\n")) + Source, TEXT("own.bango"), Own, Error);
 		Expect(bOwnBuilt && Own.bUsesGraphEditor && !Bango::IsWrittenCompact(Own, Options), FString(TEXT("uses graph editor: with the flag, in full: ")) + Error.ToString());
-		Expect(bOwnBuilt && Bango::WriteGraphText(Own, Text, WriteError, Options) && Text.StartsWith(TEXT("#LOCTEXT_NAMESPACE \"N\"\n#USES_GRAPH_EDITOR\n"), ESearchCase::CaseSensitive)
+		Expect(bOwnBuilt && Bango::WriteGraphText(Own, Text, WriteError, Options) && Text.StartsWith(TEXT("#TEXT_NAMESPACE \"N\"\n#USES_GRAPH_EDITOR\n"), ESearchCase::CaseSensitive)
 			&& Text.Contains(TEXT("//@1(0, 0)")) && Text.Contains(TEXT("// ============ SCRIPT BODY")),
 			FString(TEXT("uses graph editor: the #USES_GRAPH_EDITOR line is written after the namespace, and the node metadata:\n")) + Text);
 		FBangoGraphDocument Changed = Own;
@@ -585,18 +585,18 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		Expect(Bango::BuildGraph(ElseText, TEXT("disabled.bango"), ElseDoc, Error) && ElseDoc == Doc, FString(TEXT("Disabled nodes: a disabled else-if reads back the same: ")) + Error.ToString());
 	}
 
-	// ---- LOCTEXT_NAMESPACE and text: #LOCTEXT_NAMESPACE above the inputs (read after them too), text literals kept as written ----
+	// ---- TEXT_NAMESPACE and text: #TEXT_NAMESPACE above the inputs (read after them too), text literals kept as written ----
 	{
 		const TCHAR* Source =
 			TEXT("\n") // so the comment below isn't the script's description (that's only on line 1)
 			TEXT("// About the script\n")
 			TEXT("#inputs (text _line = nil)\n")
-			TEXT("#LOCTEXT_NAMESPACE \"Bango.Intro\"\n")
+			TEXT("#TEXT_NAMESPACE \"Bango.Intro\"\n")
 			TEXT("// About the hint\n")
-			TEXT("Say(NSNOTELOCTEXT(\"Other\", \"K\", \"Hello {0}\", \"Said slowly\"), 1); //@1(10, 0)\n")
-			TEXT("function void F()\n{\n\tSay(LOCTEXT(\"F\", \"In F\")); //@2(0, 0)\n}\n");
+			TEXT("Say(TEXT_NS(\"Other\", \"K\", \"Hello {0}\", \"Said slowly\"), 1); //@1(10, 0)\n")
+			TEXT("function void F()\n{\n\tSay(TEXT(\"F\", \"In F\")); //@2(0, 0)\n}\n");
 		const TCHAR* Expected =
-			TEXT("#LOCTEXT_NAMESPACE \"Bango.Intro\"\n")
+			TEXT("#TEXT_NAMESPACE \"Bango.Intro\"\n")
 			TEXT("\n")
 			TEXT("// ============ SCRIPT INPUTS ===================\n")
 			TEXT("\n")
@@ -606,21 +606,21 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			TEXT("// ============ SCRIPT BODY =====================\n")
 			TEXT("\n")
 			TEXT("// About the hint\n")
-			TEXT("Say(NSNOTELOCTEXT(\"Other\", \"K\", \"Hello {0}\", \"Said slowly\"), 1);    //@1(10, 0)\n")
+			TEXT("Say(TEXT_NS(\"Other\", \"K\", \"Hello {0}\", \"Said slowly\"), 1);    //@1(10, 0)\n")
 			TEXT("\n")
 			TEXT("// ============ FUNCTIONS =======================\n")
 			TEXT("\n")
 			TEXT("function void F()\n")
 			TEXT("{\n")
-			TEXT("\tSay(LOCTEXT(\"F\", \"In F\"));                                      //@2(0, 0)\n")
+			TEXT("\tSay(TEXT(\"F\", \"In F\"));                                   //@2(0, 0)\n")
 			TEXT("}\n");
 		FBangoGraphDocument Doc;
 		FBangoCompileError Error;
 		FString Text;
 		FString WriteError;
 		const bool bBuilt = Bango::BuildGraph(Source, TEXT("text.bango"), Doc, Error);
-		Expect(bBuilt && Doc.bHasLocNamespace && Doc.LocNamespace == FString(TEXT("Bango.Intro")), FString(TEXT("LOCTEXT_NAMESPACE: read into the document: ")) + Error.ToString());
-		Expect(bBuilt && Bango::WriteGraphText(Doc, Text, WriteError) && Text == FString(Expected), FString(TEXT("LOCTEXT_NAMESPACE: saved above the inputs:\n")) + Text);
+		Expect(bBuilt && Doc.bHasLocNamespace && Doc.LocNamespace == FString(TEXT("Bango.Intro")), FString(TEXT("TEXT_NAMESPACE: read into the document: ")) + Error.ToString());
+		Expect(bBuilt && Bango::WriteGraphText(Doc, Text, WriteError) && Text == FString(Expected), FString(TEXT("TEXT_NAMESPACE: saved above the inputs:\n")) + Text);
 
 		// The namespace line comes after the description, then the inputs.
 		{
@@ -628,7 +628,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				TEXT("// Description line\n")
 				TEXT("// More description lines\n")
 				TEXT("\n")
-				TEXT("#LOCTEXT_NAMESPACE \"BangoTest\"\n")
+				TEXT("#TEXT_NAMESPACE \"BangoTest\"\n")
 				TEXT("\n")
 				TEXT("// ============ SCRIPT INPUTS ===================\n")
 				TEXT("\n")
@@ -641,9 +641,9 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			FString ConfigText;
 			const bool bConfigBuilt = Bango::BuildGraph(Configured, TEXT("config.bango"), ConfigDoc, Error);
 			Expect(bConfigBuilt && ConfigDoc.Description == FString(TEXT("Description line\nMore description lines")) && ConfigDoc.LocNamespace == FString(TEXT("BangoTest"))
-				&& ConfigDoc.Main.Nodes[0].Comment.IsEmpty(), FString(TEXT("LOCTEXT_NAMESPACE: read under the description: ")) + Error.ToString());
+				&& ConfigDoc.Main.Nodes[0].Comment.IsEmpty(), FString(TEXT("TEXT_NAMESPACE: read under the description: ")) + Error.ToString());
 			Expect(bConfigBuilt && Bango::WriteGraphText(ConfigDoc, ConfigText, WriteError) && ConfigText == FString(Configured),
-				FString(TEXT("LOCTEXT_NAMESPACE: under the description, written back the same:\n")) + ConfigText + WriteError);
+				FString(TEXT("TEXT_NAMESPACE: under the description, written back the same:\n")) + ConfigText + WriteError);
 		}
 
 		// The FUNCTIONS heading: written on save, skipped when read. A line of dashes between functions (files used to
@@ -744,14 +744,14 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		}
 
 		FBangoGraphDocument NoParams;
-		Expect(Bango::BuildGraph(TEXT("#LOCTEXT_NAMESPACE \"A\"\n"), TEXT("ns.bango"), NoParams, Error) && Bango::WriteGraphText(NoParams, Text, WriteError)
-			&& Text == FString(TEXT("#LOCTEXT_NAMESPACE \"A\"\n")), FString(TEXT("LOCTEXT_NAMESPACE: without inputs or statements:\n")) + Text);
+		Expect(Bango::BuildGraph(TEXT("#TEXT_NAMESPACE \"A\"\n"), TEXT("ns.bango"), NoParams, Error) && Bango::WriteGraphText(NoParams, Text, WriteError)
+			&& Text == FString(TEXT("#TEXT_NAMESPACE \"A\"\n")), FString(TEXT("TEXT_NAMESPACE: without inputs or statements:\n")) + Text);
 		FBangoGraphDocument Commented;
-		Expect(Bango::BuildGraph(TEXT("\n// Hi\n#LOCTEXT_NAMESPACE \"A\"\n"), TEXT("ns.bango"), Commented, Error) && Bango::WriteGraphText(Commented, Text, WriteError)
-			&& Text == FString(TEXT("#LOCTEXT_NAMESPACE \"A\"\n\n// ============ SCRIPT INPUTS ===================\n\n// Hi\n#inputs ()\n")), FString(TEXT("LOCTEXT_NAMESPACE: a comment on it is Script Start's, written above an empty inputs line:\n")) + Text);
+		Expect(Bango::BuildGraph(TEXT("\n// Hi\n#TEXT_NAMESPACE \"A\"\n"), TEXT("ns.bango"), Commented, Error) && Bango::WriteGraphText(Commented, Text, WriteError)
+			&& Text == FString(TEXT("#TEXT_NAMESPACE \"A\"\n\n// ============ SCRIPT INPUTS ===================\n\n// Hi\n#inputs ()\n")), FString(TEXT("TEXT_NAMESPACE: a comment on it is Script Start's, written above an empty inputs line:\n")) + Text);
 		FBangoGraphDocument Changed = NoParams;
 		Changed.LocNamespace = TEXT("B");
-		Expect(Changed != NoParams, TEXT("LOCTEXT_NAMESPACE: part of what makes two documents different"));
+		Expect(Changed != NoParams, TEXT("TEXT_NAMESPACE: part of what makes two documents different"));
 	}
 
 	// ---- Reroutes: a line with only //@ is a reroute node; saving writes it back the same way ----
@@ -987,7 +987,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		// their comments, written at the top in a fixed layout.
 		{
 			const TCHAR* DeclSource =
-				TEXT("#LOCTEXT_NAMESPACE \"Decls\"\n")
+				TEXT("#TEXT_NAMESPACE \"Decls\"\n")
 				TEXT("\n")
 				TEXT("// ============ SCRIPT INPUTS ===================\n")
 				TEXT("\n")
@@ -1004,7 +1004,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 				TEXT("\n")
 				TEXT("// how many\n")
 				TEXT("scriptVar int _count = 0;\n")
-				TEXT("scriptVar text _t = LOCTEXT(\"k\", \"a = b\");\n")
+				TEXT("scriptVar text _t = TEXT(\"k\", \"a = b\");\n")
 				TEXT("scriptVar vector3 _p = [0, -1, 2.5];\n")
 				TEXT("\n")
 				TEXT("// ============ SCRIPT BODY =====================\n")
@@ -1034,7 +1034,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 					&& DeclDoc.Globals[1].Type == FString(TEXT("string[]")) && !DeclDoc.Globals[1].bHasValue
 					&& DeclDoc.Globals[2].bHasValue && DeclDoc.Globals[2].Value == FString(TEXT("1")), TEXT("declarations: globals, with their comments and defaults"));
 				Expect(DeclDoc.Main.ScriptVars.Num() == 3 && DeclDoc.Main.ScriptVars[0].Value == FString(TEXT("0")) && DeclDoc.Main.ScriptVars[0].Comment == FString(TEXT("how many"))
-					&& DeclDoc.Main.ScriptVars[1].Value == FString(TEXT("LOCTEXT(\"k\", \"a = b\")")) && DeclDoc.Main.ScriptVars[2].Value == FString(TEXT("[0, -1, 2.5]")),
+					&& DeclDoc.Main.ScriptVars[1].Value == FString(TEXT("TEXT(\"k\", \"a = b\")")) && DeclDoc.Main.ScriptVars[2].Value == FString(TEXT("[0, -1, 2.5]")),
 					TEXT("declarations: the main graph's script variables and their values"));
 				Expect(DeclDoc.Main.Nodes.Num() == 2 && DeclDoc.Functions.Num() == 2 && DeclDoc.Functions[0].ScriptVars.Num() == 1 && DeclDoc.Functions[0].ScriptVars[0].Value == FString(TEXT("true"))
 					&& DeclDoc.Functions[1].ScriptVars.Num() == 1 && !DeclDoc.Functions[1].ScriptVars[0].bHasValue, TEXT("declarations: no nodes for them; functions have their own script variables"));

@@ -1003,9 +1003,9 @@ int32 SBangoGraphNode::AddTextPartRows(const TSharedRef<SGridPanel>& Grid, int32
 		return Row; // no longer a literal (like after typing =expression); nothing to show
 	}
 
-	// Translated: a LOCTEXT (and the like) is gathered for translators; an INVTEXT is shown as it is in every language.
+	// Translated: a TEXT (and the like) is gathered for translators; a TEXT_INV is shown as it is in every language.
 	{
-		const FText TranslatedTip = LOCTEXT("TranslatedTip", "Checked: translators translate this text (LOCTEXT), and it has a key, a namespace and notes.\nUnchecked: it's shown as it is in every language (INVTEXT), like a name or a debug message.");
+		const FText TranslatedTip = LOCTEXT("TranslatedTip", "Checked: translators translate this text (TEXT), and it has a key, a namespace and notes.\nUnchecked: it's shown as it is in every language (TEXT_INV), like a name or a debug message.");
 		Grid->AddSlot(LabelColumn, Row)
 			.VAlign(VAlign_Fill)
 			.Padding(10.0f, 1.0f, 8.0f, 1.0f)
@@ -1049,9 +1049,9 @@ int32 SBangoGraphNode::AddTextPartRows(const TSharedRef<SGridPanel>& Grid, int32
 		{ ETextPart::Key, LOCTEXT("KeyLabel", "Key"), Literal.Key, FText(),
 			LOCTEXT("KeyTip", "Identifies this text for translators. Made up for you when the text is first typed; change it to something readable if you like.\nEach key can be used for only one text in its namespace.") },
 		{ ETextPart::Namespace, LOCTEXT("NamespaceLabel", "Namespace"), Literal.bHasNamespace ? Literal.Namespace : FString(), LOCTEXT("NamespaceHint", "script's namespace"),
-			LOCTEXT("NamespaceTip", "Leave empty to use the script's namespace (Namespace in the SCRIPT CONFIG panel). Fill in to use another one (NSLOCTEXT).") },
+			LOCTEXT("NamespaceTip", "Leave empty to use the script's namespace (Namespace in the SCRIPT CONFIG panel). Fill in to use another one (TEXT_NS).") },
 		{ ETextPart::Notes, LOCTEXT("NotesLabel", "Notes"), Literal.Notes, LOCTEXT("NotesHint", "none"),
-			LOCTEXT("NotesTip", "Shown to translators with this text, like who's speaking or where it appears (NOTELOCTEXT).") },
+			LOCTEXT("NotesTip", "Shown to translators with this text, like who's speaking or where it appears (TEXT).") },
 	};
 	for (const FPartRow& Part : Parts)
 	{

@@ -114,7 +114,7 @@ public:
 	TSharedPtr<const FBangoNodeLayoutContext> LayoutContext;
 
 	/**
-	 * The main Script Start node only: the script's `#LOCTEXT_NAMESPACE "..."` line, edited in the SCRIPT CONFIG panel
+	 * The main Script Start node only: the script's `#TEXT_NAMESPACE "..."` line, edited in the SCRIPT CONFIG panel
 	 * (SetLocNamespace). Kept here, not in Text, since it isn't part of the inputs line.
 	 */
 	UPROPERTY()
@@ -194,7 +194,7 @@ public:
 	bool SetFieldValue(int32 FieldIndex, const FString& Value, FString& OutError);
 
 	/**
-	 * The main Script Start node only: sets the script's namespace (the #LOCTEXT_NAMESPACE line) as an undoable
+	 * The main Script Start node only: sets the script's namespace (the #TEXT_NAMESPACE line) as an undoable
 	 * edit, from what was typed in SCRIPT CONFIG (a name, without quotes). Spaces around it are dropped; empty removes the
 	 * line. False if nothing changed.
 	 */

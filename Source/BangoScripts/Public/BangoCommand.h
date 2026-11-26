@@ -129,7 +129,7 @@ struct BANGOSCRIPTS_API FBangoCommandSignature
 	FString VariadicLabelSuffix;
 	/**
 	 * The parameter whose text has placeholders for the extra values, or INDEX_NONE: {0}, {1}, ... for a string
-	 * parameter, {0}, {1}, ... for a text one. When it's written out (a string or a LOCTEXT), the compiler checks
+	 * parameter, {0}, {1}, ... for a text one. When it's written out (a string or a TEXT), the compiler checks
 	 * every placeholder has a value, and the graph editor shows a row for every placeholder, even ones with no
 	 * value yet.
 	 */

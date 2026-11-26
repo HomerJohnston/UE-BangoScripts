@@ -526,7 +526,7 @@ private:
 	void UpdateDescriptionBox();
 
 	// SCRIPT CONFIG
-	/** The script's localization namespace (#LOCTEXT_NAMESPACE), from the main Script Start node; empty if it has none. */
+	/** The script's localization namespace (#TEXT_NAMESPACE), from the main Script Start node; empty if it has none. */
 	FString GetScriptNamespace() const;
 	/** Sets the namespace from what was typed (empty removes the line), as one undoable edit. */
 	void SetScriptNamespace(const FString& Typed);

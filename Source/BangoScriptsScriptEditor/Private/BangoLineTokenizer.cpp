@@ -40,7 +40,8 @@ namespace BangoLineTokenizerPrivate
 	static const TCHAR* const OtherKeywords[]  = { TEXT("isNil"), TEXT("call") }; // keywords that aren't flow control: coloured like it
 	static const TCHAR* const VectorParts[]    = { TEXT("x"), TEXT("y"), TEXT("z") };
 
-	// Localized-text macros and the role of each string argument, by position.
+	// Localized-text macros and the role of each string argument, by position. The notes are last and may be left
+	// out, so the roles by position are the same either way.
 	enum class ELocRole : uint8 { Key, Source, Notes };
 
 	struct FLocMacro
@@ -52,11 +53,9 @@ namespace BangoLineTokenizerPrivate
 
 	static const FLocMacro LocMacros[] =
 	{
-		{ TEXT("LOCTEXT"),       2, { ELocRole::Key, ELocRole::Source } },
-		{ TEXT("NSLOCTEXT"),     3, { ELocRole::Key, ELocRole::Key, ELocRole::Source } },
-		{ TEXT("NOTELOCTEXT"),   3, { ELocRole::Key, ELocRole::Source, ELocRole::Notes } },
-		{ TEXT("NSNOTELOCTEXT"), 4, { ELocRole::Key, ELocRole::Key, ELocRole::Source, ELocRole::Notes } },
-		{ TEXT("INVTEXT"),       1, { ELocRole::Source } },
+		{ TEXT("TEXT"),     3, { ELocRole::Key, ELocRole::Source, ELocRole::Notes } },
+		{ TEXT("TEXT_NS"),  4, { ELocRole::Key, ELocRole::Key, ELocRole::Source, ELocRole::Notes } },
+		{ TEXT("TEXT_INV"), 1, { ELocRole::Source } },
 	};
 
 	enum class EStringStyle : uint8 { Plain, LocKey, LocSource, LocNotes };
@@ -82,7 +81,7 @@ namespace BangoLineTokenizerPrivate
 				SkipSpaces();
 			}
 
-			// A settings line: #inputs, #LOCTEXT_NAMESPACE or #USES_GRAPH_EDITOR, as one token.
+			// A settings line: #inputs, #TEXT_NAMESPACE or #USES_GRAPH_EDITOR, as one token.
 			if (Pos < Len && Line[Pos] == TEXT('#'))
 			{
 				const int32 Start = Pos++;

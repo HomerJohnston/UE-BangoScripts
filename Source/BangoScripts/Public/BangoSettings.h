@@ -25,7 +25,7 @@ struct BANGOSCRIPTS_API FBangoDefineSetting
 
 	/**
 	 * Its value as Bango text, as a script variable's starting value is written (`3`, `"north"`, `@narrator`,
-	 * `[1, 2]`); empty is nil. It may use the defines above it. A text is written INVTEXT("..."): a define isn't
+	 * `[1, 2]`); empty is nil. It may use the defines above it. A text is written TEXT_INV("..."): a define isn't
 	 * gathered for translation.
 	 */
 	UPROPERTY(EditAnywhere, Category = "Define")

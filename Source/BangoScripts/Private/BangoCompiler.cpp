@@ -269,12 +269,12 @@ namespace BangoCompilerPrivate
 		/** Every text literal's "namespace\nkey", and the first literal that used it (spec section 3, keys must be unique). */
 		TMap<FString, const FBangoLiteralExpr*> TextKeys;
 
-		/** The value of a text literal: localized text with its namespace (the script's LOCTEXT_NAMESPACE for LOCTEXT) and key. */
+		/** The value of a text literal: localized text with its namespace (the script's TEXT_NAMESPACE for TEXT) and key. */
 		bool MakeTextValue(const FBangoLiteralExpr& Lit, FBangoValue& OutValue)
 		{
 			if (Lit.bTextInvariant)
 			{
-				// INVTEXT: never translated, so it needs no namespace or key.
+				// TEXT_INV: never translated, so it needs no namespace or key.
 				OutValue = FBangoValue::MakeText(Bango::MakeInvariantText(Lit.StringValue));
 				return true;
 			}
@@ -289,7 +289,7 @@ namespace BangoCompilerPrivate
 			}
 			else
 			{
-				return Fail(Lit.Loc, TEXT("This text needs the script's namespace: add the line #LOCTEXT_NAMESPACE \"Bango.Intro\" at the top of the script (under its description). (NSLOCTEXT and NSNOTELOCTEXT give their own namespace instead.)"));
+				return Fail(Lit.Loc, TEXT("This text needs the script's namespace: add the line #TEXT_NAMESPACE \"Bango.Intro\" at the top of the script (under its description). (TEXT_NS gives its own namespace instead.)"));
 			}
 
 			const FString Id = Namespace + TEXT("\n") + Lit.TextKey;
@@ -625,7 +625,7 @@ namespace BangoCompilerPrivate
 			{
 				if (Left.Is(FBangoType::Text()) || Right.Is(FBangoType::Text()))
 				{
-					return Fail(Loc, TEXT("Texts can't be joined with '+': other languages may need the parts in another order. Put the parts in one text with placeholders instead: FormatText(LOCTEXT(\"Key\", \"{0} {1}\"), _a, _b)."));
+					return Fail(Loc, TEXT("Texts can't be joined with '+': other languages may need the parts in another order. Put the parts in one text with placeholders instead: FormatText(TEXT(\"Key\", \"{0} {1}\"), _a, _b)."));
 				}
 				const bool bLeftString = Left.Is(FBangoType::String());
 				const bool bRightString = Right.Is(FBangoType::String());
@@ -4436,9 +4436,9 @@ namespace Bango
 		{
 			// Said about the value, not the variable it was read as.
 			OutError = Error.Message.Replace(*FString::Printf(TEXT("'%s'"), VarName), TEXT("This value"), ESearchCase::CaseSensitive);
-			if (OutError.Contains(TEXT("LOCTEXT_NAMESPACE"), ESearchCase::CaseSensitive))
+			if (OutError.Contains(TEXT("TEXT_NAMESPACE"), ESearchCase::CaseSensitive))
 			{
-				OutError = TEXT("A LOCTEXT takes its namespace from a script, and there's none here. Write the text as INVTEXT(\"...\") (never translated) or NSLOCTEXT(\"Namespace\", \"Key\", \"...\").");
+				OutError = TEXT("A TEXT takes its namespace from a script, and there's none here. Write the text as TEXT_INV(\"...\") (never translated) or TEXT_NS(\"Namespace\", \"Key\", \"...\").");
 			}
 			return false;
 		}

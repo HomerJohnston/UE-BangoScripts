@@ -200,7 +200,7 @@ struct BANGOSCRIPTS_API FBangoGraphDocument
 	 */
 	FString Description;
 
-	/** The script's `#LOCTEXT_NAMESPACE "..."` line (see FBangoScript::LocNamespace). Saved after the description, above the inputs line. Edited in the editor's SCRIPT CONFIG panel. */
+	/** The script's `#TEXT_NAMESPACE "..."` line (see FBangoScript::LocNamespace). Saved after the description, above the inputs line. Edited in the editor's SCRIPT CONFIG panel. */
 	bool bHasLocNamespace = false;
 	FString LocNamespace;
 

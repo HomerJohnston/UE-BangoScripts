@@ -331,7 +331,7 @@ FString SBangoValueBox::ToBangoText(const FString& Typed) const
 	FString Result = Bango::GetFieldValueFromTyped(Field, Typed).TrimStartAndEnd();
 	if (!bUseScriptNamespace && !Result.IsEmpty() && Bango::IsLocalizedTextField(Field))
 	{
-		// Plain words became a LOCTEXT, which takes its namespace from a script. There's none around this value.
+		// Plain words became a TEXT, which takes its namespace from a script. There's none around this value.
 		FBangoTextLiteral Literal;
 		if (Bango::ParseTextLiteral(Result, Literal) && !Literal.bInvariant && !Literal.bHasNamespace)
 		{

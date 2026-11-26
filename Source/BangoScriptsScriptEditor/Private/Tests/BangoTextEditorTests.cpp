@@ -67,9 +67,9 @@ bool FBangoLineTokenizerTest::RunTest(const FString& Parameters)
 	Check(TEXT("global int foundThings ?= 0;"), TEXT("DeclKeyword[global] Type[int] Global[foundThings] Operator[?=] Number[0] Punctuation[;]"));
 	Check(TEXT("\tglobal bool opened = true;      //@1(0, 0)"), TEXT("DeclKeyword[global] Type[bool] Global[opened] Operator[=] Constant[true] Punctuation[;] Metadata[//@1(0, 0)]"));
 	Check(TEXT("if (isNil(foundThings) && foundThings >= 10)"), TEXT("Keyword[if] Punctuation[(] Keyword[isNil] Punctuation[(] Global[foundThings] Punctuation[)] Operator[&&] Global[foundThings] Operator[>=] Number[10]"));
-	Check(TEXT("\tHint(LOCTEXT(\"Countdown\", \"Countdown: {0}\"), 3 - _i);"), TEXT("Call[Hint] Punctuation[(] LocMacro[LOCTEXT] Punctuation[(] LocKey[\"Countdown\"] Punctuation[,] String[\"Countdown: ] Placeholder[{0}] String[\"] Punctuation[)] Punctuation[,] Number[3] Operator[-] Global[_i]"));
-	Check(TEXT("Hint(NSNOTELOCTEXT(\"Ns\", \"K\", \"Hi {Name} `{\", \"note\"));"), TEXT("LocKey[\"Ns\"] Punctuation[,] LocKey[\"K\"] Punctuation[,] String[\"Hi ] Error[{Name}] String[ ] StringEscape[`{] String[\"] Punctuation[,] LocNotes[\"note\"]"));
-	Check(TEXT("Hint(INVTEXT(\"Score {0}\"), 1);"), TEXT("Call[Hint] Punctuation[(] LocMacro[INVTEXT] Punctuation[(] String[\"Score ] Placeholder[{0}] String[\"] Punctuation[)] Punctuation[,] Number[1]"));
+	Check(TEXT("\tHint(TEXT(\"Countdown\", \"Countdown: {0}\"), 3 - _i);"), TEXT("Call[Hint] Punctuation[(] LocMacro[TEXT] Punctuation[(] LocKey[\"Countdown\"] Punctuation[,] String[\"Countdown: ] Placeholder[{0}] String[\"] Punctuation[)] Punctuation[,] Number[3] Operator[-] Global[_i]"));
+	Check(TEXT("Hint(TEXT_NS(\"Ns\", \"K\", \"Hi {Name} `{\", \"note\"));"), TEXT("LocKey[\"Ns\"] Punctuation[,] LocKey[\"K\"] Punctuation[,] String[\"Hi ] Error[{Name}] String[ ] StringEscape[`{] String[\"] Punctuation[,] LocNotes[\"note\"]"));
+	Check(TEXT("Hint(TEXT_INV(\"Score {0}\"), 1);"), TEXT("Call[Hint] Punctuation[(] LocMacro[TEXT_INV] Punctuation[(] String[\"Score ] Placeholder[{0}] String[\"] Punctuation[)] Punctuation[,] Number[1]"));
 	Check(TEXT("Log(\"{0} and `{ \\n \\q {Name}\", _a);"), TEXT("String[\"] Placeholder[{0}] String[ and ] StringEscape[`{] String[ ] StringEscape[\\n] String[ ] Error[\\q] String[ {Name}\"]"));
 	Check(TEXT("@john Speak(\"Hi\");"), TEXT("Entity[@john] Call[Speak]"));
 	Check(TEXT("label Check;"), TEXT("LabelKeyword[label] LabelName[Check] Punctuation[;]"));
@@ -81,7 +81,7 @@ bool FBangoLineTokenizerTest::RunTest(const FString& Parameters)
 	Check(TEXT("float _d = 1. + .5 + 12abc + 2.5e-3;"), TEXT("Type[float] Global[_d] Operator[=] Error[1.] Operator[+] Error[.5] Operator[+] Error[12abc] Operator[+] Number[2.5e-3]"));
 	Check(TEXT("#inputs (entity _speaker, int _n = 1, entity _l = nil)"), TEXT("Preprocessor[#inputs] Punctuation[(] Type[entity] Global[_speaker]"));
 	Check(TEXT("#inputs (entity _speaker, int _n = 1, entity _l = nil)"), TEXT("Nil[nil] Punctuation[)]"));
-	Check(TEXT("#LOCTEXT_NAMESPACE \"Quest.Intro\""), TEXT("Preprocessor[#LOCTEXT_NAMESPACE] String[\"Quest.Intro\"]"));
+	Check(TEXT("#TEXT_NAMESPACE \"Quest.Intro\""), TEXT("Preprocessor[#TEXT_NAMESPACE] String[\"Quest.Intro\"]"));
 	Check(TEXT("#USES_GRAPH_EDITOR"), TEXT("Preprocessor[#USES_GRAPH_EDITOR]"));
 	Check(TEXT("//~ if (true)               //@3(20, 20)"), TEXT("DisconnectedMarker[//~] Keyword~[if] Punctuation~[(] Constant~[true] Punctuation~[)] Metadata~[//@3(20, 20)]"));
 	Check(TEXT("//~"), TEXT("DisconnectedMarker[//~]"));
@@ -96,8 +96,8 @@ bool FBangoLineTokenizerTest::RunTest(const FString& Parameters)
 	Check(TEXT("Log(\"unterminated);"), TEXT("Call[Log] Punctuation[(] Error[\"unterminated);]"));
 	Check(TEXT("_x++; _y -= 2; _z *= 3;"), TEXT("Global[_x] Operator[++] Punctuation[;] Global[_y] Operator[-=]"));
 	Check(TEXT("@ john"), TEXT("Error[@] Global[john]"));
-	Check(TEXT("Hint(LOCTEXT(\"K\", Format(\"{0}\", 1)), \"{1}\");"), TEXT("LocKey[\"K\"] Punctuation[,] Call[Format] Punctuation[(] String[\"] Placeholder[{0}]"));
-	Check(TEXT("Hint(LOCTEXT(\"K\", \"s\"), \"{1}\");"), TEXT("Punctuation[)] Punctuation[,] String[\"] Placeholder[{1}] String[\"]"));
+	Check(TEXT("Hint(TEXT(\"K\", Format(\"{0}\", 1)), \"{1}\");"), TEXT("LocKey[\"K\"] Punctuation[,] Call[Format] Punctuation[(] String[\"] Placeholder[{0}]"));
+	Check(TEXT("Hint(TEXT(\"K\", \"s\"), \"{1}\");"), TEXT("Punctuation[)] Punctuation[,] String[\"] Placeholder[{1}] String[\"]"));
 	Check(TEXT("vector3 _p = [1, 2, 3];"), TEXT("Type[vector3] Global[_p]"));
 	Check(TEXT("bool _b = !_c != false;"), TEXT("Operator[!] Global[_c] Operator[!=] Constant[false]"));
 	Check(TEXT(""), TEXT(""));
@@ -259,7 +259,7 @@ bool FBangoScriptNamesTest::RunTest(const FString& Parameters)
 {
 	const TCHAR* Source =
 		TEXT("#inputs (entity speaker, int _rounds = 3)\n")
-		TEXT("#LOCTEXT_NAMESPACE \"Q\"\n")
+		TEXT("#TEXT_NAMESPACE \"Q\"\n")
 		TEXT("// ============ GLOBAL VARS ====================\n")
 		TEXT("global int foundThings;\n")
 		TEXT("global string[] questLog;\n")
@@ -619,7 +619,9 @@ bool FBangoCompletionTest::RunTest(const FString& Parameters)
 			}
 			else if (Keyword.bCallable)
 			{
-				TestTrue(TEXT("isNil goes in with its bracket, like a call"), Keyword.Name == TEXT("isNil") && KeywordInsert.Text == TEXT("isNil(") && KeywordInsert.bOpenParen);
+				// isNil and the text macros (TEXT, TEXT_NS, TEXT_INV)
+				TestTrue(*FString::Printf(TEXT("'%s' goes in with its bracket, like a call"), *Keyword.Name),
+					(Keyword.Name == TEXT("isNil") || Keyword.Name.StartsWith(TEXT("TEXT"), ESearchCase::CaseSensitive)) && KeywordInsert.Text == Keyword.Name + TEXT("(") && KeywordInsert.bOpenParen);
 			}
 			else
 			{
@@ -672,7 +674,7 @@ bool FBangoCompletionTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("'whi' is the keyword while"), Shown.Num() == 1 && Items[Shown[0]].Name.Equals(TEXT("while"), ESearchCase::CaseSensitive));
 	TArray<FBangoCompletionItem> Values;
 	FBangoCompletion::GetKeywordItems(Values, /*bValuesOnly*/ true);
-	TestEqual(TEXT("Keywords for a node's field: true, false, nil, player, self and isNil"), Values.Num(), 6);
+	TestEqual(TEXT("Keywords for a node's field: true, false, nil, player, self, isNil, TEXT, TEXT_NS and TEXT_INV"), Values.Num(), 9);
 
 	// The local count hides the global count; the function is listed with its signature.
 	const FBangoCompletionItem* Count = Items.FindByPredicate([](const FBangoCompletionItem& Item) { return Item.Name.Equals(TEXT("count"), ESearchCase::CaseSensitive); });

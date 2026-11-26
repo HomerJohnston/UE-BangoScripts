@@ -122,16 +122,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoLocalizedTextsTest, "Bango.Game.Localized
 bool FBangoLocalizedTextsTest::RunTest(const FString& Parameters)
 {
 	// What localization gathering reports for a script asset: each text once, with its namespace and notes; not
-	// INVTEXT, and not texts in disabled nodes.
+	// TEXT_INV, and not texts in disabled nodes.
 	const FString Source =
-		TEXT("#LOCTEXT_NAMESPACE \"Bango.Test\"\n")
-		TEXT("WriteScreen(ToString(LOCTEXT(\"Hello\", \"Hello there\")));\n")
-		TEXT("WriteScreen(ToString(NOTELOCTEXT(\"Bye\", \"Goodbye\", \"Said at the door\")));\n")
-		TEXT("WriteScreen(ToString(NSLOCTEXT(\"Other.NS\", \"Hey\", \"Hey!\")));\n")
-		TEXT("WriteScreen(ToString(LOCTEXT(\"Hello\", \"Hello there\")));\n")
-		TEXT("WriteScreen(ToString(INVTEXT(\"not translated\")));\n")
+		TEXT("#TEXT_NAMESPACE \"Bango.Test\"\n")
+		TEXT("WriteScreen(ToString(TEXT(\"Hello\", \"Hello there\")));\n")
+		TEXT("WriteScreen(ToString(TEXT(\"Bye\", \"Goodbye\", \"Said at the door\")));\n")
+		TEXT("WriteScreen(ToString(TEXT_NS(\"Other.NS\", \"Hey\", \"Hey!\")));\n")
+		TEXT("WriteScreen(ToString(TEXT(\"Hello\", \"Hello there\")));\n")
+		TEXT("WriteScreen(ToString(TEXT_INV(\"not translated\")));\n")
 		TEXT("/*\n")
-		TEXT("WriteScreen(ToString(LOCTEXT(\"Hidden\", \"Disabled text\")));   //@ 9 (0,0)\n")
+		TEXT("WriteScreen(ToString(TEXT(\"Hidden\", \"Disabled text\")));   //@ 9 (0,0)\n")
 		TEXT("*/\n");
 	TArray<FBangoLocalizedTextInfo> Texts;
 	FString Error;
@@ -139,11 +139,11 @@ bool FBangoLocalizedTextsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("three texts"), Texts.Num(), 3);
 	if (Texts.Num() == 3)
 	{
-		TestTrue(TEXT("LOCTEXT"), Texts[0].Namespace == TEXT("Bango.Test") && Texts[0].Key == TEXT("Hello") && Texts[0].Source == TEXT("Hello there") && Texts[0].Line == 2);
-		TestTrue(TEXT("NOTELOCTEXT"), Texts[1].Key == TEXT("Bye") && Texts[1].Notes == TEXT("Said at the door"));
-		TestTrue(TEXT("NSLOCTEXT"), Texts[2].Namespace == TEXT("Other.NS") && Texts[2].Key == TEXT("Hey"));
+		TestTrue(TEXT("TEXT"), Texts[0].Namespace == TEXT("Bango.Test") && Texts[0].Key == TEXT("Hello") && Texts[0].Source == TEXT("Hello there") && Texts[0].Line == 2);
+		TestTrue(TEXT("TEXT"), Texts[1].Key == TEXT("Bye") && Texts[1].Notes == TEXT("Said at the door"));
+		TestTrue(TEXT("TEXT_NS"), Texts[2].Namespace == TEXT("Other.NS") && Texts[2].Key == TEXT("Hey"));
 	}
-	TestFalse(TEXT("a script that doesn't read"), Bango::GetLocalizedTexts(TEXT("WriteScreen(ToString(LOCTEXT(\"A\""), TEXT("bad.bango"), Texts, Error));
+	TestFalse(TEXT("a script that doesn't read"), Bango::GetLocalizedTexts(TEXT("WriteScreen(ToString(TEXT(\"A\""), TEXT("bad.bango"), Texts, Error));
 	return true;
 }
 
@@ -171,7 +171,7 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 	FBangoGlobalStore Globals;
 	FString Error;
 	const TCHAR* Source =
-		TEXT("#LOCTEXT_NAMESPACE \"Bango.Tests\"\n")
+		TEXT("#TEXT_NAMESPACE \"Bango.Tests\"\n")
 		TEXT("global float r;\nglobal int ri;\nglobal int fl;\nglobal int ro;\nglobal int rn;\nglobal string fm;\nglobal string en;\nglobal bool same;\n")
 		TEXT("global text tf;\nglobal string ts;\nglobal bool teq;\nglobal bool nobody;\nglobal bool nilnull;\nglobal bool done;\n")
 		TEXT("global int ce;\nglobal int sgi;\nglobal float sqr;\nglobal float pw;\nglobal float lg;\nglobal float lg2;\nglobal float lne;\nglobal float lp;\nglobal float mr;\nglobal float a2;\nglobal bool ch;\nglobal bool ne;\nglobal float ln3;\nglobal vector3 nv;\nglobal vector3 cr;\n")
@@ -208,9 +208,9 @@ bool FBangoBuiltinCommandsTest::RunTest(const FString& Parameters)
 		TEXT("WriteLog(\"logged {0}\", 1);\n")
 		TEXT("WriteScreen(\"a message with no world goes to the log\");\n")
 		TEXT("WriteScreen(Format(\"for {0} seconds\", 2), 2);\n")
-		TEXT("tf = FormatText(LOCTEXT(\"Count\", \"{1}: {0}\"), 2, ToText(\"x\"));\n")
-		TEXT("ts = ToString(NSLOCTEXT(\"Bango.Other\", \"Hello\", \"Hello\"));\n")
-		TEXT("teq = LOCTEXT(\"Hello\", \"Hello\") == ToText(\"Hello\");\n")
+		TEXT("tf = FormatText(TEXT(\"Count\", \"{1}: {0}\"), 2, ToText(\"x\"));\n")
+		TEXT("ts = ToString(TEXT_NS(\"Bango.Other\", \"Hello\", \"Hello\"));\n")
+		TEXT("teq = TEXT(\"Hello\", \"Hello\") == ToText(\"Hello\");\n")
 		TEXT("nobody = IsNull(@nobody);\n")
 		TEXT("nilnull = IsNull(_ne);\n")
 		TEXT("done = true;\n");
@@ -941,7 +941,7 @@ bool FBangoEntityIDsTest::RunTest(const FString& Parameters)
 }
 
 // A text value keeps its key and namespace (which BangoYap takes a line's ID from) through the VM, copies, saving and
-// loading; INVTEXT and ToText give none.
+// loading; TEXT_INV and ToText give none.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoTextKeyTest, "Bango.Game.TextKeys",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
@@ -961,14 +961,14 @@ bool FBangoTextKeyTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("text keys: Keep is added"), Commands.Add(Keep, AddError));
 
 	const TCHAR* Source =
-		TEXT("#LOCTEXT_NAMESPACE \"Yap.Test\"\n")
+		TEXT("#TEXT_NAMESPACE \"Yap.Test\"\n")
 		TEXT("global text heard;\n")
-		TEXT("Keep(LOCTEXT(\"UXA010\", \"Hello\"));\n")
-		TEXT("text _t = LOCTEXT(\"UXA011\", \"Hi\");\n")
+		TEXT("Keep(TEXT(\"UXA010\", \"Hello\"));\n")
+		TEXT("text _t = TEXT(\"UXA011\", \"Hi\");\n")
 		TEXT("text[] _list = [_t];\n")
 		TEXT("Keep(_list[0]);\n")
-		TEXT("Keep(NSLOCTEXT(\"Other\", \"K2\", \"There\"));\n")
-		TEXT("Keep(INVTEXT(\"plain\"));\n")
+		TEXT("Keep(TEXT_NS(\"Other\", \"K2\", \"There\"));\n")
+		TEXT("Keep(TEXT_INV(\"plain\"));\n")
 		TEXT("Keep(ToText(\"made\"));\n")
 		TEXT("heard = _t;\n")
 		TEXT("Sleep(1);\n")
@@ -996,13 +996,13 @@ bool FBangoTextKeyTest::RunTest(const FString& Parameters)
 	auto NamespaceOf = [](const FText& Text) { const TOptional<FString> Namespace = FTextInspector::GetNamespace(Text); return Namespace.IsSet() ? Namespace.GetValue() : FString(TEXT("<none>")); };
 	if (Kept.Num() == 5)
 	{
-		TestEqual(TEXT("text keys: LOCTEXT's key"), KeyOf(Kept[0]), FString(TEXT("UXA010")));
-		TestEqual(TEXT("text keys: LOCTEXT's namespace is the script's"), NamespaceOf(Kept[0]), FString(TEXT("Yap.Test")));
+		TestEqual(TEXT("text keys: TEXT's key"), KeyOf(Kept[0]), FString(TEXT("UXA010")));
+		TestEqual(TEXT("text keys: TEXT's namespace is the script's"), NamespaceOf(Kept[0]), FString(TEXT("Yap.Test")));
 		TestEqual(TEXT("text keys: through a local and an array"), KeyOf(Kept[1]), FString(TEXT("UXA011")));
 		TestEqual(TEXT("text keys: through a local and an array, its namespace"), NamespaceOf(Kept[1]), FString(TEXT("Yap.Test")));
-		TestEqual(TEXT("text keys: NSLOCTEXT's key"), KeyOf(Kept[2]), FString(TEXT("K2")));
-		TestEqual(TEXT("text keys: NSLOCTEXT's namespace"), NamespaceOf(Kept[2]), FString(TEXT("Other")));
-		TestTrue(FString::Printf(TEXT("text keys: INVTEXT has no key (%s)"), *KeyOf(Kept[3])), KeyOf(Kept[3]) == TEXT("<none>") || KeyOf(Kept[3]).IsEmpty());
+		TestEqual(TEXT("text keys: TEXT_NS's key"), KeyOf(Kept[2]), FString(TEXT("K2")));
+		TestEqual(TEXT("text keys: TEXT_NS's namespace"), NamespaceOf(Kept[2]), FString(TEXT("Other")));
+		TestTrue(FString::Printf(TEXT("text keys: TEXT_INV has no key (%s)"), *KeyOf(Kept[3])), KeyOf(Kept[3]) == TEXT("<none>") || KeyOf(Kept[3]).IsEmpty());
 		TestTrue(FString::Printf(TEXT("text keys: ToText has no key (%s)"), *KeyOf(Kept[4])), KeyOf(Kept[4]) == TEXT("<none>") || KeyOf(Kept[4]).IsEmpty());
 		TestEqual(TEXT("text keys: and its string"), Kept[4].ToString(), FString(TEXT("made")));
 	}

@@ -26,7 +26,7 @@ enum class EBangoTokenKind : uint8
 	KwCall,
 
 	/**
-	 * A settings line's start: `#inputs`, `#LOCTEXT_NAMESPACE` or `#USES_GRAPH_EDITOR`, first on its line (see
+	 * A settings line's start: `#inputs`, `#TEXT_NAMESPACE` or `#USES_GRAPH_EDITOR`, first on its line (see
 	 * FBangoScript). Its Text is the whole word, with the '#'.
 	 */
 	Directive,

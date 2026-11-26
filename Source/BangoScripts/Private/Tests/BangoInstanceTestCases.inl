@@ -463,10 +463,10 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 	{ TEXT("a part of an undeclared global that isn't a vector"), TEXT("Talk(\"{0}\", lots.x);"), nullptr, TEXT("(1:13)"), TEXT("'lots' is a string, which has no 'x' part") },
 	{ TEXT("arithmetic"), TEXT("Talk(\"{0} {1} {2} {3}\", 1 + 2 * 3, 7 / 2, 7.0 / 2, 7 % 3);"), TEXT("7 3 3.5 1"), nullptr, nullptr },
 	{ TEXT("localized text"),
-		TEXT("#LOCTEXT_NAMESPACE \"N\"\ntext[] _all;\nSay(LOCTEXT(\"A\", \"Hello {0}, {1}\"), 3, \"you\");\nTalk(\"{0}\", LOCTEXT(\"B\", \"plain\"));\nSay(FormatText(LOCTEXT(\"F\", \"{1}-{0}\"), 1, @john));\nTalk(\"{0} {1}\", LOCTEXT(\"C\", \"x\") == ToText(\"x\"), LOCTEXT(\"C\", \"x\") != NSLOCTEXT(\"M\", \"C\", \"y\"));\n_all = [LOCTEXT(\"B\", \"plain\"), nil];\nTalk(\"{0}\", _all);\nSay(LOCTEXT(\"E\", \"`{0`} stays\"));"),
+		TEXT("#TEXT_NAMESPACE \"N\"\ntext[] _all;\nSay(TEXT(\"A\", \"Hello {0}, {1}\"), 3, \"you\");\nTalk(\"{0}\", TEXT(\"B\", \"plain\"));\nSay(FormatText(TEXT(\"F\", \"{1}-{0}\"), 1, @john));\nTalk(\"{0} {1}\", TEXT(\"C\", \"x\") == ToText(\"x\"), TEXT(\"C\", \"x\") != TEXT_NS(\"M\", \"C\", \"y\"));\n_all = [TEXT(\"B\", \"plain\"), nil];\nTalk(\"{0}\", _all);\nSay(TEXT(\"E\", \"`{0`} stays\"));"),
 		TEXT("Hello 3, you|plain|john-1|true true|[plain, nil]|{0} stays"), nullptr, nullptr },
 	{ TEXT("invariant text"),
-		TEXT("text _t = INVTEXT(\"Score: {0}\");\nSay(_t, 10);\nSay(INVTEXT(\"plain\"));\nTalk(\"{0}\", INVTEXT(\"x\") == ToText(\"x\"));"),
+		TEXT("text _t = TEXT_INV(\"Score: {0}\");\nSay(_t, 10);\nSay(TEXT_INV(\"plain\"));\nTalk(\"{0}\", TEXT_INV(\"x\") == ToText(\"x\"));"),
 		TEXT("Score: 10|plain|true"), nullptr, nullptr },
 	{ TEXT("a text placeholder with no value while running"), TEXT("text _t;\n_t = ToText(\"{1}\");\nSay(_t, 1);"), nullptr, TEXT("(3:1)"), TEXT("uses {1}, but only 1 value(s) were given") },
 	{ TEXT("a nil text"), TEXT("text _t;\nSay(_t);"), nullptr, TEXT("(2:5)"), TEXT("'_t' is nil") },
@@ -1451,11 +1451,11 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			Row(TEXT("SELECT_RANDOM"), TEXT("int"), TEXT("3"));
 			Row(TEXT("NARRATOR"), TEXT("entity"), TEXT("@narrator"));
 			Row(TEXT("BOSS_LEVELS"), TEXT("int[]"), TEXT("[5, 10, SELECT_RANDOM]"));
-			Row(TEXT("GREETING"), TEXT("text"), TEXT("INVTEXT(\"Hello\")"));
+			Row(TEXT("GREETING"), TEXT("text"), TEXT("TEXT_INV(\"Hello\")"));
 			Row(TEXT("lowercase"), TEXT("int"), TEXT("1"));
 			Row(TEXT("SELECT_RANDOM"), TEXT("int"), TEXT("4"));
 			Row(TEXT("BAD_VALUE"), TEXT("int"), TEXT("\"three\""));
-			Row(TEXT("TRANSLATED"), TEXT("text"), TEXT("LOCTEXT(\"Key\", \"Hi\")"));
+			Row(TEXT("TRANSLATED"), TEXT("text"), TEXT("TEXT(\"Key\", \"Hi\")"));
 			Row(TEXT("TRAILING_"), TEXT("int"), TEXT("1"));
 			Row(TEXT("USES_LATER"), TEXT("int"), TEXT("LATER"));
 			Row(TEXT("LATER"), TEXT("int"), TEXT("2"));
@@ -2644,8 +2644,8 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				{ TEXT("entity"), TEXT("@john"), TEXT("@john entity") },
 				{ TEXT("entity[]"), TEXT("[@a, @b]"), TEXT("[@a, @b] entity[]") },
 				{ TEXT("entity"), TEXT("player"), TEXT("player entity") },
-				{ TEXT("text"), TEXT("INVTEXT(\"Hi\")"), TEXT("text(\"Hi\") text") },
-				{ TEXT("text"), TEXT("NSLOCTEXT(\"Game\", \"Key\", \"Hi\")"), TEXT("text(\"Hi\") text") },
+				{ TEXT("text"), TEXT("TEXT_INV(\"Hi\")"), TEXT("text(\"Hi\") text") },
+				{ TEXT("text"), TEXT("TEXT_NS(\"Game\", \"Key\", \"Hi\")"), TEXT("text(\"Hi\") text") },
 				{ TEXT("bool"), TEXT(""), TEXT("nil bool") },
 				{ TEXT("vector3"), TEXT("   "), TEXT("nil vector3") },
 				{ TEXT("int"), TEXT("nil"), TEXT("nil int") },
@@ -2661,7 +2661,7 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				{ TEXT("int"), TEXT("99999999999"), TEXT("!too large for an int") },
 				{ TEXT("thing"), TEXT("1"), TEXT("!'thing' isn't a type a value can have") },
 				{ TEXT("void"), TEXT("1"), TEXT("!isn't a type a value can have") },
-				{ TEXT("text"), TEXT("LOCTEXT(\"Key\", \"Hi\")"), TEXT("!A LOCTEXT takes its namespace from a script") },
+				{ TEXT("text"), TEXT("TEXT(\"Key\", \"Hi\")"), TEXT("!A TEXT takes its namespace from a script") },
 				{ TEXT("entity"), TEXT("self"), TEXT("!'self' is the actor a script belongs to") },
 				{ TEXT("entity[]"), TEXT("[@a, self]"), TEXT("!'self' is the actor a script belongs to") },
 			};

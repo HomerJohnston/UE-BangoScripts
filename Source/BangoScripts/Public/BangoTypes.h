@@ -353,6 +353,11 @@ namespace Bango
 
 	/** Keywords and type names that can't be used as names. */
 	BANGOSCRIPTS_API bool IsReservedWord(const FString& Name);
+	/**
+	 * For a text macro's old name (LOCTEXT, NSLOCTEXT, NOTELOCTEXT, NSNOTELOCTEXT, INVTEXT): what it's called now,
+	 * and how it's written ("TEXT: TEXT(\"Key\", \"Text\")"), for an error. Null for any other name.
+	 */
+	BANGOSCRIPTS_API const TCHAR* GetRenamedTextMacro(const FString& Name);
 
 	/**
 	 * The `player` keyword: an entity value with this reserved name (not an identifier, so no Bango ID can have it).

@@ -204,17 +204,17 @@ struct BANGOSCRIPTS_API FBangoGraphVariable
 	int32 Index = INDEX_NONE;
 };
 
-/** A text literal as written: `LOCTEXT("Key", "Source")` and its NS / NOTE forms, or `INVTEXT("Source")` (spec section 3). */
+/** A text literal as written: `TEXT("Key", "Source")` and its NS / NOTE forms, or `TEXT_INV("Source")` (spec section 3). */
 struct BANGOSCRIPTS_API FBangoTextLiteral
 {
-	/** INVTEXT: never translated. Only Source is written; the namespace, key and notes are left out. */
+	/** TEXT_INV: never translated. Only Source is written; the namespace, key and notes are left out. */
 	bool bInvariant = false;
-	/** NSLOCTEXT / NSNOTELOCTEXT: has its own namespace. Otherwise the script's LOCTEXT_NAMESPACE is used. */
+	/** TEXT_NS: has its own namespace. Otherwise the script's TEXT_NAMESPACE is used. */
 	bool bHasNamespace = false;
 	FString Namespace;
 	FString Key;
 	FString Source;
-	/** NOTELOCTEXT / NSNOTELOCTEXT: has notes for translators. */
+	/** TEXT / TEXT_NS: has notes for translators. */
 	bool bHasNotes = false;
 	FString Notes;
 };
@@ -240,12 +240,12 @@ namespace Bango
 	BANGOSCRIPTS_API FBangoNodeLayoutContext MakeNodeLayoutContext(const FBangoGraphDocument& Document, const IBangoCommandLookup* Commands);
 
 	/** The layout of one node. bInFunctionGraph says whether an entry node is a function's entry. */
-	/** Reads Text as exactly one text literal (`LOCTEXT("Key", "Hi")`, ...). False if it's anything else. */
+	/** Reads Text as exactly one text literal (`TEXT("Key", "Hi")`, ...). False if it's anything else. */
 	BANGOSCRIPTS_API bool ParseTextLiteral(const FString& Text, FBangoTextLiteral& OutLiteral);
 
 	/**
-	 * Writes a text literal: LOCTEXT, NSLOCTEXT, NOTELOCTEXT or NSNOTELOCTEXT, whichever fits what it has (notes
-	 * are written only if there are some, so clearing them gives LOCTEXT), or INVTEXT for an invariant one.
+	 * Writes a text literal: TEXT or TEXT_NS, with notes or without, whichever fits what it has (notes
+	 * are written only if there are some, so clearing them gives TEXT), or TEXT_INV for an invariant one.
 	 */
 	BANGOSCRIPTS_API FString MakeTextLiteral(const FBangoTextLiteral& Literal);
 

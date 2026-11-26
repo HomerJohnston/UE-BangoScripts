@@ -97,8 +97,8 @@ enum class EBangoLiteralKind : uint8
 	/** `@john`: StringValue holds the Bango ID name. */
 	Entity,
 	/**
-	 * Localized text: `LOCTEXT("Key", "Source")`, `NSLOCTEXT("Namespace", "Key", "Source")`, and NOTELOCTEXT /
-	 * NSNOTELOCTEXT with translator notes last; or `INVTEXT("Source")`, a text that is never translated
+	 * Localized text: `TEXT("Key", "Source")`, `TEXT_NS("Namespace", "Key", "Source")`, and TEXT /
+	 * TEXT_NS with translator notes last; or `TEXT_INV("Source")`, a text that is never translated
 	 * (bTextInvariant). StringValue holds the source text.
 	 */
 	Text,
@@ -118,13 +118,13 @@ struct FBangoLiteralExpr : FBangoExpr
 	FString StringValue;
 
 	// Text literals only:
-	/** INVTEXT: a text that is never translated, so it has no namespace, key or notes, and TextArgLocs holds only the source. */
+	/** TEXT_INV: a text that is never translated, so it has no namespace, key or notes, and TextArgLocs holds only the source. */
 	bool bTextInvariant = false;
-	/** NSLOCTEXT / NSNOTELOCTEXT: the namespace given. LOCTEXT / NOTELOCTEXT use the script's LOCTEXT_NAMESPACE. */
+	/** TEXT_NS: the namespace given. TEXT uses the script's TEXT_NAMESPACE. */
 	bool bTextHasNamespace = false;
 	FString TextNamespace;
 	FString TextKey;
-	/** NOTELOCTEXT / NSNOTELOCTEXT: notes for translators. */
+	/** TEXT / TEXT_NS: notes for translators. */
 	FString TextNotes;
 	/** Where each of the literal's strings is: namespace (if given), key, source, notes (if given). */
 	TArray<FBangoSourceLocation> TextArgLocs;
@@ -649,14 +649,14 @@ struct FBangoScript
 	/** Ordinary comments, in file order, for the graph editor. The compiler ignores them. */
 	TArray<FBangoSourceComment> Comments;
 	/**
-	 * Every LOCTEXT / NSLOCTEXT / NOTELOCTEXT / NSNOTELOCTEXT in the script, in file order (not INVTEXT, which isn't
+	 * Every TEXT and TEXT_NS in the script, in file order (not TEXT_INV, which isn't
 	 * translated), for localization gathering (Bango::GetLocalizedTexts). Points into the tree. Texts in disabled code
 	 * (disabled nodes) aren't here: disabled code isn't run, so its texts aren't translated.
 	 */
 	TArray<const FBangoLiteralExpr*> TextLiterals;
 
 	/**
-	 * `#LOCTEXT_NAMESPACE "Bango.Intro"`: the namespace for the script's LOCTEXT and NOTELOCTEXT texts. Like the
+	 * `#TEXT_NAMESPACE "Bango.Intro"`: the namespace for the script's TEXT texts. Like the
 	 * other settings lines, it comes before or after the inputs line (it's written before it), and before everything
 	 * else. Settings lines aren't statements: they have no graph nodes.
 	 */

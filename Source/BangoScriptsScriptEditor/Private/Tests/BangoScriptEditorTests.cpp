@@ -256,9 +256,9 @@ bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 	{
 		FBangoGraphDocument TextDoc;
 		const TCHAR* TextSource =
-			TEXT("#LOCTEXT_NAMESPACE \"Bango.Tests\"\n")
+			TEXT("#TEXT_NAMESPACE \"Bango.Tests\"\n")
 			TEXT("\n")
-			TEXT("Say(LOCTEXT(\"Greeting\", \"Hi there\"));    //@1(0, 0)\n");
+			TEXT("Say(TEXT(\"Greeting\", \"Hi there\"));    //@1(0, 0)\n");
 		if (TestTrue(TEXT("build text graph"), Bango::BuildGraph(TextSource, TEXT("text.bango"), TextDoc, Error)))
 		{
 			// No built-in command shows a text as a statement, so the test has one: Say(text).
@@ -293,13 +293,13 @@ bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 				TestEqual(TEXT("it shows the source text"), Bango::GetFieldDisplayText(TextField), FString(TEXT("Hi there")));
 				const FString Retyped = Bango::GetFieldValueFromTyped(TextField, TEXT("Hello"));
 				TestTrue(TEXT("retyping keeps the key"), SayNode->SetFieldValue(0, Retyped, EditError));
-				TestEqual(TEXT("retyped"), SayNode->Text, FString(TEXT("Say(LOCTEXT(\"Greeting\", \"Hello\"))")));
+				TestEqual(TEXT("retyped"), SayNode->Text, FString(TEXT("Say(TEXT(\"Greeting\", \"Hello\"))")));
 
 				FBangoTextLiteral Literal;
 				TestTrue(TEXT("the field is a text literal"), Bango::ParseTextLiteral(SayNode->Layout.Fields[0].Text, Literal));
 				Literal.Notes = TEXT("Said by the guard");
 				TestTrue(TEXT("add notes"), SayNode->SetFieldValue(0, Bango::MakeTextLiteral(Literal), EditError));
-				TestEqual(TEXT("with notes"), SayNode->Text, FString(TEXT("Say(NOTELOCTEXT(\"Greeting\", \"Hello\", \"Said by the guard\"))")));
+				TestEqual(TEXT("with notes"), SayNode->Text, FString(TEXT("Say(TEXT(\"Greeting\", \"Hello\", \"Said by the guard\"))")));
 			}
 		}
 	}

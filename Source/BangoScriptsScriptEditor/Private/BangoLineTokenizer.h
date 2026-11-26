@@ -25,7 +25,7 @@ enum class EBangoSyntaxKind : uint8
 	Type,               // int float ... and a [] right after one
 	Constant,           // true false
 	Nil,                // nil
-	Preprocessor,       // #inputs #LOCTEXT_NAMESPACE #USES_GRAPH_EDITOR
+	Preprocessor,       // #inputs #TEXT_NAMESPACE #USES_GRAPH_EDITOR
 	Local,              // a name the graph declares (set by FBangoScriptNames)
 	Global,             // any other name that isn't a call (the tokenizer gives every name this)
 	Entity,             // @john, and player
@@ -33,9 +33,9 @@ enum class EBangoSyntaxKind : uint8
 	String,
 	StringEscape,       // \n \" \\ and `x in a localized source
 	Placeholder,        // %0 %% and {0}
-	LocMacro,           // LOCTEXT NSLOCTEXT NOTELOCTEXT NSNOTELOCTEXT INVTEXT
+	LocMacro,           // TEXT TEXT_NS TEXT_INV
 	LocKey,             // key / namespace string of a localized-text macro
-	LocNotes,           // notes string of NOTELOCTEXT / NSNOTELOCTEXT
+	LocNotes,           // notes string of TEXT / TEXT_NS
 	VectorPart,         // .x .y .z (the part after the dot)
 	Call,               // a name followed by (
 	Comment,

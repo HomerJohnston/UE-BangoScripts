@@ -391,7 +391,7 @@ static void BangoRunGraphLayoutScenarios(TArray<FString>& OutFailures)
 			{ TEXT("vector3"), TEXT("[0, 0, 100]"), true },
 			{ TEXT("entity"), TEXT("@john"), true },
 			{ TEXT("bool"), TEXT("nil"), true },
-			{ TEXT("text"), TEXT("LOCTEXT(\"K\", \"Hi\")"), true },
+			{ TEXT("text"), TEXT("TEXT(\"K\", \"Hi\")"), true },
 			{ TEXT("int"), TEXT("1 + 2"), false },
 			{ TEXT("float"), TEXT("Random(1.0, 2.0)"), false },
 			{ TEXT("int"), TEXT("_other"), false },

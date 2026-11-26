@@ -324,10 +324,10 @@ namespace BangoLexerPrivate
 			return LexOperator(Loc);
 		}
 
-		/** `#inputs`, `#LOCTEXT_NAMESPACE` or `#USES_GRAPH_EDITOR`: the script's settings lines. Must start its line. */
+		/** `#inputs`, `#TEXT_NAMESPACE` or `#USES_GRAPH_EDITOR`: the script's settings lines. Must start its line. */
 		bool LexDirective(const FBangoSourceLocation& Loc)
 		{
-			static const TCHAR* Usage = TEXT("Lines starting with '#' are the script's settings: #inputs (...), #LOCTEXT_NAMESPACE \"Name\" and #USES_GRAPH_EDITOR.");
+			static const TCHAR* Usage = TEXT("Lines starting with '#' are the script's settings: #inputs (...), #TEXT_NAMESPACE \"Name\" and #USES_GRAPH_EDITOR.");
 			Advance(); // #
 			const int32 Start = Pos;
 			while (!AtEnd() && IsIdentChar(Peek()))
@@ -336,9 +336,13 @@ namespace BangoLexerPrivate
 			}
 			const FString Word = Source.Mid(Start, Pos - Start);
 			if (!Word.Equals(TEXT("inputs"), ESearchCase::CaseSensitive)
-				&& !Word.Equals(TEXT("LOCTEXT_NAMESPACE"), ESearchCase::CaseSensitive)
+				&& !Word.Equals(TEXT("TEXT_NAMESPACE"), ESearchCase::CaseSensitive)
 				&& !Word.Equals(TEXT("USES_GRAPH_EDITOR"), ESearchCase::CaseSensitive))
 			{
+				if (Word.Equals(TEXT("LOCTEXT_NAMESPACE"), ESearchCase::CaseSensitive))
+				{
+					return Fail(Loc, TEXT("'#LOCTEXT_NAMESPACE' is now #TEXT_NAMESPACE: #TEXT_NAMESPACE \"Name\"."));
+				}
 				return Fail(Loc, FString::Printf(TEXT("Unknown '#%s'. %s"), *Word, Usage));
 			}
 			if (Result.Tokens.Num() > 0 && Result.Tokens.Last().Loc.Line == Loc.Line)

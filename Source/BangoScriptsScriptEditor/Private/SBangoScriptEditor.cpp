@@ -241,7 +241,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 								])
 						]
 
-						// SCRIPT CONFIG: the script's settings lines, saved under the description (#LOCTEXT_NAMESPACE).
+						// SCRIPT CONFIG: the script's settings lines, saved under the description (#TEXT_NAMESPACE).
 						+ SVerticalBox::Slot()
 						.AutoHeight()
 						.Padding(0.0f, 0.0f, 0.0f, 2.0f)
@@ -263,7 +263,7 @@ void SBangoScriptEditor::Construct(const FArguments& InArgs)
 								[
 									SAssignNew(NamespaceBox, SEditableTextBox)
 									.HintText(LOCTEXT("NamespaceHint", "none"))
-									.ToolTipText(LOCTEXT("NamespaceTooltip", "The namespace of this script's LOCTEXT texts, for translators' tools, like Bango.Intro. It's saved as #LOCTEXT_NAMESPACE \"...\" at the top of the script, under the description. Leave it empty for none."))
+									.ToolTipText(LOCTEXT("NamespaceTooltip", "The namespace of this script's TEXT texts, for translators' tools, like Bango.Intro. It's saved as #TEXT_NAMESPACE \"...\" at the top of the script, under the description. Leave it empty for none."))
 									.IsReadOnly_Lambda([this]() { return EdGraphs.Num() == 0; })
 									.OnTextCommitted_Lambda([this](const FText& NewText, ETextCommit::Type CommitType)
 									{
@@ -2722,7 +2722,7 @@ TSharedRef<ITableRow> SBangoScriptEditor::OnGenerateDeclRow(TSharedPtr<FDeclEntr
 		.ToolTipText(bGlobal
 				? LOCTEXT("GlobalValueTooltip", "Its default (written ?=): given to the global when this script starts, only if it doesn't exist yet or is nil. A fixed value only (a number, a string, true, false, nil, a Bango ID, a text, or an array of those); empty gives none, so a new global starts as nil. To set it each time, add a Set Global node in the code.")
 				: LOCTEXT("LocalValueTooltip", "The value it starts with, each time the graph starts. A fixed value only (a number, a string, true, false, nil, a Bango ID, a text, or an array of those); empty starts it as nil. Set anything else in the code."))
-		.UseScriptNamespace(true) // a text typed here is a LOCTEXT, in the script's namespace
+		.UseScriptNamespace(true) // a text typed here is a TEXT, in the script's namespace
 		// Whether it reads as a fixed value; its type is checked with the rest of the script, when compiling.
 		.OnCheckValue_Lambda([](const FString& TypeName, const FString& Value, FString& OutProblem) { return Bango::CheckDeclValue(TypeName, Value, OutProblem); })
 		.OnValueCommitted_Lambda([this, bGlobal, Index](const FString& Value) { SetDeclValueText(bGlobal, Index, Value); })

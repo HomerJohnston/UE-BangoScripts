@@ -43,7 +43,7 @@ namespace Bango
 	 *
 	 * False, with a message for the user, if TypeName isn't a type or Text isn't a fixed value of it. A Bango ID
 	 * isn't looked up: whether an actor has it is only known in a level, when it's used. A text is written
-	 * INVTEXT("...") or NSLOCTEXT("Namespace", "Key", "..."): a plain LOCTEXT has no script here to take its namespace
+	 * TEXT_INV("...") or TEXT_NS("Namespace", "Key", "..."): a plain TEXT has no script here to take its namespace
 	 * from. Works in packaged games (it needs no editor).
 	 */
 	BANGOSCRIPTS_API bool ParseFixedValue(const FString& TypeName, const FString& Text, FBangoValue& OutValue, FString& OutError);

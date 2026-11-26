@@ -282,7 +282,7 @@ namespace BangoParserPrivate
 		}
 
 		/**
-		 * A settings line at the top of the script: `#inputs (...)`, `#LOCTEXT_NAMESPACE "Name"` or `#USES_GRAPH_EDITOR`
+		 * A settings line at the top of the script: `#inputs (...)`, `#TEXT_NAMESPACE "Name"` or `#USES_GRAPH_EDITOR`
 		 * (a flag, with nothing after it). The settings may come in any order, before or after the inputs line, each once.
 		 */
 		bool ParseDirective()
@@ -318,8 +318,8 @@ namespace BangoParserPrivate
 				return true;
 			}
 
-			const bool bNamespace = First.Text.Equals(TEXT("#LOCTEXT_NAMESPACE"), ESearchCase::CaseSensitive);
-			const TCHAR* What = bNamespace ? TEXT("#LOCTEXT_NAMESPACE") : TEXT("#USES_GRAPH_EDITOR");
+			const bool bNamespace = First.Text.Equals(TEXT("#TEXT_NAMESPACE"), ESearchCase::CaseSensitive);
+			const TCHAR* What = bNamespace ? TEXT("#TEXT_NAMESPACE") : TEXT("#USES_GRAPH_EDITOR");
 			const bool bOnlyParamsBefore = Script.Functions.Num() == 0
 				&& (Script.TopLevel.Num() == 0 || (Script.TopLevel.Num() == 1 && Script.GetParams()));
 			const FBangoSourceLocation& Earlier = bNamespace ? Script.LocNamespaceLoc : Script.UsesGraphEditorLoc;
@@ -347,7 +347,7 @@ namespace BangoParserPrivate
 			const FBangoSourceLocation& ValueLoc = Value.Loc.Line == First.Loc.Line ? Value.Loc : First.Loc;
 			if (Value.Kind != EBangoTokenKind::StringLiteral || Value.Loc.Line != First.Loc.Line)
 			{
-				return Fail(ValueLoc, TEXT("Write the namespace as a string: #LOCTEXT_NAMESPACE \"Bango.Intro\""));
+				return Fail(ValueLoc, TEXT("Write the namespace as a string: #TEXT_NAMESPACE \"Bango.Intro\""));
 			}
 			if (Value.Text.IsEmpty())
 			{
@@ -364,43 +364,48 @@ namespace BangoParserPrivate
 			return true;
 		}
 
-		/** LOCTEXT, NSLOCTEXT, NOTELOCTEXT, NSNOTELOCTEXT or INVTEXT, at the name: the number of strings it takes, or 0. */
-		static int32 TextLiteralArgCount(const FString& Name, bool& bOutHasNamespace, bool& bOutHasNotes, bool& bOutInvariant)
+		/** Which text macro a name is: TEXT, TEXT_NS or TEXT_INV (spec section 3, Localized text), or none. */
+		enum class ETextMacro : uint8 { None, Text, TextNs, TextInv };
+		static ETextMacro GetTextMacro(const FString& Name)
 		{
-			bOutInvariant = Name.Equals(TEXT("INVTEXT"), ESearchCase::CaseSensitive);
-			bOutHasNamespace = !bOutInvariant && Name.StartsWith(TEXT("NS"), ESearchCase::CaseSensitive);
-			bOutHasNotes = !bOutInvariant && Name.Contains(TEXT("NOTE"), ESearchCase::CaseSensitive);
-			if (bOutInvariant)
-			{
-				return 1;
-			}
-			if (Name.Equals(TEXT("LOCTEXT"), ESearchCase::CaseSensitive) || Name.Equals(TEXT("NSLOCTEXT"), ESearchCase::CaseSensitive)
-				|| Name.Equals(TEXT("NOTELOCTEXT"), ESearchCase::CaseSensitive) || Name.Equals(TEXT("NSNOTELOCTEXT"), ESearchCase::CaseSensitive))
-			{
-				return 2 + (bOutHasNamespace ? 1 : 0) + (bOutHasNotes ? 1 : 0);
-			}
-			return 0;
+			return Name.Equals(TEXT("TEXT"), ESearchCase::CaseSensitive) ? ETextMacro::Text
+				: Name.Equals(TEXT("TEXT_NS"), ESearchCase::CaseSensitive) ? ETextMacro::TextNs
+				: Name.Equals(TEXT("TEXT_INV"), ESearchCase::CaseSensitive) ? ETextMacro::TextInv
+				: ETextMacro::None;
 		}
 
-		/** A text literal like `LOCTEXT("Key", "Source")`, at its name. */
-		FBangoExprPtr ParseTextLiteral(int32 NumArgs, bool bHasNamespace, bool bHasNotes, bool bInvariant)
+		/** A text literal like `TEXT("Key", "Source")`, at its name. How many strings it has says whether it has notes. */
+		FBangoExprPtr ParseTextLiteral(ETextMacro Macro)
 		{
 			const FBangoToken& Name = Cur();
 			Advance(); // the name
 			Advance(); // (
-			const TCHAR* Usage = bInvariant ? TEXT("INVTEXT(\"Text\")")
-				: bHasNamespace
-				? (bHasNotes ? TEXT("NSNOTELOCTEXT(\"Namespace\", \"Key\", \"Text\", \"Notes for translators\")") : TEXT("NSLOCTEXT(\"Namespace\", \"Key\", \"Text\")"))
-				: (bHasNotes ? TEXT("NOTELOCTEXT(\"Key\", \"Text\", \"Notes for translators\")") : TEXT("LOCTEXT(\"Key\", \"Text\")"));
+			const bool bInvariant = Macro == ETextMacro::TextInv;
+			const bool bHasNamespace = Macro == ETextMacro::TextNs;
+			const int32 MinArgs = bInvariant ? 1 : bHasNamespace ? 3 : 2;
+			const int32 MaxArgs = bInvariant ? 1 : MinArgs + 1; // the last is notes for translators
+			const TCHAR* Usage = bInvariant ? TEXT("TEXT_INV(\"Text\")")
+				: bHasNamespace ? TEXT("TEXT_NS(\"Namespace\", \"Key\", \"Text\"), or with notes for translators, TEXT_NS(\"Namespace\", \"Key\", \"Text\", \"Notes\")")
+				: TEXT("TEXT(\"Key\", \"Text\"), or with notes for translators, TEXT(\"Key\", \"Text\", \"Notes\")");
+			auto CountError = [&Name, MinArgs, MaxArgs, Usage]()
+			{
+				return MinArgs == MaxArgs
+					? FString::Printf(TEXT("%s takes %d string%s: %s"), *Name.Text, MinArgs, MinArgs == 1 ? TEXT("") : TEXT("s"), Usage)
+					: FString::Printf(TEXT("%s takes %d or %d strings: %s"), *Name.Text, MinArgs, MaxArgs, Usage);
+			};
 			TArray<FString> Strings;
 			TUniquePtr<FBangoLiteralExpr> Lit = MakeUnique<FBangoLiteralExpr>();
 			Lit->Loc = Name.Loc;
 			Lit->LiteralKind = EBangoLiteralKind::Text;
-			for (int32 i = 0; i < NumArgs; ++i)
+			for (int32 i = 0; i < MaxArgs; ++i)
 			{
+				if (i >= MinArgs && Check(EBangoTokenKind::RParen))
+				{
+					break; // without the optional notes
+				}
 				if (i > 0 && !Check(EBangoTokenKind::Comma))
 				{
-					Fail(Cur().Loc, FString::Printf(TEXT("%s takes %d string%s: %s"), *Name.Text, NumArgs, NumArgs == 1 ? TEXT("") : TEXT("s"), Usage));
+					Fail(Cur().Loc, CountError());
 					return nullptr;
 				}
 				if (i > 0)
@@ -419,10 +424,11 @@ namespace BangoParserPrivate
 			}
 			if (!Check(EBangoTokenKind::RParen))
 			{
-				Fail(Cur().Loc, FString::Printf(TEXT("%s takes %d string%s: %s"), *Name.Text, NumArgs, NumArgs == 1 ? TEXT("") : TEXT("s"), Usage));
+				Fail(Cur().Loc, CountError());
 				return nullptr;
 			}
 			Advance();
+			const bool bHasNotes = Strings.Num() > MinArgs;
 
 			if (bInvariant)
 			{
@@ -729,7 +735,7 @@ namespace BangoParserPrivate
 			}
 			if (Bango::IsReservedWord(Cur().Text))
 			{
-				// Words like LOCTEXT, INVTEXT and isNil that aren't keyword tokens, but still mean something.
+				// Words like TEXT, TEXT_INV and isNil that aren't keyword tokens, but still mean something.
 				return Fail(Cur().Loc, FString::Printf(TEXT("Expected a name %s, but found '%s', which is a word Bango uses and can't be a name."), Context, *Cur().Text));
 			}
 			OutLoc = Cur().Loc;
@@ -1225,7 +1231,7 @@ namespace BangoParserPrivate
 						}
 						if (const FBangoExpr* TextLit = FindTextLiteral(*Param.Default))
 						{
-							Fail(TextLit->Loc, FString::Printf(TEXT("A text default can't be translated: its text isn't gathered for translators. Give '%s' the default nil, and set it in the script: if (isNil(%s)) { %s = LOCTEXT(...); }"),
+							Fail(TextLit->Loc, FString::Printf(TEXT("A text default can't be translated: its text isn't gathered for translators. Give '%s' the default nil, and set it in the script: if (isNil(%s)) { %s = TEXT(...); }"),
 								*Param.Name, *Param.Name, *Param.Name));
 							return nullptr;
 						}
@@ -2241,13 +2247,15 @@ namespace BangoParserPrivate
 			}
 			case EBangoTokenKind::Identifier:
 			{
-				bool bTextHasNamespace = false;
-				bool bTextInvariant = false;
-				bool bTextHasNotes = false;
-				const int32 TextArgs = TextLiteralArgCount(Token.Text, bTextHasNamespace, bTextHasNotes, bTextInvariant);
-				if (TextArgs > 0 && Ahead(1).Kind == EBangoTokenKind::LParen)
+				const ETextMacro TextMacro = GetTextMacro(Token.Text);
+				if (TextMacro != ETextMacro::None && Ahead(1).Kind == EBangoTokenKind::LParen)
 				{
-					return ParseTextLiteral(TextArgs, bTextHasNamespace, bTextHasNotes, bTextInvariant);
+					return ParseTextLiteral(TextMacro);
+				}
+				if (const TCHAR* Renamed = Bango::GetRenamedTextMacro(Token.Text); Renamed && Ahead(1).Kind == EBangoTokenKind::LParen)
+				{
+					Fail(Token.Loc, FString::Printf(TEXT("'%s' is now %s."), *Token.Text, Renamed));
+					return nullptr;
 				}
 				if (Ahead(1).Kind == EBangoTokenKind::LParen)
 				{
