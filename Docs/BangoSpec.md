@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.136)
+# Bango Language Spec (draft v0.137)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.137:** **`isNil` also checks what a call gives** (section 3, isNil): `isNil(GetFocus(@john))`, `isNil(MyFunction())`, and an element of what it gives, `isNil(GetList()[2])`, which is true past the end or when the call gave nil. The call runs as it would anywhere, and its arguments are read as usual. A calculation, a comparison or a value written out is still a compile error, since it's never nil.
 
 **Changes in v0.136:** **saving no longer moves the script text pane to the end** (section 12): when the graph rewrites the text, its view and cursor stay where they were, and a save that changes only the hidden node metadata leaves the box alone.
 
@@ -509,15 +511,18 @@ WriteScreen(ToString(TEXT_NS("Shared.UI", "Continue", "Continue")));
 - The only way to test for `nil` is `isNil(...)`. `x == nil` is a compile error, because comparing reads `x`.
 
 ### isNil
-- `isNil(x)` is true if `x` is `nil`. It's a **keyword**, not a command (which is why it starts with a small letter, like `forEach` and `waitUntil`): it takes the variable itself, not its value, and never reads it, so it never stops the script. A command only ever gets values, so no command could do this.
-- Accepts a variable name, a global name or an array element. Anything else (a call, a literal, an expression) is a compile error.
+- `isNil(x)` is true if `x` is `nil`. It's a **keyword**, not a command (which is why it starts with a small letter, like `forEach` and `waitUntil`): given a variable, it takes the variable itself, not its value, and never reads it, so it never stops the script. A command only ever gets values, so no command could do this.
+- Accepts a variable name, a global name or an array element, which it never reads; or **a call that gives a value** (a command, a function, a Blueprint call), or an element of what it gives, which it works out and then checks. Anything else (a calculation, a comparison, a value written out) is never nil, so it's a compile error: *"isNil can't check this: a calculation, a comparison or a value written out is never nil..."*. So is a call that gives nothing.
   ```
   isNil(_name)
   isNil(playerHasGun)     // true if the global was never created
   isNil(_arr[5])          // true if index 5 is nil or past the end
   isNil(_grid[3][2])      // true if any level is nil or past the end
+  isNil(@john GetFocus()) // true if the command gave nil
+  isNil(GetList()[2])     // true if it gave nil, or its index 2 is nil or past the end
   ```
-- The index expressions inside `isNil(...)` are still evaluated normally, so `isNil(_a[_i])` stops the script if `_i` is `nil`.
+- **A call is run as it would be anywhere else**, so it does whatever it does, and its arguments are read as usual: `isNil(Twice(_n))` stops the script if `_n` is `nil`, as `Twice(_n)` would. Only what it gives is checked. An element of what it gives works like an element of a variable: past the end, or of a nil array, is `nil`.
+- The index expressions inside `isNil(...)` are still evaluated normally, so `isNil(_a[_i])` stops the script if `_i` is `nil`. A define (section 4, Defines) is checked like a call's value.
 - `isNil` is about values, not actors: an entity that names an actor that's gone isn't `nil`. `IsNull` checks both (section 7).
 - It has no node of its own in the graph (it gives a value, like `Format`), so it's written in a field, such as an If's condition.
 

@@ -544,6 +544,14 @@ static const FBangoRuntimeTestCase GBangoRuntimeTestCases[] =
 	{ TEXT("Bango IDs"), TEXT("entity _e = @john;\n_e Speak(\"a\");\n@player Speak(\"b\");\nTalk(\"{0} {1} {2} {3}\", _e, [@john, @ghost], @john == _e, @john != @player);"), TEXT("john: a|player: b|john [john, ghost] true true"), nullptr, nullptr },
 	{ TEXT("Bango ID that isn't in the level, unused"), TEXT("entity _g = @ghost;\nTalk(\"{0}\", _g);"), TEXT("ghost"), nullptr, nullptr },
 	{ TEXT("Bango IDs as parameter defaults"), TEXT("#inputs (entity _who = @john, entity[] _all = [@john, @player])\n_who Speak(\"hi\");\nforEach (_x in _all)\n{\n\t_x Speak(\"all\");\n};"), TEXT("john: hi|john: all|player: all"), nullptr, nullptr },
+	{ TEXT("isNil of a call, and of its elements"),
+		TEXT("Talk(\"{0} {1} {2} {3} {4}\", isNil(List()), isNil(List()[1]), isNil(List()[5]), isNil(Grid()[0][1]), isNil(Grid()[3][0]));\n")
+		TEXT("Talk(\"{0}\", isNil(NoList()[2]));\n")
+		TEXT("function int[] List()\n{\n\tint[] _a = [1, 2];\n\treturn _a;\n}\n")
+		TEXT("function int[][] Grid()\n{\n\tint[][] _g = [[1, 2]];\n\treturn _g;\n}\n")
+		TEXT("function int[] NoList()\n{\n\treturn nil;\n}"),
+		TEXT("false false true false true|true"), nullptr, nullptr },
+	{ TEXT("isNil of a call still reads its arguments"), TEXT("int _n;\nTalk(\"{0}\", isNil(Twice(_n)));\nfunction int Twice(int _x)\n{\n\treturn _x * 2;\n}"), nullptr, TEXT("(2:"), TEXT("'_n' is nil") },
 	{ TEXT("isNil on globals"), TEXT("Talk(\"{0} {1}\", !isNil(nothere), !isNil(flag));"), TEXT("false true"), nullptr, nullptr },
 	{ TEXT("short-circuit"), TEXT("bool _b;\nbool _c;\n_b = !isNil(nothere) && nothere;\n_c = flag || nothere;\nTalk(\"{0} {1}\", _b, _c);"), TEXT("false true"), nullptr, nullptr },
 	{ TEXT("latent commands"), TEXT("Talk(\"start\");\nSleep(1.0);\nif (AskChoice(\"a\", \"b\") == 2)\n{\n\tTalk(\"two\");\n};"), TEXT("start|two"), nullptr, nullptr },

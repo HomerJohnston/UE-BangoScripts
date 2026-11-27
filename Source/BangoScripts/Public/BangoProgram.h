@@ -67,9 +67,10 @@ enum class EBangoOp : uint8
 	LoadPlace,          // A = place, B = 1: nil ok.  indexes... -> value  (fails if the value is nil or missing, unless B: then nil)
 	StorePlace,         // A = place.  indexes..., value ->      (converts to the place's type; grows arrays)
 	IsNilPlace,         // A = place.  indexes... -> bool        (never fails)
+	IsNilValue,         // value -> bool                         (isNil of a call's result, or an element of one)
 
 	// ---- Values ----
-	Index,              // array, index -> element               (fails if nil or out of range)
+	Index,              // A = 1: nil ok.  array, index -> element  (fails if nil or out of range, unless A: then nil, as for isNil)
 	Convert,            // A = type.   value -> value as that type (fails if it doesn't fit)
 	MakeArray,          // A = count, B = element type.  elements... -> array
 	MakeVector,         // A = 2 or 3.  numbers... -> vector2 / vector3

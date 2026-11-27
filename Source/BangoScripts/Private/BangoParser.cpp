@@ -2313,7 +2313,8 @@ namespace BangoParserPrivate
 				{
 					return nullptr;
 				}
-				FBangoExprPtr Operand = ParsePostfix();
+				const FBangoSourceLocation OperandLoc = Cur().Loc; // where it starts (a calculation's Loc is its operator)
+				FBangoExprPtr Operand = ParseExpression(); // any expression, so the error below can say why it isn't one
 				if (!Operand)
 				{
 					return nullptr;
@@ -2323,9 +2324,16 @@ namespace BangoParserPrivate
 					Fail(Member->MemberLoc, FString::Printf(TEXT("A vector's parts are never nil on their own. Check the whole vector instead: isNil(%s)."), *Bango::DumpExpr(*Member->Object)));
 					return nullptr;
 				}
-				if (!IsPlace(*Operand))
+				// A variable, a global or an element of one (never read), or a call that gives a value, and elements of
+				// what it gives (`GetFocus(@john)`, `GetList()[2]`): anything else is never nil.
+				const FBangoExpr* Root = Operand.Get();
+				while (const FBangoIndexExpr* IndexExpr = Root->As<FBangoIndexExpr>())
 				{
-					Fail(Operand->Loc, TEXT("isNil needs a variable, a global or an array element, like isNil(_x) or isNil(_a[2])."));
+					Root = IndexExpr->Array.Get();
+				}
+				if (Root->Kind != EBangoExprKind::Name && Root->Kind != EBangoExprKind::Call)
+				{
+					Fail(OperandLoc, TEXT("isNil can't check this: a calculation, a comparison or a value written out is never nil. It takes a variable, a global, an array element, or a call that gives a value, like isNil(_x), isNil(_a[2]) or isNil(GetFocus(@john))."));
 					return nullptr;
 				}
 				if (!Expect(EBangoTokenKind::RParen, TEXT("after the isNil argument")))

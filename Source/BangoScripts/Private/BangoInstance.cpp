@@ -2630,6 +2630,12 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 			{
 				return RuntimeFail(FString::Printf(TEXT("An index must be an int, but it is %s."), *ValueTypeText(IndexValue)));
 			}
+			const bool bNilOk = I.A != 0; // in isNil: nil, past the end or a nil element gives nil
+			if (bNilOk && ArrayValue.IsNil())
+			{
+				Stack.Add(FBangoValue());
+				break;
+			}
 			if (BangoInstancePrivate::IsElementIndexable(ArrayValue))
 			{
 				FBangoValue Element;
@@ -2646,6 +2652,11 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 				return RuntimeFail(FString::Printf(TEXT("Only arrays, vectors and strings can be indexed, but this is %s."), *ValueTypeText(ArrayValue)));
 			}
 			const FBangoValue* Element = ArrayValue.GetElement(IndexValue.GetInt());
+			if (bNilOk && (!Element || Element->IsNil()))
+			{
+				Stack.Add(FBangoValue());
+				break;
+			}
 			if (!Element)
 			{
 				return RuntimeFail(FString::Printf(TEXT("Index %d is out of range: the array has %lld element(s)."), IndexValue.GetInt(), ArrayValue.ArrayCount()));
@@ -2655,6 +2666,17 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 				return RuntimeFail(FString::Printf(TEXT("Element %d of the array is nil."), IndexValue.GetInt()));
 			}
 			Stack.Add(*Element);
+			break;
+		}
+
+		case EBangoOp::IsNilValue:
+		{
+			const FBangoValue Value = PopValue();
+			if (Status == EBangoInstanceStatus::Failed)
+			{
+				return false;
+			}
+			Stack.Add(FBangoValue::MakeBool(Value.IsNil()));
 			break;
 		}
 

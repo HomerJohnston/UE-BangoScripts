@@ -3270,8 +3270,20 @@ namespace BangoCompilerPrivate
 			case EBangoExprKind::Empty:        return Fail(Expr.Loc, TEXT("This value is missing. Fill it in."));
 			case EBangoExprKind::IsNil:
 			{
+				const FBangoExpr& Operand = *Expr.As<FBangoIsNilExpr>()->Operand;
+				if (!IsPlaceExpr(Operand))
+				{
+					// A call's result, or an element of it (or a define): worked out, then checked.
+					if (!CompileIsNilValue(Operand))
+					{
+						return false;
+					}
+					Emit(EBangoOp::IsNilValue);
+					OutType = FExprType::MakeKnown(FBangoType::Bool());
+					return true;
+				}
 				FPlaceInfo Place;
-				if (!ResolvePlace(*Expr.As<FBangoIsNilExpr>()->Operand, EPlaceUse::Check, Place))
+				if (!ResolvePlace(Operand, EPlaceUse::Check, Place))
 				{
 					return false;
 				}
@@ -3465,6 +3477,74 @@ namespace BangoCompilerPrivate
 		}
 
 		/** Indexing a value that isn't a variable, e.g. `GetList()[0]`. */
+		/**
+		 * isNil of something that isn't a variable (spec section 3, isNil): a call that gives a value, a define, or an
+		 * element of one of those. The call runs as it would anywhere; its arguments are read as usual. An element past
+		 * the end, of a nil array, or nil itself, gives nil rather than stopping the script.
+		 */
+		bool CompileIsNilValue(const FBangoExpr& Operand)
+		{
+			if (const FBangoIndexExpr* IndexExpr = Operand.As<FBangoIndexExpr>())
+			{
+				FExprType ArrayType;
+				if (!CompileIsNilArray(*IndexExpr->Array, ArrayType))
+				{
+					return false;
+				}
+				if (ArrayType.IsKnown() && !ArrayType.Type.IsArray())
+				{
+					const bool bPart = ArrayType.Type.Base == EBangoBaseType::Vector2 || ArrayType.Type.Base == EBangoBaseType::Vector3 || ArrayType.Type.Base == EBangoBaseType::String;
+					return Fail(IndexExpr->Loc, bPart
+						? FString(TEXT("A vector's part or a string's character is never nil (an index outside it is an error), so isNil can't check it. Check the vector or string itself, and its Count."))
+						: FString::Printf(TEXT("Only arrays can be indexed here, but this is %s."), *ArrayType.Describe()));
+				}
+				FExprType IndexType;
+				if (!CompileExpr(*IndexExpr->Index, nullptr, IndexType))
+				{
+					return false;
+				}
+				if (!IndexType.Is(FBangoType::Int()) && !IndexType.IsUnknown())
+				{
+					return Fail(IndexExpr->Index->Loc, FString::Printf(TEXT("An array index must be an int, but this is %s."), *IndexType.Describe()));
+				}
+				Emit(EBangoOp::Index, 1); // nil ok
+				return true;
+			}
+			FExprType ValueType;
+			return CompileExpr(Operand, nullptr, ValueType) && (ValueType.Kind != ETypeKind::Void
+				|| Fail(Operand.Loc, TEXT("This call doesn't return a value, so isNil can't check it.")));
+		}
+
+		/** The array an isNil element is in (CompileIsNilValue): its type, for the next level. */
+		bool CompileIsNilArray(const FBangoExpr& ArrayExpr, FExprType& OutType)
+		{
+			if (const FBangoIndexExpr* Inner = ArrayExpr.As<FBangoIndexExpr>())
+			{
+				FExprType InnerType;
+				if (!CompileIsNilArray(*Inner->Array, InnerType))
+				{
+					return false;
+				}
+				if (InnerType.IsKnown() && !InnerType.Type.IsArray())
+				{
+					return Fail(Inner->Loc, FString::Printf(TEXT("Only arrays can be indexed here, but this is %s."), *InnerType.Describe()));
+				}
+				FExprType IndexType;
+				if (!CompileExpr(*Inner->Index, nullptr, IndexType))
+				{
+					return false;
+				}
+				if (!IndexType.Is(FBangoType::Int()) && !IndexType.IsUnknown())
+				{
+					return Fail(Inner->Index->Loc, FString::Printf(TEXT("An array index must be an int, but this is %s."), *IndexType.Describe()));
+				}
+				Emit(EBangoOp::Index, 1);
+				OutType = InnerType.IsKnown() ? FExprType::MakeKnown(InnerType.Type.GetElementType()) : FExprType::MakeUnknown();
+				return true;
+			}
+			return CompileExpr(ArrayExpr, nullptr, OutType) && CheckUsableValue(OutType, ArrayExpr.Loc, TEXT("as an array"));
+		}
+
 		bool CompileIndexOfValue(const FBangoIndexExpr& IndexExpr, FExprType& OutType)
 		{
 			FExprType ArrayType;
