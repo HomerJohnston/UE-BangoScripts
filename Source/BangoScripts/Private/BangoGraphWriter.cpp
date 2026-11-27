@@ -626,10 +626,15 @@ namespace BangoGraphWriterPrivate
 
 			case EBangoGraphNodeKind::Sequence:
 			{
-				// `sequence`, then each output's block in turn: the `{` of one on the line after the `}` of the last.
+				// `sequence`, then each output's block in turn, with `next` on a line between one's `}` and the next's `{`.
 				AddCode(Indent, Detached, TEXT("sequence"), &Node);
-				for (const int32 Output : Node.Branches)
+				for (int32 BlockNum = 0; BlockNum < Node.Branches.Num(); ++BlockNum)
 				{
+					const int32 Output = Node.Branches[BlockNum];
+					if (BlockNum > 0)
+					{
+						AddCode(Indent, Detached, TEXT("next"), nullptr);
+					}
 					if (!WriteBlock(Graph, Output, Indent, Detached, Depth))
 					{
 						return false;

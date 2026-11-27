@@ -20,6 +20,7 @@ namespace BangoLexerPrivate
 		{ TEXT("forEach"), EBangoTokenKind::KwForEach },
 		{ TEXT("in"), EBangoTokenKind::KwIn },
 		{ TEXT("sequence"), EBangoTokenKind::KwSequence },
+		{ TEXT("next"), EBangoTokenKind::KwNext },
 		{ TEXT("spawn"), EBangoTokenKind::KwSpawn },
 		{ TEXT("waitUntil"), EBangoTokenKind::KwWaitUntil },
 		{ TEXT("switch"), EBangoTokenKind::KwSwitch },

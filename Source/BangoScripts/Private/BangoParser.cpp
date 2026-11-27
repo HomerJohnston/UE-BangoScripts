@@ -902,6 +902,9 @@ namespace BangoParserPrivate
 			case EBangoTokenKind::KwElse:
 				Fail(First.Loc, TEXT("'else' must come straight after the '}' of an if block, with no ';' in between."));
 				return nullptr;
+			case EBangoTokenKind::KwNext:
+				Fail(First.Loc, TEXT("'next' only goes between a sequence's blocks, straight after the '}' of one: sequence { ... } next { ... }"));
+				return nullptr;
 			case EBangoTokenKind::LBrace:
 				Fail(First.Loc, TEXT("A '{' block must belong to an if, else, while, for, forEach, sequence, spawn, switch case or function. (To group statements, put them in a sequence: sequence { ... })"));
 				return nullptr;
@@ -1471,7 +1474,7 @@ namespace BangoParserPrivate
 			return MoveTemp(Stmt);
 		}
 
-		/** `sequence` then one or more blocks, each `{` on the line after the last one's `}`. */
+		/** `sequence` then one or more blocks, with `next` between each block and the one after it. */
 		FBangoStmtPtr ParseSequence()
 		{
 			const FBangoToken& Keyword = Advance();
@@ -1484,13 +1487,28 @@ namespace BangoParserPrivate
 			Stmt->Node.TextBegin = Stmt->Node.TextEnd = Keyword.EndColumn; // no text: its blocks are its outputs
 			if (!Check(EBangoTokenKind::LBrace))
 			{
-				Fail(Cur().Loc, FString::Printf(TEXT("Expected '{' after 'sequence', but found %s. A sequence is one or more blocks: sequence { ... } { ... }"), *Bango::DescribeToken(Cur())));
+				Fail(Cur().Loc, FString::Printf(TEXT("Expected '{' after 'sequence', but found %s. A sequence is one or more blocks, with 'next' between them: sequence { ... } next { ... }"), *Bango::DescribeToken(Cur())));
 				return nullptr;
 			}
-			while (Check(EBangoTokenKind::LBrace))
+			for (;;)
 			{
 				if (!ParseBlock(Stmt->Blocks.AddDefaulted_GetRef()))
 				{
+					return nullptr;
+				}
+				if (Check(EBangoTokenKind::LBrace))
+				{
+					Fail(Cur().Loc, TEXT("Put 'next' between a sequence's blocks: sequence { ... } next { ... }"));
+					return nullptr;
+				}
+				if (!Check(EBangoTokenKind::KwNext))
+				{
+					break;
+				}
+				const FBangoToken& NextKeyword = Advance();
+				if (!Check(EBangoTokenKind::LBrace))
+				{
+					Fail(Check(EBangoTokenKind::EndOfFile) ? NextKeyword.Loc : Cur().Loc, FString::Printf(TEXT("Expected '{' after 'next', but found %s. 'next' starts a sequence's next block: sequence { ... } next { ... }"), *Bango::DescribeToken(Cur())));
 					return nullptr;
 				}
 			}

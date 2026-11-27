@@ -800,8 +800,10 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			TEXT("{\n")
 			TEXT("\tTalk(\"a\");  //@2(40, 10)\n")
 			TEXT("}\n")
+			TEXT("next\n")
 			TEXT("{\n")
 			TEXT("}\n")
+			TEXT("next\n")
 			TEXT("{\n")
 			TEXT("\tTalk(\"c\");  //@3(40, 30)\n")
 			TEXT("}\n")
@@ -831,8 +833,10 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			TEXT("{\n")
 			TEXT("\tTalk(\"a\");    //@2(40, 10)\n")
 			TEXT("}\n")
+			TEXT("next\n")
 			TEXT("{\n")
 			TEXT("}\n")
+			TEXT("next\n")
 			TEXT("{\n")
 			TEXT("\tTalk(\"c\");    //@3(40, 30)\n")
 			TEXT("}\n")
@@ -845,7 +849,7 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		{
 			FBangoGraphDocument More = Doc;
 			More.Main.Nodes[1].Branches.Add(INDEX_NONE);
-			Expect(Bango::WriteGraphText(More, Text, WriteError) && Text.Contains(TEXT("}\n{\n}\n\nTalk(\"d\")")), FString(TEXT("sequence: a fourth, empty output:\n")) + Text);
+			Expect(Bango::WriteGraphText(More, Text, WriteError) && Text.Contains(TEXT("}\nnext\n{\n}\n\nTalk(\"d\")")), FString(TEXT("sequence: a fourth, empty output:\n")) + Text);
 			FBangoGraphDocument None = Doc;
 			None.Main.Nodes[1].Branches.Reset();
 			Expect(!Bango::WriteGraphText(None, Text, WriteError) && WriteError.Contains(TEXT("no outputs")), FString(TEXT("sequence: needs an output: ")) + WriteError);

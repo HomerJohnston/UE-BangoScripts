@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.137)
+# Bango Language Spec (draft v0.138)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.138:** **`next` goes between a sequence's blocks** (section 8, sequence): `sequence { ... } next { ... } next { ... }`, so back-to-back braces no longer have to be read as one statement. It's required: a sequence block followed straight by `{` is a compile error ("Put 'next' between a sequence's blocks"), and so is `next` anywhere else, or with no block after it. As with `else`, the graph editor writes it on a line of its own, between one block's `}` and the next block's `{`. The graph doesn't change: a Sequence node still has Scope 0, Scope 1, ... and Then. `next` is a keyword, so it can't be used as a name.
 
 **Changes in v0.137:** **`isNil` also checks what a call gives** (section 3, isNil): `isNil(GetFocus(@john))`, `isNil(MyFunction())`, and an element of what it gives, `isNil(GetList()[2])`, which is true past the end or when the call gave nil. The call runs as it would anywhere, and its arguments are read as usual. A calculation, a comparison or a value written out is still a compile error, since it's never nil.
 
@@ -354,7 +356,7 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
 | `while (cond)` | exec in → Do, Then |
 | `for (init; cond; step)` | exec in → Do, Then |
 | `forEach (_x in arr)` | exec in → Do, Then |
-| `sequence { ... } { ... }` | exec in → Scope 0, Scope 1, Scope 2, ... (one per block), Then |
+| `sequence { ... } next { ... }` | exec in → Scope 0, Scope 1, Scope 2, ... (one per block), Then |
 | `spawn { ... }` | exec in → Run, Then |
 | A command with a block, `Name(...) { ... }` (section 7) | exec in → Body (its block), Then; the node is the command's, with its fields |
 | `waitUntil (cond);`, optionally with `heldFor (seconds)` and `timeout (seconds) { ... }` | exec in → Timeout (its block), Then ("Wait Until", showing the condition, the hold's seconds and the timeout's seconds) |
@@ -541,7 +543,7 @@ WriteScreen(ToString(TEXT_NS("Shared.UI", "Continue", "Continue")));
 - Calling a command or function with the wrong capitalisation is a compile error that suggests the right name: *"Unknown command or function 'writeScreen'. Did you mean 'WriteScreen'? Names are case-sensitive."*
 - A name is letters, digits and `_`, and doesn't start with a digit.
 - A **define**'s name (section 4, Defines) can't be used for anything a script declares: it always means the define.
-- Keywords and type names can't be used as names: `if else while for forEach in sequence spawn waitUntil switch case default break continue return label goto function global scriptVar persistent call isNil player self true false nil bool int float string entity text vector2 vector3 void TEXT TEXT_NS TEXT_INV`, and the old text macros' names (`LOCTEXT`, `NSLOCTEXT`, `NOTELOCTEXT`, `NSNOTELOCTEXT`, `INVTEXT`), which say what they're called now. This doesn't apply to Bango ID names, since the `@` sets them apart.
+- Keywords and type names can't be used as names: `if else while for forEach in sequence next spawn waitUntil switch case default break continue return label goto function global scriptVar persistent call isNil player self true false nil bool int float string entity text vector2 vector3 void TEXT TEXT_NS TEXT_INV`, and the old text macros' names (`LOCTEXT`, `NSLOCTEXT`, `NOTELOCTEXT`, `NSNOTELOCTEXT`, `INVTEXT`), which say what they're called now. This doesn't apply to Bango ID names, since the `@` sets them apart.
 
 ### Locals and script variables
 A graph (the main script, or a function) has two kinds of variables of its own, besides its parameters and loop variables. Both only exist inside the running script instance.
@@ -1305,7 +1307,7 @@ forEach (_x in _myArray)
 - `break` and `continue` work as usual.
 
 ### sequence
-`sequence` is followed by one or more blocks, each `{` on the line after the previous block's `}`. It runs the blocks in order, each **to its end** before the next starts, then carries on with what follows the last block:
+`sequence` is followed by one or more blocks, with `next` between each block and the one after it. It runs the blocks in order, each **to its end** before the next starts, then carries on with what follows the last block:
 
 ```
 sequence                              //@5(20, 0)
@@ -1313,6 +1315,7 @@ sequence                              //@5(20, 0)
 	@gate OpenDoor();
 	Sleep(2);
 }
+next
 {
 	WriteScreen("The gate is open.");
 }
@@ -1321,6 +1324,7 @@ WriteLog("both done");                // after both blocks
 
 - A block that waits (`Sleep`, or any command that takes time) holds up the next one: the second block above starts two seconds later. Unlike Blueprint's Sequence node, the blocks never run at the same time. To run two things at once, start another script with `Exec` (section 7).
 - It only groups statements, to keep a graph tidy: it makes no scope, and `break`, `continue`, `return`, labels and `goto` work in its blocks just as they do around it (a `break` in a sequence in a loop leaves the loop).
+- **`next` is required between blocks.** A block followed straight by `{` is a compile error (*"Put 'next' between a sequence's blocks"*), so a `{` can't join a sequence by accident, and a `}` with no `next` after it ends the sequence. `next` anywhere else is an error, and so is `next` with no `{` after it. Like `else`, it can share a line with the braces (`} next {`), but the graph editor writes it on its own line, as above.
 - A block can be empty (`{` then `}`): an output with nothing on it.
 - The `//@` metadata goes on the `sequence` line. Disabling a sequence disables all its blocks.
 
