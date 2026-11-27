@@ -46,6 +46,34 @@ struct FBangoNodeDecoratorContext
 	 * where the node can't be changed, as for a title.
 	 */
 	TFunction<bool(int32 FieldIndex, const FString& Value, FString& OutError)> SetFieldValue;
+
+	// ---- A command with entries (its block is an entry list: a row per entry, each with its condition) ----
+
+	/** True if the node's block is an entry list. */
+	bool bEntries = false;
+	/** Each entry's condition, as written; empty for `entry:`, which always passes. */
+	TArray<FString> EntryConditions;
+	/** Whether each entry is disabled. */
+	TArray<bool> EntryDisabled;
+	/**
+	 * Sets entry Entry's condition to Condition, written as it would be in the script (empty for `entry:`), as one
+	 * undoable change, as SetFieldValue does. False, with why, if it can't be set.
+	 */
+	TFunction<bool(int32 Entry, const FString& Condition, FString& OutError)> SetEntryCondition;
+	/**
+	 * In MakeEntryRowWidget only: the box the node would show for entry Entry's condition (typing in it, Tab and
+	 * Shift+Tab to the next and last, the hint "Always" when it's empty, the red outline for an error), to put
+	 * wherever the row wants it. Call it once per row; don't keep it.
+	 */
+	TFunction<TSharedRef<SWidget>(int32 Entry)> MakeEntryConditionWidget;
+	/**
+	 * While a game plays in the editor and the debugger follows a copy of the script with this node's block open:
+	 * true, with whether each entry passed when its conditions were last worked out, and the entry running (-1 none).
+	 * The node is drawn again when they change.
+	 */
+	bool bHasEntryDebug = false;
+	TArray<bool> DebugEntryPassed;
+	int32 DebugRunningEntry = -1;
 };
 
 /** Changes how one command's nodes are drawn. Every function is optional: by default the node is drawn as usual. */
@@ -73,6 +101,12 @@ public:
 	virtual bool HidesField(const FBangoNodeDecoratorContext& Context, int32 FieldIndex) const { return false; }
 	/** Something to show under the fields, or null. */
 	virtual TSharedPtr<SWidget> MakeExtraContent(const FBangoNodeDecoratorContext& Context) { return nullptr; }
+	/**
+	 * For a command with entries: the widget for entry Entry's row, beside its output pin, in place of the usual
+	 * condition box (Context.MakeEntryConditionWidget makes that box, to put in the row). Null for the usual box.
+	 * Made again whenever the node is drawn again.
+	 */
+	virtual TSharedPtr<SWidget> MakeEntryRowWidget(const FBangoNodeDecoratorContext& Context, int32 Entry) { return nullptr; }
 };
 
 namespace Bango

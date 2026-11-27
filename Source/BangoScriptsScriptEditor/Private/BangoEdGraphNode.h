@@ -99,9 +99,20 @@ public:
 	UPROPERTY()
 	int32 SequenceOutputs = 2;
 
-	/** A switch's cases: each one's values as written, like `1, 2` (see FBangoGraphNode::CaseValues). One output each. */
+	/**
+	 * A switch's cases: each one's values as written, like `1, 2` (see FBangoGraphNode::CaseValues). One output each.
+	 * A command node with entries (bEntries): each entry's condition, empty for `entry:`. One output each.
+	 */
 	UPROPERTY()
 	TArray<FString> CaseValues;
+
+	/** A command node whose block is an entry list (see FBangoGraphNode::bEntries): a row per entry, no Body. */
+	UPROPERTY()
+	bool bEntries = false;
+
+	/** With bEntries: whether each entry is disabled. One per entry. */
+	UPROPERTY()
+	TArray<bool> EntryDisabled;
 
 	/** True for nodes in a function's graph (a function graph's entry node's Text is the signature). */
 	UPROPERTY()
@@ -150,6 +161,13 @@ public:
 
 	/** For the debugger: how the script instance being debugged is using this node. Set by the script editor; not saved. */
 	EBangoNodeDebugState DebugState = EBangoNodeDebugState::None;
+	/**
+	 * A command with entries, while the debugger follows a copy of the script with its block open: which entries
+	 * passed when last worked out, and the one running (-1 none). Not saved.
+	 */
+	bool bHasEntryDebug = false;
+	TArray<bool> DebugEntryPassed;
+	int32 DebugRunningEntry = -1;
 	/** For the debugger's trail: when the script being debugged last ran this node (FPlatformTime::Seconds), or 0. Fades out. */
 	double DebugPingTime = 0.0;
 
@@ -243,8 +261,25 @@ public:
 	void RemoveSwitchCase(int32 Case);
 	/** Sets a case's values (see Bango::ValidateCaseValues; empty is allowed while it's being filled in) as an undoable edit. */
 	bool SetCaseValues(int32 Case, const FString& Values, FString& OutError);
-	/** The case an output pin is for, or INDEX_NONE (Default, Then, the input, or not a switch). */
+	/** The case (or entry) an output pin is for, or INDEX_NONE (Default, Then, the input, or neither kind of node). */
 	int32 GetCaseOfPin(const UEdGraphPin* Pin) const;
+
+	/** A command node whose block is an entry list: its rows are like a switch's cases (CaseValues), without Default. */
+	bool IsEntries() const { return GetKind() == EBangoGraphNodeKind::BlockCall && bEntries; }
+	/** A switch, or a command with entries: a box beside each of its outputs (CaseValues). */
+	bool HasCaseRows() const { return IsSwitch() || IsEntries(); }
+	/** The command takes entries (FBangoCommandSignature::Entries), and whether they're optional (it can also have an ordinary block). */
+	bool TakesEntries() const;
+	bool TakesOptionalEntries() const;
+	/** Moves an entry (its condition, whether it's disabled, and its wire) up (Delta -1) or down (+1), as an undoable edit. */
+	void MoveEntry(int32 Entry, int32 Delta);
+	/** Disables or enables one entry, as an undoable edit. */
+	void SetEntryDisabled(int32 Entry, bool bDisabled);
+	/** A command with optional entries and an ordinary block: its block becomes one `entry:` holding what was in it. */
+	void UseEntries();
+	/** The other way, for one entry with no condition. */
+	void UsePlainBlock();
+	bool CanUsePlainBlock() const { return IsEntries() && TakesOptionalEntries() && CaseValues.Num() == 1 && CaseValues[0].IsEmpty() && !(EntryDisabled.IsValidIndex(0) && EntryDisabled[0]); }
 
 	/** The decorator another module registered for the command this node calls (Bango::RegisterNodeDecorator), or null. */
 	TSharedPtr<class IBangoNodeDecorator> GetNodeDecorator() const;

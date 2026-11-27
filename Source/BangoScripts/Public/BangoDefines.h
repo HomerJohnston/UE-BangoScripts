@@ -91,4 +91,20 @@ namespace Bango
 	 * lists names already used (the rows before it); may be null.
 	 */
 	BANGOSCRIPTS_API bool CheckDefine(const FBangoDefineText& Define, const TSet<FString>* Taken, FBangoValue& OutValue, FString& OutError);
+
+	/**
+	 * For tests: while it lasts there are no defines, neither the project's nor any plugin's (a test can set its
+	 * own); when it goes, those there were are put back as they were.
+	 */
+	struct BANGOSCRIPTS_API FBangoScopedNoDefines
+	{
+		FBangoScopedNoDefines();
+		~FBangoScopedNoDefines();
+		FBangoScopedNoDefines(const FBangoScopedNoDefines&) = delete;
+		FBangoScopedNoDefines& operator=(const FBangoScopedNoDefines&) = delete;
+	private:
+		TArray<FBangoDefineText> SavedProjectRows;
+		TArray<FString> SavedOwners;
+		TArray<TArray<FBangoDefineText>> SavedPluginRows;
+	};
 }

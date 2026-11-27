@@ -246,6 +246,19 @@ namespace BangoCompilerPrivate
 					return false;
 				}
 			}
+			// And each entry list's conditions, for a block that's watched (FBangoCommandCall::WatchEntries).
+			for (int32 FunctionIndex = 0; FunctionIndex < Program.Functions.Num(); ++FunctionIndex)
+			{
+				for (FBangoBlockInfo& Block : Program.Functions[FunctionIndex].Blocks)
+				{
+					if (Block.EntryCount >= 0 && Block.CheckAt >= 0)
+					{
+						FBangoDependencies Found = Bango::FindDependencies(Program, FunctionIndex, Block.CheckAt, Block.CheckEnd);
+						Block.EntryGlobals = MoveTemp(Found.Globals);
+						Block.EntryPollReason = MoveTemp(Found.PollReason);
+					}
+				}
+			}
 			if (bCondition && Program.Functions.Num() > 0)
 			{
 				Program.ConditionDependencies = Bango::FindDependencies(Program, 0, 0, Program.Functions[0].Code.Num());
@@ -345,6 +358,8 @@ namespace BangoCompilerPrivate
 		TArray<int32> SpawnOpenBlockBases;
 		/** The blocks (BlockParents indexes) that are a block command's block: a goto can't jump into one. */
 		TArray<int32> CommandBlockIds;
+		/** Set by CompileBlockCall for a block with entries, and taken by CompileCall, which checks them before its call (EmitEntryChecks). */
+		const FBangoBlockCallStmt* EntriesToCheck = nullptr;
 		/** Set by CompileBlockCall for the call that opens its block (FBangoFunctionCode::Blocks), and taken by CompileCall; otherwise -1. */
 		int32 OpeningBlock = -1;
 		TBangoNameMap<FLabel> Labels;
@@ -863,7 +878,17 @@ namespace BangoCompilerPrivate
 			case EBangoStmtKind::Spawn:
 				return CheckNoDeclsInBlock(Stmt.As<FBangoSpawnStmt>()->Body, bInFunction);
 			case EBangoStmtKind::BlockCall:
-				return CheckNoDeclsInBlock(Stmt.As<FBangoBlockCallStmt>()->Body, bInFunction);
+			{
+				const FBangoBlockCallStmt& BlockCall = *Stmt.As<FBangoBlockCallStmt>();
+				for (const FBangoEntry& Entry : BlockCall.Entries)
+				{
+					if (!CheckNoDeclsInBlock(Entry.Body, bInFunction))
+					{
+						return false;
+					}
+				}
+				return CheckNoDeclsInBlock(BlockCall.Body, bInFunction);
+			}
 			case EBangoStmtKind::WaitUntil:
 				return CheckNoDeclsInBlock(Stmt.As<FBangoWaitUntilStmt>()->TimeoutBlock, bInFunction);
 			case EBangoStmtKind::Switch:
@@ -1105,7 +1130,17 @@ namespace BangoCompilerPrivate
 			case EBangoStmtKind::Spawn:
 				return CollectGlobalsInBlock(Stmt.As<FBangoSpawnStmt>()->Body);
 			case EBangoStmtKind::BlockCall:
-				return CollectGlobalsInBlock(Stmt.As<FBangoBlockCallStmt>()->Body);
+			{
+				const FBangoBlockCallStmt& BlockCall = *Stmt.As<FBangoBlockCallStmt>();
+				for (const FBangoEntry& Entry : BlockCall.Entries)
+				{
+					if (!CollectGlobalsInBlock(Entry.Body))
+					{
+						return false;
+					}
+				}
+				return CollectGlobalsInBlock(BlockCall.Body);
+			}
 			case EBangoStmtKind::WaitUntil:
 				return CollectGlobalsInBlock(Stmt.As<FBangoWaitUntilStmt>()->TimeoutBlock);
 			case EBangoStmtKind::Switch:
@@ -1639,8 +1674,15 @@ namespace BangoCompilerPrivate
 				break;
 			}
 			case EBangoStmtKind::BlockCall:
-				CollectGraphLocals(Stmt.As<FBangoBlockCallStmt>()->Body, bDisabled);
+			{
+				const FBangoBlockCallStmt& BlockCall = *Stmt.As<FBangoBlockCallStmt>();
+				for (const FBangoEntry& Entry : BlockCall.Entries)
+				{
+					CollectGraphLocals(Entry.Body, bDisabled || Entry.bDisabled);
+				}
+				CollectGraphLocals(BlockCall.Body, bDisabled);
 				break;
+			}
 			case EBangoStmtKind::WaitUntil:
 				CollectGraphLocals(Stmt.As<FBangoWaitUntilStmt>()->TimeoutBlock, bDisabled);
 				break;
@@ -1837,6 +1879,10 @@ namespace BangoCompilerPrivate
 			}
 			else if (const FBangoBlockCallStmt* BlockCall = Stmt.As<FBangoBlockCallStmt>())
 			{
+				for (const FBangoEntry& Entry : BlockCall->Entries)
+				{
+					NoteBlock(Entry.Body);
+				}
 				NoteBlock(BlockCall->Body);
 			}
 			else if (const FBangoWaitUntilStmt* Wait = Stmt.As<FBangoWaitUntilStmt>())
@@ -2292,18 +2338,36 @@ namespace BangoCompilerPrivate
 					*Call.Name));
 			}
 
+			if (!CheckEntries(BlockCall, *Signature))
+			{
+				return false;
+			}
+			// An empty block of a command that takes only entries is an entry list with none.
+			const bool bEntries = BlockCall.bEntries || (Signature->bEntries && !Signature->bEntriesOptional);
+
 			LoopNodeForSlots = BlockCall.Node.bHasMetadata ? BlockCall.Node.NodeID : -2;
 			FBangoBlockInfo Info;
 			Info.Command = AddName(Call.Name);
 			Info.StateSlot = AllocSlot(FBangoType::Int(), TEXT("(block state)"));
 			Info.PhaseSlot = AllocSlot(FBangoType::Int(), TEXT("(block phase)"));
+			if (bEntries)
+			{
+				Info.EntryCount = 0;
+				for (const FBangoEntry& Entry : BlockCall.Entries)
+				{
+					Info.EntryCount += Entry.bDisabled ? 0 : 1;
+				}
+				Info.EntrySlot = AllocSlot(FBangoType::ArrayOf(EBangoBaseType::Int), TEXT("(block entries)"));
+			}
 			LoopNodeForSlots = -1;
 			const int32 Index = Fn->Blocks.Add(Info);
 
 			OpeningBlock = Index;
+			EntriesToCheck = bEntries ? &BlockCall : nullptr;
 			FExprType Unused;
 			const bool bCalled = CompileCall(Call, false, Unused);
 			OpeningBlock = -1;
+			EntriesToCheck = nullptr;
 			if (!bCalled)
 			{
 				return false;
@@ -2317,7 +2381,7 @@ namespace BangoCompilerPrivate
 			Open.Name = Call.Name;
 			CommandBlockIds.Add(Open.BlockId);
 			OpenBlocks.Add(Open);
-			const bool bCompiled = CompileBlock(BlockCall.Body);
+			const bool bCompiled = bEntries ? CompileEntries(BlockCall, Index) : CompileBlock(BlockCall.Body);
 			OpenBlocks.Pop();
 			if (!bCompiled)
 			{
@@ -2327,6 +2391,133 @@ namespace BangoCompilerPrivate
 			CurrentLoc = BlockCall.Loc;
 			Fn->Blocks[Index].CloseAt = Here();
 			Emit(EBangoOp::CloseBlock, Index, 0);
+			return true;
+		}
+
+		/** Whether a block command's block is what it takes: an entry list or an ordinary block, and what its entries hold. */
+		bool CheckEntries(const FBangoBlockCallStmt& BlockCall, const FBangoCommandSignature& Signature)
+		{
+			if (BlockCall.bEntries && !Signature.bEntries)
+			{
+				return Fail(BlockCall.Entries.Num() > 0 ? BlockCall.Entries[0].Loc : BlockCall.Loc,
+					FString::Printf(TEXT("'%s' doesn't take entries, so its block is ordinary statements."), *Signature.Name));
+			}
+			if (!BlockCall.bEntries && Signature.bEntries && !Signature.bEntriesOptional)
+			{
+				for (const FBangoStmtPtr& Stmt : BlockCall.Body)
+				{
+					if (Stmt->Kind != EBangoStmtKind::Reroute)
+					{
+						return Fail(Stmt->Loc, FString::Printf(TEXT("The block of '%s' holds entries only: 'entry if (condition):' or 'entry:', each with a block. Put statements inside an entry."), *Signature.Name));
+					}
+				}
+			}
+			if (!BlockCall.bEntries || Signature.EntriesHoldCommand.IsEmpty())
+			{
+				return true;
+			}
+			// Each entry holds one call of that command, or nothing (disabled statements and reroutes don't count).
+			for (const FBangoEntry& Entry : BlockCall.Entries)
+			{
+				if (Entry.bDisabled)
+				{
+					continue;
+				}
+				int32 Count = 0;
+				for (const FBangoStmtPtr& Stmt : Entry.Body)
+				{
+					if (Stmt->bDisabled || Stmt->Kind == EBangoStmtKind::Reroute)
+					{
+						continue;
+					}
+					const FBangoExpr* CallExpr = nullptr;
+					if (const FBangoCallStmt* CallStmt = Stmt->As<FBangoCallStmt>())
+					{
+						CallExpr = CallStmt->Call.Get();
+					}
+					else if (const FBangoBlockCallStmt* Inner = Stmt->As<FBangoBlockCallStmt>())
+					{
+						CallExpr = Inner->Call.Get();
+					}
+					const FBangoCallExpr* Held = CallExpr ? CallExpr->As<FBangoCallExpr>() : nullptr;
+					const bool bIsHeld = Held && !Held->bReflect && Held->Name.Equals(Signature.EntriesHoldCommand, ESearchCase::CaseSensitive);
+					if (!bIsHeld || ++Count > 1)
+					{
+						return Fail(Stmt->Loc, FString::Printf(TEXT("A %s's entries each hold one %s and nothing else, since every entry's %s is run to gather them, whether its condition passed or not. Put anything else inside the %s's block, or before the %s."),
+							*Signature.Name, *Signature.EntriesHoldCommand, *Signature.EntriesHoldCommand, *Signature.EntriesHoldCommand, *Signature.Name));
+					}
+				}
+			}
+			return true;
+		}
+
+		/**
+		 * The entries' conditions, checked in one run of code: when the block opens (here, after the command's
+		 * arguments and before its call), and again from its start when the command asks. A condition that reads an
+		 * unset global gives false (EntryCond's C is where the next one starts).
+		 */
+		bool EmitEntryChecks(int32 Block, const FBangoBlockCallStmt& BlockCall)
+		{
+			CurrentLoc = BlockCall.Loc;
+			Fn->Blocks[Block].CheckAt = Emit(EBangoOp::EntryCheckBegin, Block);
+			int32 Number = 0;
+			for (const FBangoEntry& Entry : BlockCall.Entries)
+			{
+				if (Entry.bDisabled)
+				{
+					continue;
+				}
+				Fn->Blocks[Block].EntryConditions.Add(Entry.Condition.IsValid());
+				if (Entry.Condition)
+				{
+					CurrentLoc = Entry.Loc;
+					const int32 Cond = Emit(EBangoOp::EntryCond, Block, Number);
+					FExprType ConditionType;
+					if (!CompileExpr(*Entry.Condition, nullptr, ConditionType) || !CheckCondition(ConditionType, Entry.Condition->Loc))
+					{
+						return false;
+					}
+					CurrentLoc = Entry.Loc;
+					Emit(EBangoOp::EntryResult, Block, Number);
+					Fn->Code[Cond].C = Here();
+				}
+				++Number;
+			}
+			CurrentLoc = BlockCall.Loc;
+			Emit(EBangoOp::EntryCheckEnd, Block);
+			Fn->Blocks[Block].CheckEnd = Here();
+			return true;
+		}
+
+		/**
+		 * The entries' blocks, one after another after the command's call, each ending in an EntryEnd. Together they're
+		 * one scope, the command's block; each is a command's block of its own too, so a goto can't jump into one.
+		 */
+		bool CompileEntries(const FBangoBlockCallStmt& BlockCall, int32 Block)
+		{
+			PushScope();
+			for (const FBangoEntry& Entry : BlockCall.Entries)
+			{
+				if (Entry.bDisabled)
+				{
+					for (const FBangoStmtPtr& Stmt : Entry.Body)
+					{
+						NoteDisabledLabels(*Stmt);
+					}
+					continue;
+				}
+				const int32 Number = Fn->Blocks[Block].EntryAt.Num();
+				Fn->Blocks[Block].EntryAt.Add(Here());
+				CommandBlockIds.Add(BlockParents.Num()); // the block CompileBlock is about to open
+				if (!CompileBlock(Entry.Body))
+				{
+					return false;
+				}
+				CurrentStmt = &BlockCall;
+				CurrentLoc = Entry.Loc;
+				Emit(EBangoOp::EntryEnd, Block, Number);
+			}
+			PopScope();
 			return true;
 		}
 
@@ -4274,6 +4465,16 @@ namespace BangoCompilerPrivate
 				}
 			}
 
+			if (Opening >= 0 && EntriesToCheck && !bInferring)
+			{
+				// A block with entries: their conditions are worked out after the arguments, before the call.
+				const FBangoBlockCallStmt* Entries = EntriesToCheck;
+				EntriesToCheck = nullptr;
+				if (!EmitEntryChecks(Opening, *Entries))
+				{
+					return false;
+				}
+			}
 			CurrentLoc = Call.Loc;
 			const int32 CallFlags = (Signature->bPure ? Bango::CallIsPure : 0) | (bValueNeeded ? Bango::CallResultUsed : 0);
 			if (Signature->bMutableTarget)

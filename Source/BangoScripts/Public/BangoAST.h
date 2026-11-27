@@ -471,6 +471,24 @@ struct FBangoSpawnStmt : FBangoStmt
  * opening brace and its Close handler at the closing brace; the commands that belong to it (Inside) are called in
  * the block. The parser makes one of any call followed by a `{`; the compiler says whether the command takes one.
  */
+/**
+ * One entry of a block command's entry list: `entry if (condition):` or `entry:`, then its block. The entry line isn't
+ * a node of its own (in the graph it's a row of the command's node).
+ */
+struct FBangoEntry
+{
+	/** Where its `entry` is. */
+	FBangoSourceLocation Loc;
+	/** Its condition, or null for `entry:`. */
+	FBangoExprPtr Condition;
+	/** The columns of its condition's text on the entry line (from its first token to the end of its last), or 0. */
+	int32 ConditionBegin = 0;
+	int32 ConditionEnd = 0;
+	/** Disabled (inside the disabled-code markers): left out, as a disabled statement is. */
+	bool bDisabled = false;
+	FBangoBlock Body;
+};
+
 struct FBangoBlockCallStmt : FBangoStmt
 {
 	static constexpr EBangoStmtKind StaticKind = EBangoStmtKind::BlockCall;
@@ -478,7 +496,11 @@ struct FBangoBlockCallStmt : FBangoStmt
 
 	/** An FBangoCallExpr. */
 	FBangoExprPtr Call;
+	/** An ordinary block: its statements. Empty for an entry list. */
 	FBangoBlock Body;
+	/** The block is an entry list (FBangoCommandSignature::bEntries): Entries, and Body is empty. */
+	bool bEntries = false;
+	TArray<FBangoEntry> Entries;
 };
 
 /** One `case v1, v2: { ... }` of a switch. The case line is not a node of its own: it is a row on the switch node. */

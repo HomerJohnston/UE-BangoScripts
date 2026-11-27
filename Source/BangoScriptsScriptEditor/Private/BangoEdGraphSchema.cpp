@@ -204,6 +204,19 @@ UEdGraphNode* FBangoSchemaAction_NewNode::PerformAction(UEdGraph* ParentGraph, U
 	{
 		Node->CaseValues.Add(FString()); // a new switch has one case, to be filled in
 	}
+	if ((EBangoGraphNodeKind)Kind == EBangoGraphNodeKind::BlockCall && Sibling->LayoutContext.IsValid() && Sibling->LayoutContext->Commands)
+	{
+		// A command that takes entries starts with one `entry:`.
+		int32 Paren = INDEX_NONE;
+		const FString Name = Text.FindChar(TEXT('('), Paren) ? Text.Left(Paren).TrimStartAndEnd() : Text.TrimStartAndEnd();
+		const FBangoCommandSignature* Signature = Sibling->LayoutContext->Commands->FindCommand(Name);
+		if (Signature && Signature->bEntries)
+		{
+			Node->bEntries = true;
+			Node->CaseValues.Add(FString());
+			Node->EntryDisabled.Add(false);
+		}
+	}
 	Node->NodeID = 0;
 	Node->bInFunctionGraph = Sibling->bInFunctionGraph;
 	Node->LayoutContext = Sibling->LayoutContext;

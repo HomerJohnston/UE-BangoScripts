@@ -168,6 +168,7 @@ void FBangoCompletion::GetKeywordItems(TArray<FBangoCompletionItem>& OutItems, b
 		{ TEXT("in"),       TEXT("flow"),        TEXT("In a forEach header: forEach (_x in _array)."), false },
 		{ TEXT("sequence"), TEXT("flow"),        TEXT("sequence { ... } next { ... } runs its blocks one after another, each to its end."), false },
 		{ TEXT("next"),     TEXT("flow"),        TEXT("next goes between a sequence's blocks: sequence { ... } next { ... }"), false },
+		{ TEXT("entry"),    TEXT("flow"),        TEXT("One entry of a block command's list: entry if (condition): { ... } or entry: { ... }. Its condition is worked out when the block opens (and again if the command asks), and the command chooses which entries to run."), false },
 		{ TEXT("spawn"),    TEXT("flow"),        TEXT("spawn { ... } starts its block as a separate running copy of the script, and carries on straight away."), false },
 		{ TEXT("waitUntil"), TEXT("flow"),       TEXT("waitUntil (condition); pauses the script until the condition is true (carries on at once if it already is). With heldFor, the condition must stay true that long: waitUntil (condition) heldFor (seconds); With a timeout, it waits no longer than that, then runs the block: waitUntil (condition) timeout (seconds) { ... }"), false, true },
 		{ TEXT("switch"),   TEXT("flow"),        TEXT("switch (value) { case 1: { ... } default: { ... } } runs the case whose value matches."), false, true },

@@ -872,7 +872,7 @@ namespace Bango
 	{
 		static const TCHAR* Words[] =
 		{
-			TEXT("if"), TEXT("else"), TEXT("while"), TEXT("for"), TEXT("forEach"), TEXT("in"), TEXT("sequence"), TEXT("next"), TEXT("spawn"), TEXT("waitUntil"), TEXT("switch"), TEXT("case"), TEXT("default"),
+			TEXT("if"), TEXT("else"), TEXT("while"), TEXT("for"), TEXT("forEach"), TEXT("in"), TEXT("sequence"), TEXT("next"), TEXT("entry"), TEXT("spawn"), TEXT("waitUntil"), TEXT("switch"), TEXT("case"), TEXT("default"),
 			TEXT("break"), TEXT("continue"), TEXT("return"), TEXT("label"), TEXT("goto"),
 			TEXT("function"), TEXT("global"), TEXT("scriptVar"), TEXT("persistent"), TEXT("true"), TEXT("false"), TEXT("nil"),
 			TEXT("bool"), TEXT("int"), TEXT("float"), TEXT("string"), TEXT("entity"), TEXT("void"),

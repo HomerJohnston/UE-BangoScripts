@@ -13,6 +13,7 @@ bool FBangoGraphNode::operator==(const FBangoGraphNode& Other) const
 	return Kind == Other.Kind && NodeID == Other.NodeID && X == Other.X && Y == Other.Y
 		&& Text.Equals(Other.Text, ESearchCase::CaseSensitive) && Comment.Equals(Other.Comment, ESearchCase::CaseSensitive) && Next == Other.Next
 		&& Branches == Other.Branches && bDisabled == Other.bDisabled && CaseValues.Num() == Other.CaseValues.Num()
+		&& bEntries == Other.bEntries && EntryDisabled == Other.EntryDisabled
 		&& [&]()
 		{
 			for (int32 i = 0; i < CaseValues.Num(); ++i)
@@ -189,7 +190,8 @@ namespace Bango
 
 	int32 GetGraphNodeBranchCount(const FBangoGraphNode& Node)
 	{
-		return Node.Kind == EBangoGraphNodeKind::Sequence || Node.Kind == EBangoGraphNodeKind::Switch ? Node.Branches.Num() : GetGraphNodeBranchCount(Node.Kind);
+		return Node.Kind == EBangoGraphNodeKind::Sequence || Node.Kind == EBangoGraphNodeKind::Switch || (Node.Kind == EBangoGraphNodeKind::BlockCall && Node.bEntries)
+			? Node.Branches.Num() : GetGraphNodeBranchCount(Node.Kind);
 	}
 
 	FString GetGraphNodeNextName(EBangoGraphNodeKind Kind)
@@ -337,6 +339,10 @@ namespace Bango
 				return TEXT("Default");
 			}
 			return Node.CaseValues.IsValidIndex(Branch) && !Node.CaseValues[Branch].IsEmpty() ? Node.CaseValues[Branch] : GetGraphNodeBranchName(Node.Kind, Branch);
+		}
+		if (Node.Kind == EBangoGraphNodeKind::BlockCall && Node.bEntries)
+		{
+			return FString(TEXT("Entry ")) + FString::FromInt(Branch);
 		}
 		return GetGraphNodeBranchName(Node.Kind, Branch);
 	}
@@ -940,8 +946,31 @@ namespace BangoGraphPrivate
 			}
 			else if (const FBangoBlockCallStmt* BlockCall = Stmt.As<FBangoBlockCallStmt>())
 			{
-				const int32 Body = BuildChain(Graph, BlockCall->Body, 0, Targets);
-				GraphAt(Graph).Nodes[Index].Branches[0] = Body;
+				if (BlockCall->bEntries)
+				{
+					// An entry list: a row per entry, its condition as written, and its block on its output.
+					TArray<int32> Outputs;
+					TArray<FString> Conditions;
+					TArray<bool> Disabled;
+					for (const FBangoEntry& Entry : BlockCall->Entries)
+					{
+						const int32 LineIndex = Entry.Loc.Line - 1;
+						Conditions.Add(Entry.Condition && Lines.IsValidIndex(LineIndex) && Entry.ConditionEnd > Entry.ConditionBegin
+							? Lines[LineIndex].Mid(Entry.ConditionBegin - 1, Entry.ConditionEnd - Entry.ConditionBegin) : FString());
+						Disabled.Add(Entry.bDisabled);
+						Outputs.Add(BuildChain(Graph, Entry.Body, 0, Targets));
+					}
+					FBangoGraphNode& Node = GraphAt(Graph).Nodes[Index];
+					Node.bEntries = true;
+					Node.Branches = MoveTemp(Outputs);
+					Node.CaseValues = MoveTemp(Conditions);
+					Node.EntryDisabled = MoveTemp(Disabled);
+				}
+				else
+				{
+					const int32 Body = BuildChain(Graph, BlockCall->Body, 0, Targets);
+					GraphAt(Graph).Nodes[Index].Branches[0] = Body;
+				}
 			}
 			else if (const FBangoWaitUntilStmt* Wait = Stmt.As<FBangoWaitUntilStmt>())
 			{

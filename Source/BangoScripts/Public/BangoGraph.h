@@ -78,6 +78,8 @@ enum class EBangoGraphNodeKind : uint8
 	/**
 	 * `@john Speech(0, 1) { ... }`: a command that takes a block (FBangoCommandSignature::Block). Text is the call,
 	 * like a Call node's (`@john Speech(0, 1)`); Branches[0] ("Body") is its block, and Next (Then) what follows.
+	 * With bEntries, its block is an entry list: a row per entry (CaseValues, its condition), each with an output
+	 * (Branches), and no Body.
 	 * (Last in the list: it was added last, and the editor keeps kinds as numbers.)
 	 */
 	BlockCall,
@@ -117,7 +119,10 @@ struct BANGOSCRIPTS_API FBangoGraphNode
 	 */
 	TArray<int32> Branches = { INDEX_NONE, INDEX_NONE };
 
-	/** Switch only: each case's values as written, like `1` or `"north", "south"`. Branches[i] is case i's output. */
+	/**
+	 * Switch: each case's values as written, like `1` or `"north", "south"`. Branches[i] is case i's output.
+	 * BlockCall with bEntries: each entry's condition as written, empty for `entry:`. Branches[i] is entry i's output.
+	 */
 	TArray<FString> CaseValues;
 
 	/**
@@ -125,6 +130,11 @@ struct BANGOSCRIPTS_API FBangoGraphNode
 	 * straight on to Next. A disabled If or loop skips its blocks. The nodes in those blocks keep their own setting.
 	 */
 	bool bDisabled = false;
+
+	/** BlockCall only: its block is an entry list (FBangoCommandSignature::Entries): see CaseValues. */
+	bool bEntries = false;
+	/** With bEntries: whether each entry is disabled (written between the disabled-code markers). One per entry. */
+	TArray<bool> EntryDisabled;
 
 	bool operator==(const FBangoGraphNode& Other) const;
 	bool operator!=(const FBangoGraphNode& Other) const { return !(*this == Other); }

@@ -39,6 +39,8 @@ struct FBangoScriptDebugInfo
 	TArray<FBangoCallFrameInfo> CallStack;
 	/** The command it's waiting on, like "Sleep", or empty. */
 	FString WaitingOn;
+	/** The blocks of commands with entries that are open, with which entries passed and which is running. */
+	TArray<FBangoOpenEntries> OpenEntries;
 	/**
 	 * For a script spawned from text (an inline script, SpawnFromSource): FCrc::StrCrc32 of its text, so the graph
 	 * editor can find the copies of the inline script it has open. 0 for a script asset.

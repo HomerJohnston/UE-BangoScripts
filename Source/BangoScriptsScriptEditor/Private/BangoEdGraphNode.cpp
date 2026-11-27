@@ -31,6 +31,10 @@ int32 UBangoEdGraphNode::GetBranchCount() const
 	{
 		return CaseValues.Num() + 1;
 	}
+	if (IsEntries())
+	{
+		return CaseValues.Num();
+	}
 	return IsSequence() ? FMath::Max(SequenceOutputs, 1) : Bango::GetGraphNodeBranchCount(GetKind());
 }
 
@@ -45,7 +49,7 @@ UEdGraphPin* UBangoEdGraphNode::GetBranchPin(int32 Branch) const
 
 int32 UBangoEdGraphNode::GetCaseOfPin(const UEdGraphPin* Pin) const
 {
-	for (int32 Case = 0; IsSwitch() && Pin && Case < CaseValues.Num(); ++Case)
+	for (int32 Case = 0; HasCaseRows() && Pin && Case < CaseValues.Num(); ++Case)
 	{
 		if (Pin->PinName == GetBranchPinName(Case) && Pin->Direction == EGPD_Output)
 		{
@@ -57,18 +61,23 @@ int32 UBangoEdGraphNode::GetCaseOfPin(const UEdGraphPin* Pin) const
 
 void UBangoEdGraphNode::AddSwitchCase()
 {
-	if (!IsSwitch())
+	if (!HasCaseRows())
 	{
 		return;
 	}
-	const FScopedTransaction Transaction(LOCTEXT("AddSwitchCase", "Add Switch Case"));
+	const FScopedTransaction Transaction(IsEntries() ? LOCTEXT("AddEntry", "Add Entry") : LOCTEXT("AddSwitchCase", "Add Switch Case"));
 	Modify();
 	const int32 Case = CaseValues.Num();
 	CaseValues.Add(FString());
+	if (IsEntries())
+	{
+		EntryDisabled.SetNum(Case);
+		EntryDisabled.Add(false);
+	}
 	UEdGraphPin* Pin = CreatePin(EGPD_Output, UBangoEdGraphSchema::PC_BangoExec, GetBranchPinName(Case));
-	// After the other cases, above Default.
+	// After the other cases, above Default (an entry: after the other entries, above Then).
 	Pins.Remove(Pin);
-	const int32 DefaultIndex = Pins.IndexOfByKey(FindPin(DefaultPinName, EGPD_Output));
+	const int32 DefaultIndex = Pins.IndexOfByKey(FindPin(IsEntries() ? NextPinName : DefaultPinName, EGPD_Output));
 	Pins.Insert(Pin, DefaultIndex == INDEX_NONE ? Pins.Num() : DefaultIndex);
 	UpdateLayout();
 	if (UEdGraph* Graph = GetGraph())
@@ -80,11 +89,11 @@ void UBangoEdGraphNode::AddSwitchCase()
 void UBangoEdGraphNode::RemoveSwitchCase(int32 Case)
 {
 	const int32 Count = CaseValues.Num();
-	if (!IsSwitch() || Case < 0 || Case >= Count)
+	if (!HasCaseRows() || Case < 0 || Case >= Count)
 	{
 		return;
 	}
-	const FScopedTransaction Transaction(LOCTEXT("RemoveSwitchCase", "Remove Switch Case"));
+	const FScopedTransaction Transaction(IsEntries() ? LOCTEXT("RemoveEntry", "Remove Entry") : LOCTEXT("RemoveSwitchCase", "Remove Switch Case"));
 	Modify();
 	// Each case's wire, without the removed one's: the later cases move up one, wires and all.
 	TArray<TArray<UEdGraphPin*>> Links;
@@ -111,6 +120,10 @@ void UBangoEdGraphNode::RemoveSwitchCase(int32 Case)
 		RemovePin(Last);
 	}
 	CaseValues.RemoveAt(Case);
+	if (EntryDisabled.IsValidIndex(Case))
+	{
+		EntryDisabled.RemoveAt(Case);
+	}
 	for (int32 i = 0; i < Links.Num(); ++i)
 	{
 		if (UEdGraphPin* Pin = FindPin(GetBranchPinName(i), EGPD_Output))
@@ -130,12 +143,12 @@ void UBangoEdGraphNode::RemoveSwitchCase(int32 Case)
 
 bool UBangoEdGraphNode::SetCaseValues(int32 Case, const FString& Values, FString& OutError)
 {
-	if (!IsSwitch() || !CaseValues.IsValidIndex(Case))
+	if (!HasCaseRows() || !CaseValues.IsValidIndex(Case))
 	{
 		return false;
 	}
 	const FString Trimmed = Values.TrimStartAndEnd();
-	if (!Trimmed.IsEmpty() && !Bango::ValidateCaseValues(Trimmed, OutError))
+	if (IsEntries() ? !Bango::ValidateEntryCondition(Trimmed, OutError) : (!Trimmed.IsEmpty() && !Bango::ValidateCaseValues(Trimmed, OutError)))
 	{
 		return false;
 	}
@@ -143,11 +156,135 @@ bool UBangoEdGraphNode::SetCaseValues(int32 Case, const FString& Values, FString
 	{
 		return true;
 	}
-	const FScopedTransaction Transaction(LOCTEXT("EditSwitchCase", "Edit Switch Case"));
+	const FScopedTransaction Transaction(IsEntries() ? LOCTEXT("EditEntryCondition", "Edit Entry Condition") : LOCTEXT("EditSwitchCase", "Edit Switch Case"));
 	Modify();
 	CaseValues[Case] = Trimmed;
 	UpdateLayout();
 	return true;
+}
+
+bool UBangoEdGraphNode::TakesEntries() const
+{
+	const FBangoCommandSignature* Signature = GetKind() == EBangoGraphNodeKind::BlockCall && LayoutContext.IsValid() && LayoutContext->Commands
+		? LayoutContext->Commands->FindCommand(Layout.CallName) : nullptr;
+	return Signature && Signature->bEntries;
+}
+
+bool UBangoEdGraphNode::TakesOptionalEntries() const
+{
+	const FBangoCommandSignature* Signature = GetKind() == EBangoGraphNodeKind::BlockCall && LayoutContext.IsValid() && LayoutContext->Commands
+		? LayoutContext->Commands->FindCommand(Layout.CallName) : nullptr;
+	return Signature && Signature->bEntries && Signature->bEntriesOptional;
+}
+
+void UBangoEdGraphNode::MoveEntry(int32 Entry, int32 Delta)
+{
+	const int32 Other = Entry + Delta;
+	if (!IsEntries() || !CaseValues.IsValidIndex(Entry) || !CaseValues.IsValidIndex(Other) || Entry == Other)
+	{
+		return;
+	}
+	const FScopedTransaction Transaction(Delta < 0 ? LOCTEXT("MoveEntryUp", "Move Entry Up") : LOCTEXT("MoveEntryDown", "Move Entry Down"));
+	Modify();
+	UEdGraphPin* PinA = FindPin(GetBranchPinName(Entry), EGPD_Output);
+	UEdGraphPin* PinB = FindPin(GetBranchPinName(Other), EGPD_Output);
+	if (!PinA || !PinB)
+	{
+		return;
+	}
+	// The two rows swap, wires and all.
+	TArray<UEdGraphPin*> LinksA = PinA->LinkedTo;
+	TArray<UEdGraphPin*> LinksB = PinB->LinkedTo;
+	for (UEdGraphPin* Linked : LinksA)
+	{
+		if (Linked && Linked->GetOwningNode())
+		{
+			Linked->GetOwningNode()->Modify();
+		}
+	}
+	for (UEdGraphPin* Linked : LinksB)
+	{
+		if (Linked && Linked->GetOwningNode())
+		{
+			Linked->GetOwningNode()->Modify();
+		}
+	}
+	PinA->BreakAllPinLinks();
+	PinB->BreakAllPinLinks();
+	for (UEdGraphPin* Linked : LinksB)
+	{
+		PinA->MakeLinkTo(Linked);
+	}
+	for (UEdGraphPin* Linked : LinksA)
+	{
+		PinB->MakeLinkTo(Linked);
+	}
+	CaseValues.Swap(Entry, Other);
+	EntryDisabled.SetNum(CaseValues.Num());
+	EntryDisabled.Swap(Entry, Other);
+	UpdateLayout();
+	if (UEdGraph* Graph = GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
+}
+
+void UBangoEdGraphNode::SetEntryDisabled(int32 Entry, bool bDisabled)
+{
+	if (!IsEntries() || !CaseValues.IsValidIndex(Entry))
+	{
+		return;
+	}
+	EntryDisabled.SetNum(CaseValues.Num());
+	if (EntryDisabled[Entry] == bDisabled)
+	{
+		return;
+	}
+	const FScopedTransaction Transaction(bDisabled ? LOCTEXT("DisableEntry", "Disable Entry") : LOCTEXT("EnableEntry", "Enable Entry"));
+	Modify();
+	EntryDisabled[Entry] = bDisabled;
+	UpdateLayout();
+	if (UEdGraph* Graph = GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
+}
+
+void UBangoEdGraphNode::UseEntries()
+{
+	if (GetKind() != EBangoGraphNodeKind::BlockCall || bEntries || !TakesOptionalEntries())
+	{
+		return;
+	}
+	// Body and the first entry's output are the same pin (Branch0), so its wire stays: what was in the block is the entry's.
+	const FScopedTransaction Transaction(LOCTEXT("UseEntries", "Use Entries"));
+	Modify();
+	bEntries = true;
+	CaseValues = { FString() };
+	EntryDisabled = { false };
+	UpdateLayout();
+	if (UEdGraph* Graph = GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
+}
+
+void UBangoEdGraphNode::UsePlainBlock()
+{
+	if (!CanUsePlainBlock())
+	{
+		return;
+	}
+	const FScopedTransaction Transaction(LOCTEXT("UsePlainBlock", "Use a Plain Block"));
+	Modify();
+	bEntries = false;
+	CaseValues.Reset();
+	EntryDisabled.Reset();
+	UpdateLayout();
+	if (UEdGraph* Graph = GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
 }
 
 void UBangoEdGraphNode::AddSequenceOutput()
@@ -382,6 +519,51 @@ void UBangoEdGraphNode::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeCon
 				FUIAction(FExecuteAction::CreateLambda([MutableThis, Case]() { MutableThis->RemoveSwitchCase(Case); })));
 		}
 	}
+	if (GetKind() == EBangoGraphNodeKind::BlockCall && (IsEntries() || TakesOptionalEntries()))
+	{
+		// A command's entries: add one at the end; right-clicking an entry's output removes, moves or disables it.
+		UBangoEdGraphNode* MutableThis = const_cast<UBangoEdGraphNode*>(this);
+		FToolMenuSection& Section = Menu->AddSection(TEXT("BangoEntries"), LOCTEXT("EntriesSection", "Entries"));
+		if (IsEntries())
+		{
+			Section.AddMenuEntry(TEXT("AddEntry"), LOCTEXT("AddEntryItem", "Add Entry"),
+				LOCTEXT("AddEntryTooltip", "Adds an entry after the others. Type its condition in its box, or leave it empty for one that always passes."), FSlateIcon(),
+				FUIAction(FExecuteAction::CreateLambda([MutableThis]() { MutableThis->AddSwitchCase(); })));
+			const int32 Entry = GetCaseOfPin(Context->Pin);
+			if (Entry != INDEX_NONE)
+			{
+				const bool bEntryDisabled = EntryDisabled.IsValidIndex(Entry) && EntryDisabled[Entry];
+				Section.AddMenuEntry(TEXT("RemoveEntry"), FText::Format(LOCTEXT("RemoveEntryItem", "Remove Entry {0}"), FText::AsNumber(Entry)),
+					LOCTEXT("RemoveEntryTooltip", "Removes this entry and its wire (the nodes on it stay, unwired). The entries after it move up."), FSlateIcon(),
+					FUIAction(FExecuteAction::CreateLambda([MutableThis, Entry]() { MutableThis->RemoveSwitchCase(Entry); })));
+				Section.AddMenuEntry(TEXT("MoveEntryUp"), LOCTEXT("MoveEntryUpItem", "Move Entry Up"),
+					LOCTEXT("MoveEntryUpTooltip", "Swaps this entry with the one above it, wires and all. The order matters to a command that runs the first that passes, or each in turn."), FSlateIcon(),
+					FUIAction(FExecuteAction::CreateLambda([MutableThis, Entry]() { MutableThis->MoveEntry(Entry, -1); }),
+						FCanExecuteAction::CreateLambda([Entry]() { return Entry > 0; })));
+				const int32 Count = CaseValues.Num();
+				Section.AddMenuEntry(TEXT("MoveEntryDown"), LOCTEXT("MoveEntryDownItem", "Move Entry Down"),
+					LOCTEXT("MoveEntryDownTooltip", "Swaps this entry with the one below it, wires and all."), FSlateIcon(),
+					FUIAction(FExecuteAction::CreateLambda([MutableThis, Entry]() { MutableThis->MoveEntry(Entry, 1); }),
+						FCanExecuteAction::CreateLambda([Entry, Count]() { return Entry + 1 < Count; })));
+				Section.AddMenuEntry(TEXT("ToggleEntryDisabled"), bEntryDisabled ? LOCTEXT("EnableEntryItem", "Enable Entry") : LOCTEXT("DisableEntryItem", "Disable Entry"),
+					LOCTEXT("ToggleEntryDisabledTooltip", "A disabled entry is left out: its condition isn't worked out, and the command isn't told of it."), FSlateIcon(),
+					FUIAction(FExecuteAction::CreateLambda([MutableThis, Entry, bEntryDisabled]() { MutableThis->SetEntryDisabled(Entry, !bEntryDisabled); })));
+			}
+			if (TakesOptionalEntries())
+			{
+				Section.AddMenuEntry(TEXT("UsePlainBlock"), LOCTEXT("UsePlainBlockItem", "Use a Plain Block"),
+					LOCTEXT("UsePlainBlockTooltip", "Its one entry, which has no condition, becomes an ordinary block holding what was in it."), FSlateIcon(),
+					FUIAction(FExecuteAction::CreateLambda([MutableThis]() { MutableThis->UsePlainBlock(); }),
+						FCanExecuteAction::CreateLambda([MutableThis]() { return MutableThis->CanUsePlainBlock(); })));
+			}
+		}
+		else
+		{
+			Section.AddMenuEntry(TEXT("UseEntries"), LOCTEXT("UseEntriesItem", "Use Entries"),
+				LOCTEXT("UseEntriesTooltip", "Its block becomes one entry, with no condition, holding what was in it. Add more entries after it."), FSlateIcon(),
+				FUIAction(FExecuteAction::CreateLambda([MutableThis]() { MutableThis->UseEntries(); })));
+		}
+	}
 	if (Context->Pin || !CanBeDisabled())
 	{
 		return;
@@ -439,6 +621,39 @@ FBangoNodeDecoratorContext UBangoEdGraphNode::MakeDecoratorContext() const
 		}
 		return Node->SetFieldValue(FieldIndex, Value, OutError);
 	};
+	Context.bEntries = IsEntries();
+	if (Context.bEntries)
+	{
+		Context.EntryConditions = CaseValues;
+		Context.EntryDisabled = EntryDisabled;
+		Context.EntryDisabled.SetNum(CaseValues.Num());
+		Context.SetEntryCondition = [WeakNode](int32 Entry, const FString& Condition, FString& OutError)
+		{
+			UBangoEdGraphNode* Node = WeakNode.Get();
+			if (!Node)
+			{
+				OutError = TEXT("The node is gone.");
+				return false;
+			}
+			if (!Node->CaseValues.IsValidIndex(Entry))
+			{
+				OutError = TEXT("The node has no such entry.");
+				return false;
+			}
+			if (!Node->SetCaseValues(Entry, Condition, OutError))
+			{
+				return false;
+			}
+			if (UEdGraph* Graph = Node->GetGraph())
+			{
+				Graph->NotifyGraphChanged(); // drawn again, from the new text
+			}
+			return true;
+		};
+		Context.bHasEntryDebug = bHasEntryDebug;
+		Context.DebugEntryPassed = DebugEntryPassed;
+		Context.DebugRunningEntry = DebugRunningEntry;
+	}
 	return Context;
 }
 
@@ -573,9 +788,10 @@ FText UBangoEdGraphNode::GetPinDisplayName(const UEdGraphPin* Pin) const
 	{
 		return FText::FromString(Bango::GetGraphNodeNextName(GetKind()));
 	}
-	if (IsSwitch())
+	if (HasCaseRows())
 	{
-		// A case's values are in the box beside its pin, and Default has a box saying so, so these pins have no names.
+		// A case's values (an entry's condition) are in the box beside its pin, and Default has a box saying so, so
+		// these pins have no names.
 		return FText::GetEmpty();
 	}
 	for (int32 Branch = 0; Branch < GetBranchCount(); ++Branch)

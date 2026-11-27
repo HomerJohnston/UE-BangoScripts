@@ -501,6 +501,19 @@ FBangoCommandSignature& FBangoCommandSignature::Inside(const FString& BlockComma
 	return *this;
 }
 
+FBangoCommandSignature& FBangoCommandSignature::Entries(bool bOptional)
+{
+	bEntries = true;
+	bEntriesOptional = bOptional;
+	return *this;
+}
+
+FBangoCommandSignature& FBangoCommandSignature::EntriesHold(const FString& CommandName)
+{
+	EntriesHoldCommand = CommandName;
+	return *this;
+}
+
 FBangoCommandSignature& FBangoCommandSignature::InCategory(const FString& InCategory)
 {
 	CategoryName = InCategory;
@@ -552,6 +565,21 @@ bool FBangoCommandTable::Add(const FBangoCommand& Command, FString& OutError)
 	if (Command.Close && !Command.Signature.bBlock)
 	{
 		OutError = FString::Printf(TEXT("'%s' has a Close handler, but doesn't take a block (Block)."), *Name);
+		return false;
+	}
+	if (Command.Signature.bEntries && !Command.Signature.bBlock)
+	{
+		OutError = FString::Printf(TEXT("'%s' takes entries (Entries), but doesn't take a block (Block)."), *Name);
+		return false;
+	}
+	if (!Command.Signature.EntriesHoldCommand.IsEmpty() && !Command.Signature.bEntries)
+	{
+		OutError = FString::Printf(TEXT("'%s' says what its entries hold (EntriesHold), but doesn't take entries (Entries)."), *Name);
+		return false;
+	}
+	if (Command.EntryEnded && !Command.Signature.bEntries)
+	{
+		OutError = FString::Printf(TEXT("'%s' has an EntryEnded handler, but doesn't take entries (Entries)."), *Name);
 		return false;
 	}
 	for (int32 i = 0; i < Command.Signature.TypeParams.Num(); ++i)

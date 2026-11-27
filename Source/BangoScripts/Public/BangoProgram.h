@@ -21,6 +21,13 @@ namespace Bango
 	constexpr int32 CallBlockShift = 8;
 	/** A CallCommand instruction's C: the call opens the block above (it's the block command's own call), rather than being written in it. */
 	constexpr int32 CallOpensBlock = 8;
+	/** In a block's entry slot (FBangoBlockInfo::EntrySlot): its flags, and each entry's. */
+	constexpr int64 EntryWatched = 1;
+	constexpr int64 EntryRecheck = 2;
+	constexpr int64 EntryPassed = 1;
+	constexpr int64 EntryHasCondition = 2;
+	/** The entry slot's elements before the entries' own: the entry running, and the flags. */
+	constexpr int32 EntryHeader = 2;
 	/** A WaitBegin instruction's B: which values it takes off the stack (pushed in this order). */
 	constexpr int32 WaitHasHold = 1;
 	constexpr int32 WaitHasTimeout = 2;
@@ -107,6 +114,16 @@ enum class EBangoOp : uint8
 	ForEachNext,        // A = slot holding the array copy (A + 1 holds the int position), B = loop variable slot, C = target when done
 	SpawnBlock,         // A = target: starts another instance at A with a copy of this frame's slots (a spawn block); this one carries on. B = 1: push the new instance's id
 	CloseBlock,         // A = block (FBangoFunctionCode::Blocks): its command's close handler runs, then its state is emptied. B = 1: the script is leaving the block early (return, break, continue, goto)
+
+	// ---- A block command's entries (FBangoBlockInfo::EntryCount) ----
+	// Its entries' conditions are checked in one run of code, EntryCheckBegin to EntryCheckEnd: when the block opens
+	// (after the command's arguments, before its call), and again from there when the command asks (RecheckEntries)
+	// or watches them (WatchEntries). Then the entries' blocks follow the command's call, each ending in an EntryEnd.
+	EntryCheckBegin,    // A = block. Starts checking its entries' conditions: an entry without one passes
+	EntryCond,          // A = block, B = entry, C = where the next entry's check starts. Its condition follows: while it's worked out, a global that's unset makes it false (on at C), and it can't wait
+	EntryResult,        // A = block, B = entry.  bool -> : whether it passed
+	EntryCheckEnd,      // A = block. Done checking: when the block opens, on to the command's call; for a re-check, back to the command, still waiting
+	EntryEnd,           // A = block, B = entry: the entry's closing brace. The command's EntryEnded handler runs, and runs another entry, or the block closes
 
 	// ---- waitUntil (Program.WaitSets) ----
 	WaitBegin,          // A = wait set (one with a heldFor or a timeout), B = which of the Bango::WaitHas... values are there.  [hold seconds] [timeout seconds] [ignoreHold] -> : notes them, before its first WaitCheck
@@ -199,6 +216,26 @@ struct FBangoBlockInfo
 	int32 CloseAt = 0;
 	/** The block this one's command is written in and belongs to (FBangoCommandSignature::InsideOf), or -1. */
 	int32 Parent = -1;
+
+	// ---- An entry list (FBangoCommandSignature::Entries) ----
+	/** How many entries the block has (not counting disabled ones), or -1 for an ordinary block. */
+	int32 EntryCount = -1;
+	/**
+	 * The slot with what's known about its entries while it's open: an int array, [the entry running (-1 none),
+	 * flags (Bango::EntryWatched, Bango::EntryRecheck), then each entry's Bango::EntryPassed and Bango::EntryHasCondition].
+	 */
+	int32 EntrySlot = -1;
+	/** The EntryCheckBegin instruction, and the instruction after its EntryCheckEnd (what its conditions read is in between). */
+	int32 CheckAt = -1;
+	int32 CheckEnd = -1;
+	/** Each entry's first instruction. */
+	TArray<int32> EntryAt;
+	/** Whether each entry has a condition (`entry if (...):`) or not (`entry:`, which always passes). */
+	TArray<bool> EntryConditions;
+	/** The globals its conditions read (themselves, or in the script's functions they call): a change to one rechecks a watched block. */
+	TArray<FString> EntryGlobals;
+	/** Empty if only those globals can change its conditions' answers; else why a watched block is rechecked every frame. */
+	FString EntryPollReason;
 };
 
 struct FBangoFunctionCode

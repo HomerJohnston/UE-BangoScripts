@@ -165,6 +165,15 @@ struct BANGOSCRIPTS_API FBangoCommandSignature
 	FString InsideOf;
 	/** With InsideOf: the command may also be called anywhere else, where it belongs to no block. See Inside. */
 	bool bInsideOptional = false;
+	/**
+	 * With bBlock: the block is a list of entries (`entry if (condition): { ... }`, `entry: { ... }`) and nothing
+	 * else, and the command chooses which of them run. See Entries.
+	 */
+	bool bEntries = false;
+	/** With bEntries: the block may also be an ordinary block (one that doesn't start with `entry`). See Entries. */
+	bool bEntriesOptional = false;
+	/** With bEntries: the one command each entry holds (or none), and nothing else. Empty: anything. See EntriesHold. */
+	FString EntriesHoldCommand;
 	/** What's wrong with how the signature was built (a type parameter that doesn't exist, ...): FBangoCommandTable::Add fails with it. */
 	FString BuildError;
 	/**
@@ -280,6 +289,21 @@ struct BANGOSCRIPTS_API FBangoCommandSignature
 	 * For a command that works on its own as well as in the block, like a line said outside any speech.
 	 */
 	FBangoCommandSignature& Inside(const FString& BlockCommand, bool bOptional = false);
+	/**
+	 * With Block: the block is a list of entries, `entry if (condition): { ... }` and `entry: { ... }`, and nothing
+	 * else. Every entry's condition is worked out when the block opens, after the arguments, and the command chooses
+	 * which entries run (FBangoCommandCall::RunEntry), and in what order. At the end of each entry, its EntryEnded
+	 * handler is called. A condition must answer at once; one that reads a global that isn't set up yet doesn't pass.
+	 *
+	 * With bOptional, the block may also be an ordinary block: one whose first thing isn't `entry`.
+	 */
+	FBangoCommandSignature& Entries(bool bOptional = false);
+	/**
+	 * With Entries: each entry holds one call of the command named (with its own block, if it takes one), or nothing,
+	 * and nothing else. For a command that runs every entry, passed or not, to gather them (a prompt's options), so
+	 * that nothing else in an entry runs when its condition is false.
+	 */
+	FBangoCommandSignature& EntriesHold(const FString& CommandName);
 	FBangoCommandSignature& InCategory(const FString& InCategory);
 	FBangoCommandSignature& Describe(const FString& InDescription);
 };
@@ -393,6 +417,59 @@ struct FBangoCommandCall
 	 */
 	bool bBlockAbandoned = false;
 
+	// ---- Entries (FBangoCommandSignature::Entries) ----
+	// For a block command with entries, in Start, EntryEnded, Close and their Poll: what its entries are, and which
+	// passed when their conditions were last worked out.
+
+	/** The number of entries (not counting disabled ones), or -1 if the block isn't an entry list. Set by the VM. */
+	int32 EntryCount = -1;
+	/** Per entry: bit 0, its condition passed; bit 1, it has one (not `entry:`). Set by the VM. */
+	TArray<uint8> EntryFlags;
+	/** True if the block is an entry list (a command with optional entries may have an ordinary block). */
+	bool HasEntries() const { return EntryCount >= 0; }
+	/** How many entries there are, not counting disabled ones (0 if the block isn't an entry list). */
+	int32 GetEntryCount() const { return FMath::Max(EntryCount, 0); }
+	/** True if entry Index's condition passed when it was last worked out (always, for `entry:`). */
+	bool EntryPassed(int32 Index) const { return EntryFlags.IsValidIndex(Index) && (EntryFlags[Index] & 1) != 0; }
+	/** False for `entry:`, which has no condition. */
+	bool EntryHasCondition(int32 Index) const { return EntryFlags.IsValidIndex(Index) && (EntryFlags[Index] & 2) != 0; }
+	/** In Poll: a re-check (RecheckEntries) or the watch (WatchEntries) has changed an entry's answer since the last call. */
+	bool bEntriesChanged = false;
+	/** EntryEnded, and Poll after an EntryEnded that returned Pending: the entry that has just ended. -1 otherwise. */
+	int32 EntryNumber = -1;
+	/** EntryEnded, and Poll after one that returned Pending: the call is at the end of an entry (EntryNumber). */
+	bool bEntryEnding = false;
+	/** Set by RunEntry: the entry to run, or -1. */
+	int32 RunEntryNumber = -1;
+	/**
+	 * From Start or EntryEnded (or Poll while waiting on either), when it returns Done: the script runs that entry's
+	 * block, passed or not, and at its end EntryEnded is called. Without it, the script goes on to the block's close.
+	 */
+	void RunEntry(int32 Index) { RunEntryNumber = Index; }
+	/** Set by RecheckEntries. */
+	bool bRecheckEntries = false;
+	/**
+	 * From Start, EntryEnded or Close (or their Poll), which must then return Pending: every entry's condition is
+	 * worked out again before the next Poll, which sees the new answers (and bEntriesChanged). From Start, EntryEnded
+	 * or Close, that Poll comes straight away, in the same frame.
+	 */
+	void RecheckEntries() { bRecheckEntries = true; }
+	/** Set by WatchEntries: 1 to watch, 0 to stop, -1 no change. */
+	int32 WatchEntriesRequest = -1;
+	/**
+	 * Turns watching the entries on or off. While on, whenever the command waits (its Start, EntryEnded or Close, or
+	 * their Poll, returned Pending), the entries' conditions are checked again by waitUntil's rules before each Poll:
+	 * when a global they read changes, or every frame if they call a command that isn't pure. Poll then has
+	 * bEntriesChanged. It stays on until it's turned off or the block closes.
+	 */
+	void WatchEntries(bool bWatch) { WatchEntriesRequest = bWatch ? 1 : 0; }
+	/**
+	 * For a command that belongs to a block (Inside), written in one of its entries: which entry (for one that also
+	 * takes a block of its own, like a prompt's option, the entry of the block it's written in, with OuterBlockState).
+	 * -1 if it isn't in an entry.
+	 */
+	int32 BlockEntryNumber = -1;
+
 	/**
 	 * Any handler (Start, Poll, Close, Abandoned), of any command: the state of the nearest open block of the block
 	 * command named, in this running script, counting blocks opened by the callers of the function the command is in.
@@ -429,6 +506,15 @@ struct FBangoCommandCall
 		bSkipBlock = false;
 		RunBlockNumber = -1;
 		bBlockAbandoned = false;
+		EntryCount = -1;
+		EntryFlags.Reset();
+		bEntriesChanged = false;
+		EntryNumber = -1;
+		bEntryEnding = false;
+		RunEntryNumber = -1;
+		bRecheckEntries = false;
+		WatchEntriesRequest = -1;
+		BlockEntryNumber = -1;
 		Result = FBangoValue();
 		Error.Reset();
 	}
@@ -470,6 +556,13 @@ struct FBangoCommand
 	 * Not called when the script's world is torn down, or for a command that itself returned Failed.
 	 */
 	FBangoCommandHandler Abandoned;
+	/**
+	 * For a block command with entries (FBangoCommandSignature::Entries): runs at the end of each entry it ran, with
+	 * FBangoCommandCall::EntryNumber, the block's state and its entries. It may RunEntry another (or the same one
+	 * again), or return Done without one, and then the block's Close runs. It may return Pending, and Poll is called
+	 * with bEntryEnding. Optional: without it, the block closes after the first entry it runs.
+	 */
+	FBangoCommandHandler EntryEnded;
 };
 
 /** Looks up command signatures by name (case-sensitive). */

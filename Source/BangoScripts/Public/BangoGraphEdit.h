@@ -42,6 +42,12 @@ namespace Bango
 	BANGOSCRIPTS_API bool ValidateCaseValues(const FString& Values, FString& OutError);
 
 	/**
+	 * Checks an entry's condition (a row of a command node with entries): empty (the entry is `entry:`), or one line
+	 * that reads as a condition, as an If's does. Types and names are checked by Compile.
+	 */
+	BANGOSCRIPTS_API bool ValidateEntryCondition(const FString& Condition, FString& OutError);
+
+	/**
 	 * For statement text (a declaration, assignment, ++/--, or call): which of those kinds it is. Text that
 	 * stores a call's result (`double _t = Random(...)`, `_t = Random(...)`) is a declaration or assignment.
 	 */
@@ -68,7 +74,10 @@ namespace Bango
 		int32 Node = INDEX_NONE;
 		/** Character offset in the node's text, or INDEX_NONE if the error isn't inside the node's text. */
 		int32 Offset = INDEX_NONE;
-		/** For a Switch node, the case whose line the error is on, or INDEX_NONE. Offset is then in its values. */
+		/**
+		 * For a Switch node, the case whose line the error is on, or INDEX_NONE. Offset is then in its values. For a
+		 * command node with entries, the entry, and Offset is in its condition.
+		 */
 		int32 Case = INDEX_NONE;
 	};
 

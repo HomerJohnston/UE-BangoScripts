@@ -216,6 +216,17 @@ namespace BangoDumpPrivate
 		case EBangoStmtKind::BlockCall:
 		{
 			const FBangoBlockCallStmt& S = *Stmt.As<FBangoBlockCallStmt>();
+			if (S.bEntries)
+			{
+				// (block call (entries (entry cond (...)) (entry (...)) (disabled entry ...)))
+				FString Entries;
+				for (const FBangoEntry& Entry : S.Entries)
+				{
+					Entries += FString::Printf(TEXT(" (%sentry%s %s)"), Entry.bDisabled ? TEXT("disabled ") : TEXT(""),
+						Entry.Condition ? *(TEXT(" ") + Bango::DumpExpr(*Entry.Condition)) : TEXT(""), *DumpBlock(Entry.Body));
+				}
+				return FString::Printf(TEXT("(block %s (entries%s))"), *Bango::DumpExpr(*S.Call), *Entries);
+			}
 			return FString::Printf(TEXT("(block %s %s)"), *Bango::DumpExpr(*S.Call), *DumpBlock(S.Body));
 		}
 		case EBangoStmtKind::Spawn:

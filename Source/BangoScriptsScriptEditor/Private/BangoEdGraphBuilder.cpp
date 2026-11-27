@@ -39,6 +39,13 @@ namespace BangoScriptEditor
 			{
 				Node->CaseValues = Source.CaseValues;
 			}
+			if (Source.Kind == EBangoGraphNodeKind::BlockCall && Source.bEntries)
+			{
+				Node->bEntries = true;
+				Node->CaseValues = Source.CaseValues;
+				Node->EntryDisabled = Source.EntryDisabled;
+				Node->EntryDisabled.SetNum(Node->CaseValues.Num());
+			}
 			Node->bInFunctionGraph = Graph.bIsFunction;
 			Node->LayoutContext = LayoutContext;
 			Node->CreateNewGuid();
@@ -233,13 +240,19 @@ namespace BangoScriptEditor
 				Out.Comment = Node->NodeComment;
 				Out.bDisabled = Node->IsDisabledNode();
 				Out.Next = Target(Node->GetNextPin(), Index);
-				if (Node->IsSequence() || Node->IsSwitch())
+				if (Node->IsSequence() || Node->HasCaseRows())
 				{
 					Out.Branches.Init(INDEX_NONE, Node->GetBranchCount());
 				}
-				if (Node->IsSwitch())
+				if (Node->HasCaseRows())
 				{
 					Out.CaseValues = Node->CaseValues;
+				}
+				if (Node->IsEntries())
+				{
+					Out.bEntries = true;
+					Out.EntryDisabled = Node->EntryDisabled;
+					Out.EntryDisabled.SetNum(Node->CaseValues.Num());
 				}
 				for (int32 Branch = 0; Branch < Node->GetBranchCount(); ++Branch)
 				{

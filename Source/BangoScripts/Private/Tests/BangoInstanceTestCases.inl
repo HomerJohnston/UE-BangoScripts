@@ -1436,8 +1436,10 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			}
 		}
 
-		// Defines: project-wide named values, compiled in place (FBangoDefineEntry). The project's are put back after.
+		// Defines: project-wide named values, compiled in place (FBangoDefineEntry). The project's are put back after,
+		// and the plugins' (BangoYap's, say) are set aside while it runs.
 		{
+			const Bango::FBangoScopedNoDefines NoDefines;
 			TArray<Bango::FBangoDefineText> ProjectDefines;
 			for (const FBangoDefineEntry& Entry : Bango::GetDefines())
 			{
@@ -1600,6 +1602,19 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 			FBangoCompileError UndefinedError;
 			Expect(Bango::CompileSource(TEXT("int SELECT_RANDOM = 1;"), TEXT("defines.bango"), Commands, Undefined, UndefinedError) && Bango::GetDefines().Num() == 0,
 				TEXT("defines: without the define, the name is free again"));
+			{
+				// Setting the defines aside, as these tests do, and putting them back.
+				Bango::RegisterDefines(TEXT("ScopePlugin"), { { TEXT("SCOPED"), TEXT("int"), TEXT("4"), TEXT(""), TEXT("") } });
+				Bango::SetProjectDefines({ { TEXT("PROJECT_ONE"), TEXT("int"), TEXT("1"), TEXT(""), TEXT("") }, { TEXT("SCOPED"), TEXT("int"), TEXT("2"), TEXT(""), TEXT("") } });
+				{
+					const Bango::FBangoScopedNoDefines Inner;
+					Expect(Bango::GetDefines().Num() == 0, TEXT("defines: set aside"));
+				}
+				Expect(Bango::GetDefines().Num() == 2 && Bango::FindDefine(TEXT("SCOPED")) && Bango::FindDefine(TEXT("SCOPED"))->Value.GetInt() == 4
+					&& Bango::FindDefine(TEXT("PROJECT_ONE")) && !Bango::GetDefineRowError(1).IsEmpty(),
+					TEXT("defines: put back as they were, with the project row's error"));
+				Bango::UnregisterDefines(TEXT("ScopePlugin"));
+			}
 			Bango::SetProjectDefines(ProjectDefines);
 		}
 
@@ -2059,6 +2074,491 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				Expect(Instance.Start(FailProgram, First, ProbeGlobals, 1, ProbeError) && Instance.Resume(ProbeContext) == EBangoInstanceStatus::Failed
 					&& Instance.GetError().FileName == TEXT("fails.bango") && Instance.GetError().ToString().Contains(TEXT("fails.bango(3:")),
 					*FString::Printf(TEXT("file name: an error while running names its file. Got: %s"), *Instance.GetError().ToString()));
+			}
+		}
+
+		// Block commands with entries: `Talk(0) { entry if (c): { ... } entry: { ... } }`. The conditions are worked out
+		// when the block opens; the command runs the entries it chooses, is told at each one's end, and can have the
+		// conditions checked again, or watched while it waits.
+		{
+			TArray<FString> EntryLog;
+			FBangoCommandTable EntryTable;
+			bool bEntryTableMade = true;
+			bool bFlag = false;
+			auto AddEntryCommand = [&](const FBangoCommand& Command)
+			{
+				FString AddError;
+				if (!EntryTable.Add(Command, AddError))
+				{
+					bEntryTableMade = false;
+					OutFailures.Add(FString::Printf(TEXT("entries: can't add a test command: %s"), *AddError));
+				}
+			};
+			// What a call has of its entries: "-" if the block isn't an entry list, else a 1 or 0 for each one passing.
+			const auto Passed = [](const FBangoCommandCall& Call) -> FString
+			{
+				if (!Call.HasEntries())
+				{
+					return TEXT("-");
+				}
+				FString Bits;
+				for (int32 Index = 0; Index < Call.GetEntryCount(); ++Index)
+				{
+					Bits += Call.EntryPassed(Index) ? TEXT("1") : TEXT("0");
+				}
+				return Bits.IsEmpty() ? FString(TEXT("none")) : Bits;
+			};
+			// The next entry after From that passed, or -1.
+			const auto NextPassed = [](const FBangoCommandCall& Call, int32 From) -> int32
+			{
+				for (int32 Index = From + 1; Index < Call.GetEntryCount(); ++Index)
+				{
+					if (Call.EntryPassed(Index))
+					{
+						return Index;
+					}
+				}
+				return -1;
+			};
+			{
+				// Talk(Mode). 0: run all; 1: the first that passed; 2: run all, checking again at each entry's end;
+				// 3: entry 1, passed or not; 4: entry 99; 5: check again from Start, then run the first; 6: asks for a
+				// check again without waiting. Its state is its mode.
+				FBangoCommand Talk;
+				Talk.Signature = FBangoCommandSignature::Make(TEXT("Talk")).Param(TEXT("Mode"), FBangoType::Int()).Block().Entries(/*bOptional*/ true);
+				Talk.Start = [&EntryLog, Passed, NextPassed](FBangoCommandCall& Call)
+				{
+					const int64 Mode = Call.Args[0].GetInt();
+					*Call.BlockState = FBangoValue::MakeInt(Mode);
+					EntryLog.Add(FString::Printf(TEXT("open %s"), *Passed(Call)));
+					if (!Call.HasEntries())
+					{
+						return EBangoCommandResult::Done;
+					}
+					if (Mode == 3)
+					{
+						Call.RunEntry(1);
+					}
+					else if (Mode == 4)
+					{
+						Call.RunEntry(99);
+					}
+					else if (Mode == 5)
+					{
+						Call.RecheckEntries();
+						return EBangoCommandResult::Pending;
+					}
+					else if (Mode == 6)
+					{
+						Call.RecheckEntries();
+					}
+					else if (NextPassed(Call, -1) >= 0)
+					{
+						Call.RunEntry(NextPassed(Call, -1));
+					}
+					return EBangoCommandResult::Done;
+				};
+				Talk.EntryEnded = [&EntryLog, NextPassed](FBangoCommandCall& Call)
+				{
+					const int64 Mode = Call.BlockState->GetInt();
+					EntryLog.Add(FString::Printf(TEXT("end %d"), Call.EntryNumber));
+					if (!Call.bEntryEnding)
+					{
+						return Call.Fail(TEXT("EntryEnded without bEntryEnding"));
+					}
+					if (Mode == 2)
+					{
+						Call.RecheckEntries();
+						return EBangoCommandResult::Pending;
+					}
+					if (Mode == 0 && NextPassed(Call, Call.EntryNumber) >= 0)
+					{
+						Call.RunEntry(NextPassed(Call, Call.EntryNumber));
+					}
+					return EBangoCommandResult::Done;
+				};
+				Talk.Poll = [&EntryLog, Passed, NextPassed](FBangoCommandCall& Call)
+				{
+					const int32 From = Call.bEntryEnding ? Call.EntryNumber : -1;
+					EntryLog.Add(FString::Printf(TEXT("poll %s %d %s"), Call.bEntryEnding ? TEXT("end") : TEXT("start"), Call.bEntriesChanged ? 1 : 0, *Passed(Call)));
+					if (NextPassed(Call, From) >= 0)
+					{
+						Call.RunEntry(NextPassed(Call, From));
+					}
+					return EBangoCommandResult::Done;
+				};
+				Talk.Close = [&EntryLog](FBangoCommandCall& Call)
+				{
+					EntryLog.Add(Call.bLeftEarly ? TEXT("close:early") : TEXT("close"));
+					return EBangoCommandResult::Done;
+				};
+				AddEntryCommand(Talk);
+
+				// Say(N) belongs to a Talk where it's written in one. 9 ends the block; 8 tries to run an entry.
+				FBangoCommand Say;
+				Say.Signature = FBangoCommandSignature::Make(TEXT("Say")).Param(TEXT("N"), FBangoType::Int()).Inside(TEXT("Talk"), /*bOptional*/ true);
+				Say.Start = [&EntryLog](FBangoCommandCall& Call)
+				{
+					const int64 N = Call.Args[0].GetInt();
+					EntryLog.Add(FString::Printf(TEXT("say %lld e%d"), (long long)N, Call.BlockEntryNumber));
+					if (N == 9)
+					{
+						Call.EndBlock();
+					}
+					if (N == 8)
+					{
+						Call.RunEntry(0);
+					}
+					return EBangoCommandResult::Done;
+				};
+				AddEntryCommand(Say);
+
+				// Note(N) gives N back, noting it: what's worked out, and when.
+				FBangoCommand Note;
+				Note.Signature = FBangoCommandSignature::Make(TEXT("Note")).Param(TEXT("N"), FBangoType::Int()).Returns(FBangoType::Int());
+				Note.Start = [&EntryLog](FBangoCommandCall& Call)
+				{
+					EntryLog.Add(FString::Printf(TEXT("note %lld"), (long long)Call.Args[0].GetInt()));
+					Call.Result = Call.Args[0];
+					return EBangoCommandResult::Done;
+				};
+				AddEntryCommand(Note);
+
+				// Flag() is the test's flag: not pure, so a watch on it checks every frame.
+				FBangoCommand Flag;
+				Flag.Signature = FBangoCommandSignature::Make(TEXT("Flag")).Returns(FBangoType::Bool());
+				Flag.Start = [&bFlag](FBangoCommandCall& Call)
+				{
+					Call.Result = FBangoValue::MakeBool(bFlag);
+					return EBangoCommandResult::Done;
+				};
+				AddEntryCommand(Flag);
+
+				// Waits() takes a frame.
+				FBangoCommand Waits;
+				Waits.Signature = FBangoCommandSignature::Make(TEXT("Waits")).Returns(FBangoType::Bool());
+				Waits.Start = [](FBangoCommandCall&) { return EBangoCommandResult::Pending; };
+				Waits.Poll = [](FBangoCommandCall& Call)
+				{
+					Call.Result = FBangoValue::MakeBool(true);
+					return EBangoCommandResult::Done;
+				};
+				AddEntryCommand(Waits);
+
+				// Gather() runs every entry to gather its Opt, then watches the entries while it waits: its Poll says
+				// what changed, and is done once something has.
+				FBangoCommand Gather;
+				Gather.Signature = FBangoCommandSignature::Make(TEXT("Gather")).Block().Entries().EntriesHold(TEXT("Opt"));
+				Gather.Start = [](FBangoCommandCall& Call)
+				{
+					if (Call.GetEntryCount() > 0)
+					{
+						Call.RunEntry(0);
+					}
+					return EBangoCommandResult::Done;
+				};
+				Gather.EntryEnded = [](FBangoCommandCall& Call)
+				{
+					if (Call.EntryNumber + 1 < Call.GetEntryCount())
+					{
+						Call.RunEntry(Call.EntryNumber + 1);
+					}
+					return EBangoCommandResult::Done;
+				};
+				Gather.Close = [&EntryLog, Passed](FBangoCommandCall& Call)
+				{
+					EntryLog.Add(FString::Printf(TEXT("show %s"), *Passed(Call)));
+					Call.WatchEntries(true);
+					return EBangoCommandResult::Pending;
+				};
+				Gather.Poll = [&EntryLog, Passed](FBangoCommandCall& Call)
+				{
+					EntryLog.Add(FString::Printf(TEXT("%s %s"), Call.bEntriesChanged ? TEXT("changed") : TEXT("same"), *Passed(Call)));
+					return Call.bEntriesChanged ? EBangoCommandResult::Done : EBangoCommandResult::Pending;
+				};
+				AddEntryCommand(Gather);
+
+				FBangoCommand Opt;
+				Opt.Signature = FBangoCommandSignature::Make(TEXT("Opt")).Param(TEXT("Id"), FBangoType::Int()).Inside(TEXT("Gather"));
+				Opt.Start = [&EntryLog](FBangoCommandCall& Call)
+				{
+					EntryLog.Add(FString::Printf(TEXT("opt %lld e%d"), (long long)Call.Args[0].GetInt(), Call.BlockEntryNumber));
+					return EBangoCommandResult::Done;
+				};
+				AddEntryCommand(Opt);
+
+				// Once() runs its second entry, and has no EntryEnded: its block closes after it.
+				FBangoCommand Once;
+				Once.Signature = FBangoCommandSignature::Make(TEXT("Once")).Block().Entries();
+				Once.Start = [](FBangoCommandCall& Call)
+				{
+					Call.RunEntry(1);
+					return EBangoCommandResult::Done;
+				};
+				AddEntryCommand(Once);
+
+				// A block command without entries.
+				FBangoCommand Plain;
+				Plain.Signature = FBangoCommandSignature::Make(TEXT("Plain")).Block();
+				Plain.Start = [](FBangoCommandCall&) { return EBangoCommandResult::Done; };
+				AddEntryCommand(Plain);
+			}
+			{
+				// What a signature can't be.
+				FBangoCommandTable Bad;
+				FString AddError;
+				FBangoCommand NoBlock;
+				NoBlock.Signature = FBangoCommandSignature::Make(TEXT("NoBlock")).Entries();
+				Expect(!Bad.Add(NoBlock, AddError) && AddError.Contains(TEXT("doesn't take a block")), TEXT("entries: Entries needs Block"));
+				FBangoCommand HoldNoEntries;
+				HoldNoEntries.Signature = FBangoCommandSignature::Make(TEXT("HoldNoEntries")).Block().EntriesHold(TEXT("X"));
+				Expect(!Bad.Add(HoldNoEntries, AddError) && AddError.Contains(TEXT("doesn't take entries")), TEXT("entries: EntriesHold needs Entries"));
+				FBangoCommand EndNoEntries;
+				EndNoEntries.Signature = FBangoCommandSignature::Make(TEXT("EndNoEntries")).Block();
+				EndNoEntries.EntryEnded = [](FBangoCommandCall&) { return EBangoCommandResult::Done; };
+				Expect(!Bad.Add(EndNoEntries, AddError) && AddError.Contains(TEXT("EntryEnded handler")), TEXT("entries: EntryEnded needs Entries"));
+			}
+
+			FBangoExecContext EntryContext = Context;
+			struct FEntryRun
+			{
+				FBangoGlobalStore Globals;
+				FBangoInstance Instance;
+				EBangoInstanceStatus Status = EBangoInstanceStatus::None;
+			};
+			auto StartEntries = [&](const TCHAR* EntrySource, FEntryRun& Run, TSharedPtr<FBangoProgram>* OutProgram = nullptr) -> bool
+			{
+				EntryLog.Reset();
+				TSharedPtr<FBangoProgram> EntryProgram = MakeShared<FBangoProgram>();
+				FBangoCompileError EntryCompileError;
+				if (!Bango::CompileSource(EntrySource, TEXT("entries.bango"), EntryTable, *EntryProgram, EntryCompileError))
+				{
+					OutFailures.Add(FString::Printf(TEXT("entries: doesn't compile: %s\n%s"), *EntryCompileError.ToString(), EntrySource));
+					return false;
+				}
+				FBangoRuntimeError EntryStartError;
+				if (!Run.Instance.Start(EntryProgram, EntryTable, Run.Globals, 1, EntryStartError))
+				{
+					OutFailures.Add(FString::Printf(TEXT("entries: doesn't start: %s"), *EntryStartError.Message));
+					return false;
+				}
+				if (OutProgram)
+				{
+					*OutProgram = EntryProgram;
+				}
+				return true;
+			};
+			auto ResumeEntries = [&](FEntryRun& Run)
+			{
+				EntryContext.Globals = &Run.Globals;
+				Run.Status = Run.Instance.Resume(EntryContext);
+			};
+			auto OutOfEntries = [](const FBangoGlobalStore& Store) -> int64
+			{
+				const FBangoValue* Value = Store.Find(TEXT("out"));
+				return Value && !Value->IsNil() ? Value->GetInt() : -1;
+			};
+			struct FEntryCase
+			{
+				const TCHAR* Name;
+				const TCHAR* Source;
+				const TCHAR* Log;
+				int64 Out;       // the global `out` afterwards (-1: never set)
+			};
+			const FEntryCase EntryCases[] =
+			{
+				{ TEXT("run all: the entries that passed, in order"),
+					TEXT("global int out;\nTalk(0)\n{\n\tentry if (true):\n\t{\n\t\tSay(1);\n\t}\n\tentry if (false):\n\t{\n\t\tSay(2);\n\t}\n\tentry:\n\t{\n\t\tSay(3);\n\t}\n}\nout = 1;"),
+					TEXT("open 101, say 1 e0, end 0, say 3 e2, end 2, close"), 1 },
+				{ TEXT("select one: the first that passed"),
+					TEXT("global int out;\nTalk(1)\n{\n\tentry if (false):\n\t{\n\t\tSay(1);\n\t}\n\tentry:\n\t{\n\t\tSay(2);\n\t}\n\tentry:\n\t{\n\t\tSay(3);\n\t}\n}\nout = 1;"),
+					TEXT("open 011, say 2 e1, end 1, close"), 1 },
+				{ TEXT("the braces on the entry lines"),
+					TEXT("global int out;\nTalk(0) {\n\tentry if (true): {\n\t\tSay(1);\n\t}\n\tentry: {\n\t}\n}\nout = 1;"),
+					TEXT("open 11, say 1 e0, end 0, end 1, close"), 1 },
+				{ TEXT("a global that isn't set doesn't pass, and isn't an error"),
+					TEXT("global int out;\nglobal int notSet;\nTalk(0)\n{\n\tentry if (notSet > 0):\n\t{\n\t\tSay(1);\n\t}\n\tentry if (notSet > 0 || true):\n\t{\n\t\tSay(2);\n\t}\n\tentry if (Unknown() > 0):\n\t{\n\t\tSay(3);\n\t}\n}\nout = 1;\n\nfunction int Unknown()\n{\n\treturn notSet;\n}"),
+					TEXT("open 010, say 2 e1, end 1, close"), 1 },
+				{ TEXT("the conditions are worked out after the arguments, before the command"),
+					TEXT("global int out;\nTalk(Note(0))\n{\n\tentry if (Note(1) > 0):\n\t{\n\t}\n\tentry if (Note(2) > 5):\n\t{\n\t}\n}\nout = 1;"),
+					TEXT("note 0, note 1, note 2, open 10, end 0, close"), 1 },
+				{ TEXT("run all without checking again: what passed when it opened"),
+					TEXT("global int out;\nint _g = 0;\nTalk(0)\n{\n\tentry:\n\t{\n\t\t_g = 1;\n\t\tSay(1);\n\t}\n\tentry if (_g == 0):\n\t{\n\t\tSay(2);\n\t}\n\tentry:\n\t{\n\t\tSay(3);\n\t}\n}\nout = 1;"),
+					TEXT("open 111, say 1 e0, end 0, say 2 e1, end 1, say 3 e2, end 2, close"), 1 },
+				{ TEXT("run all, checking again at each entry's end, in the same frame"),
+					TEXT("global int out;\nint _g = 0;\nTalk(2)\n{\n\tentry:\n\t{\n\t\t_g = 1;\n\t\tSay(1);\n\t}\n\tentry if (_g == 0):\n\t{\n\t\tSay(2);\n\t}\n\tentry:\n\t{\n\t\tSay(3);\n\t}\n}\nout = 1;"),
+					TEXT("open 111, say 1 e0, end 0, poll end 1 101, say 3 e2, end 2, poll end 0 101, close"), 1 },
+				{ TEXT("an entry that didn't pass can be run"),
+					TEXT("global int out;\nTalk(3)\n{\n\tentry:\n\t{\n\t\tSay(1);\n\t}\n\tentry if (false):\n\t{\n\t\tSay(2);\n\t}\n}\nout = 1;"),
+					TEXT("open 10, say 2 e1, end 1, close"), 1 },
+				{ TEXT("checking again from its start, polled straight away"),
+					TEXT("global int out;\nTalk(5)\n{\n\tentry:\n\t{\n\t\tSay(1);\n\t}\n}\nout = 1;"),
+					TEXT("open 1, poll start 0 1, say 1 e0, end 0, close"), 1 },
+				{ TEXT("a disabled entry is left out"),
+					TEXT("global int out;\nTalk(0)\n{\n\t/*\n\tentry:\n\t{\n\t\tSay(9);\n\t}\n\t*/\n\tentry:\n\t{\n\t\tSay(1);\n\t}\n}\nout = 1;"),
+					TEXT("open 1, say 1 e0, end 0, close"), 1 },
+				{ TEXT("no entries"), TEXT("global int out;\nGather()\n{\n}\nout = 1;"), TEXT("show none"), -1 },
+				{ TEXT("break leaves the whole block"),
+					TEXT("global int out;\nwhile (true)\n{\n\tTalk(0)\n\t{\n\t\tentry:\n\t\t{\n\t\t\tSay(1);\n\t\t\tbreak;\n\t\t}\n\t\tentry:\n\t\t{\n\t\t\tSay(2);\n\t\t}\n\t}\n}\nout = 1;"),
+					TEXT("open 11, say 1 e0, close:early"), 1 },
+				{ TEXT("return leaves it"),
+					TEXT("global int out;\nTalk(0)\n{\n\tentry:\n\t{\n\t\tout = 3;\n\t\treturn;\n\t}\n}\nout = 1;"),
+					TEXT("open 1, close:early"), 3 },
+				{ TEXT("goto out of an entry, and within one"),
+					TEXT("global int out;\nTalk(0)\n{\n\tentry:\n\t{\n\t\tgoto Skip;\n\t\tSay(5);\n\t\tlabel Skip;\n\t\tSay(1);\n\t}\n\tentry:\n\t{\n\t\tgoto Done;\n\t}\n}\nout = 9;\nlabel Done;\nout = 1;"),
+					TEXT("open 11, say 1 e0, end 0, close:early"), 1 },
+				{ TEXT("ending the block from an entry goes to its close"),
+					TEXT("global int out;\nTalk(0)\n{\n\tentry:\n\t{\n\t\tSay(9);\n\t\tSay(1);\n\t}\n\tentry:\n\t{\n\t\tSay(2);\n\t}\n}\nout = 1;"),
+					TEXT("open 11, say 9 e0, close"), 1 },
+				{ TEXT("an ordinary block, for a command with optional entries"),
+					TEXT("global int out;\nTalk(0)\n{\n\tSay(1);\n}\nSay(2);\nout = 1;"),
+					TEXT("open -, say 1 e-1, close, say 2 e-1"), 1 },
+				{ TEXT("without EntryEnded, the block closes after the entry it ran"),
+					TEXT("global int out;\nout = 0;\nOnce()\n{\n\tentry:\n\t{\n\t\tout = 1;\n\t}\n\tentry:\n\t{\n\t\tout = 2;\n\t}\n\tentry:\n\t{\n\t\tout = 3;\n\t}\n}\nout = out + 10;"),
+					TEXT(""), 12 },
+				{ TEXT("each entry runs again when the block opens again"),
+					TEXT("global int out;\nfor (int _i = 0; _i < 2; _i++)\n{\n\tTalk(1)\n\t{\n\t\tentry if (_i == 1):\n\t\t{\n\t\t\tSay(1);\n\t\t}\n\t\tentry:\n\t\t{\n\t\t\tSay(2);\n\t\t}\n\t}\n}\nout = 1;"),
+					TEXT("open 01, say 2 e1, end 1, close, open 11, say 1 e0, end 0, close"), 1 },
+				{ TEXT("entries in a function"),
+					TEXT("global int out;\nout = Pick(2);\n\nfunction int Pick(int _n)\n{\n\tint _got = 0;\n\tTalk(1)\n\t{\n\t\tentry if (_n == 1):\n\t\t{\n\t\t\t_got = 10;\n\t\t}\n\t\tentry if (_n == 2):\n\t\t{\n\t\t\t_got = 20;\n\t\t}\n\t}\n\treturn _got;\n}"),
+					TEXT("open 01, end 1, close"), 20 },
+				{ TEXT("a prompt gathers every entry's option, passed or not"),
+					TEXT("global int out;\nGather()\n{\n\tentry if (false):\n\t{\n\t\tOpt(1);\n\t}\n\tentry:\n\t{\n\t\t// a comment\n\t\tOpt(2);\n\t}\n\tentry:\n\t{\n\t}\n}\nout = 1;"),
+					TEXT("opt 1 e0, opt 2 e1, show 011"), -1 },
+			};
+			if (bEntryTableMade)
+			{
+				for (const FEntryCase& Case : EntryCases)
+				{
+					FEntryRun Run;
+					if (StartEntries(Case.Source, Run))
+					{
+						ResumeEntries(Run);
+						const FString RunLog = FString::Join(EntryLog, TEXT(", "));
+						const bool bOutRight = Case.Out < 0 ? OutOfEntries(Run.Globals) == -1 : OutOfEntries(Run.Globals) == Case.Out && Run.Status == EBangoInstanceStatus::Finished;
+						Expect(RunLog == Case.Log && bOutRight, *FString::Printf(TEXT("entries: %s. Log: %s. out = %lld, error: %s"),
+							Case.Name, *RunLog, (long long)OutOfEntries(Run.Globals), *Run.Instance.GetError().Message));
+					}
+				}
+				{
+					// Watched: the prompt is shown, then told when an entry's condition changes (Flag() is checked every frame).
+					FEntryRun Run;
+					bFlag = false;
+					if (StartEntries(TEXT("global int out;\nGather()\n{\n\tentry if (Flag()):\n\t{\n\t\tOpt(1);\n\t}\n\tentry:\n\t{\n\t\tOpt(2);\n\t}\n}\nout = 1;"), Run))
+					{
+						ResumeEntries(Run);
+						ResumeEntries(Run);
+						bFlag = true;
+						ResumeEntries(Run);
+						const FString RunLog = FString::Join(EntryLog, TEXT(", "));
+						Expect(RunLog == TEXT("opt 1 e0, opt 2 e1, show 01, same 01, changed 11") && Run.Status == EBangoInstanceStatus::Finished && OutOfEntries(Run.Globals) == 1,
+							*FString::Printf(TEXT("entries: watched, by a command. Log: %s. Error: %s"), *RunLog, *Run.Instance.GetError().Message));
+					}
+				}
+				{
+					// Watched by a global: checked again only when it changes. Saved and loaded while watching, too.
+					FEntryRun Run;
+					TSharedPtr<FBangoProgram> WatchProgram;
+					if (StartEntries(TEXT("global int out;\nglobal int key;\nglobal int other;\nGather()\n{\n\tentry if (key > 0):\n\t{\n\t\tOpt(1);\n\t}\n}\nout = 1;"), Run, &WatchProgram))
+					{
+						ResumeEntries(Run);
+						ResumeEntries(Run);
+						ResumeEntries(Run);
+						TArray<FBangoOpenEntries> Open;
+						Run.Instance.GetOpenEntries(Open);
+						Expect(Open.Num() == 1 && Open[0].Passed == TArray<bool>({ false }) && Open[0].Running == -1,
+							*FString::Printf(TEXT("entries: the debugger sees the open block's entries (%d blocks)"), Open.Num()));
+						FString SetError;
+						Run.Globals.Set(TEXT("other"), FBangoValue::MakeInt(5), SetError);
+						ResumeEntries(Run);
+						TArray<uint8> Bytes;
+						{
+							FMemoryWriter Writer(Bytes);
+							Run.Globals.Serialize(Writer);
+							Run.Instance.Serialize(Writer);
+						}
+						FEntryRun Loaded;
+						{
+							FMemoryReader Reader(Bytes);
+							Loaded.Globals.Serialize(Reader);
+							Loaded.Instance.Serialize(Reader);
+						}
+						FString BindError;
+						const bool bBound = Loaded.Instance.Bind(WatchProgram, EntryTable, BindError);
+						Loaded.Globals.Set(TEXT("key"), FBangoValue::MakeInt(1), SetError);
+						ResumeEntries(Loaded);
+						const FString RunLog = FString::Join(EntryLog, TEXT(", "));
+						Expect(bBound && RunLog == TEXT("opt 1 e0, show 0, same 0, same 0, same 0, changed 1") && Loaded.Status == EBangoInstanceStatus::Finished,
+							*FString::Printf(TEXT("entries: watched by a global, saved and loaded. Log: %s. Error: %s %s"), *RunLog, *BindError, *Loaded.Instance.GetError().Message));
+					}
+				}
+				{
+					// A script terminated while its command waits: the block's command is told.
+					FEntryRun Run;
+					if (StartEntries(TEXT("Gather()\n{\n\tentry:\n\t{\n\t\tOpt(1);\n\t}\n}"), Run))
+					{
+						ResumeEntries(Run);
+						Run.Instance.Terminate();
+						Expect(Run.Instance.GetStatus() == EBangoInstanceStatus::Terminated, TEXT("entries: terminated while watching"));
+					}
+				}
+				struct FEntryRunError
+				{
+					const TCHAR* Name;
+					const TCHAR* Source;
+					const TCHAR* Contains;
+				};
+				const FEntryRunError EntryRunErrors[] =
+				{
+					{ TEXT("running an entry it doesn't have"), TEXT("Talk(4)\n{\n\tentry:\n\t{\n\t}\n\tentry:\n\t{\n\t}\n}"), TEXT("asked to run entry 99, but its block has 2 entries") },
+					{ TEXT("checking again without waiting"), TEXT("Talk(6)\n{\n\tentry:\n\t{\n\t}\n}"), TEXT("RecheckEntries needs the handler to return Pending") },
+					{ TEXT("a command that isn't the block's runs an entry"), TEXT("Talk(1)\n{\n\tentry:\n\t{\n\t\tSay(8);\n\t}\n}"), TEXT("only a block command with entries can run or check its entries") },
+					{ TEXT("a condition that waits"), TEXT("Talk(0)\n{\n\tentry if (Waits()):\n\t{\n\t}\n}"), TEXT("An entry's condition must answer at once, but 'Waits' waits") },
+					{ TEXT("a condition that isn't set up, and isn't a global"), TEXT("int _n;\nTalk(0)\n{\n\tentry if (_n > 0):\n\t{\n\t}\n}"), TEXT("_n") },
+					{ TEXT("an error in a condition, checked again"), TEXT("int[] _list = [1];\nTalk(2)\n{\n\tentry:\n\t{\n\t\t_list = [];\n\t}\n\tentry if (_list[0] == 1):\n\t{\n\t}\n}"), TEXT("_list") },
+				};
+				for (const FEntryRunError& Case : EntryRunErrors)
+				{
+					FEntryRun Run;
+					if (StartEntries(Case.Source, Run))
+					{
+						ResumeEntries(Run);
+						Expect(Run.Status == EBangoInstanceStatus::Failed && Run.Instance.GetError().Message.Contains(Case.Contains),
+							*FString::Printf(TEXT("entries: %s. Got: %s"), Case.Name, *Run.Instance.GetError().Message));
+					}
+				}
+				struct FEntryCompileError
+				{
+					const TCHAR* Name;
+					const TCHAR* Source;
+					const TCHAR* Contains;
+				};
+				const FEntryCompileError EntryCompileErrors[] =
+				{
+					{ TEXT("entries for a command that doesn't take them"), TEXT("Plain()\n{\n\tentry:\n\t{\n\t}\n}"), TEXT("'Plain' doesn't take entries, so its block is ordinary statements") },
+					{ TEXT("statements for a command that takes only entries"), TEXT("Gather()\n{\n\tOpt(1);\n}"), TEXT("The block of 'Gather' holds entries only") },
+					{ TEXT("an entry holding something else"), TEXT("int _n = 0;\nGather()\n{\n\tentry:\n\t{\n\t\t_n = 1;\n\t\tOpt(1);\n\t}\n}"), TEXT("A Gather's entries each hold one Opt and nothing else") },
+					{ TEXT("an entry holding two"), TEXT("Gather()\n{\n\tentry:\n\t{\n\t\tOpt(1);\n\t\tOpt(2);\n\t}\n}"), TEXT("A Gather's entries each hold one Opt and nothing else") },
+					{ TEXT("a condition that isn't a bool"), TEXT("Talk(0)\n{\n\tentry if (1):\n\t{\n\t}\n}"), TEXT("bool") },
+					{ TEXT("goto into an entry"), TEXT("goto In;\nTalk(0)\n{\n\tentry:\n\t{\n\t\tlabel In;\n\t}\n}"), TEXT("jumps into a command's block") },
+					{ TEXT("goto from one entry to another"), TEXT("Talk(0)\n{\n\tentry:\n\t{\n\t\tgoto In;\n\t}\n\tentry:\n\t{\n\t\tlabel In;\n\t}\n}"), TEXT("jumps into a command's block") },
+					{ TEXT("a local declared in an entry isn't seen in the next"), TEXT("Talk(0)\n{\n\tentry:\n\t{\n\t\tint _x = 1;\n\t}\n\tentry:\n\t{\n\t\t_x = 2;\n\t}\n}"), TEXT("_x") },
+				};
+				for (const FEntryCompileError& Case : EntryCompileErrors)
+				{
+					FBangoProgram ErrorProgram;
+					FBangoCompileError ErrorCompileError;
+					const bool bCompiled = Bango::CompileSource(Case.Source, TEXT("entries.bango"), EntryTable, ErrorProgram, ErrorCompileError);
+					Expect(!bCompiled && ErrorCompileError.Message.Contains(Case.Contains),
+						*FString::Printf(TEXT("entries: %s. Got: %s"), Case.Name, bCompiled ? TEXT("it compiled") : *ErrorCompileError.Message));
+				}
+				{
+					// Allowed in an entry that holds one command: comments, disabled statements, and nothing at all.
+					FBangoProgram HoldProgram;
+					FBangoCompileError HoldError;
+					Expect(Bango::CompileSource(TEXT("Gather()\n{\n\tentry:\n\t{\n\t\t// later\n\t}\n\tentry:\n\t{\n\t\t/*\n\t\tOpt(3);\n\t\t*/\n\t\tOpt(1);\n\t}\n}"), TEXT("entries.bango"), EntryTable, HoldProgram, HoldError),
+						*FString::Printf(TEXT("entries: comments and disabled code in an entry that holds one command. Got: %s"), *HoldError.Message));
+				}
 			}
 		}
 

@@ -1,8 +1,12 @@
-# Bango Language Spec (draft v0.138)
+# Bango Language Spec (draft v0.140)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.140:** **the graph editor shows commands with entries** (section 7, Commands with entries; section 1, table; section 15, Node decorators): the command's node has a row per entry, a box with its condition (empty, *Always*, for `entry:`) beside the entry's output, as a Switch node's case boxes are, then **Then**; no **Body**. **Add pin** (or right-click > **Add Entry**) adds one; right-clicking an entry's output removes, moves (**Move Entry Up** / **Down**) or disables it (a disabled row is faded). A command with optional entries switches between an ordinary block and entries (**Use Entries**, **Use a Plain Block**), and one that takes entries starts with one `entry:` in the node menu. An error in a condition outlines its box in red. While the debugger follows a copy of the script with the block open, rows whose entry didn't pass are dimmed and the running one is outlined. **Decorators** are told the entries (`FBangoNodeDecoratorContext::bEntries`, `EntryConditions`, `EntryDisabled`, `SetEntryCondition`, and the debugger's `bHasEntryDebug`, `DebugEntryPassed`, `DebugRunningEntry`) and can draw a row of their own (`IBangoNodeDecorator::MakeEntryRowWidget`, with `Context.MakeEntryConditionWidget` for the usual box). In C++: `FBangoGraphNode::bEntries` and `EntryDisabled` (its `CaseValues` are the conditions), `Bango::ValidateEntryCondition`, `FBangoInstance::GetOpenEntries` and `FBangoScriptDebugInfo::OpenEntries`.
+
+**Changes in v0.139:** **block commands with entries** (section 7, Commands with entries): a block command registered with `.Entries()` has a block that's a list of entries, `entry if (condition):` and `entry:`, each with a block, and nothing else. Every entry's condition is worked out when the block opens, after the arguments; a condition must answer at once, and one that reads an unset global doesn't pass. The command chooses which entries run (`Call.RunEntry`, passed or not), is told at each one's end (`FBangoCommand::EntryEnded`), and can have the conditions checked again (`RecheckEntries`, polled in the same frame) or watched while it waits (`WatchEntries`, by `waitUntil`'s rules). `.EntriesHold(TEXT("AddPrompt"))` makes each entry hold one call of that command. `Call.BlockEntryNumber` says which entry a command is in. `entry` is a keyword. The graph editor can't show entries yet: such a script is edited as text. Save data from earlier versions can't be loaded.
 
 **Changes in v0.138:** **`next` goes between a sequence's blocks** (section 8, sequence): `sequence { ... } next { ... } next { ... }`, so back-to-back braces no longer have to be read as one statement. It's required: a sequence block followed straight by `{` is a compile error ("Put 'next' between a sequence's blocks"), and so is `next` anywhere else, or with no block after it. As with `else`, the graph editor writes it on a line of its own, between one block's `}` and the next block's `{`. The graph doesn't change: a Sequence node still has Scope 0, Scope 1, ... and Then. `next` is a keyword, so it can't be used as a name.
 
@@ -359,6 +363,7 @@ Bango is a text scripting language for Unreal Engine 5. It is meant for level an
 | `sequence { ... } next { ... }` | exec in → Scope 0, Scope 1, Scope 2, ... (one per block), Then |
 | `spawn { ... }` | exec in → Run, Then |
 | A command with a block, `Name(...) { ... }` (section 7) | exec in → Body (its block), Then; the node is the command's, with its fields |
+| A command with entries, `Name(...) { entry if (...): { } entry: { } }` (section 7) | exec in → one output per entry (beside a box with its condition), Then; the node is the command's, with its fields |
 | `waitUntil (cond);`, optionally with `heldFor (seconds)` and `timeout (seconds) { ... }` | exec in → Timeout (its block), Then ("Wait Until", showing the condition, the hold's seconds and the timeout's seconds) |
 | `switch (value) { case ...: { } default: { } }` | exec in → one output per case (beside a box with its values), Default, Then |
 | `break;` / `continue;` | exec in → exec out |
@@ -543,7 +548,7 @@ WriteScreen(ToString(TEXT_NS("Shared.UI", "Continue", "Continue")));
 - Calling a command or function with the wrong capitalisation is a compile error that suggests the right name: *"Unknown command or function 'writeScreen'. Did you mean 'WriteScreen'? Names are case-sensitive."*
 - A name is letters, digits and `_`, and doesn't start with a digit.
 - A **define**'s name (section 4, Defines) can't be used for anything a script declares: it always means the define.
-- Keywords and type names can't be used as names: `if else while for forEach in sequence next spawn waitUntil switch case default break continue return label goto function global scriptVar persistent call isNil player self true false nil bool int float string entity text vector2 vector3 void TEXT TEXT_NS TEXT_INV`, and the old text macros' names (`LOCTEXT`, `NSLOCTEXT`, `NOTELOCTEXT`, `NSNOTELOCTEXT`, `INVTEXT`), which say what they're called now. This doesn't apply to Bango ID names, since the `@` sets them apart.
+- Keywords and type names can't be used as names: `if else while for forEach in sequence next entry spawn waitUntil switch case default break continue return label goto function global scriptVar persistent call isNil player self true false nil bool int float string entity text vector2 vector3 void TEXT TEXT_NS TEXT_INV`, and the old text macros' names (`LOCTEXT`, `NSLOCTEXT`, `NOTELOCTEXT`, `NSNOTELOCTEXT`, `INVTEXT`), which say what they're called now. This doesn't apply to Bango ID names, since the `@` sets them apart.
 
 ### Locals and script variables
 A graph (the main script, or a function) has two kinds of variables of its own, besides its parameters and loop variables. Both only exist inside the running script instance.
@@ -1162,6 +1167,78 @@ Line.Start = [](FBangoCommandCall& Call)
 - `FBangoCommand::Abandoned` is a fourth handler, optional, for any command: it runs when the script stops for good while it was waiting on the command (`Call.LatentState` is what `Poll` would have had), or, for a block command, while its block was open (`Call.bBlockAbandoned` is then true, and `Call.BlockState` is the block's). A block command whose close was being waited on is told both ways. What it returns is ignored, and it mustn't start or stop scripts. A command that itself returned `Failed` isn't told.
 - `Call.FindOpenBlock(TEXT("Name"))`, from any handler of any command (`Start`, `Poll`, `Close`, `Abandoned`): the state of the nearest open block of the block command named, in this running script, or null if none is open. Unlike `Inside`, it isn't about where the command is written: it counts blocks opened by the callers of the function the command is in, innermost first (the function on top first, then its callers). It's read only, and good for that call only, like `BlockState`. A `spawn` block's copy and another script (`Exec`) have none of this script's blocks open; a block that has picked one of its blocks (`RunBlock`) is closed, so it isn't found; and in `Abandoned`, the blocks around the one being told are still open, the ones inside it already told. That's how a command that can be anywhere belongs to the block around it: a speech, in a function or not, to the conversation it's in.
 - `FBangoCommandTable::Add` refuses a block command that returns a value, a `Close` handler on a command without `.Block()`, and `MutableTarget` with either.
+
+### Commands with entries
+A block command can take **entries**: its block is then a list of entries, and nothing else, as a `switch` holds only its cases. Each entry is a block, with a condition or without one. The conditions are worked out when the block opens, and **the command chooses which entries run**, and in what order: all those that passed, the first, one at random, or every one to gather them.
+
+```
+santa Speech(SELECT_RANDOM)
+{
+	entry if (hojoIsSad):
+	{
+		santa Say(TEXT("XMS700", "Cheer up, HoJo."));
+	}
+	entry:
+	{
+		santa Say(TEXT("XMS710", "Ho ho ho!"));
+		hojo Say(TEXT("XMS720", "Hi, Santa!"));
+	}
+}
+```
+
+`Speech` and `Say` here are a game's commands (BangoYap's); the plugin has none that take entries.
+
+- **An entry** is `entry if (condition):` or `entry:`, then its block, the `{` on the entry's line or the next, as a switch case's. The entry line must fit on one line. The condition is a `bool`. `entry:` has no condition and always passes; it isn't a `default`, and can go anywhere in the list.
+- **The block holds entries only**: one entry's `}`, then the next `entry`. Anything else directly in it (a statement, a declaration, a label) is a compile error: *"The block of 'Speech' holds entries only: 'entry if (condition):' or 'entry:', each with a block, but found 'x'. Put statements inside an entry."* Node metadata (`//@`) on an entry line or between entries is an error, as on a switch's case lines: an entry line isn't a node.
+- **An empty entry** (`entry:` then `{ }`) is allowed, and so is a block with no entries.
+- **A disabled entry** (`/*` and `*/` around whole entries) is left out: its condition isn't worked out, the command isn't told of it, and the others are numbered without it.
+- **Which kind of block**: a block that starts with `entry` (after any `/*`) is an entry list; any other is an ordinary block. A command that takes entries must be given an entry list, unless it takes them optionally (below), when an ordinary block works as for any block command. Entries for a command that doesn't take them are an error (*"'Plain' doesn't take entries, so its block is ordinary statements."*), and `entry` anywhere else (in an ordinary block, at the top level) is an error that says where it goes.
+- **When the block opens**, the command's target and arguments are worked out, then every entry's condition, in order, once each, then the command runs. A condition **must answer at once**, as a `waitUntil`'s must (section 8): a command in it that waits stops the script with an error (*"An entry's condition must answer at once, but 'X' waits."*). A condition that reads a **global that isn't set up yet** is unknown, as in a `waitUntil`, and an unknown condition **doesn't pass** (no error); `entry if (doorOpen || leverPulled):` passes as soon as either is true. Any other error stops the script as anywhere.
+- **Nothing is checked again by itself**: which entries passed is what it was when the block opened, unless the command asks for them to be checked again, or watches them (below). A condition is run each time it's checked, so it should be a question.
+- **Inside an entry**, statements are ordinary, and count as written directly in the command's block: a command that belongs to the block (`Inside`) belongs to it from an entry. **Leaving an entry** with `break`, `continue`, `return` or a `goto` leaves the whole block, and its close runs, told it's being left early. A `goto` can't jump into an entry, from outside the block or from another entry. A command that ends the block (`EndBlock`) from an entry ends the whole block: its close runs.
+- **In the graph** a command with entries is its command's node, with its fields, then **a row per entry**: a box with the entry's condition beside the entry's output, as a Switch node's case boxes are (empty, with the hint *Always*, for `entry:`), then **Then**. There's no **Body**. Each entry's block is the nodes wired from its output.
+  - Click a box to type a condition; Enter or Tab goes on to the next entry's box, Shift+Tab back. Emptying it makes the entry `entry:`. A compile error in a condition outlines its box in red.
+  - **Add pin** (under the rows) or right-click > **Add Entry** adds an `entry:` at the end. Right-clicking an entry's output: **Remove Entry N** (its wire goes, the nodes on it stay), **Move Entry Up** / **Move Entry Down** (the order matters to a command that runs the first that passes, or each in turn), and **Disable Entry** / **Enable Entry** (a disabled row is faded).
+  - A command with optional entries whose block is ordinary is drawn with **Body** and **Then**, as any block command; right-click > **Use Entries** makes its block one `entry:` holding what was in it, and **Use a Plain Block** (with one entry, with no condition, not disabled) turns it back.
+  - In the node menu, a command that takes entries starts with one `entry:`. (An empty block written in the text, `Prompt() { }`, is shown with Body; use the menu's node, or **Use Entries**, to have rows.)
+  - **While the debugger follows** a copy of the script with the block open, the rows of entries that didn't pass when last worked out are dimmed, and the running entry's row is outlined.
+
+In C++:
+
+```cpp
+FBangoCommand Speech;
+Speech.Signature = FBangoCommandSignature::Make(TEXT("Speech")).Target(FBangoType::Entity()).Param(TEXT("Mode"), FBangoType::Int())
+	.Block().Entries(/*bOptional*/ true);   // an entry list, or an ordinary block
+Speech.Start = [](FBangoCommandCall& Call)
+{
+	// Run all: the first entry that passed (without one, the block goes straight on to its close).
+	for (int32 Index = 0; Index < Call.GetEntryCount(); ++Index)
+	{
+		if (Call.EntryPassed(Index))
+		{
+			Call.RunEntry(Index);
+			break;
+		}
+	}
+	return EBangoCommandResult::Done;
+};
+Speech.EntryEnded = [](FBangoCommandCall& Call)
+{
+	// Check them again, so what this entry did counts; Poll runs the next (straight away, in the same frame).
+	Call.RecheckEntries();
+	return EBangoCommandResult::Pending;
+};
+```
+
+- `.Entries(bOptional)` (`FBangoCommandSignature::bEntries`, `bEntriesOptional`) needs `.Block()`. `.EntriesHold(TEXT("AddPrompt"))` (`EntriesHoldCommand`) says each entry holds one call of that command (with its own block, if it takes one), or nothing, and nothing else besides comments, disabled statements and reroutes: for a command that runs every entry, passed or not, to gather them, so nothing else in an entry runs when its condition is false. Anything else is a compile error (*"A Prompt's entries each hold one AddPrompt and nothing else, since every entry's AddPrompt is run to gather them, whether its condition passed or not..."*). A gathered command's arguments are still worked out, passed or not.
+- In `Start`, `EntryEnded`, `Close` and their `Poll`: `Call.HasEntries()` (false for an ordinary block), `GetEntryCount()`, `EntryPassed(i)` (when its condition was last worked out; always true for `entry:`) and `EntryHasCondition(i)`.
+- `Call.RunEntry(i)`, from `Start` or `EntryEnded` (or `Poll` while waiting on one) returning `Done`: entry `i` runs, **passed or not**, and at its end `EntryEnded` is called. Without it the block goes on to its close. An entry can be run more than once. One the block doesn't have stops the script with an error; so does one from `Close` (its entries are over: `RunBlock` runs one of the blocks written in it), or from a command that isn't the block's own.
+- `FBangoCommand::EntryEnded` is called at the end of each entry it ran, with `Call.EntryNumber` (and `Call.bEntryEnding` in its `Poll`). It may `RunEntry` again, or return `Done` without one, and the block closes. It may return `Pending`. Without an `EntryEnded` handler, the block closes after the first entry it runs.
+- `Call.RecheckEntries()`, from `Start`, `EntryEnded` or `Close` (or their `Poll`), which must then return `Pending`: every entry's condition is worked out again before the next `Poll`, which sees the new answers, and `Call.bEntriesChanged` if any changed. From `Start`, `EntryEnded` or `Close`, that `Poll` comes straight away, in the same frame, so a speech's lines don't wait longer between them.
+- `Call.WatchEntries(true)` (and `false`): while on, whenever the command waits (its `Start`, `EntryEnded` or `Close` returned `Pending`), its entries are checked again by `waitUntil`'s rules before each `Poll`: when a global they read (themselves, or in the script's functions they call) changes, and every frame if one calls a command that isn't pure or a Blueprint function. `Poll` then has `bEntriesChanged`, with the new answers in `EntryPassed`, so a prompt can show an option whose condition has come true, and hide one whose condition stopped holding; they're brought up to date before `Poll` is called, so the command can check that a picked option's entry still passes. It stays on until it's turned off or the block closes, and isn't done while an entry's statements run.
+- `Call.BlockEntryNumber`: for a command that belongs to a block (`Inside`), the entry of that block it's written in, or -1; for one that also takes a block of its own (a prompt's option), the entry of the block it's written in, with `OuterBlockState`.
+- **Saving:** which entries passed, which is running, and whether they're watched are kept with the block (a hidden local), so a game saved mid-entry carries on in the same entry; a watched block is checked again at its first poll after loading. Hot reload follows its rules for any block.
+- `FBangoCommandTable::Add` refuses `.Entries()` without `.Block()`, `.EntriesHold` without `.Entries()`, and an `EntryEnded` handler on a command without `.Entries()`.
 
 ### Calling Blueprint functions (`call`)
 `target call Name(args)` calls a Blueprint function of the target's actor, by reflection, without a C++ command for it:
@@ -2305,7 +2382,8 @@ Bango::UnregisterNodeDecorator(TEXT("SpeechLine"));
 - **The node's text is still what's saved.** `FBangoNodeDecoratorContext` gives the command's name, the node's layout (its fields, each with its text as written), its text, whether it's a block command's node and whether it's disabled, and `SetFieldValue(FieldIndex, Value, OutError)`: it sets a field to `Value` written as it would be in the script (`"Happy"` with its quotes, `TEXT("UXA010", "Hello")`, `2`; `Bango::GetFieldValueFromTyped`, in `BangoGraphEdit.h`, makes that from what a person typed), as one undoable change, the same as typing it in, and the node is drawn again. A value the field can't take is refused, with why.
 - The field widgets and the extra content are made again each time the node is drawn again (after every change), so they can simply show what the layout says. The title, colour, icon and tooltip are asked for as the graph is drawn.
 - Registering again for the same name replaces the decorator. Nodes already on screen pick it up when they're next drawn again. **Unregister it when the module shuts down**: the graph editor would otherwise keep a decorator whose code is gone.
-- Drawing a whole block as one node with a row per statement isn't there yet: a block command's node is decorated like any other, and the statements in its block are nodes of their own.
+- **A command with entries**: the context also has `bEntries`, each entry's condition (`EntryConditions`, empty for `entry:`) and whether it's disabled (`EntryDisabled`), and `SetEntryCondition(Entry, Condition, OutError)`, one undoable change as `SetFieldValue` is. While the debugger follows a copy of the script with the block open, `bHasEntryDebug` is true, with `DebugEntryPassed` (each entry) and `DebugRunningEntry` (-1 none); the node is drawn again when they change. `MakeEntryRowWidget(Context, Entry)` can draw an entry's row in place of the usual condition box (and isn't held to a pin row's height); `Context.MakeEntryConditionWidget(Entry)`, only while that runs, makes the usual box (typing, Tab, the *Always* hint, the error outline), to put in the row.
+- Drawing a whole block as one node with a row per statement isn't there yet: a block command's node is decorated like any other, and the statements in its block (or its entries' blocks) are nodes of their own.
 
 ### Constants
 A **constant** is a named value an object gives its inline scripts and conditions, set per placed object in the details panel: a lever's `_door`, a light switch's `_lamps` and `_colour`. Every script on that object reads it as an input, after the ones its inputs signature gives it, so the same script text works on every placed copy, each with its own values. They're instance inputs (above) with a ready-made property, details row and helpers, in the **BangoScripts** module (`BangoConstant.h`); the row is in **BangoScriptsScriptEditor**, and needs nothing from the owner.

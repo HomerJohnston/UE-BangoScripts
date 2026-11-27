@@ -569,6 +569,7 @@ void UBangoScriptSubsystem::GetDebugInfo(TArray<FBangoScriptDebugInfo>& OutScrip
 		Info.Status = Script.Instance.GetStatus();
 		Script.Instance.GetCallStack(Info.CallStack);
 		Info.WaitingOn = Script.Instance.GetWaitingCommandName();
+		Script.Instance.GetOpenEntries(Info.OpenEntries);
 		Info.SourceHash = Script.bFromSource ? FCrc::StrCrc32(*Script.GetSource()) : 0;
 	}
 	OutScripts.Append(EndedScripts);

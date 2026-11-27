@@ -18,6 +18,8 @@
 #include "Editor.h"
 #include "Editor/Transactor.h"
 #include "UObject/StrongObjectPtr.h"
+#include "BangoCommand.h"
+#include "BangoNodeDecorator.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoEdGraphBuilderTest, "Bango.ScriptEditor.EdGraph",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -349,6 +351,128 @@ bool FBangoEdGraphBuilderTest::RunTest(const FString& Parameters)
 	{
 		AddWarning(TEXT("No editor transaction buffer; the undo checks were skipped."));
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoEdGraphEntriesTest, "Bango.ScriptEditor.EdGraphEntries",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FBangoEdGraphEntriesTest::RunTest(const FString& Parameters)
+{
+	// Commands with entries (spec section 7): a row per entry, like a switch's cases, without Default.
+	FBangoCommandTable Table;
+	FString TableError;
+	TestTrue(TEXT("Talk"), Table.Add(FBangoCommandSignature::Make(TEXT("Talk")).Param(TEXT("Mode"), FBangoType::Int()).Block().Entries(/*bOptional*/ true), TableError));
+	TestTrue(TEXT("Say"), Table.Add(FBangoCommandSignature::Make(TEXT("Say")).Param(TEXT("N"), FBangoType::Int()).Inside(TEXT("Talk"), true), TableError));
+	const TCHAR* Source =
+		TEXT("Talk(1)    //@1(10, 0)\n")
+		TEXT("{\n")
+		TEXT("\tentry if (true):\n")
+		TEXT("\t{\n")
+		TEXT("\t\tSay(1);    //@2(20, 0)\n")
+		TEXT("\t}\n")
+		TEXT("\t/*\n")
+		TEXT("\tentry:\n")
+		TEXT("\t{\n")
+		TEXT("\t}\n")
+		TEXT("\t*/\n")
+		TEXT("\tentry:\n")
+		TEXT("\t{\n")
+		TEXT("\t\tSay(3);    //@3(20, 4)\n")
+		TEXT("\t}\n")
+		TEXT("}\n")
+		TEXT("Talk(0)    //@4(10, 8)\n")
+		TEXT("{\n")
+		TEXT("\tSay(4);    //@5(20, 8)\n")
+		TEXT("}\n");
+	FBangoGraphDocument Doc;
+	FBangoCompileError Error;
+	if (!TestTrue(TEXT("build"), Bango::BuildGraph(Source, TEXT("entries.bango"), Doc, Error)))
+	{
+		AddError(Error.ToString());
+		return false;
+	}
+	const TSharedPtr<FBangoNodeLayoutContext> Context = MakeShared<FBangoNodeLayoutContext>(Bango::MakeNodeLayoutContext(Doc, &Table));
+	TStrongObjectPtr<UEdGraph> Graph(BangoScriptEditor::CreateEdGraph(Doc.Main, Context));
+	if (!TestEqual(TEXT("node count"), Graph->Nodes.Num(), 6))
+	{
+		return false;
+	}
+	UBangoEdGraphNode* Talk = Cast<UBangoEdGraphNode>(Graph->Nodes[1]);
+	UBangoEdGraphNode* First = Cast<UBangoEdGraphNode>(Graph->Nodes[2]);
+	UBangoEdGraphNode* Third = Cast<UBangoEdGraphNode>(Graph->Nodes[3]);
+	UBangoEdGraphNode* Plain = Cast<UBangoEdGraphNode>(Graph->Nodes[4]);
+	if (!TestTrue(TEXT("Bango nodes"), Talk && First && Third && Plain))
+	{
+		return false;
+	}
+	auto LinkedNode = [](UEdGraphPin* Pin) -> UEdGraphNode*
+	{
+		return Pin && Pin->LinkedTo.Num() == 1 ? Pin->LinkedTo[0]->GetOwningNode() : nullptr;
+	};
+	TestTrue(TEXT("a command with entries"), Talk->IsEntries() && Talk->HasCaseRows() && Talk->TakesEntries() && Talk->TakesOptionalEntries());
+	TestTrue(TEXT("its conditions"), Talk->CaseValues == TArray<FString>({ TEXT("true"), TEXT(""), TEXT("") }));
+	TestTrue(TEXT("which are disabled"), Talk->EntryDisabled == TArray<bool>({ false, true, false }));
+	TestEqual(TEXT("pins: In, an output per entry, Then"), Talk->Pins.Num(), 5);
+	TestTrue(TEXT("each entry's block on its output"), LinkedNode(Talk->GetBranchPin(0)) == First && Talk->GetBranchPin(1)->LinkedTo.Num() == 0 && LinkedNode(Talk->GetBranchPin(2)) == Third);
+	TestEqual(TEXT("an entry's pin knows its entry"), Talk->GetCaseOfPin(Talk->GetBranchPin(2)), 2);
+	TestEqual(TEXT("entry pins have no labels (the condition is in the box)"), Talk->GetPinDisplayName(Talk->GetBranchPin(0)).ToString(), FString());
+	TestTrue(TEXT("a plain block"), !Plain->IsEntries() && Plain->TakesOptionalEntries() && Plain->Pins.Num() == 3);
+
+	auto ReadsBack = [&](const TCHAR* What)
+	{
+		FBangoGraphDocument Back;
+		FString BuildError;
+		TArray<UEdGraph*> Graphs = { Graph.Get() };
+		const bool bBuilt = BangoScriptEditor::BuildDocument(Graphs, Back, nullptr, BuildError);
+		FString Written;
+		FString WriteError;
+		const bool bWritten = bBuilt && Bango::WriteGraphText(Back, Written, WriteError);
+		FBangoScript Script;
+		FBangoCompileError ParseError;
+		TestTrue(*FString::Printf(TEXT("%s: reads back, and its text parses"), What), bWritten && Bango::ParseScript(Written, TEXT("back.bango"), Script, ParseError));
+		return Back;
+	};
+	TestTrue(TEXT("the editor graph reads back as the same document"), ReadsBack(TEXT("as built")).Main == Doc.Main);
+
+	// Adding, editing, moving, disabling and removing entries.
+	Talk->AddSwitchCase();
+	TestTrue(TEXT("Add Entry: a fourth, empty, above Then"), Talk->CaseValues.Num() == 4 && Talk->EntryDisabled.Num() == 4 && Talk->Pins.Num() == 6 && Talk->Pins.Last() == Talk->GetNextPin());
+	FString EditError;
+	TestTrue(TEXT("a condition typed in"), Talk->SetCaseValues(3, TEXT("  1 > 0 "), EditError) && Talk->CaseValues[3] == TEXT("1 > 0"));
+	TestFalse(TEXT("one that doesn't read"), Talk->SetCaseValues(3, TEXT("1 == \"a"), EditError));
+	Talk->MoveEntry(0, 1);
+	TestTrue(TEXT("Move Entry Down: condition, disabled and wire swap"), Talk->CaseValues[1] == TEXT("true") && Talk->EntryDisabled[0] && !Talk->EntryDisabled[1]
+		&& LinkedNode(Talk->GetBranchPin(1)) == First && Talk->GetBranchPin(0)->LinkedTo.Num() == 0);
+	Talk->MoveEntry(1, -1);
+	TestTrue(TEXT("Move Entry Up: back"), Talk->CaseValues[0] == TEXT("true") && LinkedNode(Talk->GetBranchPin(0)) == First);
+	Talk->SetEntryDisabled(1, false);
+	TestFalse(TEXT("Enable Entry"), Talk->EntryDisabled[1]);
+	Talk->RemoveSwitchCase(1);
+	TestTrue(TEXT("Remove Entry: the later ones move up"), Talk->CaseValues == TArray<FString>({ TEXT("true"), TEXT(""), TEXT("1 > 0") }) && LinkedNode(Talk->GetBranchPin(1)) == Third && Talk->Pins.Num() == 5);
+	{
+		const FBangoGraphDocument Back = ReadsBack(TEXT("after editing"));
+		const FBangoGraphNode* Node = Back.Main.Nodes.FindByPredicate([](const FBangoGraphNode& Each) { return Each.Kind == EBangoGraphNodeKind::BlockCall && Each.bEntries; });
+		TestTrue(TEXT("the edits are in the document"), Node && Node->CaseValues == Talk->CaseValues && Node->Branches.Num() == 3 && Node->EntryDisabled == TArray<bool>({ false, false, false }));
+	}
+
+	// The decorator is told of the entries, and can set a condition.
+	{
+		const FBangoNodeDecoratorContext DecoratorContext = Talk->MakeDecoratorContext();
+		TestTrue(TEXT("decorator: the entries"), DecoratorContext.bEntries && DecoratorContext.EntryConditions == Talk->CaseValues && DecoratorContext.EntryDisabled.Num() == 3 && !DecoratorContext.bHasEntryDebug);
+		FString SetError;
+		TestTrue(TEXT("decorator: sets a condition"), DecoratorContext.SetEntryCondition && DecoratorContext.SetEntryCondition(1, TEXT("false"), SetError) && Talk->CaseValues[1] == TEXT("false"));
+		TestFalse(TEXT("decorator: not one it doesn't have"), DecoratorContext.SetEntryCondition(9, TEXT("false"), SetError));
+	}
+
+	// A command with optional entries: its ordinary block becomes one entry, and back.
+	UEdGraphNode* PlainBody = LinkedNode(Plain->GetBranchPin(0));
+	Plain->UseEntries();
+	TestTrue(TEXT("Use Entries: one entry: holding what was in the block"), Plain->IsEntries() && Plain->CaseValues == TArray<FString>({ TEXT("") }) && LinkedNode(Plain->GetBranchPin(0)) == PlainBody && PlainBody);
+	TestTrue(TEXT("Use a Plain Block is offered"), Plain->CanUsePlainBlock());
+	Plain->UsePlainBlock();
+	TestTrue(TEXT("Use a Plain Block: back"), !Plain->IsEntries() && Plain->CaseValues.Num() == 0 && LinkedNode(Plain->GetBranchPin(0)) == PlainBody);
+	ReadsBack(TEXT("after Use Entries and back"));
 	return true;
 }
 

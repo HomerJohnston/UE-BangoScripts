@@ -92,6 +92,14 @@ namespace BangoProgramPrivate
 				(I.C >> Bango::CallBlockShift) != 0 ? *FString::Printf(TEXT(" block %d"), (I.C >> Bango::CallBlockShift) - 1) : TEXT(""));
 		case EBangoOp::CloseBlock:
 			return FString::Printf(TEXT("%d%s"), I.A, I.B ? TEXT(" early") : TEXT(""));
+		case EBangoOp::EntryCheckBegin:
+		case EBangoOp::EntryCheckEnd:
+			return FString::Printf(TEXT("block %d"), I.A);
+		case EBangoOp::EntryCond:
+			return FString::Printf(TEXT("block %d entry %d -> %d"), I.A, I.B, I.C);
+		case EBangoOp::EntryResult:
+		case EBangoOp::EntryEnd:
+			return FString::Printf(TEXT("block %d entry %d"), I.A, I.B);
 		case EBangoOp::CallReflected:
 			return FString::Printf(TEXT("%s %d%s"), Program.Names.IsValidIndex(I.A) ? *Program.Names[I.A] : TEXT("<bad name>"), I.B, I.C ? TEXT(" +result") : TEXT(""));
 		case EBangoOp::CallCommandInPlace:
@@ -163,6 +171,11 @@ namespace Bango
 		case EBangoOp::ErrorMissingReturn: return TEXT("ErrorMissingReturn");
 		case EBangoOp::SpawnBlock:         return TEXT("SpawnBlock");
 		case EBangoOp::CloseBlock:         return TEXT("CloseBlock");
+		case EBangoOp::EntryCheckBegin:    return TEXT("EntryCheckBegin");
+		case EBangoOp::EntryCond:          return TEXT("EntryCond");
+		case EBangoOp::EntryResult:        return TEXT("EntryResult");
+		case EBangoOp::EntryCheckEnd:      return TEXT("EntryCheckEnd");
+		case EBangoOp::EntryEnd:           return TEXT("EntryEnd");
 		case EBangoOp::CallCommandInPlace: return TEXT("CallCommandInPlace");
 		case EBangoOp::ForEachNext:        return TEXT("ForEachNext");
 		case EBangoOp::WaitBegin:          return TEXT("WaitBegin");

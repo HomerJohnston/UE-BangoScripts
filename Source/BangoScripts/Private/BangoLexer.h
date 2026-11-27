@@ -17,7 +17,7 @@ enum class EBangoTokenKind : uint8
 	EntityLiteral,
 
 	// Keywords
-	KwIf, KwElse, KwWhile, KwFor, KwForEach, KwIn, KwSequence, KwNext, KwSpawn, KwWaitUntil, KwSwitch, KwCase, KwDefault,
+	KwIf, KwElse, KwWhile, KwFor, KwForEach, KwIn, KwSequence, KwNext, KwEntry, KwSpawn, KwWaitUntil, KwSwitch, KwCase, KwDefault,
 	KwBreak, KwContinue, KwReturn, KwLabel, KwGoto,
 	KwFunction, KwGlobal, KwScriptVar, KwPersistent, KwTrue, KwFalse, KwNil,
 	KwBool, KwInt, KwDouble, KwString, KwEntity, KwText, KwVector2, KwVector3, KwVoid,

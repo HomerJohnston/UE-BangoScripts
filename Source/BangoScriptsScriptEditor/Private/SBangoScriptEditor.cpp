@@ -5273,6 +5273,43 @@ int64 SBangoScriptEditor::GetDebugNodeID(const FDebugEntry& Entry)
 
 void SBangoScriptEditor::ApplyDebugStates()
 {
+	// The blocks of commands with entries that are open in the copy followed: their rows show which entries passed.
+	TMap<int64, const FBangoOpenEntries*> OpenEntries;
+	if (const FDebugEntry* Entry = FindDebugEntry())
+	{
+		for (const FBangoOpenEntries& Block : Entry->Info.OpenEntries)
+		{
+			OpenEntries.Add(Block.NodeID, &Block);
+		}
+	}
+	for (const TStrongObjectPtr<UEdGraph>& Graph : EdGraphs)
+	{
+		bool bChanged = false;
+		for (UEdGraphNode* GraphNode : Graph->Nodes)
+		{
+			UBangoEdGraphNode* Node = Cast<UBangoEdGraphNode>(GraphNode);
+			if (!Node || !Node->IsEntries())
+			{
+				continue;
+			}
+			const FBangoOpenEntries* const* Found = OpenEntries.Find(Node->NodeID);
+			const bool bHas = Found != nullptr;
+			const TArray<bool> Passed = bHas ? (*Found)->Passed : TArray<bool>();
+			const int32 Running = bHas ? (*Found)->Running : -1;
+			if (Node->bHasEntryDebug != bHas || Node->DebugEntryPassed != Passed || Node->DebugRunningEntry != Running)
+			{
+				Node->bHasEntryDebug = bHas;
+				Node->DebugEntryPassed = Passed;
+				Node->DebugRunningEntry = Running;
+				bChanged = true;
+			}
+		}
+		if (bChanged)
+		{
+			Graph->NotifyGraphChanged(); // drawn again: rows that didn't pass are dimmed, the running one is marked
+		}
+	}
+
 	TMap<int64, EBangoNodeDebugState> States;
 	TMap<int32, EBangoNodeDebugState> LineStates; // the same by line, for the gutter of a text without NodeIDs
 	if (const FDebugEntry* Entry = FindDebugEntry())

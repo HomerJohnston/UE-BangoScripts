@@ -207,6 +207,12 @@ namespace Bango
 		return true;
 	}
 
+	bool ValidateEntryCondition(const FString& Condition, FString& OutError)
+	{
+		// As an If's condition: one line, and it reads as one. (Empty is `entry:`, which always passes.)
+		return Condition.TrimStartAndEnd().IsEmpty() || ValidateNodeText(EBangoGraphNodeKind::If, false, Condition.TrimStartAndEnd(), OutError);
+	}
+
 	bool ValidateCaseValues(const FString& Values, FString& OutError)
 	{
 		using namespace BangoGraphEditPrivate;
@@ -441,6 +447,44 @@ namespace Bango
 			++LineEnd;
 		}
 		const FString Line = WrittenText.Mid(LineStart, LineEnd - LineStart);
+		if (Node.Kind == EBangoGraphNodeKind::BlockCall && Node.bEntries && Line.TrimStart().StartsWith(TEXT("entry"), ESearchCase::CaseSensitive))
+		{
+			// An entry line: which entry it is, counting the entry lines at its indent back up to the command's '{'.
+			const int32 Indent = Line.Len() - Line.TrimStart().Len();
+			int32 EntryIndex = 0;
+			int32 End = LineStart - 1; // the '\n' before this line
+			while (End > 0)
+			{
+				int32 Start = End;
+				while (Start > 0 && WrittenText[Start - 1] != TEXT('\n'))
+				{
+					--Start;
+				}
+				const FString Above = WrittenText.Mid(Start, End - Start);
+				const FString Trimmed = Above.TrimStart();
+				const int32 AboveIndent = Above.Len() - Trimmed.Len();
+				if (!Trimmed.IsEmpty() && AboveIndent < Indent)
+				{
+					break;
+				}
+				if (AboveIndent == Indent && Trimmed.StartsWith(TEXT("entry"), ESearchCase::CaseSensitive))
+				{
+					++EntryIndex;
+				}
+				End = Start - 1;
+			}
+			if (Node.CaseValues.IsValidIndex(EntryIndex))
+			{
+				OutPlace.Case = EntryIndex;
+				const int32 ConditionAt = Indent + 10; // after `entry if (`
+				const int32 Offset = Error.Column - 1 - ConditionAt;
+				if (Offset >= 0 && Offset <= Node.CaseValues[EntryIndex].Len())
+				{
+					OutPlace.Offset = Offset;
+				}
+			}
+			return true;
+		}
 		if (Node.Kind == EBangoGraphNodeKind::Switch && Line.TrimStart().StartsWith(TEXT("case "), ESearchCase::CaseSensitive))
 		{
 			// A case line: which case it is, counting the case lines at its indent back up to the switch's '{'.
@@ -1105,6 +1149,10 @@ namespace Bango
 				}
 				else if (const FBangoBlockCallStmt* BlockCall = Stmt.As<FBangoBlockCallStmt>())
 				{
+					for (const FBangoEntry& Entry : BlockCall->Entries)
+					{
+						CollectGlobalDecls(Entry.Body, 0, Out);
+					}
 					CollectGlobalDecls(BlockCall->Body, 0, Out);
 				}
 				else if (const FBangoWaitUntilStmt* Wait = Stmt.As<FBangoWaitUntilStmt>())

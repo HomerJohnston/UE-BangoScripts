@@ -287,6 +287,20 @@ namespace BangoGraphWriterPrivate
 				{
 					return Fail(FString::Printf(TEXT("In %s, %s has no outputs: a sequence needs at least one."), *GraphName, *NodeName(Node)));
 				}
+				if (Node.Kind == EBangoGraphNodeKind::BlockCall && Node.bEntries)
+				{
+					if (Node.Branches.Num() != Node.CaseValues.Num() || Node.EntryDisabled.Num() != Node.CaseValues.Num())
+					{
+						return Fail(FString::Printf(TEXT("In %s, %s has %d outputs for %d entries: one per entry."), *GraphName, *NodeName(Node), Node.Branches.Num(), Node.CaseValues.Num()));
+					}
+					for (const FString& Condition : Node.CaseValues)
+					{
+						if (HasLineBreak(Condition))
+						{
+							return Fail(FString::Printf(TEXT("In %s, an entry's condition of %s has a line break. Each entry's condition must be one line."), *GraphName, *NodeName(Node)));
+						}
+					}
+				}
 				if (Node.Kind == EBangoGraphNodeKind::Switch)
 				{
 					if (Node.Branches.Num() != Node.CaseValues.Num() + 1)
@@ -648,6 +662,35 @@ namespace BangoGraphWriterPrivate
 			{
 				// The call, with no ';', then its block.
 				AddCode(Indent, Detached, Text, &Node);
+				if (Node.bEntries)
+				{
+					// An entry list: each entry's line (between the disabled-code markers if it's disabled) and block, one deeper.
+					AddCode(Indent, Detached, TEXT("{"), nullptr);
+					int32 EntryIndent = Indent;
+					int32 EntryDetached = Detached;
+					Deeper(EntryIndent, EntryDetached);
+					for (int32 Branch = 0; Branch < Node.Branches.Num(); ++Branch)
+					{
+						const bool bEntryDisabled = Node.EntryDisabled.IsValidIndex(Branch) && Node.EntryDisabled[Branch];
+						if (bEntryDisabled)
+						{
+							AddCode(EntryIndent, EntryDetached, TEXT("/*"), nullptr);
+						}
+						const FString Condition = Node.CaseValues.IsValidIndex(Branch) ? Node.CaseValues[Branch].TrimStartAndEnd() : FString();
+						AddCode(EntryIndent, EntryDetached, Condition.IsEmpty() ? FString(TEXT("entry:")) : FString(TEXT("entry if (")) + Condition + TEXT("):"), nullptr);
+						if (!WriteBlock(Graph, Node.Branches[Branch], EntryIndent, EntryDetached, Depth + 1))
+						{
+							return false;
+						}
+						AddCode(EntryIndent, EntryDetached, TEXT("}"), nullptr);
+						if (bEntryDisabled)
+						{
+							AddCode(EntryIndent, EntryDetached, TEXT("*/"), nullptr);
+						}
+					}
+					AddCode(Indent, Detached, TEXT("}"), nullptr);
+					return true;
+				}
 				if (!WriteBlock(Graph, Node.Branches[0], Indent, Detached, Depth))
 				{
 					return false;

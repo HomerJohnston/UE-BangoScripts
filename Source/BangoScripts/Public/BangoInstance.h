@@ -133,6 +133,17 @@ struct FBangoCallFrameInfo
 	FBangoDebugLoc Loc;
 };
 
+/** For the debugger: an open block of a command with entries (FBangoInstance::GetOpenEntries). */
+struct FBangoOpenEntries
+{
+	/** The block command's node. */
+	int64 NodeID = -1;
+	/** Whether each entry passed when its condition was last worked out. */
+	TArray<bool> Passed;
+	/** The entry running, or -1. */
+	int32 Running = -1;
+};
+
 /** What became of a reload (FBangoInstance::RequestReload). */
 enum class EBangoReloadResult : uint8
 {
@@ -228,6 +239,8 @@ public:
 
 	/** For the debugger: the calls in progress, the main graph first and the innermost (where it is) last. */
 	void GetCallStack(TArray<FBangoCallFrameInfo>& OutFrames) const;
+	/** For the debugger: the blocks of commands with entries that are open, in every frame, with what's known of their entries. */
+	void GetOpenEntries(TArray<FBangoOpenEntries>& OutBlocks) const;
 
 	/** For the debugger: the command it's waiting on (like "Sleep"), "waitUntil", or empty if it isn't waiting. */
 	FString GetWaitingCommandName() const;
@@ -411,11 +424,11 @@ private:
 	int32 GetBlockPhase(int32 Block) const;
 	void SetBlockPhase(int32 Block, int32 Phase);
 	/** For a script waiting on a command: the block that command opens, is in or is closing (-1 for none), from the instruction it's waiting at. */
-	void FindPendingBlock(int32& OutBlock, bool& bOutOpens, bool& bOutClosing, bool& bOutLeftEarly) const;
+	void FindPendingBlock(int32& OutBlock, bool& bOutOpens, bool& bOutClosing, bool& bOutLeftEarly, int32* OutEntryEnding = nullptr) const;
 	/** Gives a call what it's handed about blocks, for the block it opens (bOpens) or is written in. */
 	void SetCallBlock(FBangoCommandCall& Call, int32 Block, bool bOpens);
 	/** After a command that opens a block or is written in one is done: its block opens, is skipped or is ended, as it asked. */
-	bool AfterBlockCall(int32 Block, bool bOpens, bool bEndBlock, bool bSkipBlock, const FString& CommandName);
+	bool AfterBlockCall(int32 Block, bool bOpens, bool bEndBlock, bool bSkipBlock, int32 RunEntry, const FString& CommandName);
 	/** After a block's close handler is done: the block is closed, and one of its blocks runs if the handler picked one. */
 	bool AfterBlockClose(int32 Block, bool bLeftEarly, int32 RunBlock, const FString& CommandName);
 	/** The script has stopped for good: tells the command it was waiting on, and the commands of the blocks left open (FBangoCommand::Abandoned). */
@@ -581,4 +594,48 @@ private:
 	void ForgetPersistentKeys() { PersistentKeysProgram = nullptr; PersistentKeys.Reset(); GlobalSlots.Reset(); }
 	/** SetPersistentScope's. */
 	FString PersistentScope;
+
+	// ---- A block command's entries (FBangoCommandSignature::Entries) ----
+	/**
+	 * While a block's entries' conditions are being checked (EntryCheckBegin to EntryCheckEnd): which block, the
+	 * entry whose condition is being worked out and where to go on if it reads an unset global, and for a re-check,
+	 * where the script was waiting. Never saved: a script can't pause then.
+	 */
+	struct FEntryGuard
+	{
+		int32 Block = -1;
+		int32 Entry = -1;
+		int32 NumFrames = 0;
+		int32 StackSize = 0;
+		int32 NextIP = 0;
+		/** A re-check while the command waits (RunEntryChecks), not the check when the block opens. */
+		bool bRecheck = false;
+		int32 ReturnIP = 0;
+		/** Its EntryCheckBegin has run. */
+		bool bBegun = false;
+	};
+	FEntryGuard EntryGuard;
+	/** The globals' change stamp when a watched block's entries were last checked; 0 checks them at the next poll. Not saved. */
+	uint64 EntryWatchStamp = 0;
+	/** The block's entry slot (FBangoBlockInfo::EntrySlot) as ints: false if it has none, or it isn't set up. */
+	bool ReadEntrySlot(int32 Block, TArray<int64>& OutValues) const;
+	void WriteEntrySlot(int32 Block, const TArray<int64>& Values);
+	/** Notes whether an entry's condition passed. */
+	void SetEntryPassed(int32 Block, int32 Entry, bool bPassed);
+	/** The entry of Block that's running, or -1. */
+	int32 GetRunningEntry(int32 Block) const;
+	/** Gives a call of the block's own command what it has of its entries. */
+	void FillCallEntries(FBangoCommandCall& Call, int32 Block) const;
+	/** After a handler of the block's command: what it asked of its entries (RecheckEntries, WatchEntries). */
+	bool TakeEntryRequests(int32 Block, bool bOwnCall, FBangoCommandCall& Call, EBangoCommandResult Result, const FString& CommandName);
+	/** The block's entries' conditions, worked out again while its command waits: false if the script failed. */
+	bool RunEntryChecks(int32 Block, const FBangoExecContext& Context, bool& bOutChanged);
+	/** The waiting command is its block's own, and asked for its entries to be checked again (or watches them and they're due). */
+	bool AreEntriesDue(int32 Block, bool bRequestedOnly, const FBangoGlobalStore& Globals) const;
+	/** An entry's closing brace (EntryEnd): the command's EntryEnded, then another entry or the block's close. */
+	bool EndEntry(int32 Block, int32 Entry, const FBangoExecContext& Context);
+	/** After EntryEnded (or its Poll) is done: the entry it asked to run, or the block's close. */
+	bool AfterEntryEnded(int32 Block, int32 RunEntry, const FString& CommandName);
+	/** Runs entry RunEntry of Block now (from its start or the end of another), checking that there is one. */
+	bool GoToEntry(int32 Block, int32 RunEntry, const FString& CommandName);
 };

@@ -269,9 +269,9 @@ bool FBangoScriptNamesTest::RunTest(const FString& Parameters)
 		TEXT("{\n")
 		TEXT("\tcount += _rounds;\n")
 		TEXT("};\n")
-		TEXT("forEach (entry in questLog)\n")
+		TEXT("forEach (record in questLog)\n")
 		TEXT("{\n")
-		TEXT("\tLog(entry);\n")
+		TEXT("\tLog(record);\n")
 		TEXT("};\n")
 		TEXT("for (int i = 0; i < count; i++)\n")
 		TEXT("{\n")
@@ -321,9 +321,9 @@ bool FBangoScriptNamesTest::RunTest(const FString& Parameters)
 	Check(8, TEXT("otherGlobal"), K::UndeclaredGlobal);
 	Check(10, TEXT("count"), K::Local);
 	Check(10, TEXT("_rounds"), K::Parameter);
-	Check(12, TEXT("entry"), K::Local);
+	Check(12, TEXT("record"), K::Local);
 	Check(12, TEXT("questLog"), K::Global);
-	Check(14, TEXT("entry"), K::Local);
+	Check(14, TEXT("record"), K::Local);
 	Check(16, TEXT("i"), K::Local);
 	Check(19, TEXT("amount"), K::Parameter);
 	Check(20, TEXT("who"), K::Parameter);                 // a function header over two lines
@@ -334,7 +334,7 @@ bool FBangoScriptNamesTest::RunTest(const FString& Parameters)
 	Check(27, TEXT("count"), K::Local);
 	Check(29, TEXT("count"), K::Local);                   // the main graph again, after the function's };
 	Check(29, TEXT("amount"), K::UndeclaredGlobal);
-	Check(19, TEXT("entry"), K::UndeclaredGlobal);        // loop variables only exist in their loop
+	Check(19, TEXT("record"), K::UndeclaredGlobal);        // loop variables only exist in their loop
 	Check(29, TEXT("i"), K::UndeclaredGlobal);
 
 	// Block scope: a local is visible from its line to the } that closes its block; the inner one of two wins; a
@@ -654,7 +654,8 @@ bool FBangoCompletionTest::RunTest(const FString& Parameters)
 	}
 
 	// In the main graph (line 5): "fo" is the command foo, the keywords for and forEach, the command Format and the
-	// global foundThings, by name.
+	// global foundThings, by name. (The project's and plugins' defines are set aside: they'd be listed too.)
+	const Bango::FBangoScopedNoDefines NoDefines;
 	TArray<FBangoCompletionItem> Items;
 	FBangoCompletion::GatherItems(Names, 4, Commands, Items);
 	TArray<int32> Shown;

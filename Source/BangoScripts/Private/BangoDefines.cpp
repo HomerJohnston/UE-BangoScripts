@@ -300,3 +300,34 @@ void Bango::SetDefineErrorReporter(TFunction<void(const FString&)> Reporter)
 {
 	BangoDefinesPrivate::GetTable().Reporter = MoveTemp(Reporter);
 }
+
+Bango::FBangoScopedNoDefines::FBangoScopedNoDefines()
+{
+	BangoDefinesPrivate::FTable& Table = BangoDefinesPrivate::GetTable();
+	SavedProjectRows = Table.ProjectRows;
+	for (const BangoDefinesPrivate::FPluginSet& Set : Table.Plugins)
+	{
+		SavedOwners.Add(Set.Owner);
+		SavedPluginRows.Add(Set.Rows);
+	}
+	Table.ProjectRows.Reset();
+	Table.RowErrors.Reset();
+	Table.Plugins.Reset();
+	BangoDefinesPrivate::Rebuild();
+}
+
+Bango::FBangoScopedNoDefines::~FBangoScopedNoDefines()
+{
+	// In the order they were registered, then the project's: the same table, and the same errors, as before.
+	BangoDefinesPrivate::FTable& Table = BangoDefinesPrivate::GetTable();
+	Table.ProjectRows = SavedProjectRows;
+	Table.RowErrors.Reset();
+	Table.Plugins.Reset();
+	for (int32 Index = 0; Index < SavedOwners.Num(); ++Index)
+	{
+		BangoDefinesPrivate::FPluginSet& Set = Table.Plugins.AddDefaulted_GetRef();
+		Set.Owner = SavedOwners[Index];
+		Set.Rows = SavedPluginRows[Index];
+	}
+	BangoDefinesPrivate::Rebuild();
+}

@@ -172,6 +172,14 @@ private:
 	TSharedRef<SWidget> MakeCaseValueBox(int32 Case);
 	/** The box beside a switch's Default output: like a case's, but greyed out and not editable. */
 	TSharedRef<SWidget> MakeDefaultCaseBox() const;
+	/**
+	 * What goes beside a case's (or entry's) pin: its box, or for a decorated command's entry, the decorator's row
+	 * (MakeEntryRowWidget); while the debugger follows the script, an entry that didn't pass is dimmed and the one
+	 * running is outlined.
+	 */
+	TSharedRef<SWidget> MakeCaseRow(int32 Case);
+	/** Set by MakeCaseRow: the row it made is a decorator's, so it isn't held to a pin row's height. */
+	bool bDecoratedRow = false;
 	bool IsSwitchDefaultPin(const UEdGraphPin* Pin) const;
 	void BeginEditingCase(int32 Case);
 	void OnCaseCommitted(const FText& NewText, ETextCommit::Type CommitType, int32 Case);

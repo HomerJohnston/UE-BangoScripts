@@ -156,6 +156,9 @@ static FString BangoCheckGraphRoundTrip(const TCHAR* Name, const FString& Source
 /** Extra scripts for the round-trip check: comments, disconnected nodes, functions, long lines. */
 static const TCHAR* const GBangoGraphRoundTripSources[] =
 {
+	// Commands with entries (spec section 7): a row per entry; disabled ones; a command with a block in an entry; in a function.
+	TEXT("global bool hasKey;\n@john Prompt()\n{\n\tentry if (hasKey):\n\t{\n\t\t// the key\n\t\tAddPrompt(\"Key\")\n\t\t{\n\t\t\thasKey = false;\n\t\t}\n\t}\n\t/*\n\tentry:\n\t{\n\t\tAddPrompt(\"Later\");\n\t}\n\tentry if (false):\n\t{\n\t}\n\t*/\n\tentry:\n\t{\n\t\tAddPrompt(\"Bye\");\n\t}\n}\nLog(\"after\");\n"),
+	TEXT("Ask(2);\n\nfunction void Ask(int _n)\n{\n\tSpeech(0)\n\t{\n\t\tentry if (_n > 1 && Ready()):\n\t\t{\n\t\t\tint _x = _n;\n\t\t\tSay(_x);\n\t\t\tif (_x > 3)\n\t\t\t{\n\t\t\t\treturn;\n\t\t\t}\n\t\t}\n\t}\n\tSpeech(0)\n\t{\n\t\tSay(1);\n\t}\n\tSpeech(0)\n\t{\n\t}\n}\n"),
 	// Defines (spec section 4, Defines): names like any other in a field, and a case value.
 	TEXT("global int mode ?= SELECT_RANDOM;\nint _pick = BOSS_LEVELS[1] + SELECT_RANDOM;\nswitch (mode)\n{\ncase SELECT_RANDOM:\n{\n\tmode = 0;\n}\ncase 2:\n{\n}\n}\n"),
 	// World and persistent globals: in the Globals list, and set in the code (a Global node).
@@ -854,6 +857,95 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			None.Main.Nodes[1].Branches.Reset();
 			Expect(!Bango::WriteGraphText(None, Text, WriteError) && WriteError.Contains(TEXT("no outputs")), FString(TEXT("sequence: needs an output: ")) + WriteError);
 		}
+	}
+	{
+		// A command with entries: a row per entry (its condition as written, empty for `entry:`) with an output, and
+		// whether it's disabled; Next for what follows. No Body.
+		const TCHAR* Source =
+			TEXT("Talk(1)      //@1(20, 0)\n")
+			TEXT("{\n")
+			TEXT("\tentry if (_a > 1):\n")
+			TEXT("\t{\n")
+			TEXT("\t\tTalk(\"a\");  //@2(40, 10)\n")
+			TEXT("\t}\n")
+			TEXT("\t/*\n")
+			TEXT("\tentry:\n")
+			TEXT("\t{\n")
+			TEXT("\t\tTalk(\"b\");  //@3(40, 20)\n")
+			TEXT("\t}\n")
+			TEXT("\t*/\n")
+			TEXT("\tentry:\n")
+			TEXT("\t{\n")
+			TEXT("\t}\n")
+			TEXT("}\n")
+			TEXT("\n")
+			TEXT("Talk(\"d\");    //@4(40, 0)\n");
+		FBangoGraphDocument Doc;
+		FBangoCompileError Error;
+		FString Text;
+		FString WriteError;
+		const bool bBuilt = Bango::BuildGraph(Source, TEXT("entries.bango"), Doc, Error);
+		Expect(bBuilt && Doc.Main.Nodes.Num() == 5, FString(TEXT("entries: builds: ")) + Error.ToString());
+		if (bBuilt && Doc.Main.Nodes.Num() == 5)
+		{
+			const TArray<FBangoGraphNode>& N = Doc.Main.Nodes;
+			Expect(N[1].Kind == EBangoGraphNodeKind::BlockCall && N[1].bEntries && N[1].Text == TEXT("Talk(1)") && N[1].Branches.Num() == 3 && Bango::GetGraphNodeBranchCount(N[1]) == 3,
+				TEXT("entries: a command node with three entries"));
+			Expect(N[1].CaseValues.Num() == 3 && N[1].CaseValues[0] == TEXT("_a > 1") && N[1].CaseValues[1].IsEmpty() && N[1].CaseValues[2].IsEmpty(),
+				TEXT("entries: each entry's condition, empty for entry:"));
+			Expect(N[1].EntryDisabled == TArray<bool>({ false, true, false }), TEXT("entries: the second is disabled"));
+			Expect(N[N[1].Branches[0]].Text == TEXT("Talk(\"a\")") && N[N[1].Branches[1]].Text == TEXT("Talk(\"b\")") && N[1].Branches[2] == INDEX_NONE,
+				TEXT("entries: each entry's block on its output"));
+			Expect(N[N[1].Next].Text == TEXT("Talk(\"d\")") && Bango::GetGraphNodeBranchName(N[1], 1) == TEXT("Entry 1"), TEXT("entries: Then, and the outputs' names"));
+		}
+		const TCHAR* Expected =
+			TEXT("// ============ SCRIPT BODY =====================\n")
+			TEXT("\n")
+			TEXT("Talk(1)               //@1(20, 0)\n")
+			TEXT("{\n")
+			TEXT("\tentry if (_a > 1):\n")
+			TEXT("\t{\n")
+			TEXT("\t\tTalk(\"a\");    //@2(40, 10)\n")
+			TEXT("\t}\n")
+			TEXT("\t/*\n")
+			TEXT("\tentry:\n")
+			TEXT("\t{\n")
+			TEXT("\t\tTalk(\"b\");    //@3(40, 20)\n")
+			TEXT("\t}\n")
+			TEXT("\t*/\n")
+			TEXT("\tentry:\n")
+			TEXT("\t{\n")
+			TEXT("\t}\n")
+			TEXT("}\n")
+			TEXT("\n")
+			TEXT("Talk(\"d\");            //@4(40, 0)\n");
+		Expect(bBuilt && Bango::WriteGraphText(Doc, Text, WriteError) && Text == FString(Expected), FString(TEXT("entries: written in the saved layout:\n")) + Text);
+		if (bBuilt && Doc.Main.Nodes.Num() == 5)
+		{
+			// Another entry (as the editor's Add pin does), a condition typed into the last, and a mismatch refused.
+			FBangoGraphDocument More = Doc;
+			More.Main.Nodes[1].CaseValues.Add(TEXT("Ready()"));
+			More.Main.Nodes[1].EntryDisabled.Add(false);
+			More.Main.Nodes[1].Branches.Add(INDEX_NONE);
+			Expect(Bango::WriteGraphText(More, Text, WriteError) && Text.Contains(TEXT("\tentry if (Ready()):\n\t{\n\t}\n}")), FString(TEXT("entries: a fourth:\n")) + Text);
+			FBangoGraphDocument Mismatch = Doc;
+			Mismatch.Main.Nodes[1].CaseValues.Add(TEXT(""));
+			Expect(!Bango::WriteGraphText(Mismatch, Text, WriteError) && WriteError.Contains(TEXT("one per entry")), FString(TEXT("entries: outputs must match entries: ")) + WriteError);
+			// An error on an entry line points at that entry, and into its condition.
+			FString Written;
+			Bango::WriteGraphText(Doc, Written, WriteError);
+			FBangoCompileError EntryError;
+			EntryError.NodeID = 1;
+			EntryError.Line = 5; // `\tentry if (_a > 1):`, after the heading and a blank line
+			EntryError.Column = 13;
+			Bango::FBangoErrorPlace Place;
+			Expect(Bango::FindErrorPlace(Doc, Written, EntryError, Place) && Place.Node == 1 && Place.Case == 0 && Place.Offset == 1,
+				FString::Printf(TEXT("entries: an error on an entry line finds the entry (node %d, entry %d, offset %d)"), Place.Node, Place.Case, Place.Offset));
+		}
+		FString ConditionError;
+		Expect(Bango::ValidateEntryCondition(TEXT(""), ConditionError) && Bango::ValidateEntryCondition(TEXT("_a > 1 && Ready()"), ConditionError),
+			FString(TEXT("entries: valid conditions: ")) + ConditionError);
+		Expect(!Bango::ValidateEntryCondition(TEXT("_a == \"open"), ConditionError), TEXT("entries: a condition that doesn't read"));
 	}
 	{
 		// A switch: a row per case (its values as written) with an output, Default last, and Next for what follows.

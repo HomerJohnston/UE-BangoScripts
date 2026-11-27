@@ -905,6 +905,9 @@ namespace BangoParserPrivate
 			case EBangoTokenKind::KwNext:
 				Fail(First.Loc, TEXT("'next' only goes between a sequence's blocks, straight after the '}' of one: sequence { ... } next { ... }"));
 				return nullptr;
+			case EBangoTokenKind::KwEntry:
+				Fail(First.Loc, TEXT("'entry' only goes directly in the block of a command that takes entries, and then everything in that block must be an entry: Speech(...) { entry if (...): { ... } entry: { ... } }. In a block that starts with statements, there can be no entries."));
+				return nullptr;
 			case EBangoTokenKind::LBrace:
 				Fail(First.Loc, TEXT("A '{' block must belong to an if, else, while, for, forEach, sequence, spawn, switch case or function. (To group statements, put them in a sequence: sequence { ... })"));
 				return nullptr;
@@ -968,7 +971,9 @@ namespace BangoParserPrivate
 					return nullptr;
 				}
 				SetTextSpan(*BlockCall, StartTok, Pos); // the call, up to its ')': the '{' is next
-				if (!ParseBlock(BlockCall->Body) || !ExpectBlockTerminator())
+				// A block that starts with `entry` (perhaps disabled) is an entry list; any other is an ordinary block.
+				const bool bParsed = StartsEntries() ? ParseEntries(*BlockCall) : ParseBlock(BlockCall->Body);
+				if (!bParsed || !ExpectBlockTerminator())
 				{
 					return nullptr;
 				}
@@ -1538,6 +1543,147 @@ namespace BangoParserPrivate
 				}
 			}
 			return true;
+		}
+
+		/** At a block command's '{': whether its block starts with `entry` (after any '/*'), so it's an entry list. */
+		bool StartsEntries() const
+		{
+			int32 At = Pos + 1;
+			while (Tokens.IsValidIndex(At) && Tokens[At].Kind == EBangoTokenKind::DisabledBegin)
+			{
+				++At;
+			}
+			return Tokens.IsValidIndex(At) && Tokens[At].Kind == EBangoTokenKind::KwEntry;
+		}
+
+		/** The lines of an entry list that aren't nodes (its entry lines, and between entries): no metadata there. */
+		bool CheckNoMetadataInEntries()
+		{
+			const int32 AfterLine = Pos > 0 ? Tokens[Pos - 1].Loc.Line : 0;
+			const int32 UpToLine = Check(EBangoTokenKind::EndOfFile) ? MAX_int32 : Cur().Loc.Line;
+			for (const int32 Line : Lex.MetadataLines)
+			{
+				if (Line > AfterLine && Line <= UpToLine && !NodeLines.Contains(Line))
+				{
+					FBangoSourceLocation Loc;
+					Loc.Line = Line;
+					Loc.Column = 1;
+					return Fail(Loc, TEXT("Node metadata (//@) can't go on an entry line or between entries: they aren't graph nodes. Put it on the command's line or on statements inside the entries."));
+				}
+			}
+			return true;
+		}
+
+		/**
+		 * A block command's entry list: `{`, then `entry if (condition):` or `entry:`, each followed by a block, then
+		 * `}`. Nothing else goes directly in it. A disabled part holds whole entries.
+		 */
+		bool ParseEntries(FBangoBlockCallStmt& BlockCall)
+		{
+			const FBangoCallExpr* Call = BlockCall.Call ? BlockCall.Call->As<FBangoCallExpr>() : nullptr;
+			const FString Name = Call ? Call->Name : FString(TEXT("command"));
+			BlockCall.bEntries = true;
+			const FBangoSourceLocation OpenLoc = Advance().Loc;
+			bParamsAllowed = false;
+			if (!EnterNesting())
+			{
+				return false;
+			}
+			TArray<FBangoSourceLocation> DisabledOpens;
+			while (true)
+			{
+				if (!CheckNoMetadataInEntries())
+				{
+					return false;
+				}
+				const FBangoToken& Tok = Cur();
+				if (Tok.Kind == EBangoTokenKind::RBrace)
+				{
+					if (DisabledOpens.Num() > 0)
+					{
+						return FailPlain(Tok.Loc, FString::Printf(TEXT("This '}' closes a block that was opened before the '/*' on line %d. A disabled part must end with '*/' in the same block it starts in."), DisabledOpens.Last().Line));
+					}
+					break;
+				}
+				if (Tok.Kind == EBangoTokenKind::EndOfFile)
+				{
+					return Fail(Tok.Loc, DisabledOpens.Num() > 0
+						? FString::Printf(TEXT("The '/*' on line %d is never closed with '*/'. '/*' and '*/' go around disabled nodes; write notes as // comments."), DisabledOpens.Last().Line)
+						: FString::Printf(TEXT("The block of '%s' opened with '{' on line %d is never closed."), *Name, OpenLoc.Line));
+				}
+				if (Tok.Kind == EBangoTokenKind::DisabledBegin)
+				{
+					DisabledOpens.Add(Advance().Loc);
+					++DisabledDepth;
+					continue;
+				}
+				if (Tok.Kind == EBangoTokenKind::DisabledEnd)
+				{
+					if (DisabledOpens.Num() == 0)
+					{
+						return FailPlain(Tok.Loc, TEXT("This '*/' has no '/*' before it in this block. '/*' and '*/' go around disabled nodes, and both must be in the same block."));
+					}
+					Advance();
+					DisabledOpens.Pop();
+					--DisabledDepth;
+					continue;
+				}
+				if (Tok.Kind != EBangoTokenKind::KwEntry)
+				{
+					return Fail(Tok.Loc, FString::Printf(TEXT("The block of '%s' holds entries only: 'entry if (condition):' or 'entry:', each with a block, but found %s. Put statements inside an entry."), *Name, *Bango::DescribeToken(Tok)));
+				}
+				if (!ParseEntry(BlockCall.Entries.AddDefaulted_GetRef()))
+				{
+					return false;
+				}
+				Match(EBangoTokenKind::Semicolon); // `};` after an entry's block, as after any block
+			}
+			Advance(); // '}'
+			LeaveNesting();
+			return true;
+		}
+
+		/** `entry if (condition):` or `entry:`, then its block. */
+		bool ParseEntry(FBangoEntry& Entry)
+		{
+			const FBangoToken& Keyword = Advance();
+			Entry.Loc = Keyword.Loc;
+			Entry.bDisabled = DisabledDepth > 0;
+			if (Match(EBangoTokenKind::KwIf))
+			{
+				if (!Check(EBangoTokenKind::LParen))
+				{
+					return Fail(Cur().Loc, FString::Printf(TEXT("Expected '(' after 'entry if', but found %s. An entry with a condition is written 'entry if (condition):'."), *Bango::DescribeToken(Cur())));
+				}
+				Advance();
+				const int32 FirstTok = Pos;
+				Entry.Condition = ParseExpression();
+				if (!Entry.Condition)
+				{
+					return false;
+				}
+				Entry.ConditionBegin = Tokens[FirstTok].Loc.Column;
+				Entry.ConditionEnd = Previous().EndColumn;
+				if (!Expect(EBangoTokenKind::RParen, TEXT("after the entry's condition")))
+				{
+					return false;
+				}
+			}
+			if (!Check(EBangoTokenKind::Colon))
+			{
+				return Fail(Cur().Loc, FString::Printf(TEXT("Expected ':' after %s, but found %s. An entry is written 'entry if (condition):' or 'entry:', then its block."),
+					Entry.Condition ? TEXT("the entry's condition") : TEXT("'entry'"), *Bango::DescribeToken(Cur())));
+			}
+			Advance();
+			if (!RequireOneLine(Keyword.Loc.Line, Previous().Loc) || !CheckNoMetadataInEntries())
+			{
+				return false;
+			}
+			if (!Check(EBangoTokenKind::LBrace))
+			{
+				return Fail(Cur().Loc, FString::Printf(TEXT("Expected '{' after the entry's ':', but found %s. Each entry has a block: entry: { ... }"), *Bango::DescribeToken(Cur())));
+			}
+			return ParseBlock(Entry.Body);
 		}
 
 		/** `switch (value)` `{` then `case v, ...:` / `default:` each followed by a block, then `}`. */

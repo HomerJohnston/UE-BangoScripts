@@ -795,9 +795,9 @@ namespace BangoGraphLayoutPrivate
 					Chain(Node.Branches[1], Scope);
 					break;
 				case EBangoGraphNodeKind::While:
-				case EBangoGraphNodeKind::BlockCall:
 					Chain(Node.Branches[0], Scope);
 					break;
+				case EBangoGraphNodeKind::BlockCall: // its Body, or each entry's block
 				case EBangoGraphNodeKind::Sequence:
 				case EBangoGraphNodeKind::Switch:
 				case EBangoGraphNodeKind::Spawn:

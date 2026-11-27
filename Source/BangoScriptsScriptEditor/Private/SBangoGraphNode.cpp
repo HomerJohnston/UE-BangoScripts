@@ -96,7 +96,7 @@ TSharedRef<SWidget> SBangoGraphNode::CreateNodeContentArea()
 	const float HalfPin = SBangoGraphPin::PinSize * 0.5f;
 	// A switch's case boxes are made with their pins (AddPin), which comes after this.
 	CaseEditBoxes.Reset();
-	CaseEditBoxes.SetNum(BangoNode && BangoNode->IsSwitch() ? BangoNode->CaseValues.Num() : 0);
+	CaseEditBoxes.SetNum(BangoNode && BangoNode->HasCaseRows() ? BangoNode->CaseValues.Num() : 0);
 	EditingCase = INDEX_NONE;
 	// A disabled node: SGraphNode fades the title and the body and adds the Disabled banner; this fades the fields
 	// and the pins to match.
@@ -235,7 +235,7 @@ void SBangoGraphNode::CreateOutputSideAddButton(TSharedPtr<SVerticalBox> OutputB
 void SBangoGraphNode::AddAddPinButton(const TSharedPtr<SVerticalBox>& OutputBox)
 {
 	using namespace BangoGraphNodeStyle;
-	if (!BangoNode || !(BangoNode->IsSequence() || BangoNode->IsSwitch()) || !OutputBox.IsValid())
+	if (!BangoNode || !(BangoNode->IsSequence() || BangoNode->HasCaseRows()) || !OutputBox.IsValid())
 	{
 		return;
 	}
@@ -243,7 +243,9 @@ void SBangoGraphNode::AddAddPinButton(const TSharedPtr<SVerticalBox>& OutputBox)
 	// Placed like an output pin, in a row of its own: its circle's centre on the node's right edge.
 	const FMargin BodyInset = GetDefault<UGraphEditorSettings>()->GetNonPinNodeBodyPadding();
 	const float HalfPin = SBangoGraphPin::PinSize * 0.5f;
-	const FText Tip = BangoNode->IsSwitch()
+	const FText Tip = BangoNode->IsEntries()
+		? LOCTEXT("AddEntryPinTooltip", "Add pin: adds an entry after the others. Type its condition in its box, or leave it empty for one that always passes. (To remove, move or disable one, right-click its pin.)")
+		: BangoNode->IsSwitch()
 		? LOCTEXT("AddSwitchPinTooltip", "Add pin: adds a case after the others, before Default. Type its value (or values, separated by commas) in its box. (To remove one, right-click its pin.)")
 		: LOCTEXT("AddSequencePinTooltip", "Add pin: adds a scope after the others: another block, run after them and before Then. (To remove one, right-click it.)");
 	OutputBox->AddSlot()
@@ -263,9 +265,9 @@ FReply SBangoGraphNode::OnAddPin()
 	{
 		BangoNode->AddSequenceOutput();
 	}
-	else if (BangoNode && BangoNode->IsSwitch())
+	else if (BangoNode && BangoNode->HasCaseRows())
 	{
-		// The new case's box opens for typing once the node has rebuilt.
+		// The new case's (or entry's) box opens for typing once the node has rebuilt.
 		BangoNode->AddSwitchCase();
 		PendingCaseEdit = BangoNode->CaseValues.Num() - 1;
 		RefreshSoon();
@@ -275,7 +277,7 @@ FReply SBangoGraphNode::OnAddPin()
 
 void SBangoGraphNode::AddOutputGap()
 {
-	if (BangoNode && (BangoNode->IsSequence() || BangoNode->IsSwitch()) && RightNodeBox.IsValid() && OutputPins.Num() > 0)
+	if (BangoNode && (BangoNode->IsSequence() || BangoNode->HasCaseRows()) && RightNodeBox.IsValid() && OutputPins.Num() > 0)
 	{
 		RightNodeBox->AddSlot()
 			.AutoHeight()
@@ -315,14 +317,17 @@ void SBangoGraphNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 	{
 		// (Default gets a row like a case's, with a box that can't be edited.)
 		// A switch's case: its values in a box just inside the node, then the pin. The row is exactly as tall as a
-		// plain pin's (PinRowGap above and below the circle), so the pins stay on the grid.
+		// plain pin's (PinRowGap above and below the circle), so the pins stay on the grid. A decorator's entry row
+		// (MakeEntryRowWidget) is as tall as it wants.
+		bDecoratedRow = false;
+		const TSharedRef<SWidget> RowContent = Case != INDEX_NONE ? MakeCaseRow(Case) : MakeDefaultCaseBox();
 		RightNodeBox->AddSlot()
 			.AutoHeight()
 			.HAlign(HAlign_Right)
 			.Padding(0.0f, 0.0f, BodyInset.Right - HalfPin, 0.0f)
 			[
 				SNew(SBox)
-				.HeightOverride(CaseRowHeight)
+				.HeightOverride(bDecoratedRow ? FOptionalSize() : FOptionalSize(CaseRowHeight))
 				[
 					SNew(SHorizontalBox)
 					// "Case" before the first case's box.
@@ -333,7 +338,7 @@ void SBangoGraphNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 					[
 						Case == 0
 							? StaticCastSharedRef<SWidget>(SNew(STextBlock)
-								.Text(LOCTEXT("CaseLabel", "Case"))
+								.Text(BangoNode->IsEntries() ? LOCTEXT("EntriesLabel", "Entries") : LOCTEXT("CaseLabel", "Case"))
 								.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
 								.ColorAndOpacity(FSlateColor(LabelColor)))
 							: SNullWidget::NullWidget
@@ -343,7 +348,7 @@ void SBangoGraphNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 					.VAlign(VAlign_Fill) // the box fills its row (16 high)
 					.Padding(0.0f, 0.0f, 4.0f, 0.0f)
 					[
-						Case != INDEX_NONE ? MakeCaseValueBox(Case) : MakeDefaultCaseBox()
+						RowContent
 					]
 					+ SHorizontalBox::Slot()
 					.AutoWidth()
@@ -395,12 +400,52 @@ TSharedRef<SWidget> SBangoGraphNode::MakeDefaultCaseBox() const
 		];
 }
 
+TSharedRef<SWidget> SBangoGraphNode::MakeCaseRow(int32 Case)
+{
+	TSharedPtr<SWidget> Row;
+	if (BangoNode && BangoNode->IsEntries())
+	{
+		if (const TSharedPtr<IBangoNodeDecorator> RowDecorator = BangoNode->GetNodeDecorator())
+		{
+			FBangoNodeDecoratorContext Context = BangoNode->MakeDecoratorContext();
+			const TWeakPtr<SBangoGraphNode> WeakThis = SharedThis(this);
+			Context.MakeEntryConditionWidget = [WeakThis](int32 Entry) -> TSharedRef<SWidget>
+			{
+				const TSharedPtr<SBangoGraphNode> This = WeakThis.Pin();
+				return This.IsValid() && This->CaseEditBoxes.IsValidIndex(Entry) ? This->MakeCaseValueBox(Entry) : SNullWidget::NullWidget;
+			};
+			Row = RowDecorator->MakeEntryRowWidget(Context, Case);
+			bDecoratedRow = Row.IsValid();
+		}
+	}
+	const TSharedRef<SWidget> Content = Row.IsValid() ? Row.ToSharedRef() : MakeCaseValueBox(Case);
+	if (!BangoNode || !BangoNode->IsEntries() || !BangoNode->bHasEntryDebug)
+	{
+		return Content;
+	}
+	// The debugger follows a copy of the script with this block open.
+	const bool bPassed = BangoNode->DebugEntryPassed.IsValidIndex(Case) && BangoNode->DebugEntryPassed[Case];
+	const bool bRunning = BangoNode->DebugRunningEntry == Case;
+	return SNew(SBorder)
+		.BorderImage(FAppStyle::GetBrush(bRunning ? "WhiteBrush" : "NoBorder"))
+		.BorderBackgroundColor(FSlateColor(FLinearColor(1.0f, 0.72f, 0.1f)))
+		.Padding(bRunning ? FMargin(1.0f) : FMargin(0.0f))
+		.ColorAndOpacity(FLinearColor(1.0f, 1.0f, 1.0f, bPassed || bRunning ? 1.0f : 0.4f))
+		.ToolTipText(bRunning ? LOCTEXT("EntryRunningTip", "Running now.") : bPassed ? LOCTEXT("EntryPassedTip", "Its condition passed when last worked out.")
+			: LOCTEXT("EntryNotPassedTip", "Its condition didn't pass when last worked out."))
+		[
+			Content
+		];
+}
+
 TSharedRef<SWidget> SBangoGraphNode::MakeCaseValueBox(int32 Case)
 {
 	using namespace BangoGraphNodeStyle;
 	const FString Values = BangoNode->CaseValues.IsValidIndex(Case) ? BangoNode->CaseValues[Case] : FString();
 	const bool bEmpty = Values.IsEmpty();
 	const bool bHasError = BangoNode->ErrorCase == Case;
+	const bool bEntry = BangoNode->IsEntries();
+	const bool bEntryDisabled = bEntry && BangoNode->EntryDisabled.IsValidIndex(Case) && BangoNode->EntryDisabled[Case];
 	const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Mono", 8);
 
 	TSharedRef<SEditableText> Edit = SNew(SEditableText)
@@ -413,12 +458,15 @@ TSharedRef<SWidget> SBangoGraphNode::MakeCaseValueBox(int32 Case)
 	CaseEditBoxes[Case] = Edit;
 
 	const FText Tip = bHasError ? FText::FromString(BangoNode->ErrorMsg)
+		: bEntry ? FText::Format(LOCTEXT("EntryConditionTip", "{0}This entry's condition: worked out when the block opens. The command chooses which entries run, and may check them again.\nEmpty: the entry always passes (entry:).\nRight-click the pin to remove, move or disable the entry."),
+			bEntryDisabled ? LOCTEXT("EntryDisabledTipPrefix", "Disabled: this entry is left out.\n\n") : FText::GetEmpty())
 		: LOCTEXT("CaseValuesTip", "This case's values: the switch runs this output when its value equals one of them.\nAn int like 3, a string like \"north\" or a Bango ID like @guard; separate several with commas, like 1, 2.\nRight-click the pin to remove the case.");
 	TSharedRef<SBorder> Box = SNew(SBorder)
 		.BorderImage(FAppStyle::GetBrush(bHasError ? "WhiteBrush" : "NoBorder"))
 		.BorderBackgroundColor(FSlateColor(ErrorColor))
 		.Padding(bHasError ? FMargin(1.0f) : FMargin(0.0f))
 		.ToolTipText(Tip)
+		.ColorAndOpacity(FLinearColor(1.0f, 1.0f, 1.0f, bEntryDisabled ? 0.45f : 1.0f))
 		[
 			SNew(SBorder)
 			.BorderImage(FAppStyle::GetBrush("ToolPanel.DarkGroupBorder"))
@@ -434,7 +482,7 @@ TSharedRef<SWidget> SBangoGraphNode::MakeCaseValueBox(int32 Case)
 					+ SWidgetSwitcher::Slot()
 					[
 						SNew(STextBlock)
-						.Text(bEmpty ? LOCTEXT("CaseValueMissing", "value") : FText::FromString(Values))
+						.Text(bEmpty ? (bEntry ? LOCTEXT("EntryAlways", "Always") : LOCTEXT("CaseValueMissing", "value")) : FText::FromString(Values))
 						.Font(bEmpty ? FCoreStyle::GetDefaultFontStyle("Italic", 8) : Font)
 						.ColorAndOpacity(bEmpty ? FSlateColor(EmptyColor) : FSlateColor::UseForeground())
 						.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
