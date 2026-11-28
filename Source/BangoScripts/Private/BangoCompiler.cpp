@@ -2468,6 +2468,10 @@ namespace BangoCompilerPrivate
 					continue;
 				}
 				Fn->Blocks[Block].EntryConditions.Add(Entry.Condition.IsValid());
+				if (Entry.bDefault)
+				{
+					Fn->Blocks[Block].DefaultEntry = Number; // worked out at EntryCheckEnd, from the others
+				}
 				if (Entry.Condition)
 				{
 					CurrentLoc = Entry.Loc;

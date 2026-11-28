@@ -142,6 +142,8 @@ struct FBangoOpenEntries
 	TArray<bool> Passed;
 	/** The entry running, or -1. */
 	int32 Running = -1;
+	/** The `default:` entry (the last), or -1. */
+	int32 Default = -1;
 };
 
 /** What became of a reload (FBangoInstance::RequestReload). */

@@ -5294,8 +5294,24 @@ void SBangoScriptEditor::ApplyDebugStates()
 			}
 			const FBangoOpenEntries* const* Found = OpenEntries.Find(Node->NodeID);
 			const bool bHas = Found != nullptr;
-			const TArray<bool> Passed = bHas ? (*Found)->Passed : TArray<bool>();
-			const int32 Running = bHas ? (*Found)->Running : -1;
+			// The script numbers its entries without the disabled ones; the node has a row for each.
+			TArray<bool> Passed;
+			int32 Running = -1;
+			if (bHas)
+			{
+				int32 Number = 0;
+				for (int32 Row = 0; Row < Node->CaseValues.Num(); ++Row)
+				{
+					if (Node->EntryDisabled.IsValidIndex(Row) && Node->EntryDisabled[Row])
+					{
+						Passed.Add(false);
+						continue;
+					}
+					Passed.Add((*Found)->Passed.IsValidIndex(Number) && (*Found)->Passed[Number]);
+					Running = (*Found)->Running == Number ? Row : Running;
+					++Number;
+				}
+			}
 			if (Node->bHasEntryDebug != bHas || Node->DebugEntryPassed != Passed || Node->DebugRunningEntry != Running)
 			{
 				Node->bHasEntryDebug = bHas;

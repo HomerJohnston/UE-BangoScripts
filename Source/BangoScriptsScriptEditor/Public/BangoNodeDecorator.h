@@ -55,6 +55,8 @@ struct FBangoNodeDecoratorContext
 	TArray<FString> EntryConditions;
 	/** Whether each entry is disabled. */
 	TArray<bool> EntryDisabled;
+	/** The `default:` entry (the last; its condition is empty), which passes when none of the others does, or -1. */
+	int32 DefaultEntry = -1;
 	/**
 	 * Sets entry Entry's condition to Condition, written as it would be in the script (empty for `entry:`), as one
 	 * undoable change, as SetFieldValue does. False, with why, if it can't be set.
@@ -63,7 +65,7 @@ struct FBangoNodeDecoratorContext
 	/**
 	 * In MakeEntryRowWidget only: the box the node would show for entry Entry's condition (typing in it, Tab and
 	 * Shift+Tab to the next and last, the hint "Always" when it's empty, the red outline for an error), to put
-	 * wherever the row wants it. Call it once per row; don't keep it.
+	 * wherever the row wants it; for the default, the box saying Default. Call it once per row; don't keep it.
 	 */
 	TFunction<TSharedRef<SWidget>(int32 Entry)> MakeEntryConditionWidget;
 	/**

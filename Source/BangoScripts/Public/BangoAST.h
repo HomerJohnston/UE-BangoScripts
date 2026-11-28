@@ -472,15 +472,17 @@ struct FBangoSpawnStmt : FBangoStmt
  * the block. The parser makes one of any call followed by a `{`; the compiler says whether the command takes one.
  */
 /**
- * One entry of a block command's entry list: `entry if (condition):` or `entry:`, then its block. The entry line isn't
- * a node of its own (in the graph it's a row of the command's node).
+ * One entry of a block command's entry list: `entry if (condition):`, `entry:` or `default:` (the last, if there's one),
+ * then its block. The entry line isn't a node of its own (in the graph it's a row of the command's node).
  */
 struct FBangoEntry
 {
 	/** Where its `entry` is. */
 	FBangoSourceLocation Loc;
-	/** Its condition, or null for `entry:`. */
+	/** Its condition, or null for `entry:` and `default:`. */
 	FBangoExprPtr Condition;
+	/** `default:`: it passes when none of the other entries does. Always the last entry. */
+	bool bDefault = false;
 	/** The columns of its condition's text on the entry line (from its first token to the end of its last), or 0. */
 	int32 ConditionBegin = 0;
 	int32 ConditionEnd = 0;

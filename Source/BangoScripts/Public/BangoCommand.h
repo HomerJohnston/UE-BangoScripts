@@ -429,10 +429,12 @@ struct FBangoCommandCall
 	bool HasEntries() const { return EntryCount >= 0; }
 	/** How many entries there are, not counting disabled ones (0 if the block isn't an entry list). */
 	int32 GetEntryCount() const { return FMath::Max(EntryCount, 0); }
-	/** True if entry Index's condition passed when it was last worked out (always, for `entry:`). */
+	/** True if entry Index's condition passed when it was last worked out (always, for `entry:`; for `default:`, when no other entry did). */
 	bool EntryPassed(int32 Index) const { return EntryFlags.IsValidIndex(Index) && (EntryFlags[Index] & 1) != 0; }
 	/** False for `entry:`, which has no condition. */
 	bool EntryHasCondition(int32 Index) const { return EntryFlags.IsValidIndex(Index) && (EntryFlags[Index] & 2) != 0; }
+	/** The `default:` entry, the last if there's one: it passes (EntryPassed) when none of the others does. */
+	bool EntryIsDefault(int32 Index) const { return EntryFlags.IsValidIndex(Index) && (EntryFlags[Index] & 4) != 0; }
 	/** In Poll: a re-check (RecheckEntries) or the watch (WatchEntries) has changed an entry's answer since the last call. */
 	bool bEntriesChanged = false;
 	/** EntryEnded, and Poll after an EntryEnded that returned Pending: the entry that has just ended. -1 otherwise. */

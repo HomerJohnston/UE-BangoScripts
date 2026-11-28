@@ -895,8 +895,10 @@ namespace BangoParserPrivate
 			case EBangoTokenKind::KwSpawn:   return ParseSpawn();
 			case EBangoTokenKind::KwWaitUntil: return ParseWaitUntil();
 			case EBangoTokenKind::KwCase:
-			case EBangoTokenKind::KwDefault:
 				Fail(First.Loc, FString::Printf(TEXT("'%s' can only be used directly inside the braces of a switch."), *First.Text));
+				return nullptr;
+			case EBangoTokenKind::KwDefault:
+				Fail(First.Loc, TEXT("'default' can only be used directly inside the braces of a switch, or as the last entry of a block command's entry list."));
 				return nullptr;
 
 			case EBangoTokenKind::KwElse:
@@ -1545,7 +1547,7 @@ namespace BangoParserPrivate
 			return true;
 		}
 
-		/** At a block command's '{': whether its block starts with `entry` (after any '/*'), so it's an entry list. */
+		/** At a block command's '{': whether its block starts with `entry` or `default` (after any '/*'), so it's an entry list. */
 		bool StartsEntries() const
 		{
 			int32 At = Pos + 1;
@@ -1553,7 +1555,7 @@ namespace BangoParserPrivate
 			{
 				++At;
 			}
-			return Tokens.IsValidIndex(At) && Tokens[At].Kind == EBangoTokenKind::KwEntry;
+			return Tokens.IsValidIndex(At) && (Tokens[At].Kind == EBangoTokenKind::KwEntry || Tokens[At].Kind == EBangoTokenKind::KwDefault);
 		}
 
 		/** The lines of an entry list that aren't nodes (its entry lines, and between entries): no metadata there. */
@@ -1575,8 +1577,9 @@ namespace BangoParserPrivate
 		}
 
 		/**
-		 * A block command's entry list: `{`, then `entry if (condition):` or `entry:`, each followed by a block, then
-		 * `}`. Nothing else goes directly in it. A disabled part holds whole entries.
+		 * A block command's entry list: `{`, then `entry if (condition):` or `entry:`, each followed by a block, and
+		 * maybe `default:` and its block last, then `}`. Nothing else goes directly in it. A disabled part holds whole
+		 * entries.
 		 */
 		bool ParseEntries(FBangoBlockCallStmt& BlockCall)
 		{
@@ -1628,9 +1631,15 @@ namespace BangoParserPrivate
 					--DisabledDepth;
 					continue;
 				}
-				if (Tok.Kind != EBangoTokenKind::KwEntry)
+				if (Tok.Kind != EBangoTokenKind::KwEntry && Tok.Kind != EBangoTokenKind::KwDefault)
 				{
 					return Fail(Tok.Loc, FString::Printf(TEXT("The block of '%s' holds entries only: 'entry if (condition):' or 'entry:', each with a block, but found %s. Put statements inside an entry."), *Name, *Bango::DescribeToken(Tok)));
+				}
+				if (BlockCall.Entries.Num() > 0 && BlockCall.Entries.Last().bDefault)
+				{
+					return Fail(Tok.Loc, Tok.Kind == EBangoTokenKind::KwDefault
+						? FString::Printf(TEXT("The block of '%s' can only have one 'default:'."), *Name)
+						: FString::Printf(TEXT("'default:' must be the last entry of the block of '%s': it runs when none of the entries before it passed. Move this entry above it."), *Name));
 				}
 				if (!ParseEntry(BlockCall.Entries.AddDefaulted_GetRef()))
 				{
@@ -1638,18 +1647,33 @@ namespace BangoParserPrivate
 				}
 				Match(EBangoTokenKind::Semicolon); // `};` after an entry's block, as after any block
 			}
+			// A default passes when no other entry does, so an `entry:` (which always passes) would leave it nothing.
+			const FBangoEntry* Default = BlockCall.Entries.Num() > 0 && BlockCall.Entries.Last().bDefault && !BlockCall.Entries.Last().bDisabled
+				? &BlockCall.Entries.Last() : nullptr;
+			for (const FBangoEntry& Entry : BlockCall.Entries)
+			{
+				if (Default && !Entry.bDefault && !Entry.bDisabled && !Entry.Condition)
+				{
+					return Fail(Default->Loc, FString::Printf(TEXT("'default:' runs only when no entry passed, but the 'entry:' on line %d always passes, so it never would. Give that entry a condition, or take out the default."), Entry.Loc.Line));
+				}
+			}
 			Advance(); // '}'
 			LeaveNesting();
 			return true;
 		}
 
-		/** `entry if (condition):` or `entry:`, then its block. */
+		/** `entry if (condition):`, `entry:` or `default:`, then its block. */
 		bool ParseEntry(FBangoEntry& Entry)
 		{
 			const FBangoToken& Keyword = Advance();
 			Entry.Loc = Keyword.Loc;
 			Entry.bDisabled = DisabledDepth > 0;
-			if (Match(EBangoTokenKind::KwIf))
+			Entry.bDefault = Keyword.Kind == EBangoTokenKind::KwDefault;
+			if (Entry.bDefault && Check(EBangoTokenKind::KwIf))
+			{
+				return Fail(Cur().Loc, TEXT("'default:' has no condition: it passes when none of the other entries does. For an entry with a condition, write 'entry if (condition):'."));
+			}
+			if (!Entry.bDefault && Match(EBangoTokenKind::KwIf))
 			{
 				if (!Check(EBangoTokenKind::LParen))
 				{
@@ -1671,8 +1695,8 @@ namespace BangoParserPrivate
 			}
 			if (!Check(EBangoTokenKind::Colon))
 			{
-				return Fail(Cur().Loc, FString::Printf(TEXT("Expected ':' after %s, but found %s. An entry is written 'entry if (condition):' or 'entry:', then its block."),
-					Entry.Condition ? TEXT("the entry's condition") : TEXT("'entry'"), *Bango::DescribeToken(Cur())));
+				return Fail(Cur().Loc, FString::Printf(TEXT("Expected ':' after %s, but found %s. An entry is written 'entry if (condition):', 'entry:' or 'default:', then its block."),
+					Entry.Condition ? TEXT("the entry's condition") : Entry.bDefault ? TEXT("'default'") : TEXT("'entry'"), *Bango::DescribeToken(Cur())));
 			}
 			Advance();
 			if (!RequireOneLine(Keyword.Loc.Line, Previous().Loc) || !CheckNoMetadataInEntries())

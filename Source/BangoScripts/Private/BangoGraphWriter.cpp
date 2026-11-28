@@ -293,6 +293,10 @@ namespace BangoGraphWriterPrivate
 					{
 						return Fail(FString::Printf(TEXT("In %s, %s has %d outputs for %d entries: one per entry."), *GraphName, *NodeName(Node), Node.Branches.Num(), Node.CaseValues.Num()));
 					}
+					if (Node.bEntryDefault && (Node.CaseValues.Num() == 0 || !Node.CaseValues.Last().TrimStartAndEnd().IsEmpty()))
+					{
+						return Fail(FString::Printf(TEXT("In %s, %s has a default entry with a condition: the default (the last entry) has none."), *GraphName, *NodeName(Node)));
+					}
 					for (const FString& Condition : Node.CaseValues)
 					{
 						if (HasLineBreak(Condition))
@@ -677,7 +681,8 @@ namespace BangoGraphWriterPrivate
 							AddCode(EntryIndent, EntryDetached, TEXT("/*"), nullptr);
 						}
 						const FString Condition = Node.CaseValues.IsValidIndex(Branch) ? Node.CaseValues[Branch].TrimStartAndEnd() : FString();
-						AddCode(EntryIndent, EntryDetached, Condition.IsEmpty() ? FString(TEXT("entry:")) : FString(TEXT("entry if (")) + Condition + TEXT("):"), nullptr);
+						const bool bDefault = Node.bEntryDefault && Branch == Node.Branches.Num() - 1;
+						AddCode(EntryIndent, EntryDetached, bDefault ? FString(TEXT("default:")) : Condition.IsEmpty() ? FString(TEXT("entry:")) : FString(TEXT("entry if (")) + Condition + TEXT("):"), nullptr);
 						if (!WriteBlock(Graph, Node.Branches[Branch], EntryIndent, EntryDetached, Depth + 1))
 						{
 							return false;

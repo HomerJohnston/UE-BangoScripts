@@ -447,7 +447,11 @@ namespace Bango
 			++LineEnd;
 		}
 		const FString Line = WrittenText.Mid(LineStart, LineEnd - LineStart);
-		if (Node.Kind == EBangoGraphNodeKind::BlockCall && Node.bEntries && Line.TrimStart().StartsWith(TEXT("entry"), ESearchCase::CaseSensitive))
+		const auto IsEntryLine = [](const FString& Trimmed)
+		{
+			return Trimmed.StartsWith(TEXT("entry"), ESearchCase::CaseSensitive) || Trimmed.StartsWith(TEXT("default:"), ESearchCase::CaseSensitive);
+		};
+		if (Node.Kind == EBangoGraphNodeKind::BlockCall && Node.bEntries && IsEntryLine(Line.TrimStart()))
 		{
 			// An entry line: which entry it is, counting the entry lines at its indent back up to the command's '{'.
 			const int32 Indent = Line.Len() - Line.TrimStart().Len();
@@ -467,7 +471,7 @@ namespace Bango
 				{
 					break;
 				}
-				if (AboveIndent == Indent && Trimmed.StartsWith(TEXT("entry"), ESearchCase::CaseSensitive))
+				if (AboveIndent == Indent && IsEntryLine(Trimmed))
 				{
 					++EntryIndex;
 				}

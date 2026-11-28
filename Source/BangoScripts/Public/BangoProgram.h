@@ -122,7 +122,7 @@ enum class EBangoOp : uint8
 	EntryCheckBegin,    // A = block. Starts checking its entries' conditions: an entry without one passes
 	EntryCond,          // A = block, B = entry, C = where the next entry's check starts. Its condition follows: while it's worked out, a global that's unset makes it false (on at C), and it can't wait
 	EntryResult,        // A = block, B = entry.  bool -> : whether it passed
-	EntryCheckEnd,      // A = block. Done checking: when the block opens, on to the command's call; for a re-check, back to the command, still waiting
+	EntryCheckEnd,      // A = block. Done checking (a default passes if no other entry did): when the block opens, on to the command's call; for a re-check, back to the command, still waiting
 	EntryEnd,           // A = block, B = entry: the entry's closing brace. The command's EntryEnded handler runs, and runs another entry, or the block closes
 
 	// ---- waitUntil (Program.WaitSets) ----
@@ -230,8 +230,10 @@ struct FBangoBlockInfo
 	int32 CheckEnd = -1;
 	/** Each entry's first instruction. */
 	TArray<int32> EntryAt;
-	/** Whether each entry has a condition (`entry if (...):`) or not (`entry:`, which always passes). */
+	/** Whether each entry has a condition (`entry if (...):`) or not (`entry:`, which always passes, and `default:`). */
 	TArray<bool> EntryConditions;
+	/** The `default:` entry (the last), which passes when no other entry does, or -1. Worked out at EntryCheckEnd. */
+	int32 DefaultEntry = -1;
 	/** The globals its conditions read (themselves, or in the script's functions they call): a change to one rechecks a watched block. */
 	TArray<FString> EntryGlobals;
 	/** Empty if only those globals can change its conditions' answers; else why a watched block is rechecked every frame. */

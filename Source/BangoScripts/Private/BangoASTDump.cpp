@@ -218,11 +218,11 @@ namespace BangoDumpPrivate
 			const FBangoBlockCallStmt& S = *Stmt.As<FBangoBlockCallStmt>();
 			if (S.bEntries)
 			{
-				// (block call (entries (entry cond (...)) (entry (...)) (disabled entry ...)))
+				// (block call (entries (entry cond (...)) (entry (...)) (disabled entry ...) (default (...))))
 				FString Entries;
 				for (const FBangoEntry& Entry : S.Entries)
 				{
-					Entries += FString::Printf(TEXT(" (%sentry%s %s)"), Entry.bDisabled ? TEXT("disabled ") : TEXT(""),
+					Entries += FString::Printf(TEXT(" (%s%s%s %s)"), Entry.bDisabled ? TEXT("disabled ") : TEXT(""), Entry.bDefault ? TEXT("default") : TEXT("entry"),
 						Entry.Condition ? *(TEXT(" ") + Bango::DumpExpr(*Entry.Condition)) : TEXT(""), *DumpBlock(Entry.Body));
 				}
 				return FString::Printf(TEXT("(block %s (entries%s))"), *Bango::DumpExpr(*S.Call), *Entries);

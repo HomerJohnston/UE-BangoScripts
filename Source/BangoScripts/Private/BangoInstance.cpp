@@ -2455,6 +2455,7 @@ void FBangoInstance::GetOpenEntries(TArray<FBangoOpenEntries>& OutBlocks) const
 				const FBangoValue* Flags = Entries.GetElement(Index);
 				Block.Passed.Add(Flags && !Flags->IsNil() && (Flags->GetInt() & Bango::EntryPassed) != 0);
 			}
+			Block.Default = Info.DefaultEntry;
 		}
 	}
 }
@@ -2528,6 +2529,10 @@ void FBangoInstance::FillCallEntries(FBangoCommandCall& Call, int32 Block) const
 	for (int32 Entry = 0; Entry < Call.EntryCount; ++Entry)
 	{
 		Call.EntryFlags[Entry] = Values.IsValidIndex(Bango::EntryHeader + Entry) ? (uint8)(Values[Bango::EntryHeader + Entry] & 3) : 0;
+		if (Entry == Code->Blocks[Block].DefaultEntry)
+		{
+			Call.EntryFlags[Entry] |= 4;
+		}
 	}
 }
 
@@ -3809,6 +3814,7 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 				{
 					Values.Add(bHasCondition ? Bango::EntryHasCondition : Bango::EntryPassed);
 				}
+				// (A default's answer is worked out at EntryCheckEnd, from the others'.)
 				WriteEntrySlot(I.A, Values);
 			}
 			EntryGuard.bBegun = true;
@@ -3842,6 +3848,21 @@ bool FBangoInstance::Execute(const FBangoExecContext& Context)
 		{
 			const FEntryGuard Guard = EntryGuard;
 			EntryGuard = FEntryGuard();
+			// A default passes when none of the other entries did.
+			const FBangoFunctionCode* Code = GetBlockCode();
+			const int32 Default = Code && Code->Blocks.IsValidIndex(I.A) ? Code->Blocks[I.A].DefaultEntry : -1;
+			TArray<int64> Values;
+			if (Default >= 0 && ReadEntrySlot(I.A, Values) && Values.IsValidIndex(Bango::EntryHeader + Default))
+			{
+				bool bAnyPassed = false;
+				for (int32 Index = Bango::EntryHeader; Index < Values.Num(); ++Index)
+				{
+					bAnyPassed |= Index != Bango::EntryHeader + Default && (Values[Index] & Bango::EntryPassed) != 0;
+				}
+				int64& Flags = Values[Bango::EntryHeader + Default];
+				Flags = bAnyPassed ? (Flags & ~Bango::EntryPassed) : (Flags | Bango::EntryPassed);
+				WriteEntrySlot(I.A, Values);
+			}
 			if (Guard.bRecheck)
 			{
 				// A re-check: back to the command, which is still waiting (RunEntryChecks goes on from there).

@@ -13,7 +13,7 @@ bool FBangoGraphNode::operator==(const FBangoGraphNode& Other) const
 	return Kind == Other.Kind && NodeID == Other.NodeID && X == Other.X && Y == Other.Y
 		&& Text.Equals(Other.Text, ESearchCase::CaseSensitive) && Comment.Equals(Other.Comment, ESearchCase::CaseSensitive) && Next == Other.Next
 		&& Branches == Other.Branches && bDisabled == Other.bDisabled && CaseValues.Num() == Other.CaseValues.Num()
-		&& bEntries == Other.bEntries && EntryDisabled == Other.EntryDisabled
+		&& bEntries == Other.bEntries && EntryDisabled == Other.EntryDisabled && bEntryDefault == Other.bEntryDefault
 		&& [&]()
 		{
 			for (int32 i = 0; i < CaseValues.Num(); ++i)
@@ -342,6 +342,10 @@ namespace Bango
 		}
 		if (Node.Kind == EBangoGraphNodeKind::BlockCall && Node.bEntries)
 		{
+			if (Node.bEntryDefault && Branch == Node.Branches.Num() - 1)
+			{
+				return TEXT("Default");
+			}
 			return FString(TEXT("Entry ")) + FString::FromInt(Branch);
 		}
 		return GetGraphNodeBranchName(Node.Kind, Branch);
@@ -965,6 +969,7 @@ namespace BangoGraphPrivate
 					Node.Branches = MoveTemp(Outputs);
 					Node.CaseValues = MoveTemp(Conditions);
 					Node.EntryDisabled = MoveTemp(Disabled);
+					Node.bEntryDefault = BlockCall->Entries.Num() > 0 && BlockCall->Entries.Last().bDefault;
 				}
 				else
 				{

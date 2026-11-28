@@ -79,7 +79,7 @@ enum class EBangoGraphNodeKind : uint8
 	 * `@john Speech(0, 1) { ... }`: a command that takes a block (FBangoCommandSignature::Block). Text is the call,
 	 * like a Call node's (`@john Speech(0, 1)`); Branches[0] ("Body") is its block, and Next (Then) what follows.
 	 * With bEntries, its block is an entry list: a row per entry (CaseValues, its condition), each with an output
-	 * (Branches), and no Body.
+	 * (Branches), and no Body. With bEntryDefault, the last entry is `default:`.
 	 * (Last in the list: it was added last, and the editor keeps kinds as numbers.)
 	 */
 	BlockCall,
@@ -135,6 +135,8 @@ struct BANGOSCRIPTS_API FBangoGraphNode
 	bool bEntries = false;
 	/** With bEntries: whether each entry is disabled (written between the disabled-code markers). One per entry. */
 	TArray<bool> EntryDisabled;
+	/** With bEntries: the last entry is `default:` (its CaseValues is empty), which passes when no other entry does. */
+	bool bEntryDefault = false;
 
 	bool operator==(const FBangoGraphNode& Other) const;
 	bool operator!=(const FBangoGraphNode& Other) const { return !(*this == Other); }

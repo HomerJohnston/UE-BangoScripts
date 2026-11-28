@@ -171,7 +171,7 @@ private:
 	/** The case's values, shown on one line beside its pin; clicking edits them in place. */
 	TSharedRef<SWidget> MakeCaseValueBox(int32 Case);
 	/** The box beside a switch's Default output: like a case's, but greyed out and not editable. */
-	TSharedRef<SWidget> MakeDefaultCaseBox() const;
+	TSharedRef<SWidget> MakeDefaultCaseBox(bool bEntry = false) const;
 	/**
 	 * What goes beside a case's (or entry's) pin: its box, or for a decorated command's entry, the decorator's row
 	 * (MakeEntryRowWidget); while the debugger follows the script, an entry that didn't pass is dimmed and the one

@@ -244,7 +244,7 @@ void SBangoGraphNode::AddAddPinButton(const TSharedPtr<SVerticalBox>& OutputBox)
 	const FMargin BodyInset = GetDefault<UGraphEditorSettings>()->GetNonPinNodeBodyPadding();
 	const float HalfPin = SBangoGraphPin::PinSize * 0.5f;
 	const FText Tip = BangoNode->IsEntries()
-		? LOCTEXT("AddEntryPinTooltip", "Add pin: adds an entry after the others. Type its condition in its box, or leave it empty for one that always passes. (To remove, move or disable one, right-click its pin.)")
+		? LOCTEXT("AddEntryPinTooltip", "Add pin: adds an entry after the others (above the default, if there's one). Type its condition in its box, or leave it empty for one that always passes. (To remove, move or disable one, right-click its pin; to add a default, right-click the node.)")
 		: BangoNode->IsSwitch()
 		? LOCTEXT("AddSwitchPinTooltip", "Add pin: adds a case after the others, before Default. Type its value (or values, separated by commas) in its box. (To remove one, right-click its pin.)")
 		: LOCTEXT("AddSequencePinTooltip", "Add pin: adds a scope after the others: another block, run after them and before Then. (To remove one, right-click it.)");
@@ -269,7 +269,7 @@ FReply SBangoGraphNode::OnAddPin()
 	{
 		// The new case's (or entry's) box opens for typing once the node has rebuilt.
 		BangoNode->AddSwitchCase();
-		PendingCaseEdit = BangoNode->CaseValues.Num() - 1;
+		PendingCaseEdit = BangoNode->CaseValues.Num() - (BangoNode->HasDefaultEntry() ? 2 : 1); // above the default
 		RefreshSoon();
 	}
 	return FReply::Handled();
@@ -378,15 +378,19 @@ bool SBangoGraphNode::IsSwitchDefaultPin(const UEdGraphPin* Pin) const
 	return BangoNode && BangoNode->IsSwitch() && Pin && Pin->Direction == EGPD_Output && Pin->PinName == UBangoEdGraphNode::DefaultPinName;
 }
 
-TSharedRef<SWidget> SBangoGraphNode::MakeDefaultCaseBox() const
+TSharedRef<SWidget> SBangoGraphNode::MakeDefaultCaseBox(bool bEntry) const
 {
 	using namespace BangoGraphNodeStyle;
-	// Looks like a case's box, greyed out: Default has no values to type.
+	// Looks like a case's box, greyed out: Default has no values (or condition) to type.
+	const bool bDisabled = bEntry && BangoNode && BangoNode->EntryDisabled.IsValidIndex(BangoNode->CaseValues.Num() - 1) && BangoNode->EntryDisabled.Last();
 	return SNew(SBorder)
 		.BorderImage(FAppStyle::GetBrush("ToolPanel.DarkGroupBorder"))
 		.Padding(FMargin(4.0f, 0.0f, 3.0f, 0.0f))
-		.ColorAndOpacity(FLinearColor(1.0f, 1.0f, 1.0f, 0.6f))
-		.ToolTipText(LOCTEXT("DefaultCaseTip", "Default: runs when no case's value matches. It's only written to the script when something is wired to it."))
+		.ColorAndOpacity(FLinearColor(1.0f, 1.0f, 1.0f, bDisabled ? 0.3f : 0.6f))
+		.ToolTipText(bEntry
+			? (bDisabled ? LOCTEXT("DefaultEntryDisabledTip", "Disabled: the default is left out.\n\nDefault: passes when none of the other entries does. Right-click the pin to remove or disable it.")
+				: LOCTEXT("DefaultEntryTip", "Default: passes when none of the other entries does. Right-click the pin to remove or disable it."))
+			: LOCTEXT("DefaultCaseTip", "Default: runs when no case's value matches. It's only written to the script when something is wired to it."))
 		[
 			SNew(SBox)
 			.MinDesiredWidth(28.0f)
@@ -412,13 +416,18 @@ TSharedRef<SWidget> SBangoGraphNode::MakeCaseRow(int32 Case)
 			Context.MakeEntryConditionWidget = [WeakThis](int32 Entry) -> TSharedRef<SWidget>
 			{
 				const TSharedPtr<SBangoGraphNode> This = WeakThis.Pin();
+				if (This.IsValid() && This->BangoNode && This->BangoNode->IsDefaultEntry(Entry))
+				{
+					return This->MakeDefaultCaseBox(/*bEntry*/ true);
+				}
 				return This.IsValid() && This->CaseEditBoxes.IsValidIndex(Entry) ? This->MakeCaseValueBox(Entry) : SNullWidget::NullWidget;
 			};
 			Row = RowDecorator->MakeEntryRowWidget(Context, Case);
 			bDecoratedRow = Row.IsValid();
 		}
 	}
-	const TSharedRef<SWidget> Content = Row.IsValid() ? Row.ToSharedRef() : MakeCaseValueBox(Case);
+	const TSharedRef<SWidget> Content = Row.IsValid() ? Row.ToSharedRef()
+		: BangoNode && BangoNode->IsDefaultEntry(Case) ? MakeDefaultCaseBox(/*bEntry*/ true) : MakeCaseValueBox(Case);
 	if (!BangoNode || !BangoNode->IsEntries() || !BangoNode->bHasEntryDebug)
 	{
 		return Content;
@@ -561,7 +570,8 @@ FReply SBangoGraphNode::OnCaseKeyDown(const FGeometry& Geometry, const FKeyEvent
 	{
 		return FReply::Unhandled();
 	}
-	const int32 Num = CaseEditBoxes.Num();
+	// (A default's row has no box to type in.)
+	const int32 Num = BangoNode && BangoNode->HasDefaultEntry() ? FMath::Max(CaseEditBoxes.Num() - 1, 1) : CaseEditBoxes.Num();
 	int32 Next = Case + (KeyEvent.IsShiftDown() ? -1 : 1);
 	if (Next < 0 || Next >= Num)
 	{

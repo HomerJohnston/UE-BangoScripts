@@ -114,6 +114,10 @@ public:
 	UPROPERTY()
 	TArray<bool> EntryDisabled;
 
+	/** With bEntries: the last entry is `default:` (no condition), which passes when none of the others does. */
+	UPROPERTY()
+	bool bEntryDefault = false;
+
 	/** True for nodes in a function's graph (a function graph's entry node's Text is the signature). */
 	UPROPERTY()
 	bool bInFunctionGraph = false;
@@ -279,7 +283,16 @@ public:
 	void UseEntries();
 	/** The other way, for one entry with no condition. */
 	void UsePlainBlock();
-	bool CanUsePlainBlock() const { return IsEntries() && TakesOptionalEntries() && CaseValues.Num() == 1 && CaseValues[0].IsEmpty() && !(EntryDisabled.IsValidIndex(0) && EntryDisabled[0]); }
+	bool CanUsePlainBlock() const { return IsEntries() && !bEntryDefault && TakesOptionalEntries() && CaseValues.Num() == 1 && CaseValues[0].IsEmpty() && !(EntryDisabled.IsValidIndex(0) && EntryDisabled[0]); }
+	/** The entries end with `default:`, and whether Entry is it. */
+	bool HasDefaultEntry() const { return IsEntries() && bEntryDefault && CaseValues.Num() > 0; }
+	bool IsDefaultEntry(int32 Entry) const { return HasDefaultEntry() && Entry == CaseValues.Num() - 1; }
+	/** Adds `default:` at the end, as an undoable edit. Not with an enabled `entry:`, which always passes (the default would never run). */
+	void AddDefaultEntry();
+	bool CanAddDefaultEntry() const;
+	/** (In an edit that's under way:) adds a row at the end, with its output pin above Then (or Default); swaps two entries' rows, wires and all. */
+	void AddCaseRow();
+	void SwapEntryRows(int32 Entry, int32 Other);
 
 	/** The decorator another module registered for the command this node calls (Bango::RegisterNodeDecorator), or null. */
 	TSharedPtr<class IBangoNodeDecorator> GetNodeDecorator() const;

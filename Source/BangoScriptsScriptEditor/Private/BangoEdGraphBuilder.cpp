@@ -45,6 +45,7 @@ namespace BangoScriptEditor
 				Node->CaseValues = Source.CaseValues;
 				Node->EntryDisabled = Source.EntryDisabled;
 				Node->EntryDisabled.SetNum(Node->CaseValues.Num());
+				Node->bEntryDefault = Source.bEntryDefault && Node->CaseValues.Num() > 0;
 			}
 			Node->bInFunctionGraph = Graph.bIsFunction;
 			Node->LayoutContext = LayoutContext;
@@ -253,6 +254,7 @@ namespace BangoScriptEditor
 					Out.bEntries = true;
 					Out.EntryDisabled = Node->EntryDisabled;
 					Out.EntryDisabled.SetNum(Node->CaseValues.Num());
+					Out.bEntryDefault = Node->HasDefaultEntry();
 				}
 				for (int32 Branch = 0; Branch < Node->GetBranchCount(); ++Branch)
 				{

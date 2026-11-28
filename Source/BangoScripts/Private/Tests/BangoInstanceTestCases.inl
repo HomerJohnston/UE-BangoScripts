@@ -2094,7 +2094,8 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 					OutFailures.Add(FString::Printf(TEXT("entries: can't add a test command: %s"), *AddError));
 				}
 			};
-			// What a call has of its entries: "-" if the block isn't an entry list, else a 1 or 0 for each one passing.
+			// What a call has of its entries: "-" if the block isn't an entry list, else a 1 or 0 for each one passing
+			// (D or d for a default).
 			const auto Passed = [](const FBangoCommandCall& Call) -> FString
 			{
 				if (!Call.HasEntries())
@@ -2104,7 +2105,7 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				FString Bits;
 				for (int32 Index = 0; Index < Call.GetEntryCount(); ++Index)
 				{
-					Bits += Call.EntryPassed(Index) ? TEXT("1") : TEXT("0");
+					Bits += Call.EntryIsDefault(Index) ? (Call.EntryPassed(Index) ? TEXT("D") : TEXT("d")) : Call.EntryPassed(Index) ? TEXT("1") : TEXT("0");
 				}
 				return Bits.IsEmpty() ? FString(TEXT("none")) : Bits;
 			};
@@ -2422,6 +2423,18 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				{ TEXT("entries in a function"),
 					TEXT("global int out;\nout = Pick(2);\n\nfunction int Pick(int _n)\n{\n\tint _got = 0;\n\tTalk(1)\n\t{\n\t\tentry if (_n == 1):\n\t\t{\n\t\t\t_got = 10;\n\t\t}\n\t\tentry if (_n == 2):\n\t\t{\n\t\t\t_got = 20;\n\t\t}\n\t}\n\treturn _got;\n}"),
 					TEXT("open 01, end 1, close"), 20 },
+				{ TEXT("a default passes when no other entry does"),
+					TEXT("global int out;\nglobal int notSet;\nTalk(0)\n{\n\tentry if (false):\n\t{\n\t\tSay(1);\n\t}\n\tentry if (notSet > 0):\n\t{\n\t\tSay(2);\n\t}\n\tdefault:\n\t{\n\t\tSay(3);\n\t}\n}\nout = 1;"),
+					TEXT("open 00D, say 3 e2, end 2, close"), 1 },
+				{ TEXT("a default doesn't pass when another entry does"),
+					TEXT("global int out;\nTalk(0)\n{\n\tentry if (true):\n\t{\n\t\tSay(1);\n\t}\n\tentry if (false):\n\t{\n\t\tSay(2);\n\t}\n\tdefault:\n\t{\n\t\tSay(3);\n\t}\n}\nout = 1;"),
+					TEXT("open 10d, say 1 e0, end 0, close"), 1 },
+				{ TEXT("a default is worked out again with the others"),
+					TEXT("global int out;\nint _g = 0;\nTalk(2)\n{\n\tentry if (_g == 0):\n\t{\n\t\t_g = 1;\n\t\tSay(1);\n\t}\n\tdefault:\n\t{\n\t\tSay(2);\n\t}\n}\nout = 1;"),
+					TEXT("open 1d, say 1 e0, end 0, poll end 1 0D, say 2 e1, end 1, poll end 0 0D, close"), 1 },
+				{ TEXT("a disabled entry doesn't count against the default"),
+					TEXT("global int out;\nTalk(0)\n{\n\t/*\n\tentry:\n\t{\n\t\tSay(9);\n\t}\n\t*/\n\tentry if (false):\n\t{\n\t\tSay(1);\n\t}\n\tdefault:\n\t{\n\t\tSay(2);\n\t}\n}\nout = 1;"),
+					TEXT("open 0D, say 2 e1, end 1, close"), 1 },
 				{ TEXT("a prompt gathers every entry's option, passed or not"),
 					TEXT("global int out;\nGather()\n{\n\tentry if (false):\n\t{\n\t\tOpt(1);\n\t}\n\tentry:\n\t{\n\t\t// a comment\n\t\tOpt(2);\n\t}\n\tentry:\n\t{\n\t}\n}\nout = 1;"),
 					TEXT("opt 1 e0, opt 2 e1, show 011"), -1 },
@@ -2453,6 +2466,24 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 						const FString RunLog = FString::Join(EntryLog, TEXT(", "));
 						Expect(RunLog == TEXT("opt 1 e0, opt 2 e1, show 01, same 01, changed 11") && Run.Status == EBangoInstanceStatus::Finished && OutOfEntries(Run.Globals) == 1,
 							*FString::Printf(TEXT("entries: watched, by a command. Log: %s. Error: %s"), *RunLog, *Run.Instance.GetError().Message));
+					}
+				}
+				{
+					// Watched, with a default: it's shown while the other isn't, and goes when the other comes true.
+					FEntryRun Run;
+					bFlag = false;
+					if (StartEntries(TEXT("global int out;\nGather()\n{\n\tentry if (Flag()):\n\t{\n\t\tOpt(1);\n\t}\n\tdefault:\n\t{\n\t\tOpt(2);\n\t}\n}\nout = 1;"), Run))
+					{
+						ResumeEntries(Run);
+						TArray<FBangoOpenEntries> Open;
+						Run.Instance.GetOpenEntries(Open);
+						const bool bOpenRight = Open.Num() == 1 && Open[0].Passed == TArray<bool>({ false, true }) && Open[0].Default == 1;
+						ResumeEntries(Run);
+						bFlag = true;
+						ResumeEntries(Run);
+						const FString RunLog = FString::Join(EntryLog, TEXT(", "));
+						Expect(bOpenRight && RunLog == TEXT("opt 1 e0, opt 2 e1, show 0D, same 0D, changed 1d") && Run.Status == EBangoInstanceStatus::Finished && OutOfEntries(Run.Globals) == 1,
+							*FString::Printf(TEXT("entries: a watched default. Log: %s. Debugger right: %d. Error: %s"), *RunLog, bOpenRight ? 1 : 0, *Run.Instance.GetError().Message));
 					}
 				}
 				{

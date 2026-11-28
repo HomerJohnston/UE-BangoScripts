@@ -465,6 +465,26 @@ bool FBangoEdGraphEntriesTest::RunTest(const FString& Parameters)
 		TestFalse(TEXT("decorator: not one it doesn't have"), DecoratorContext.SetEntryCondition(9, TEXT("false"), SetError));
 	}
 
+	// A default: added last, kept last, no condition, and taken out again.
+	TestTrue(TEXT("Add Default: offered when every entry has a condition"), Talk->CanAddDefaultEntry());
+	Talk->AddDefaultEntry();
+	TestTrue(TEXT("Add Default: a fourth row, the default"), Talk->CaseValues.Num() == 4 && Talk->HasDefaultEntry() && Talk->IsDefaultEntry(3) && !Talk->IsDefaultEntry(2)
+		&& Talk->Pins.Num() == 6 && Talk->Pins.Last() == Talk->GetNextPin() && !Talk->CanAddDefaultEntry());
+	TestEqual(TEXT("decorator: the default"), Talk->MakeDecoratorContext().DefaultEntry, 3);
+	TestFalse(TEXT("the default takes no condition"), Talk->SetCaseValues(3, TEXT("true"), EditError));
+	{
+		const FBangoGraphDocument Back = ReadsBack(TEXT("with a default"));
+		const FBangoGraphNode* Node = Back.Main.Nodes.FindByPredicate([](const FBangoGraphNode& Each) { return Each.Kind == EBangoGraphNodeKind::BlockCall && Each.bEntries; });
+		TestTrue(TEXT("the default is in the document"), Node && Node->bEntryDefault && Node->CaseValues.Num() == 4);
+	}
+	Talk->AddSwitchCase();
+	TestTrue(TEXT("Add Entry: above the default"), Talk->CaseValues.Num() == 5 && Talk->IsDefaultEntry(4) && Talk->CaseValues[3].IsEmpty() && Talk->CaseValues[2] == TEXT("1 > 0"));
+	Talk->MoveEntry(3, 1);
+	TestTrue(TEXT("Move Entry Down: not past the default"), Talk->IsDefaultEntry(4) && Talk->CaseValues[3].IsEmpty());
+	Talk->RemoveSwitchCase(3);
+	Talk->RemoveSwitchCase(3);
+	TestTrue(TEXT("Remove Default"), Talk->CaseValues.Num() == 3 && !Talk->HasDefaultEntry() && Talk->Pins.Num() == 5);
+
 	// A command with optional entries: its ordinary block becomes one entry, and back.
 	UEdGraphNode* PlainBody = LinkedNode(Plain->GetBranchPin(0));
 	Plain->UseEntries();

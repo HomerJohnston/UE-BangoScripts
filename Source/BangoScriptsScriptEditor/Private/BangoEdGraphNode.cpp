@@ -67,6 +67,54 @@ void UBangoEdGraphNode::AddSwitchCase()
 	}
 	const FScopedTransaction Transaction(IsEntries() ? LOCTEXT("AddEntry", "Add Entry") : LOCTEXT("AddSwitchCase", "Add Switch Case"));
 	Modify();
+	AddCaseRow();
+	if (HasDefaultEntry() && CaseValues.Num() >= 2)
+	{
+		// The default stays last: the new entry goes just above it.
+		SwapEntryRows(CaseValues.Num() - 2, CaseValues.Num() - 1);
+	}
+	UpdateLayout();
+	if (UEdGraph* Graph = GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
+}
+
+bool UBangoEdGraphNode::CanAddDefaultEntry() const
+{
+	if (!IsEntries() || bEntryDefault)
+	{
+		return false;
+	}
+	for (int32 Entry = 0; Entry < CaseValues.Num(); ++Entry)
+	{
+		if (CaseValues[Entry].IsEmpty() && !(EntryDisabled.IsValidIndex(Entry) && EntryDisabled[Entry]))
+		{
+			return false; // an `entry:` always passes, so a default would never run
+		}
+	}
+	return true;
+}
+
+void UBangoEdGraphNode::AddDefaultEntry()
+{
+	if (!CanAddDefaultEntry())
+	{
+		return;
+	}
+	const FScopedTransaction Transaction(LOCTEXT("AddDefaultEntry", "Add Default"));
+	Modify();
+	AddCaseRow();
+	bEntryDefault = true;
+	UpdateLayout();
+	if (UEdGraph* Graph = GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
+}
+
+void UBangoEdGraphNode::AddCaseRow()
+{
 	const int32 Case = CaseValues.Num();
 	CaseValues.Add(FString());
 	if (IsEntries())
@@ -79,11 +127,6 @@ void UBangoEdGraphNode::AddSwitchCase()
 	Pins.Remove(Pin);
 	const int32 DefaultIndex = Pins.IndexOfByKey(FindPin(IsEntries() ? NextPinName : DefaultPinName, EGPD_Output));
 	Pins.Insert(Pin, DefaultIndex == INDEX_NONE ? Pins.Num() : DefaultIndex);
-	UpdateLayout();
-	if (UEdGraph* Graph = GetGraph())
-	{
-		Graph->NotifyGraphChanged();
-	}
 }
 
 void UBangoEdGraphNode::RemoveSwitchCase(int32 Case)
@@ -119,6 +162,10 @@ void UBangoEdGraphNode::RemoveSwitchCase(int32 Case)
 	{
 		RemovePin(Last);
 	}
+	if (IsDefaultEntry(Case))
+	{
+		bEntryDefault = false;
+	}
 	CaseValues.RemoveAt(Case);
 	if (EntryDisabled.IsValidIndex(Case))
 	{
@@ -148,6 +195,11 @@ bool UBangoEdGraphNode::SetCaseValues(int32 Case, const FString& Values, FString
 		return false;
 	}
 	const FString Trimmed = Values.TrimStartAndEnd();
+	if (IsDefaultEntry(Case) && !Trimmed.IsEmpty())
+	{
+		OutError = TEXT("The default has no condition: it passes when none of the other entries does.");
+		return false;
+	}
 	if (IsEntries() ? !Bango::ValidateEntryCondition(Trimmed, OutError) : (!Trimmed.IsEmpty() && !Bango::ValidateCaseValues(Trimmed, OutError)))
 	{
 		return false;
@@ -180,12 +232,22 @@ bool UBangoEdGraphNode::TakesOptionalEntries() const
 void UBangoEdGraphNode::MoveEntry(int32 Entry, int32 Delta)
 {
 	const int32 Other = Entry + Delta;
-	if (!IsEntries() || !CaseValues.IsValidIndex(Entry) || !CaseValues.IsValidIndex(Other) || Entry == Other)
+	if (!IsEntries() || !CaseValues.IsValidIndex(Entry) || !CaseValues.IsValidIndex(Other) || Entry == Other || IsDefaultEntry(Entry) || IsDefaultEntry(Other))
 	{
-		return;
+		return; // the default stays last
 	}
 	const FScopedTransaction Transaction(Delta < 0 ? LOCTEXT("MoveEntryUp", "Move Entry Up") : LOCTEXT("MoveEntryDown", "Move Entry Down"));
 	Modify();
+	SwapEntryRows(Entry, Other);
+	UpdateLayout();
+	if (UEdGraph* Graph = GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
+}
+
+void UBangoEdGraphNode::SwapEntryRows(int32 Entry, int32 Other)
+{
 	UEdGraphPin* PinA = FindPin(GetBranchPinName(Entry), EGPD_Output);
 	UEdGraphPin* PinB = FindPin(GetBranchPinName(Other), EGPD_Output);
 	if (!PinA || !PinB)
@@ -222,11 +284,6 @@ void UBangoEdGraphNode::MoveEntry(int32 Entry, int32 Delta)
 	CaseValues.Swap(Entry, Other);
 	EntryDisabled.SetNum(CaseValues.Num());
 	EntryDisabled.Swap(Entry, Other);
-	UpdateLayout();
-	if (UEdGraph* Graph = GetGraph())
-	{
-		Graph->NotifyGraphChanged();
-	}
 }
 
 void UBangoEdGraphNode::SetEntryDisabled(int32 Entry, bool bDisabled)
@@ -260,6 +317,7 @@ void UBangoEdGraphNode::UseEntries()
 	const FScopedTransaction Transaction(LOCTEXT("UseEntries", "Use Entries"));
 	Modify();
 	bEntries = true;
+	bEntryDefault = false;
 	CaseValues = { FString() };
 	EntryDisabled = { false };
 	UpdateLayout();
@@ -278,6 +336,7 @@ void UBangoEdGraphNode::UsePlainBlock()
 	const FScopedTransaction Transaction(LOCTEXT("UsePlainBlock", "Use a Plain Block"));
 	Modify();
 	bEntries = false;
+	bEntryDefault = false;
 	CaseValues.Reset();
 	EntryDisabled.Reset();
 	UpdateLayout();
@@ -527,24 +586,36 @@ void UBangoEdGraphNode::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeCon
 		if (IsEntries())
 		{
 			Section.AddMenuEntry(TEXT("AddEntry"), LOCTEXT("AddEntryItem", "Add Entry"),
-				LOCTEXT("AddEntryTooltip", "Adds an entry after the others. Type its condition in its box, or leave it empty for one that always passes."), FSlateIcon(),
+				LOCTEXT("AddEntryTooltip", "Adds an entry after the others (above the default, if there's one). Type its condition in its box, or leave it empty for one that always passes."), FSlateIcon(),
 				FUIAction(FExecuteAction::CreateLambda([MutableThis]() { MutableThis->AddSwitchCase(); })));
+			if (!bEntryDefault)
+			{
+				Section.AddMenuEntry(TEXT("AddDefaultEntry"), LOCTEXT("AddDefaultEntryItem", "Add Default"),
+					LOCTEXT("AddDefaultEntryTooltip", "Adds default: at the end, which passes when none of the other entries does. Not with an entry that has no condition: that one always passes, so the default would never run."), FSlateIcon(),
+					FUIAction(FExecuteAction::CreateLambda([MutableThis]() { MutableThis->AddDefaultEntry(); }),
+						FCanExecuteAction::CreateLambda([MutableThis]() { return MutableThis->CanAddDefaultEntry(); })));
+			}
 			const int32 Entry = GetCaseOfPin(Context->Pin);
 			if (Entry != INDEX_NONE)
 			{
 				const bool bEntryDisabled = EntryDisabled.IsValidIndex(Entry) && EntryDisabled[Entry];
-				Section.AddMenuEntry(TEXT("RemoveEntry"), FText::Format(LOCTEXT("RemoveEntryItem", "Remove Entry {0}"), FText::AsNumber(Entry)),
+				const bool bIsDefault = IsDefaultEntry(Entry);
+				Section.AddMenuEntry(TEXT("RemoveEntry"), bIsDefault ? LOCTEXT("RemoveDefaultEntryItem", "Remove Default") : FText::Format(LOCTEXT("RemoveEntryItem", "Remove Entry {0}"), FText::AsNumber(Entry)),
 					LOCTEXT("RemoveEntryTooltip", "Removes this entry and its wire (the nodes on it stay, unwired). The entries after it move up."), FSlateIcon(),
 					FUIAction(FExecuteAction::CreateLambda([MutableThis, Entry]() { MutableThis->RemoveSwitchCase(Entry); })));
-				Section.AddMenuEntry(TEXT("MoveEntryUp"), LOCTEXT("MoveEntryUpItem", "Move Entry Up"),
-					LOCTEXT("MoveEntryUpTooltip", "Swaps this entry with the one above it, wires and all. The order matters to a command that runs the first that passes, or each in turn."), FSlateIcon(),
-					FUIAction(FExecuteAction::CreateLambda([MutableThis, Entry]() { MutableThis->MoveEntry(Entry, -1); }),
-						FCanExecuteAction::CreateLambda([Entry]() { return Entry > 0; })));
 				const int32 Count = CaseValues.Num();
-				Section.AddMenuEntry(TEXT("MoveEntryDown"), LOCTEXT("MoveEntryDownItem", "Move Entry Down"),
-					LOCTEXT("MoveEntryDownTooltip", "Swaps this entry with the one below it, wires and all."), FSlateIcon(),
-					FUIAction(FExecuteAction::CreateLambda([MutableThis, Entry]() { MutableThis->MoveEntry(Entry, 1); }),
-						FCanExecuteAction::CreateLambda([Entry, Count]() { return Entry + 1 < Count; })));
+				const int32 Movable = HasDefaultEntry() ? Count - 1 : Count; // the default stays last
+				if (!bIsDefault)
+				{
+					Section.AddMenuEntry(TEXT("MoveEntryUp"), LOCTEXT("MoveEntryUpItem", "Move Entry Up"),
+						LOCTEXT("MoveEntryUpTooltip", "Swaps this entry with the one above it, wires and all. The order matters to a command that runs the first that passes, or each in turn."), FSlateIcon(),
+						FUIAction(FExecuteAction::CreateLambda([MutableThis, Entry]() { MutableThis->MoveEntry(Entry, -1); }),
+							FCanExecuteAction::CreateLambda([Entry]() { return Entry > 0; })));
+					Section.AddMenuEntry(TEXT("MoveEntryDown"), LOCTEXT("MoveEntryDownItem", "Move Entry Down"),
+						LOCTEXT("MoveEntryDownTooltip", "Swaps this entry with the one below it, wires and all. (The default stays last.)"), FSlateIcon(),
+						FUIAction(FExecuteAction::CreateLambda([MutableThis, Entry]() { MutableThis->MoveEntry(Entry, 1); }),
+							FCanExecuteAction::CreateLambda([Entry, Movable]() { return Entry + 1 < Movable; })));
+				}
 				Section.AddMenuEntry(TEXT("ToggleEntryDisabled"), bEntryDisabled ? LOCTEXT("EnableEntryItem", "Enable Entry") : LOCTEXT("DisableEntryItem", "Disable Entry"),
 					LOCTEXT("ToggleEntryDisabledTooltip", "A disabled entry is left out: its condition isn't worked out, and the command isn't told of it."), FSlateIcon(),
 					FUIAction(FExecuteAction::CreateLambda([MutableThis, Entry, bEntryDisabled]() { MutableThis->SetEntryDisabled(Entry, !bEntryDisabled); })));
@@ -627,6 +698,7 @@ FBangoNodeDecoratorContext UBangoEdGraphNode::MakeDecoratorContext() const
 		Context.EntryConditions = CaseValues;
 		Context.EntryDisabled = EntryDisabled;
 		Context.EntryDisabled.SetNum(CaseValues.Num());
+		Context.DefaultEntry = HasDefaultEntry() ? CaseValues.Num() - 1 : INDEX_NONE;
 		Context.SetEntryCondition = [WeakNode](int32 Entry, const FString& Condition, FString& OutError)
 		{
 			UBangoEdGraphNode* Node = WeakNode.Get();

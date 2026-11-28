@@ -158,6 +158,7 @@ static const TCHAR* const GBangoGraphRoundTripSources[] =
 {
 	// Commands with entries (spec section 7): a row per entry; disabled ones; a command with a block in an entry; in a function.
 	TEXT("global bool hasKey;\n@john Prompt()\n{\n\tentry if (hasKey):\n\t{\n\t\t// the key\n\t\tAddPrompt(\"Key\")\n\t\t{\n\t\t\thasKey = false;\n\t\t}\n\t}\n\t/*\n\tentry:\n\t{\n\t\tAddPrompt(\"Later\");\n\t}\n\tentry if (false):\n\t{\n\t}\n\t*/\n\tentry:\n\t{\n\t\tAddPrompt(\"Bye\");\n\t}\n}\nLog(\"after\");\n"),
+	TEXT("@john Prompt()\n{\n\tentry if (hasKey):\n\t{\n\t\tAddPrompt(\"Key\");\n\t}\n\t/*\n\tdefault:\n\t{\n\t}\n\t*/\n}\nSpeech(0)\n{\n\tentry if (a):\n\t{\n\t}\n\tdefault:\n\t{\n\t\tSay(\"hint\");\n\t}\n}\n"),
 	TEXT("Ask(2);\n\nfunction void Ask(int _n)\n{\n\tSpeech(0)\n\t{\n\t\tentry if (_n > 1 && Ready()):\n\t\t{\n\t\t\tint _x = _n;\n\t\t\tSay(_x);\n\t\t\tif (_x > 3)\n\t\t\t{\n\t\t\t\treturn;\n\t\t\t}\n\t\t}\n\t}\n\tSpeech(0)\n\t{\n\t\tSay(1);\n\t}\n\tSpeech(0)\n\t{\n\t}\n}\n"),
 	// Defines (spec section 4, Defines): names like any other in a field, and a case value.
 	TEXT("global int mode ?= SELECT_RANDOM;\nint _pick = BOSS_LEVELS[1] + SELECT_RANDOM;\nswitch (mode)\n{\ncase SELECT_RANDOM:\n{\n\tmode = 0;\n}\ncase 2:\n{\n}\n}\n"),
@@ -941,6 +942,45 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 			Bango::FBangoErrorPlace Place;
 			Expect(Bango::FindErrorPlace(Doc, Written, EntryError, Place) && Place.Node == 1 && Place.Case == 0 && Place.Offset == 1,
 				FString::Printf(TEXT("entries: an error on an entry line finds the entry (node %d, entry %d, offset %d)"), Place.Node, Place.Case, Place.Offset));
+		}
+		{
+			// A default: the last row, named Default, written back as `default:`; an error on its line finds it.
+			const TCHAR* DefaultSource =
+				TEXT("Talk(1)      //@1(20, 0)\n")
+				TEXT("{\n")
+				TEXT("\tentry if (_a > 1):\n")
+				TEXT("\t{\n")
+				TEXT("\t}\n")
+				TEXT("\tdefault:\n")
+				TEXT("\t{\n")
+				TEXT("\t\tTalk(\"z\");  //@2(40, 10)\n")
+				TEXT("\t}\n")
+				TEXT("}\n");
+			FBangoGraphDocument DefaultDoc;
+			const bool bDefaultBuilt = Bango::BuildGraph(DefaultSource, TEXT("entries.bango"), DefaultDoc, Error);
+			Expect(bDefaultBuilt && DefaultDoc.Main.Nodes.Num() == 3, FString(TEXT("entries: a default builds: ")) + Error.ToString());
+			if (bDefaultBuilt && DefaultDoc.Main.Nodes.Num() == 3)
+			{
+				const FBangoGraphNode& Talk = DefaultDoc.Main.Nodes[1];
+				Expect(Talk.bEntries && Talk.bEntryDefault && Talk.CaseValues.Num() == 2 && Talk.CaseValues[1].IsEmpty()
+					&& DefaultDoc.Main.Nodes[Talk.Branches[1]].Text == TEXT("Talk(\"z\")")
+					&& Bango::GetGraphNodeBranchName(Talk, 1) == TEXT("Default") && Bango::GetGraphNodeBranchName(Talk, 0) == TEXT("Entry 0"),
+					TEXT("entries: the default is the last row, named Default"));
+				FString Written;
+				Expect(Bango::WriteGraphText(DefaultDoc, Written, WriteError) && Written.Contains(TEXT("\t}\n\tdefault:\n\t{\n\t\tTalk(\"z\");")),
+					FString(TEXT("entries: a default is written back:\n")) + Written);
+				FBangoCompileError DefaultError;
+				DefaultError.NodeID = 1;
+				DefaultError.Line = 8; // `\tdefault:`, after the heading and a blank line
+				DefaultError.Column = 2;
+				Bango::FBangoErrorPlace Place;
+				Expect(Bango::FindErrorPlace(DefaultDoc, Written, DefaultError, Place) && Place.Node == 1 && Place.Case == 1,
+					FString::Printf(TEXT("entries: an error on the default's line finds it (node %d, entry %d)"), Place.Node, Place.Case));
+				FBangoGraphDocument WithCondition = DefaultDoc;
+				WithCondition.Main.Nodes[1].CaseValues[1] = TEXT("_b");
+				Expect(!Bango::WriteGraphText(WithCondition, Written, WriteError) && WriteError.Contains(TEXT("default entry with a condition")),
+					FString(TEXT("entries: a default has no condition: ")) + WriteError);
+			}
 		}
 		FString ConditionError;
 		Expect(Bango::ValidateEntryCondition(TEXT(""), ConditionError) && Bango::ValidateEntryCondition(TEXT("_a > 1 && Ready()"), ConditionError),
