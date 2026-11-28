@@ -5284,7 +5284,6 @@ void SBangoScriptEditor::ApplyDebugStates()
 	}
 	for (const TStrongObjectPtr<UEdGraph>& Graph : EdGraphs)
 	{
-		bool bChanged = false;
 		for (UEdGraphNode* GraphNode : Graph->Nodes)
 		{
 			UBangoEdGraphNode* Node = Cast<UBangoEdGraphNode>(GraphNode);
@@ -5317,12 +5316,8 @@ void SBangoScriptEditor::ApplyDebugStates()
 				Node->bHasEntryDebug = bHas;
 				Node->DebugEntryPassed = Passed;
 				Node->DebugRunningEntry = Running;
-				bChanged = true;
+				Graph->NotifyNodeChanged(Node); // drawn again: rows that didn't pass are dimmed, the running one is marked
 			}
-		}
-		if (bChanged)
-		{
-			Graph->NotifyGraphChanged(); // drawn again: rows that didn't pass are dimmed, the running one is marked
 		}
 	}
 
@@ -5374,7 +5369,7 @@ void SBangoScriptEditor::ApplyDebugStates()
 				{
 					Node->DebugStatementEntry = StatementEntry;
 					Node->DebugStatementIndex = StatementIndex;
-					Graph->NotifyGraphChanged(); // its row marks the statement
+					Graph->NotifyNodeChanged(Node); // its row marks the statement
 				}
 			}
 		}

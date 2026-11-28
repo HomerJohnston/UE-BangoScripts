@@ -48,6 +48,12 @@ public:
 	virtual const FPinConnectionResponse CanCreateConnection(const UEdGraphPin* PinA, const UEdGraphPin* PinB) const override;
 	virtual FLinearColor GetPinTypeColor(const FEdGraphPinType& PinType) const override;
 	virtual bool ShouldHidePinDefaultValue(UEdGraphPin* Pin) const override { return true; }
+	/**
+	 * False, as Blueprint's: a change to the graph updates only what it names (NotifyNodeChanged rebuilds that one
+	 * node's widget, an added or removed node adds or removes its own). The default, true, has the graph panel throw
+	 * away every node widget on any change and make them again a frame later, so the whole graph flashes.
+	 */
+	virtual bool ShouldAlwaysPurgeOnModification() const override { return false; }
 
 	/**
 	 * The graph editor calls these without opening an undo transaction (Alt-click on a pin, "Break This Link",

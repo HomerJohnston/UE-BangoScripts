@@ -45,6 +45,12 @@ public:
 protected:
 	//~ Begin SGraphNode
 	virtual TSharedRef<SWidget> CreateNodeContentArea() override;
+	/**
+	 * SGraphNode's, then (once the node has been drawn) lays the new widgets out at once, as SGraphPanel::AddNode does
+	 * for a new node: a rebuild during a paint (an active timer's, as RefreshSoon's) comes after the frame's layout,
+	 * so the new widgets would be drawn unsized for a frame, wires and all, and the node would flash.
+	 */
+	virtual void UpdateGraphNode() override;
 	virtual void AddPin(const TSharedRef<SGraphPin>& PinToAdd) override;
 	/** Does nothing: a sequence's or switch's Add pin goes above Then instead (AddAddPinButton, from AddPin). */
 	virtual void CreateOutputSideAddButton(TSharedPtr<SVerticalBox> OutputBox) override;
@@ -211,6 +217,9 @@ private:
 	void OnCaseCommitted(const FText& NewText, ETextCommit::Type CommitType, int32 Case);
 	/** Enter applies and moves on to the next case (editing ends after the last); Tab wraps around; Shift goes back. */
 	FReply OnCaseKeyDown(const FGeometry& Geometry, const FKeyEvent& KeyEvent, int32 Case);
+
+	/** Set once Construct has made the widget: UpdateGraphNode lays out a rebuild only after that. */
+	bool bConstructed = false;
 };
 
 /** Creates SBangoGraphNode widgets for Bango nodes. */

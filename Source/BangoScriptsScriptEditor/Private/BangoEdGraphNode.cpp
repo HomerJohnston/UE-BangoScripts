@@ -77,7 +77,7 @@ void UBangoEdGraphNode::AddSwitchCase()
 	UpdateLayout();
 	if (UEdGraph* Graph = GetGraph())
 	{
-		Graph->NotifyGraphChanged();
+		Graph->NotifyNodeChanged(this);
 	}
 }
 
@@ -111,7 +111,7 @@ void UBangoEdGraphNode::AddDefaultEntry()
 	UpdateLayout();
 	if (UEdGraph* Graph = GetGraph())
 	{
-		Graph->NotifyGraphChanged();
+		Graph->NotifyNodeChanged(this);
 	}
 }
 
@@ -201,7 +201,7 @@ void UBangoEdGraphNode::RemoveSwitchCase(int32 Case)
 	UpdateLayout();
 	if (UEdGraph* Graph = GetGraph())
 	{
-		Graph->NotifyGraphChanged();
+		Graph->NotifyNodeChanged(this);
 	}
 }
 
@@ -259,7 +259,7 @@ void UBangoEdGraphNode::MoveEntry(int32 Entry, int32 Delta)
 	UpdateLayout();
 	if (UEdGraph* Graph = GetGraph())
 	{
-		Graph->NotifyGraphChanged();
+		Graph->NotifyNodeChanged(this);
 	}
 }
 
@@ -322,7 +322,7 @@ void UBangoEdGraphNode::SetEntryDisabled(int32 Entry, bool bDisabled)
 	UpdateLayout();
 	if (UEdGraph* Graph = GetGraph())
 	{
-		Graph->NotifyGraphChanged();
+		Graph->NotifyNodeChanged(this);
 	}
 }
 
@@ -344,7 +344,7 @@ void UBangoEdGraphNode::UseEntries()
 	UpdateLayout();
 	if (UEdGraph* Graph = GetGraph())
 	{
-		Graph->NotifyGraphChanged();
+		Graph->NotifyNodeChanged(this);
 	}
 }
 
@@ -364,7 +364,7 @@ void UBangoEdGraphNode::UsePlainBlock()
 	UpdateLayout();
 	if (UEdGraph* Graph = GetGraph())
 	{
-		Graph->NotifyGraphChanged();
+		Graph->NotifyNodeChanged(this);
 	}
 }
 
@@ -385,7 +385,7 @@ void UBangoEdGraphNode::AddSequenceOutput()
 	Pins.Insert(Pin, NextIndex == INDEX_NONE ? Pins.Num() : NextIndex);
 	if (UEdGraph* Graph = GetGraph())
 	{
-		Graph->NotifyGraphChanged();
+		Graph->NotifyNodeChanged(this);
 	}
 }
 
@@ -435,7 +435,7 @@ void UBangoEdGraphNode::RemoveSequenceOutput(int32 Branch)
 	}
 	if (UEdGraph* Graph = GetGraph())
 	{
-		Graph->NotifyGraphChanged();
+		Graph->NotifyNodeChanged(this);
 	}
 }
 
@@ -889,7 +889,7 @@ bool UBangoEdGraphNode::InsertEntryStatement(int32 Entry, int32 Index, const FSt
 	UpdateLayout();
 	if (UEdGraph* Graph = GetGraph())
 	{
-		Graph->NotifyGraphChanged();
+		Graph->NotifyNodeChanged(this);
 	}
 	return true;
 }
@@ -912,7 +912,7 @@ bool UBangoEdGraphNode::RemoveEntryStatement(int32 Entry, int32 Index, FString& 
 	UpdateLayout();
 	if (UEdGraph* Graph = GetGraph())
 	{
-		Graph->NotifyGraphChanged();
+		Graph->NotifyNodeChanged(this);
 	}
 	return true;
 }
@@ -946,7 +946,7 @@ bool UBangoEdGraphNode::MoveEntryStatement(int32 FromEntry, int32 FromIndex, int
 	UpdateLayout();
 	if (UEdGraph* Graph = GetGraph())
 	{
-		Graph->NotifyGraphChanged();
+		Graph->NotifyNodeChanged(this);
 	}
 	return true;
 }
@@ -967,7 +967,7 @@ bool UBangoEdGraphNode::SetEntryStatementDisabled(int32 Entry, int32 Index, bool
 	EntryRows[Entry].Statements[Index].bDisabled = bDisabled;
 	if (UEdGraph* Graph = GetGraph())
 	{
-		Graph->NotifyGraphChanged();
+		Graph->NotifyNodeChanged(this);
 	}
 	return true;
 }
@@ -1111,7 +1111,7 @@ FBangoNodeDecoratorContext UBangoEdGraphNode::MakeDecoratorContext() const
 			}
 			if (UEdGraph* Graph = Node->GetGraph())
 			{
-				Graph->NotifyGraphChanged(); // drawn again, from the new text
+				Graph->NotifyNodeChanged(Node); // drawn again, from the new text
 			}
 			return true;
 		};
@@ -1160,7 +1160,7 @@ FBangoNodeDecoratorContext UBangoEdGraphNode::MakeDecoratorContext() const
 					}
 					if (UEdGraph* Graph = Node->GetGraph())
 					{
-						Graph->NotifyGraphChanged();
+						Graph->NotifyNodeChanged(Node);
 					}
 					return true;
 				};

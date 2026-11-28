@@ -1,8 +1,10 @@
-# Bango Language Spec (draft v0.145)
+# Bango Language Spec (draft v0.146)
 
 Bango is a text scripting language for Unreal Engine 5. It is meant for level and dialogue scripting, not heavy computation. Every script can also be shown and edited as a Blueprint-style node graph, so the text format is designed around that.
 
 **Guiding rule:** any mistake, big or small, stops the script immediately and shows an error on screen. Nothing is quietly handled. Level designers have to fix every error.
+
+**Changes in v0.146:** **no flash when a node changes** (the graph editor; nothing in the language): a change to a node (a field, an entry, a statement in a row, disabling it, the debugger's marks) now draws only that node again, laid out at once, rather than every node in the graph, a frame later. Before, the graph's schema let the graph panel throw away and remake every node widget on any change (`UEdGraphSchema::ShouldAlwaysPurgeOnModification`, true by default; `UBangoEdGraphSchema` now says false, as Blueprint's does), and a node rebuilt by itself was drawn unsized for a frame; now `SBangoGraphNode::UpdateGraphNode` lays it out straight away, as the graph panel does a new node. Node edits notify the graph with `NotifyNodeChanged`; only rebuilding every node (`RebuildAllNodes`) still uses `NotifyGraphChanged`.
 
 **Changes in v0.145:** **no room for fields a decorated node doesn't show** (section 15, Node decorators): a decorated node whose fields are all left out (`HidesField`), or that has none, keeps no room for them: `Context.MakeDefaultFieldsArea()` is the null widget then, and so is the band's middle for a decorator that doesn't make its own fields area. Before, they kept the gap above the first field (and a node with no fields a 29-pixel space), as blank space above a decorator's own content. With a field shown, the gap is kept, so the first field is in line with the pins. Nodes without a decorator are as before.
 

@@ -84,6 +84,18 @@ void SBangoGraphNode::Construct(const FArguments& InArgs, UBangoEdGraphNode* InN
 	BangoNode = InNode;
 	SetCursor(EMouseCursor::CardinalCross);
 	UpdateGraphNode();
+	bConstructed = true;
+}
+
+void SBangoGraphNode::UpdateGraphNode()
+{
+	SGraphNode::UpdateGraphNode();
+	if (bConstructed)
+	{
+		// With the same layout scale (the graph's zoom) the node was last laid out with.
+		MarkPrepassAsDirty();
+		SlatePrepass(GetPrepassLayoutScaleMultiplier());
+	}
 }
 
 TSharedRef<SWidget> SBangoGraphNode::CreateNodeContentArea()
