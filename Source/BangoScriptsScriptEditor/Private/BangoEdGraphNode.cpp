@@ -1012,6 +1012,50 @@ TSharedPtr<IBangoNodeDecorator> UBangoEdGraphNode::GetNodeDecorator() const
 	return bCallsCommand && !IsEntry() ? Bango::FindNodeDecorator(Layout.CallName) : nullptr;
 }
 
+FName UBangoEdGraphNode::GetDecoratorPinName(const UEdGraphPin* Pin) const
+{
+	if (!Pin || Pin->GetOwningNodeUnchecked() != this)
+	{
+		return NAME_None;
+	}
+	if (Pin->Direction == EGPD_Input)
+	{
+		return Pin->PinName == InPinName ? Bango::NodePins::In : NAME_None;
+	}
+	if (Pin->PinName == NextPinName)
+	{
+		return Bango::NodePins::Then;
+	}
+	int32 Entry = INDEX_NONE;
+	int32 Index = INDEX_NONE;
+	if (FindStatementOfPin(Pin, Entry, Index))
+	{
+		return Bango::NodePins::Statement(Entry, Index);
+	}
+	if (IsEntries())
+	{
+		Entry = GetCaseOfPin(Pin);
+		return Entry == INDEX_NONE ? NAME_None : IsDefaultEntry(Entry) ? Bango::NodePins::Default : Bango::NodePins::Entry(Entry);
+	}
+	if (GetKind() == EBangoGraphNodeKind::BlockCall && Pin->PinName == GetBranchPinName(0))
+	{
+		return Bango::NodePins::Body;
+	}
+	return NAME_None;
+}
+
+UEdGraphPin* UBangoEdGraphNode::FindDecoratorPin(FName Name) const
+{
+	for (UEdGraphPin* Pin : Pins)
+	{
+		if (!Name.IsNone() && GetDecoratorPinName(Pin) == Name)
+		{
+			return Pin;
+		}
+	}
+	return nullptr;
+}
+
 FBangoNodeDecoratorContext UBangoEdGraphNode::MakeDecoratorContext() const
 {
 	FBangoNodeDecoratorContext Context;
@@ -1033,6 +1077,14 @@ FBangoNodeDecoratorContext UBangoEdGraphNode::MakeDecoratorContext() const
 		}
 		return Node->SetFieldValue(FieldIndex, Value, OutError);
 	};
+	for (const UEdGraphPin* Pin : Pins)
+	{
+		const FName PinName = GetDecoratorPinName(Pin);
+		if (!PinName.IsNone())
+		{
+			Context.PinNames.Add(PinName);
+		}
+	}
 	Context.bEntries = IsEntries();
 	if (Context.bEntries)
 	{
@@ -1069,6 +1121,9 @@ FBangoNodeDecoratorContext UBangoEdGraphNode::MakeDecoratorContext() const
 		Context.RemoveEntry = [WeakNode](int32 Entry) { if (UBangoEdGraphNode* Node = WeakNode.Get()) { Node->RemoveSwitchCase(Entry); } };
 		Context.MoveEntry = [WeakNode](int32 Entry, int32 Delta) { if (UBangoEdGraphNode* Node = WeakNode.Get()) { Node->MoveEntry(Entry, Delta); } };
 		Context.SetEntryDisabled = [WeakNode](int32 Entry, bool bOff) { if (UBangoEdGraphNode* Node = WeakNode.Get()) { Node->SetEntryDisabled(Entry, bOff); } };
+		Context.AddEntry = [WeakNode]() { if (UBangoEdGraphNode* Node = WeakNode.Get()) { Node->AddSwitchCase(); } };
+		Context.AddDefaultEntry = [WeakNode]() { if (UBangoEdGraphNode* Node = WeakNode.Get(); Node && Node->CanAddDefaultEntry()) { Node->AddDefaultEntry(); } };
+		Context.bCanAddDefaultEntry = CanAddDefaultEntry();
 
 		// The statements of entries drawn in their rows, each told about as a node of its own would be.
 		Context.EntryDrawsStatements.Init(false, CaseValues.Num());

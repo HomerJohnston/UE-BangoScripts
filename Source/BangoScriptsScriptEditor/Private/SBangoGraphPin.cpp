@@ -73,7 +73,7 @@ int32 SBangoGraphPin::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedG
 	const int32 MaxLayer = SGraphPin::OnPaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
 
 	const UEdGraphPin* Pin = GetPinObj();
-	if (!Pin || !Pin->GetOwningNodeUnchecked() || UseLowDetailPinNames() || !FSlateApplication::IsInitialized())
+	if (!bPaintsLabel || !Pin || !Pin->GetOwningNodeUnchecked() || UseLowDetailPinNames() || !FSlateApplication::IsInitialized())
 	{
 		return MaxLayer;
 	}

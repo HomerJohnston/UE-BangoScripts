@@ -1,6 +1,7 @@
 #include "SBangoGraphNode.h"
 
 #include "BangoEdGraphNode.h"
+#include "BangoEdGraphSchema.h"
 #include "BangoEditorStyle.h"
 #include "BangoEditorSettings.h"
 #include "BangoGraphEdit.h"
@@ -100,6 +101,19 @@ TSharedRef<SWidget> SBangoGraphNode::CreateNodeContentArea()
 	CaseEditBoxes.Reset();
 	CaseEditBoxes.SetNum(BangoNode && BangoNode->HasCaseRows() ? BangoNode->CaseValues.Num() : 0);
 	EditingCase = INDEX_NONE;
+	// The decorator's areas are made now, before the pins: the pins it places go in slots (PinSlots) filled by AddPin.
+	PinSlots.Reset();
+	RowsArea.Reset();
+	PrepareDecorator();
+	bMakingAreas = true;
+	const TSharedRef<SWidget> Fields = MakeFieldsAndExtras();
+	RowsArea = Decorator.IsValid() ? Decorator->MakeRowsArea(*DecoratorContext) : nullptr;
+	bMakingAreas = false;
+	if (RowsArea.IsValid() && BangoNode)
+	{
+		BangoNode->FocusStatementEntry = INDEX_NONE; // told once
+		BangoNode->FocusStatementIndex = INDEX_NONE;
+	}
 	// A disabled node: SGraphNode fades the title and the body and adds the Disabled banner; this fades the fields
 	// and the pins to match.
 	return SNew(SBorder)
@@ -110,42 +124,68 @@ TSharedRef<SWidget> SBangoGraphNode::CreateNodeContentArea()
 			return BangoNode && BangoNode->IsDisabledNode() ? FLinearColor(1.0f, 1.0f, 1.0f, 0.45f) : FLinearColor::White;
 		})
 		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
+			SNew(SVerticalBox)
+			// The band: the input pins, the fields, the output pins.
+			+ SVerticalBox::Slot()
+			.AutoHeight()
 			[
-				SNew(SBox)
-				.MinDesiredWidth(BodyInset.Left + HalfPin)
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
 				[
-					SAssignNew(LeftNodeBox, SVerticalBox)
-					+ SVerticalBox::Slot()
-					.AutoHeight()
+					SNew(SBox)
+					.MinDesiredWidth(BodyInset.Left + HalfPin)
 					[
-						SNew(SBox).HeightOverride(PinGridOffset)
+						SAssignNew(LeftNodeBox, SVerticalBox)
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						[
+							SNew(SBox).HeightOverride(PinGridOffset)
+						]
+					]
+				]
+				+ SHorizontalBox::Slot()
+				.FillWidth(1.0f)
+				.Padding(FieldsSideGap, 2.0f, FieldsSideGap, 6.0f)
+				[
+					Fields
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				[
+					SNew(SBox)
+					.MinDesiredWidth(BodyInset.Right + HalfPin)
+					[
+						SAssignNew(RightNodeBox, SVerticalBox)
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						[
+							SNew(SBox).HeightOverride(PinGridOffset)
+						]
 					]
 				]
 			]
-			+ SHorizontalBox::Slot()
-			.FillWidth(1.0f)
-			.Padding(FieldsSideGap, 2.0f, FieldsSideGap, 6.0f)
+			// The decorator's rows, the node's whole width: reaching half a pin past the body on each side, as the pin
+			// columns do, so a pin at a row's end has its circle's centre on the node's edge.
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(RowsArea.IsValid() ? FMargin(BodyInset.Left - HalfPin, 0.0f, BodyInset.Right - HalfPin, 4.0f) : FMargin(0.0f))
 			[
-				MakeFieldsAndExtras()
-			]
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			[
-				SNew(SBox)
-				.MinDesiredWidth(BodyInset.Right + HalfPin)
-				[
-					SAssignNew(RightNodeBox, SVerticalBox)
-					+ SVerticalBox::Slot()
-					.AutoHeight()
-					[
-						SNew(SBox).HeightOverride(PinGridOffset)
-					]
-				]
+				RowsArea.IsValid() ? RowsArea.ToSharedRef() : SNullWidget::NullWidget
 			]
 		];
+}
+
+TSharedRef<SWidget> SBangoGraphNode::MakePinSlot(FName Name)
+{
+	UEdGraphPin* Pin = bMakingAreas && BangoNode ? BangoNode->FindDecoratorPin(Name) : nullptr;
+	if (!Pin || PinSlots.Contains(Pin->PinName))
+	{
+		return SNullWidget::NullWidget;
+	}
+	const TSharedRef<SBox> PinSlot = SNew(SBox);
+	PinSlots.Add(Pin->PinName, PinSlot);
+	return PinSlot;
 }
 
 /**
@@ -279,7 +319,7 @@ FReply SBangoGraphNode::OnAddPin()
 
 void SBangoGraphNode::AddOutputGap()
 {
-	if (BangoNode && (BangoNode->IsSequence() || BangoNode->HasCaseRows()) && RightNodeBox.IsValid() && OutputPins.Num() > 0)
+	if (BangoNode && (BangoNode->IsSequence() || BangoNode->HasCaseRows()) && !HasRowsArea() && RightNodeBox.IsValid() && OutputPins.Num() > 0)
 	{
 		RightNodeBox->AddSlot()
 			.AutoHeight()
@@ -295,16 +335,27 @@ void SBangoGraphNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 	PinToAdd->SetOwner(SharedThis(this));
 	const FMargin BodyInset = GetDefault<UGraphEditorSettings>()->GetNonPinNodeBodyPadding();
 	const float HalfPin = SBangoGraphPin::PinSize * 0.5f;
+	if (const TSharedPtr<SBox>* PinSlot = PinToAdd->GetPinObj() ? PinSlots.Find(PinToAdd->GetPinObj()->PinName) : nullptr)
+	{
+		// Placed by the decorator: in its slot, without its label (the decorator draws one if it wants).
+		if (PinToAdd->GetPinObj()->PinType.PinCategory == UBangoEdGraphSchema::PC_BangoExec)
+		{
+			StaticCastSharedRef<SBangoGraphPin>(PinToAdd)->SetPaintsLabel(false);
+		}
+		(*PinSlot)->SetContent(PinToAdd);
+		(PinToAdd->GetDirection() == EGPD_Input ? InputPins : OutputPins).Add(PinToAdd);
+		return;
+	}
 	int32 StatementEntry = INDEX_NONE;
 	int32 StatementIndex = INDEX_NONE;
-	if (BangoNode && BangoNode->FindStatementOfPin(PinToAdd->GetPinObj(), StatementEntry, StatementIndex))
+	if (!HasRowsArea() && BangoNode && BangoNode->FindStatementOfPin(PinToAdd->GetPinObj(), StatementEntry, StatementIndex))
 	{
 		// A statement's output, for its entry's row to place (MakeCaseRow, from its entry's pin, which comes later).
 		StatementPinWidgets.Add(PinToAdd->GetPinObj()->PinName, PinToAdd);
 		OutputPins.Add(PinToAdd);
 		return;
 	}
-	if (PinToAdd->GetDirection() == EGPD_Output && PinToAdd->GetPinObj() && PinToAdd->GetPinObj()->PinName == UBangoEdGraphNode::NextPinName)
+	if (!HasRowsArea() && PinToAdd->GetDirection() == EGPD_Output && PinToAdd->GetPinObj() && PinToAdd->GetPinObj()->PinName == UBangoEdGraphNode::NextPinName)
 	{
 		AddAddPinButton(RightNodeBox); // a sequence's or switch's Add pin goes after its other outputs, above Then
 	}
@@ -324,12 +375,12 @@ void SBangoGraphNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 		InputPins.Add(PinToAdd);
 	}
 	else if (const int32 Case = BangoNode ? BangoNode->GetCaseOfPin(PinToAdd->GetPinObj()) : INDEX_NONE;
-		(Case != INDEX_NONE && CaseEditBoxes.IsValidIndex(Case)) || IsSwitchDefaultPin(PinToAdd->GetPinObj()))
+		!HasRowsArea() && ((Case != INDEX_NONE && CaseEditBoxes.IsValidIndex(Case)) || IsSwitchDefaultPin(PinToAdd->GetPinObj())))
 	{
 		// (Default gets a row like a case's, with a box that can't be edited.)
 		// A switch's case: its values in a box just inside the node, then the pin. The row is exactly as tall as a
 		// plain pin's (PinRowGap above and below the circle), so the pins stay on the grid. A decorator's entry row
-		// (MakeEntryRowWidget) is as tall as it wants.
+		// holding its statements is as tall as they are.
 		bDecoratedRow = false;
 		const TSharedRef<SWidget> RowContent = Case != INDEX_NONE ? MakeCaseRow(Case) : MakeDefaultCaseBox();
 		if (Case != INDEX_NONE && BangoNode->IsEntryInRow(Case))
@@ -377,6 +428,12 @@ void SBangoGraphNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 	}
 	else
 	{
+		// With a rows area, an entry's pin the decorator didn't place is an ordinary output here (hidden for an entry
+		// drawn in its row: nothing is wired to it).
+		if (HasRowsArea() && BangoNode && BangoNode->IsEntryInRow(BangoNode->GetCaseOfPin(PinToAdd->GetPinObj())))
+		{
+			PinToAdd->SetVisibility(EVisibility::Collapsed);
+		}
 		RightNodeBox->AddSlot()
 			.AutoHeight()
 			.HAlign(HAlign_Right)
@@ -422,36 +479,9 @@ TSharedRef<SWidget> SBangoGraphNode::MakeDefaultCaseBox(bool bEntry) const
 TSharedRef<SWidget> SBangoGraphNode::MakeCaseRow(int32 Case)
 {
 	TSharedPtr<SWidget> Row;
-	if (BangoNode && BangoNode->IsEntries())
-	{
-		if (const TSharedPtr<IBangoNodeDecorator> RowDecorator = BangoNode->GetNodeDecorator())
-		{
-			FBangoNodeDecoratorContext Context = BangoNode->MakeDecoratorContext();
-			const TWeakPtr<SBangoGraphNode> WeakThis = SharedThis(this);
-			Context.MakeEntryConditionWidget = [WeakThis](int32 Entry) -> TSharedRef<SWidget>
-			{
-				const TSharedPtr<SBangoGraphNode> This = WeakThis.Pin();
-				if (This.IsValid() && This->BangoNode && This->BangoNode->IsDefaultEntry(Entry))
-				{
-					return This->MakeDefaultCaseBox(/*bEntry*/ true);
-				}
-				return This.IsValid() && This->CaseEditBoxes.IsValidIndex(Entry) ? This->MakeCaseValueBox(Entry) : SNullWidget::NullWidget;
-			};
-			Context.MakeEntryStatementPinWidget = [WeakThis](int32 Entry, int32 Statement) -> TSharedRef<SWidget>
-			{
-				const TSharedPtr<SBangoGraphNode> This = WeakThis.Pin();
-				return This.IsValid() ? This->TakeStatementPinWidget(Entry, Statement) : SNullWidget::NullWidget;
-			};
-			Row = RowDecorator->MakeEntryRowWidget(Context, Case);
-			bDecoratedRow = Row.IsValid();
-		}
-	}
 	if (BangoNode && BangoNode->IsEntryInRow(Case))
 	{
-		if (!Row.IsValid())
-		{
-			Row = MakeRowStatements(Case);
-		}
+		Row = MakeRowStatements(Case);
 		bDecoratedRow = true; // as tall as its statements
 		// Any statement pin the row didn't place goes at its right, so no wire is lost.
 		TSharedRef<SVerticalBox> Unplaced = SNew(SVerticalBox);
@@ -687,51 +717,105 @@ FReply SBangoGraphNode::OnCaseKeyDown(const FGeometry& Geometry, const FKeyEvent
 	return FReply::Handled();
 }
 
-TSharedRef<SWidget> SBangoGraphNode::MakeFieldsAndExtras()
+void SBangoGraphNode::PrepareDecorator()
 {
 	// A decorator (another module's, for its commands) is asked again each time the node is drawn again.
 	Decorator = BangoNode ? BangoNode->GetNodeDecorator() : nullptr;
 	DecoratorContext.Reset();
-	if (Decorator.IsValid())
+	if (!Decorator.IsValid())
 	{
-		DecoratorContext = MakeShared<FBangoNodeDecoratorContext>(BangoNode->MakeDecoratorContext());
-		// A field set from the decorator's widget draws the node again, as one typed in does.
-		TWeakPtr<SBangoGraphNode> WeakThis = StaticCastSharedRef<SBangoGraphNode>(AsShared());
-		TFunction<bool(int32, const FString&, FString&)> SetOnNode = DecoratorContext->SetFieldValue;
-		DecoratorContext->SetFieldValue = [WeakThis, SetOnNode](int32 FieldIndex, const FString& Value, FString& OutError)
+		return;
+	}
+	DecoratorContext = MakeShared<FBangoNodeDecoratorContext>(BangoNode->MakeDecoratorContext());
+	const TWeakPtr<SBangoGraphNode> WeakThis = StaticCastSharedRef<SBangoGraphNode>(AsShared());
+	// A field set from the decorator's widget draws the node again, as one typed in does.
+	TFunction<bool(int32, const FString&, FString&)> SetOnNode = DecoratorContext->SetFieldValue;
+	DecoratorContext->SetFieldValue = [WeakThis, SetOnNode](int32 FieldIndex, const FString& Value, FString& OutError)
+	{
+		const bool bSet = SetOnNode && SetOnNode(FieldIndex, Value, OutError);
+		if (TSharedPtr<SBangoGraphNode> This = WeakThis.Pin())
 		{
-			const bool bSet = SetOnNode && SetOnNode(FieldIndex, Value, OutError);
-			if (TSharedPtr<SBangoGraphNode> This = WeakThis.Pin())
+			This->RefreshSoon();
+		}
+		return bSet;
+	};
+	// What works only while the areas are made (bMakingAreas).
+	DecoratorContext->MakeDefaultFieldsArea = [WeakThis]() -> TSharedRef<SWidget>
+	{
+		const TSharedPtr<SBangoGraphNode> This = WeakThis.Pin();
+		return This.IsValid() && This->bMakingAreas ? This->MakeFieldsArea() : SNullWidget::NullWidget;
+	};
+	DecoratorContext->MakePinWidget = [WeakThis](FName Name) -> TSharedRef<SWidget>
+	{
+		const TSharedPtr<SBangoGraphNode> This = WeakThis.Pin();
+		return This.IsValid() ? This->MakePinSlot(Name) : SNullWidget::NullWidget;
+	};
+	DecoratorContext->MakeEntryConditionWidget = [WeakThis](int32 Entry) -> TSharedRef<SWidget>
+	{
+		const TSharedPtr<SBangoGraphNode> This = WeakThis.Pin();
+		if (!This.IsValid() || !This->bMakingAreas || !This->BangoNode || !This->CaseEditBoxes.IsValidIndex(Entry))
+		{
+			return SNullWidget::NullWidget;
+		}
+		return This->BangoNode->IsDefaultEntry(Entry) ? This->MakeDefaultCaseBox(/*bEntry*/ true) : This->MakeCaseValueBox(Entry);
+	};
+	// A new entry's condition box opens for typing once the node has rebuilt, as from the Add pin button.
+	if (DecoratorContext->AddEntry)
+	{
+		DecoratorContext->AddEntry = [WeakThis]()
+		{
+			const TSharedPtr<SBangoGraphNode> This = WeakThis.Pin();
+			if (This.IsValid())
+			{
+				This->OnAddPin();
+			}
+		};
+	}
+	if (const TFunction<void()> AddDefault = DecoratorContext->AddDefaultEntry)
+	{
+		DecoratorContext->AddDefaultEntry = [WeakThis, AddDefault]()
+		{
+			AddDefault();
+			if (const TSharedPtr<SBangoGraphNode> This = WeakThis.Pin())
 			{
 				This->RefreshSoon();
 			}
-			return bSet;
 		};
 	}
-	const TSharedRef<SWidget> Fields = MakeFieldsArea();
-	const TSharedPtr<SWidget> Extra = Decorator.IsValid() ? Decorator->MakeExtraContent(*DecoratorContext) : nullptr;
-	if (!Extra.IsValid())
+}
+
+TSharedRef<SWidget> SBangoGraphNode::MakeFieldsAndExtras()
+{
+	EditBoxes.Reset();
+	EditingField = INDEX_NONE;
+	if (Decorator.IsValid())
 	{
-		return Fields;
+		if (const TSharedPtr<SWidget> Area = Decorator->MakeFieldsArea(*DecoratorContext))
+		{
+			return Area.ToSharedRef();
+		}
 	}
-	return SNew(SVerticalBox)
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		[
-			Fields
-		]
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(2.0f, 4.0f, 2.0f, 2.0f)
-		[
-			Extra.ToSharedRef()
-		];
+	return MakeFieldsArea();
 }
 
 TSharedRef<SWidget> SBangoGraphNode::MakeFieldsArea()
 {
 	EditBoxes.Reset();
 	EditingField = INDEX_NONE;
+	if (Decorator.IsValid() && BangoNode)
+	{
+		// A decorated node whose fields are all left out (or that has none) draws its own content: no room is kept
+		// for fields it doesn't show, not even the gap that keeps the first field in line with the pins.
+		bool bAnyShown = false;
+		for (int32 FieldIndex = 0; FieldIndex < BangoNode->Layout.Fields.Num() && !bAnyShown; ++FieldIndex)
+		{
+			bAnyShown = !Decorator->HidesField(*DecoratorContext, FieldIndex);
+		}
+		if (!bAnyShown)
+		{
+			return SNullWidget::NullWidget;
+		}
+	}
 	if (!BangoNode || BangoNode->Layout.Fields.Num() == 0)
 	{
 		return SNew(SSpacer).Size(29);

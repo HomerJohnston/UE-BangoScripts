@@ -5,6 +5,7 @@
 #include "SGraphNode.h"
 #include "BangoCompletion.h"
 
+class SBox;
 class SEditableText;
 class SEditableTextBox;
 class SMenuAnchor;
@@ -14,8 +15,9 @@ struct FBangoNodeField;
 struct FBangoTextLiteral;
 
 /**
- * A Bango node: the title, then a body in three parts: the input pin on the left, the fields in the middle and the
- * output pins on the right. The pins are circles centred on the node's edges, with their names outside the node
+ * A Bango node: the title, then a body in three parts (the band): the input pin on the left, the fields in the middle
+ * and the output pins on the right; then, for a command whose decorator gives one, its rows area, the node's whole
+ * width (BangoNodeDecorator.h). A decorator can also replace the fields, and place any pin in either area. The pins are circles centred on the node's edges, with their names outside the node
  * (SBangoGraphPin). The fields are in columns, like the details panel: type icons, names, then values.
  *
  * Clicking a value edits it in place. Enter or clicking elsewhere applies the change (if it's valid; otherwise
@@ -118,11 +120,25 @@ private:
 
 	/** The fields, for the middle of the body (an empty widget for a node with no fields). */
 	TSharedRef<SWidget> MakeFieldsArea();
-	/** MakeFieldsArea, with what a decorator adds under the fields (IBangoNodeDecorator::MakeExtraContent). */
+	/** The middle of the band: the decorator's fields area (IBangoNodeDecorator::MakeFieldsArea), or MakeFieldsArea. */
 	TSharedRef<SWidget> MakeFieldsAndExtras();
-	/** The node's decorator (BangoNodeDecorator.h) and what it's told, made by MakeFieldsAndExtras; null if none. */
+	/** Finds the node's decorator, and makes what it's told, with the node widget's own functions in it. */
+	void PrepareDecorator();
+	/** The node's decorator (BangoNodeDecorator.h) and what it's told, made by PrepareDecorator; null if none. */
 	TSharedPtr<class IBangoNodeDecorator> Decorator;
 	TSharedPtr<struct FBangoNodeDecoratorContext> DecoratorContext;
+
+	// ---- The decorator's areas, and the pins it places ----
+
+	/** The decorator's rows area (IBangoNodeDecorator::MakeRowsArea), or null; made with the body, before the pins. */
+	TSharedPtr<SWidget> RowsArea;
+	bool HasRowsArea() const { return RowsArea.IsValid(); }
+	/** Set while the decorator's areas are made: its MakePinWidget, MakeEntryConditionWidget and MakeDefaultFieldsArea work only then. */
+	bool bMakingAreas = false;
+	/** The slots of the pins the decorator placed, by the pin's own name: AddPin (after the body is made) puts each pin in its slot. */
+	TMap<FName, TSharedPtr<SBox>> PinSlots;
+	/** A slot for the pin the decorator calls Name (Bango::NodePins), or the null widget (no such pin, or placed already). */
+	TSharedRef<SWidget> MakePinSlot(FName Name);
 
 	/**
 	 * Adds the rows of an expanded text field, from row Row on: Translated (TEXT or TEXT_INV), then, for a translated
@@ -173,12 +189,12 @@ private:
 	/** The box beside a switch's Default output: like a case's, but greyed out and not editable. */
 	TSharedRef<SWidget> MakeDefaultCaseBox(bool bEntry = false) const;
 	/**
-	 * What goes beside a case's (or entry's) pin: its box, or for a decorated command's entry, the decorator's row
-	 * (MakeEntryRowWidget); while the debugger follows the script, an entry that didn't pass is dimmed and the one
-	 * running is outlined.
+	 * What goes beside a case's (or entry's) pin, for a node without a rows area: its box, or for an entry drawn in its
+	 * row, the box and its statements; while the debugger follows the script, an entry that didn't pass is dimmed and
+	 * the one running is outlined.
 	 */
 	TSharedRef<SWidget> MakeCaseRow(int32 Case);
-	/** Set by MakeCaseRow: the row it made is a decorator's, so it isn't held to a pin row's height. */
+	/** Set by MakeCaseRow: the row it made holds statements, so it isn't held to a pin row's height. */
 	bool bDecoratedRow = false;
 
 	// ---- Entries drawn in their rows (statements that aren't nodes) ----
@@ -188,7 +204,7 @@ private:
 	TSet<FName> PlacedStatementPins;
 	/** Statement Index's pin of entry Entry, for its row to place (once), or an empty widget. */
 	TSharedRef<SWidget> TakeStatementPinWidget(int32 Entry, int32 Index);
-	/** An entry drawn in its row without a decorator's row: its condition box, then a line per statement with its pin. */
+	/** An entry drawn in its row, in the output column: its condition box, then a line per statement with its pin. */
 	TSharedRef<SWidget> MakeRowStatements(int32 Entry);
 	bool IsSwitchDefaultPin(const UEdGraphPin* Pin) const;
 	void BeginEditingCase(int32 Case);

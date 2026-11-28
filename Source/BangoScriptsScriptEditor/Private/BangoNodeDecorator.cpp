@@ -28,3 +28,18 @@ TSharedPtr<IBangoNodeDecorator> Bango::FindNodeDecorator(const FString& CommandN
 	const TSharedRef<IBangoNodeDecorator>* Found = BangoNodeDecoratorPrivate::GetDecorators().Find(CommandName);
 	return Found ? TSharedPtr<IBangoNodeDecorator>(*Found) : nullptr;
 }
+
+const FName Bango::NodePins::In(TEXT("In"));
+const FName Bango::NodePins::Then(TEXT("Then"));
+const FName Bango::NodePins::Body(TEXT("Body"));
+const FName Bango::NodePins::Default(TEXT("Default"));
+
+FName Bango::NodePins::Entry(int32 Entry)
+{
+	return FName(*FString::Printf(TEXT("Entry%d"), Entry));
+}
+
+FName Bango::NodePins::Statement(int32 Entry, int32 Index)
+{
+	return FName(*FString::Printf(TEXT("Entry%d.Statement%d"), Entry, Index));
+}

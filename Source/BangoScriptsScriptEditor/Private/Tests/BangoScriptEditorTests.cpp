@@ -21,6 +21,10 @@
 #include "BangoCommand.h"
 #include "BangoNodeDecorator.h"
 #include "Misc/ScopeExit.h"
+#include "SBangoGraphNode.h"
+#include "SGraphPin.h"
+#include "Widgets/SBoxPanel.h"
+#include "Widgets/SNullWidget.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoEdGraphBuilderTest, "Bango.ScriptEditor.EdGraph",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -651,6 +655,161 @@ bool FBangoEdGraphEntryRowsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Remove Entry: its option's pin goes, the node on it stays"), Ask->Pins.Num() == PinsBefore - 1 && ById[3]->GetInputPin()->LinkedTo.Num() == 0
 		&& Ask->EntryRows.Num() == 3 && Ask->IsEntryInRow(1) && Ask->EntryRows[1].Statements.Num() == 1);
 	ReadsBack(TEXT("after removing an entry"), BackText);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoNodeAreasTest, "Bango.ScriptEditor.NodeAreas",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FBangoNodeAreasTest::RunTest(const FString& Parameters)
+{
+	// A decorator's fields area and rows area, and the pins it places in them, by name.
+	FBangoCommandTable Table;
+	FString TableError;
+	TestTrue(TEXT("AreaAsk"), Table.Add(FBangoCommandSignature::Make(TEXT("AreaAsk")).Block().Entries()
+		.EntriesHold({ TEXT("AreaOpt"), TEXT("AreaLine") }, /*bMany*/ true).DefaultHoldsAnything(), TableError));
+	TestTrue(TEXT("AreaOpt"), Table.Add(FBangoCommandSignature::Make(TEXT("AreaOpt")).Param(TEXT("N"), FBangoType::Int()).Inside(TEXT("AreaAsk"), true).Block(), TableError));
+	TestTrue(TEXT("AreaLine"), Table.Add(FBangoCommandSignature::Make(TEXT("AreaLine")).Param(TEXT("N"), FBangoType::Int()), TableError));
+	TestTrue(TEXT("AreaLog"), Table.Add(FBangoCommandSignature::Make(TEXT("AreaLog")).Param(TEXT("N"), FBangoType::Int()), TableError));
+
+	// What the decorator made and was given, to check after.
+	struct FPlaced
+	{
+		TSharedPtr<SWidget> Fields;
+		TSharedPtr<SWidget> Rows;
+		TSharedPtr<SWidget> Missing;
+		TSharedPtr<SWidget> Twice;
+		TSharedPtr<SWidget> DefaultFields;
+		TArray<FName> PinNames;
+	};
+	const TSharedRef<FPlaced> Placed = MakeShared<FPlaced>();
+	class FAreaDecorator : public IBangoNodeDecorator
+	{
+	public:
+		explicit FAreaDecorator(const TSharedRef<FPlaced>& InPlaced) : Out(InPlaced) {}
+		virtual bool DrawsEntryStatements(const FBangoNodeDecoratorContext&, int32) const override { return true; }
+		virtual TSharedPtr<SWidget> MakeFieldsArea(const FBangoNodeDecoratorContext& Context) override
+		{
+			// The usual fields (none: AreaAsk has no arguments), with Then under them.
+			Out->DefaultFields = Context.MakeDefaultFieldsArea();
+			const TSharedRef<SVerticalBox> Box = SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()[Out->DefaultFields.ToSharedRef()]
+				+ SVerticalBox::Slot().AutoHeight()[Context.MakePinWidget(Bango::NodePins::Then)];
+			Out->Twice = Context.MakePinWidget(Bango::NodePins::Then);
+			Out->Fields = Box;
+			return Box;
+		}
+		virtual TSharedPtr<SWidget> MakeRowsArea(const FBangoNodeDecoratorContext& Context) override
+		{
+			// Entry 1's row (drawn as nodes) with its pin at its end, and the first entry's option's pin; the default's
+			// pin isn't placed.
+			const TSharedRef<SVerticalBox> Box = SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().FillWidth(1.0f)[Context.MakeEntryConditionWidget(1)]
+					+ SHorizontalBox::Slot().AutoWidth()[Context.MakePinWidget(Bango::NodePins::Entry(1))]
+				]
+				+ SVerticalBox::Slot().AutoHeight()[Context.MakePinWidget(Bango::NodePins::Statement(0, 0))];
+			Out->Missing = Context.MakePinWidget(FName(TEXT("Entry9")));
+			Out->PinNames = Context.PinNames;
+			Out->Rows = Box;
+			return Box;
+		}
+	private:
+		TSharedRef<FPlaced> Out;
+	};
+	Bango::RegisterNodeDecorator(TEXT("AreaAsk"), MakeShared<FAreaDecorator>(Placed));
+	ON_SCOPE_EXIT
+	{
+		Bango::UnregisterNodeDecorator(TEXT("AreaAsk"));
+	};
+
+	const TCHAR* Source =
+		TEXT("AreaAsk()               //@1(10, 0)\n")
+		TEXT("{\n")
+		TEXT("\tentry if (true):\n")
+		TEXT("\t{\n")
+		TEXT("\t\tAreaOpt(1)          //@2(20, 0)\n")
+		TEXT("\t\t{\n")
+		TEXT("\t\t\tAreaLog(1);     //@3(30, 0)\n")
+		TEXT("\t\t}\n")
+		TEXT("\t\tAreaLine(2);        //@4(20, 2)\n")
+		TEXT("\t}\n")
+		TEXT("\tentry if (false):\n")
+		TEXT("\t{\n")
+		TEXT("\t\tAreaLog(5);         //@5(20, 4)\n")
+		TEXT("\t}\n")
+		TEXT("\tdefault:\n")
+		TEXT("\t{\n")
+		TEXT("\t\tAreaLog(6);         //@6(20, 6)\n")
+		TEXT("\t}\n")
+		TEXT("}\n");
+	FBangoGraphDocument Doc;
+	FBangoCompileError Error;
+	if (!TestTrue(TEXT("build"), Bango::BuildGraph(Source, TEXT("areas.bango"), Doc, Error)))
+	{
+		AddError(Error.ToString());
+		return false;
+	}
+	const TSharedPtr<FBangoNodeLayoutContext> Context = MakeShared<FBangoNodeLayoutContext>(Bango::MakeNodeLayoutContext(Doc, &Table));
+	TStrongObjectPtr<UEdGraph> Graph(BangoScriptEditor::CreateEdGraph(Doc.Main, Context));
+	UBangoEdGraphNode* Ask = nullptr;
+	for (UEdGraphNode* EdNode : Graph->Nodes)
+	{
+		UBangoEdGraphNode* Node = Cast<UBangoEdGraphNode>(EdNode);
+		Ask = Node && Node->IsEntries() ? Node : Ask;
+	}
+	if (!TestTrue(TEXT("AreaAsk's node"), Ask != nullptr))
+	{
+		return false;
+	}
+	using namespace Bango::NodePins;
+	TestTrue(TEXT("the pins' names"), Ask->MakeDecoratorContext().PinNames == TArray<FName>({ In, Statement(0, 0), Entry(0), Entry(1), Default, Then }));
+	TestTrue(TEXT("a name finds its pin"), Ask->FindDecoratorPin(Then) == Ask->GetNextPin() && Ask->FindDecoratorPin(Entry(1)) == Ask->GetBranchPin(1)
+		&& Ask->FindDecoratorPin(Statement(0, 0)) == Ask->GetStatementPin(0, 0) && !Ask->FindDecoratorPin(Statement(0, 1)) && !Ask->FindDecoratorPin(Body));
+
+	// The node's widget, as the graph makes it.
+	const TSharedPtr<SGraphNode> Widget = FBangoGraphNodeFactory().CreateNode(Ask);
+	if (!TestTrue(TEXT("the widget, with both areas"), Widget.IsValid() && Placed->Fields.IsValid() && Placed->Rows.IsValid()))
+	{
+		return false;
+	}
+	TestTrue(TEXT("the decorator was told the names"), Placed->PinNames.Num() == 6);
+	TestTrue(TEXT("a decorated node's fields, none shown, take no room (the null widget)"), Placed->DefaultFields == TSharedPtr<SWidget>(SNullWidget::NullWidget));
+	auto IsUnder = [](TSharedPtr<SWidget> Child, const TSharedPtr<SWidget>& Ancestor)
+	{
+		for (; Child.IsValid(); Child = Child->GetParentWidget())
+		{
+			if (Child == Ancestor)
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+	auto PinWidget = [&](FName Name) -> TSharedPtr<SWidget> { return Widget->FindWidgetForPin(Ask->FindDecoratorPin(Name)); };
+	TestTrue(TEXT("Then in the fields area"), IsUnder(PinWidget(Then), Placed->Fields));
+	TestTrue(TEXT("an entry's pin in the rows area"), IsUnder(PinWidget(Entry(1)), Placed->Rows));
+	TestTrue(TEXT("an option's pin in the rows area"), IsUnder(PinWidget(Statement(0, 0)), Placed->Rows));
+	TestTrue(TEXT("the default's, not placed, in the node (its output column)"), IsUnder(PinWidget(Default), Widget)
+		&& !IsUnder(PinWidget(Default), Placed->Fields) && !IsUnder(PinWidget(Default), Placed->Rows));
+	TestTrue(TEXT("an entry drawn in its row: its own pin, not placed, is hidden"), PinWidget(Entry(0)).IsValid() && PinWidget(Entry(0))->GetVisibility() == EVisibility::Collapsed);
+	TestTrue(TEXT("no such pin, and one placed already: the null widget"), Placed->Missing == TSharedPtr<SWidget>(SNullWidget::NullWidget)
+		&& Placed->Twice == TSharedPtr<SWidget>(SNullWidget::NullWidget));
+	for (UEdGraphPin* Pin : Ask->Pins)
+	{
+		TestTrue(*FString::Printf(TEXT("pin %s has its widget"), *Pin->PinName.ToString()), Widget->FindWidgetForPin(Pin).IsValid());
+	}
+
+	// Adding entries from the rows.
+	const FBangoNodeDecoratorContext Told = Ask->MakeDecoratorContext();
+	TestFalse(TEXT("no second default"), Told.bCanAddDefaultEntry);
+	if (TestTrue(TEXT("AddEntry is there"), (bool)Told.AddEntry))
+	{
+		Told.AddEntry();
+		TestTrue(TEXT("AddEntry: above the default, drawn in its row"), Ask->CaseValues.Num() == 4 && Ask->IsDefaultEntry(3) && Ask->IsEntryInRow(2));
+	}
 	return true;
 }
 

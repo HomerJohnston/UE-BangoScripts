@@ -376,6 +376,10 @@ public:
 	bool FindStatementOfPin(const UEdGraphPin* Pin, int32& OutEntry, int32& OutIndex) const;
 	/** The output pin of a statement drawn in a row (one with a block), or null. */
 	UEdGraphPin* GetStatementPin(int32 Entry, int32 Index) const;
+	/** A decorator's name for Pin (Bango::NodePins: In, Then, Body, Entry2, Default, Entry0.Statement1), or NAME_None. */
+	FName GetDecoratorPinName(const UEdGraphPin* Pin) const;
+	/** The pin a decorator calls Name, or null. */
+	UEdGraphPin* FindDecoratorPin(FName Name) const;
 	/** The statement drawn in a row whose NodeID is NodeID, or false. */
 	bool FindStatement(int64 NodeID, int32& OutEntry, int32& OutIndex) const;
 	/** Shows a compile error on a statement drawn in a row (and on the node, as for any error). */
