@@ -2412,14 +2412,27 @@ namespace BangoCompilerPrivate
 					}
 				}
 			}
-			if (!BlockCall.bEntries || Signature.EntriesHoldCommand.IsEmpty())
+			const TArray<FString>& HeldNames = Signature.EntriesHoldCommands;
+			if (!BlockCall.bEntries || HeldNames.IsEmpty())
 			{
 				return true;
 			}
-			// Each entry holds one call of that command, or nothing (disabled statements and reroutes don't count).
+			// "A", "A and B", "A, B and C" (or "or").
+			const auto JoinNames = [&HeldNames](const TCHAR* Last)
+			{
+				FString Joined;
+				for (int32 Index = 0; Index < HeldNames.Num(); ++Index)
+				{
+					Joined += Index == 0 ? TEXT("") : Index + 1 == HeldNames.Num() ? FString::Printf(TEXT(" %s "), Last) : FString(TEXT(", "));
+					Joined += HeldNames[Index];
+				}
+				return Joined;
+			};
+			// Each entry holds calls of those commands only: one or none, or with bMany any number (disabled
+			// statements and reroutes don't count). A default that may hold anything is a bypass.
 			for (const FBangoEntry& Entry : BlockCall.Entries)
 			{
-				if (Entry.bDisabled)
+				if (Entry.bDisabled || (Entry.bDefault && Signature.bDefaultHoldsAnything))
 				{
 					continue;
 				}
@@ -2440,11 +2453,17 @@ namespace BangoCompilerPrivate
 						CallExpr = Inner->Call.Get();
 					}
 					const FBangoCallExpr* Held = CallExpr ? CallExpr->As<FBangoCallExpr>() : nullptr;
-					const bool bIsHeld = Held && !Held->bReflect && Held->Name.Equals(Signature.EntriesHoldCommand, ESearchCase::CaseSensitive);
-					if (!bIsHeld || ++Count > 1)
+					const bool bIsHeld = Held && !Held->bReflect && HeldNames.ContainsByPredicate([Held](const FString& Each) { return Held->Name.Equals(Each, ESearchCase::CaseSensitive); });
+					if (!bIsHeld && Signature.bEntriesHoldMany)
 					{
+						return Fail(Stmt->Loc, FString::Printf(TEXT("A %s's entries hold only %s calls: put conditions on the entry ('entry if (...):'), and anything else before or after the %s."),
+							*Signature.Name, *JoinNames(TEXT("and")), *Signature.Name));
+					}
+					if (!bIsHeld || (!Signature.bEntriesHoldMany && ++Count > 1))
+					{
+						const FString OneOf = JoinNames(TEXT("or"));
 						return Fail(Stmt->Loc, FString::Printf(TEXT("A %s's entries each hold one %s and nothing else, since every entry's %s is run to gather them, whether its condition passed or not. Put anything else inside the %s's block, or before the %s."),
-							*Signature.Name, *Signature.EntriesHoldCommand, *Signature.EntriesHoldCommand, *Signature.EntriesHoldCommand, *Signature.Name));
+							*Signature.Name, *OneOf, *OneOf, *OneOf, *Signature.Name));
 					}
 				}
 			}

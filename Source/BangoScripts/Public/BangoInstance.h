@@ -432,7 +432,7 @@ private:
 	/** After a command that opens a block or is written in one is done: its block opens, is skipped or is ended, as it asked. */
 	bool AfterBlockCall(int32 Block, bool bOpens, bool bEndBlock, bool bSkipBlock, int32 RunEntry, const FString& CommandName);
 	/** After a block's close handler is done: the block is closed, and one of its blocks runs if the handler picked one. */
-	bool AfterBlockClose(int32 Block, bool bLeftEarly, int32 RunBlock, const FString& CommandName);
+	bool AfterBlockClose(int32 Block, bool bLeftEarly, int32 RunBlock, int32 RunEntry, const FString& CommandName);
 	/** The script has stopped for good: tells the command it was waiting on, and the commands of the blocks left open (FBangoCommand::Abandoned). */
 	void NotifyAbandoned();
 	/** CloseBlock: the block command's close handler, then its state is emptied. */

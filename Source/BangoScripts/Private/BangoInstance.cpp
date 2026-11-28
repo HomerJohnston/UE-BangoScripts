@@ -972,17 +972,11 @@ EBangoInstanceStatus FBangoInstance::Resume(const FBangoExecContext& Context)
 			{
 				SetBlockPhase(PendingBlock, 0); // it knows it failed: it isn't told it was abandoned as well
 			}
-			if (bPendingClose && RunEntry >= 0 && Result == EBangoCommandResult::Done)
-			{
-				SetBlockPhase(PendingBlock, 0);
-				RuntimeFail(FString::Printf(TEXT("%s: the command can't run an entry from its close: its entries are over. (RunBlock runs one of the blocks written in its block.)"), *Command->Signature.Name));
-				return Status;
-			}
 			if (!FinishCommand(Result))
 			{
 				return Status;
 			}
-			const bool bAfter = bPendingClose ? AfterBlockClose(PendingBlock, bPendingEarly, RunBlock, Command->Signature.Name)
+			const bool bAfter = bPendingClose ? AfterBlockClose(PendingBlock, bPendingEarly, RunBlock, RunEntry, Command->Signature.Name)
 				: PendingEntry >= 0 ? AfterEntryEnded(PendingBlock, RunEntry, Command->Signature.Name)
 				: AfterBlockCall(PendingBlock, bPendingOpens, bEndBlock, bSkipBlock, RunEntry, Command->Signature.Name);
 			if (!bAfter)
@@ -2092,8 +2086,19 @@ bool FBangoInstance::CallCommand(int32 NameIndex, int32 ArgCount, int32 Flags, c
 	}
 
 	// The block the call opens or is written in, if any: the command gets its state.
-	const int32 Block = (Flags >> Bango::CallBlockShift) - 1;
+	int32 Block = (Flags >> Bango::CallBlockShift) - 1;
 	const bool bOpens = Block >= 0 && (Flags & Bango::CallOpensBlock) != 0;
+	if (Block >= 0 && !bOpens && GetBlockPhase(Block) == 2)
+	{
+		// Written in a block that's over: its close ran its default as a bypass. Only a command that may be on its
+		// own is allowed there, and it is.
+		if (!Signature.bInsideOptional)
+		{
+			return RuntimeFail(FString::Printf(TEXT("%s belongs to the block of '%s', which is over: its default is running as a bypass, from its close. Only a command that may also be used on its own can be in a bypass."),
+				*Signature.Name, *Signature.InsideOf));
+		}
+		Block = -1;
+	}
 	if (Block >= 0)
 	{
 		SetCallBlock(Call, Block, bOpens);
@@ -2225,6 +2230,10 @@ void FBangoInstance::FindPendingBlock(int32& OutBlock, bool& bOutOpens, bool& bO
 	{
 		OutBlock = (Instruction.C >> Bango::CallBlockShift) - 1;
 		bOutOpens = OutBlock >= 0 && (Instruction.C & Bango::CallOpensBlock) != 0;
+		if (OutBlock >= 0 && !bOutOpens && GetBlockPhase(OutBlock) == 2)
+		{
+			OutBlock = -1; // in a block that's over (a bypass run from its close): on its own
+		}
 	}
 	else if (Instruction.Op == EBangoOp::CloseBlock)
 	{
@@ -2320,7 +2329,7 @@ bool FBangoInstance::AfterBlockCall(int32 Block, bool bOpens, bool bEndBlock, bo
 	return true;
 }
 
-bool FBangoInstance::AfterBlockClose(int32 Block, bool bLeftEarly, int32 RunBlock, const FString& CommandName)
+bool FBangoInstance::AfterBlockClose(int32 Block, bool bLeftEarly, int32 RunBlock, int32 RunEntry, const FString& CommandName)
 {
 	const FBangoFunctionCode* Code = GetBlockCode();
 	if (!Code || !Code->Blocks.IsValidIndex(Block))
@@ -2328,6 +2337,29 @@ bool FBangoInstance::AfterBlockClose(int32 Block, bool bLeftEarly, int32 RunBloc
 		return RuntimeFail(TEXT("Internal error: bad block closed."));
 	}
 	ClearBlockState(Block);
+	if (RunEntry >= 0)
+	{
+		// Its close picked its default (a bypass): it runs now, as a block RunBlock picked, and this one is done with.
+		const FBangoBlockInfo& Info = Code->Blocks[Block];
+		SetBlockPhase(Block, 0);
+		if (RunBlock >= 0)
+		{
+			return RuntimeFail(FString::Printf(TEXT("%s: the command asked to run both one of its blocks and an entry from its close: only one can run."), *CommandName));
+		}
+		if (bLeftEarly)
+		{
+			return RuntimeFail(FString::Printf(TEXT("%s: the command can't run its default when the script is leaving its block early."), *CommandName));
+		}
+		if (RunEntry != Info.DefaultEntry || !Info.EntryAt.IsValidIndex(RunEntry))
+		{
+			return RuntimeFail(Info.DefaultEntry < 0
+				? FString::Printf(TEXT("%s: the command can't run an entry from its close: its entries are over, and its block has no default to run as a bypass. (RunBlock runs one of the blocks written in its block.)"), *CommandName)
+				: FString::Printf(TEXT("%s: the command can't run entry %d from its close: its entries are over. Only its default (entry %d) can run from there, as a bypass. (RunBlock runs one of the blocks written in its block.)"), *CommandName, RunEntry, Info.DefaultEntry));
+		}
+		SetBlockPhase(Block, 2);
+		Frames.Last().IP = Info.EntryAt[RunEntry];
+		return true;
+	}
 	if (RunBlock >= 0)
 	{
 		// Its close picked one of the blocks written in it: that one runs now, and this one is done with.
@@ -2378,7 +2410,7 @@ bool FBangoInstance::CloseBlock(int32 Block, bool bLeftEarly, const FBangoExecCo
 	}
 	if (!Command->Close)
 	{
-		return AfterBlockClose(Block, bLeftEarly, -1, Command->Signature.Name); // nothing to do at its closing brace
+		return AfterBlockClose(Block, bLeftEarly, -1, -1, Command->Signature.Name); // nothing to do at its closing brace
 	}
 
 	FCallScope CallScope(*this);
@@ -2400,11 +2432,6 @@ bool FBangoInstance::CloseBlock(int32 Block, bool bLeftEarly, const FBangoExecCo
 	{
 		return false;
 	}
-	if (Result == EBangoCommandResult::Done && Call.RunEntryNumber >= 0)
-	{
-		SetBlockPhase(Block, 0);
-		return RuntimeFail(FString::Printf(TEXT("%s: the command can't run an entry from its close: its entries are over. (RunBlock runs one of the blocks written in its block.)"), *Command->Signature.Name));
-	}
 	if (Result == EBangoCommandResult::Pending)
 	{
 		return WaitOnCall(NameIndex, *Command, Call); // the block is closed when it's done (Resume)
@@ -2414,7 +2441,7 @@ bool FBangoInstance::CloseBlock(int32 Block, bool bLeftEarly, const FBangoExecCo
 		SetBlockPhase(Block, 0); // it knows it failed: it isn't told it was abandoned as well
 		return RuntimeFail(FString::Printf(TEXT("%s: %s"), *Command->Signature.Name, Call.Error.IsEmpty() ? TEXT("the command failed at the end of its block.") : *Call.Error));
 	}
-	return AfterBlockClose(Block, bLeftEarly, Call.RunBlockNumber, Command->Signature.Name);
+	return AfterBlockClose(Block, bLeftEarly, Call.RunBlockNumber, Call.RunEntryNumber, Command->Signature.Name);
 }
 
 // ---- A block command's entries (FBangoCommandSignature::Entries) ----
@@ -2708,6 +2735,13 @@ bool FBangoInstance::EndEntry(int32 Block, int32 Entry, const FBangoExecContext&
 	if (!Code || !Code->Blocks.IsValidIndex(Block))
 	{
 		return RuntimeFail(TEXT("Internal error: bad block for an entry."));
+	}
+	if (GetBlockPhase(Block) == 2)
+	{
+		// The default, run from the close as a bypass: the block is over, and the script goes on after it.
+		SetBlockPhase(Block, 0);
+		Frames.Last().IP = Code->Blocks[Block].CloseAt + 1;
+		return true;
 	}
 	const int32 NameIndex = Code->Blocks[Block].Command;
 	const FBangoCommand* Command = BoundCommands.IsValidIndex(NameIndex) ? BoundCommands[NameIndex] : nullptr;

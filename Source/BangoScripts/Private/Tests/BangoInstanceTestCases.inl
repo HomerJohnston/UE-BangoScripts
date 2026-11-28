@@ -2288,6 +2288,89 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				};
 				AddEntryCommand(Opt);
 
+				// Ask() is a prompt with a bypass: its entries hold any number of Opt2 and Hint calls, and its default
+				// anything. It gathers every entry but the default, then waits in its close, watching; once no other
+				// entry passes, it runs the default from there.
+				FBangoCommand Ask;
+				Ask.Signature = FBangoCommandSignature::Make(TEXT("Ask")).Block().Entries().EntriesHold({ TEXT("Opt2"), TEXT("Hint") }, /*bMany*/ true).DefaultHoldsAnything();
+				Ask.Start = [](FBangoCommandCall& Call)
+				{
+					if (Call.GetEntryCount() > 0 && !Call.EntryIsDefault(0))
+					{
+						Call.RunEntry(0);
+					}
+					return EBangoCommandResult::Done;
+				};
+				Ask.EntryEnded = [](FBangoCommandCall& Call)
+				{
+					const int32 Next = Call.EntryNumber + 1;
+					if (Next < Call.GetEntryCount() && !Call.EntryIsDefault(Next))
+					{
+						Call.RunEntry(Next);
+					}
+					return EBangoCommandResult::Done;
+				};
+				const auto RunBypass = [](FBangoCommandCall& Call)
+				{
+					for (int32 Index = 0; Index < Call.GetEntryCount(); ++Index)
+					{
+						if (Call.EntryIsDefault(Index) && Call.EntryPassed(Index))
+						{
+							Call.RunEntry(Index);
+							return true;
+						}
+					}
+					return false;
+				};
+				Ask.Close = [&EntryLog, Passed, RunBypass](FBangoCommandCall& Call)
+				{
+					EntryLog.Add(FString::Printf(TEXT("ask %s"), *Passed(Call)));
+					if (RunBypass(Call))
+					{
+						return EBangoCommandResult::Done;
+					}
+					Call.WatchEntries(true);
+					return EBangoCommandResult::Pending;
+				};
+				Ask.Poll = [&EntryLog, Passed, RunBypass](FBangoCommandCall& Call)
+				{
+					EntryLog.Add(FString::Printf(TEXT("%s %s"), Call.bEntriesChanged ? TEXT("changed") : TEXT("same"), *Passed(Call)));
+					return RunBypass(Call) ? EBangoCommandResult::Done : EBangoCommandResult::Pending;
+				};
+				AddEntryCommand(Ask);
+
+				FBangoCommand Opt2;
+				Opt2.Signature = FBangoCommandSignature::Make(TEXT("Opt2")).Param(TEXT("Id"), FBangoType::Int()).Inside(TEXT("Ask"), /*bOptional*/ true);
+				Opt2.Start = [&EntryLog](FBangoCommandCall& Call)
+				{
+					EntryLog.Add(FString::Printf(TEXT("opt2 %lld e%d%s"), (long long)Call.Args[0].GetInt(), Call.BlockEntryNumber, Call.BlockState ? TEXT("") : TEXT(" alone")));
+					return EBangoCommandResult::Done;
+				};
+				AddEntryCommand(Opt2);
+				FBangoCommand Hint;
+				Hint.Signature = FBangoCommandSignature::Make(TEXT("Hint")).Param(TEXT("Id"), FBangoType::Int());
+				Hint.Start = [&EntryLog](FBangoCommandCall& Call)
+				{
+					EntryLog.Add(FString::Printf(TEXT("hint %lld"), (long long)Call.Args[0].GetInt()));
+					return EBangoCommandResult::Done;
+				};
+				AddEntryCommand(Hint);
+				FBangoCommand Opt3;
+				Opt3.Signature = FBangoCommandSignature::Make(TEXT("Opt3")).Inside(TEXT("Ask"));
+				Opt3.Start = [](FBangoCommandCall&) { return EBangoCommandResult::Done; };
+				AddEntryCommand(Opt3);
+
+				// CloseRuns() runs its first entry from its close: only a default may run from there.
+				FBangoCommand CloseRuns;
+				CloseRuns.Signature = FBangoCommandSignature::Make(TEXT("CloseRuns")).Block().Entries();
+				CloseRuns.Start = [](FBangoCommandCall&) { return EBangoCommandResult::Done; };
+				CloseRuns.Close = [](FBangoCommandCall& Call)
+				{
+					Call.RunEntry(0);
+					return EBangoCommandResult::Done;
+				};
+				AddEntryCommand(CloseRuns);
+
 				// Once() runs its second entry, and has no EntryEnded: its block closes after it.
 				FBangoCommand Once;
 				Once.Signature = FBangoCommandSignature::Make(TEXT("Once")).Block().Entries();
@@ -2318,6 +2401,9 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 				EndNoEntries.Signature = FBangoCommandSignature::Make(TEXT("EndNoEntries")).Block();
 				EndNoEntries.EntryEnded = [](FBangoCommandCall&) { return EBangoCommandResult::Done; };
 				Expect(!Bad.Add(EndNoEntries, AddError) && AddError.Contains(TEXT("EntryEnded handler")), TEXT("entries: EntryEnded needs Entries"));
+				FBangoCommand DefaultAnything;
+				DefaultAnything.Signature = FBangoCommandSignature::Make(TEXT("DefaultAnything")).Block().Entries().DefaultHoldsAnything();
+				Expect(!Bad.Add(DefaultAnything, AddError) && AddError.Contains(TEXT("DefaultHoldsAnything")), TEXT("entries: DefaultHoldsAnything needs EntriesHold"));
 			}
 
 			FBangoExecContext EntryContext = Context;
@@ -2487,6 +2573,55 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 					}
 				}
 				{
+					// The bypass: every option stops holding while the close waits, so it runs the default from there.
+					// The block is over then (its state gone): the default's end goes on after it, with no EntryEnded.
+					FEntryRun Run;
+					bFlag = true;
+					if (StartEntries(TEXT("global int out;\nAsk()\n{\n\tentry if (Flag()):\n\t{\n\t\tOpt2(1);\n\t\tOpt2(2);\n\t}\n\tdefault:\n\t{\n\t\tOpt2(7);\n\t\tout = 5;\n\t}\n}\nout = out * 10;"), Run))
+					{
+						ResumeEntries(Run);
+						const bool bWaiting = Run.Status != EBangoInstanceStatus::Finished;
+						bFlag = false;
+						ResumeEntries(Run);
+						const FString RunLog = FString::Join(EntryLog, TEXT(", "));
+						Expect(bWaiting && RunLog == TEXT("opt2 1 e0, opt2 2 e0, ask 1d, changed 0D, opt2 7 e-1 alone") && Run.Status == EBangoInstanceStatus::Finished && OutOfEntries(Run.Globals) == 50,
+							*FString::Printf(TEXT("entries: the bypass, run from the close. Log: %s. Out: %lld. Error: %s"), *RunLog, (long long)OutOfEntries(Run.Globals), *Run.Instance.GetError().Message));
+					}
+				}
+				{
+					// The bypass when nothing passes at the close; one that leaves with a goto; and one saved and loaded.
+					FEntryRun Run;
+					if (StartEntries(TEXT("global int out;\nAsk()\n{\n\tentry if (false):\n\t{\n\t\tOpt2(1);\n\t}\n\tdefault:\n\t{\n\t\tgoto Away;\n\t}\n}\nout = 1;\nlabel Away;\nout = 3;"), Run))
+					{
+						ResumeEntries(Run);
+						const FString RunLog = FString::Join(EntryLog, TEXT(", "));
+						Expect(RunLog == TEXT("opt2 1 e0, ask 0D") && Run.Status == EBangoInstanceStatus::Finished && OutOfEntries(Run.Globals) == 3,
+							*FString::Printf(TEXT("entries: a bypass that leaves with a goto. Log: %s. Out: %lld. Error: %s"), *RunLog, (long long)OutOfEntries(Run.Globals), *Run.Instance.GetError().Message));
+					}
+				}
+				{
+					// A command that belongs to the block can't be in a bypass run from its close: the block is over.
+					FEntryRun Run;
+					if (StartEntries(TEXT("Ask()\n{\n\tentry if (false):\n\t{\n\t}\n\tdefault:\n\t{\n\t\tOpt3();\n\t}\n}"), Run))
+					{
+						ResumeEntries(Run);
+						Expect(Run.Status == EBangoInstanceStatus::Failed && Run.Instance.GetError().Message.Contains(TEXT("Opt3 belongs to the block of 'Ask', which is over")),
+							*FString::Printf(TEXT("entries: a command of the block in a bypass. Got: %s"), *Run.Instance.GetError().Message));
+					}
+				}
+				for (const TCHAR* BadClose : { TEXT("CloseRuns()\n{\n\tentry if (true):\n\t{\n\t}\n\tdefault:\n\t{\n\t}\n}"), TEXT("CloseRuns()\n{\n\tentry:\n\t{\n\t}\n}") })
+				{
+					// Only the default may run from a close.
+					FEntryRun Run;
+					if (StartEntries(BadClose, Run))
+					{
+						ResumeEntries(Run);
+					}
+					const FString Message = Run.Instance.GetError().Message;
+					Expect(Run.Status == EBangoInstanceStatus::Failed && (Message.Contains(TEXT("Only its default (entry 1) can run from there")) || Message.Contains(TEXT("has no default to run as a bypass"))),
+						*FString::Printf(TEXT("entries: an entry run from a close. Got: %s"), *Message));
+				}
+				{
 					// Watched by a global: checked again only when it changes. Saved and loaded while watching, too.
 					FEntryRun Run;
 					TSharedPtr<FBangoProgram> WatchProgram;
@@ -2570,6 +2705,8 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 					{ TEXT("statements for a command that takes only entries"), TEXT("Gather()\n{\n\tOpt(1);\n}"), TEXT("The block of 'Gather' holds entries only") },
 					{ TEXT("an entry holding something else"), TEXT("int _n = 0;\nGather()\n{\n\tentry:\n\t{\n\t\t_n = 1;\n\t\tOpt(1);\n\t}\n}"), TEXT("A Gather's entries each hold one Opt and nothing else") },
 					{ TEXT("an entry holding two"), TEXT("Gather()\n{\n\tentry:\n\t{\n\t\tOpt(1);\n\t\tOpt(2);\n\t}\n}"), TEXT("A Gather's entries each hold one Opt and nothing else") },
+					{ TEXT("an entry holding something else, for many"), TEXT("int _n = 0;\nAsk()\n{\n\tentry:\n\t{\n\t\tOpt2(1);\n\t\t_n = 1;\n\t}\n}"), TEXT("A Ask's entries hold only Opt2 and Hint calls: put conditions on the entry ('entry if (...):'), and anything else before or after the Ask.") },
+					{ TEXT("a default holding something else, when it isn't exempt"), TEXT("int _n = 0;\nGather()\n{\n\tentry if (true):\n\t{\n\t}\n\tdefault:\n\t{\n\t\t_n = 1;\n\t}\n}"), TEXT("A Gather's entries each hold one Opt and nothing else") },
 					{ TEXT("a condition that isn't a bool"), TEXT("Talk(0)\n{\n\tentry if (1):\n\t{\n\t}\n}"), TEXT("bool") },
 					{ TEXT("goto into an entry"), TEXT("goto In;\nTalk(0)\n{\n\tentry:\n\t{\n\t\tlabel In;\n\t}\n}"), TEXT("jumps into a command's block") },
 					{ TEXT("goto from one entry to another"), TEXT("Talk(0)\n{\n\tentry:\n\t{\n\t\tgoto In;\n\t}\n\tentry:\n\t{\n\t\tlabel In;\n\t}\n}"), TEXT("jumps into a command's block") },
@@ -2589,6 +2726,10 @@ static void BangoRunInstanceScenarios(TArray<FString>& OutFailures)
 					FBangoCompileError HoldError;
 					Expect(Bango::CompileSource(TEXT("Gather()\n{\n\tentry:\n\t{\n\t\t// later\n\t}\n\tentry:\n\t{\n\t\t/*\n\t\tOpt(3);\n\t\t*/\n\t\tOpt(1);\n\t}\n}"), TEXT("entries.bango"), EntryTable, HoldProgram, HoldError),
 						*FString::Printf(TEXT("entries: comments and disabled code in an entry that holds one command. Got: %s"), *HoldError.Message));
+					// Many calls of several commands, in any mix; and a default that holds anything.
+					Expect(Bango::CompileSource(TEXT("int _n = 0;\nAsk()\n{\n\tentry if (true):\n\t{\n\t\tOpt2(1);\n\t\tHint(2);\n\t\tOpt2(3);\n\t}\n\tentry if (false):\n\t{\n\t}\n\tdefault:\n\t{\n\t}\n}\nAsk()\n{\n\tentry if (false):\n\t{\n\t}\n\tdefault:\n\t{\n\t\t_n = 1;\n\t\tif (_n > 0)\n\t\t{\n\t\t\tHint(1);\n\t\t}\n\t}\n}"),
+						TEXT("entries.bango"), EntryTable, HoldProgram, HoldError),
+						*FString::Printf(TEXT("entries: many held calls, and a default that holds anything. Got: %s"), *HoldError.Message));
 				}
 			}
 		}

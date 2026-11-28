@@ -510,7 +510,21 @@ FBangoCommandSignature& FBangoCommandSignature::Entries(bool bOptional)
 
 FBangoCommandSignature& FBangoCommandSignature::EntriesHold(const FString& CommandName)
 {
-	EntriesHoldCommand = CommandName;
+	EntriesHoldCommands = { CommandName };
+	bEntriesHoldMany = false;
+	return *this;
+}
+
+FBangoCommandSignature& FBangoCommandSignature::EntriesHold(const TArray<FString>& CommandNames, bool bMany)
+{
+	EntriesHoldCommands = CommandNames;
+	bEntriesHoldMany = bMany;
+	return *this;
+}
+
+FBangoCommandSignature& FBangoCommandSignature::DefaultHoldsAnything()
+{
+	bDefaultHoldsAnything = true;
 	return *this;
 }
 
@@ -572,9 +586,19 @@ bool FBangoCommandTable::Add(const FBangoCommand& Command, FString& OutError)
 		OutError = FString::Printf(TEXT("'%s' takes entries (Entries), but doesn't take a block (Block)."), *Name);
 		return false;
 	}
-	if (!Command.Signature.EntriesHoldCommand.IsEmpty() && !Command.Signature.bEntries)
+	if (!Command.Signature.EntriesHoldCommands.IsEmpty() && !Command.Signature.bEntries)
 	{
 		OutError = FString::Printf(TEXT("'%s' says what its entries hold (EntriesHold), but doesn't take entries (Entries)."), *Name);
+		return false;
+	}
+	if (Command.Signature.EntriesHoldCommands.ContainsByPredicate([](const FString& Held) { return Held.IsEmpty(); }))
+	{
+		OutError = FString::Printf(TEXT("'%s' says its entries hold a command with no name (EntriesHold)."), *Name);
+		return false;
+	}
+	if (Command.Signature.bDefaultHoldsAnything && Command.Signature.EntriesHoldCommands.IsEmpty())
+	{
+		OutError = FString::Printf(TEXT("'%s' lets its default hold anything (DefaultHoldsAnything), but doesn't say what its other entries hold (EntriesHold)."), *Name);
 		return false;
 	}
 	if (Command.EntryEnded && !Command.Signature.bEntries)

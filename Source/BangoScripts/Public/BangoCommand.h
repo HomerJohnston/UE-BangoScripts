@@ -172,8 +172,12 @@ struct BANGOSCRIPTS_API FBangoCommandSignature
 	bool bEntries = false;
 	/** With bEntries: the block may also be an ordinary block (one that doesn't start with `entry`). See Entries. */
 	bool bEntriesOptional = false;
-	/** With bEntries: the one command each entry holds (or none), and nothing else. Empty: anything. See EntriesHold. */
-	FString EntriesHoldCommand;
+	/** With bEntries: the commands an entry holds calls of, and nothing else. Empty: anything. See EntriesHold. */
+	TArray<FString> EntriesHoldCommands;
+	/** With EntriesHoldCommands: an entry holds any number of their calls; without it, one, or none. */
+	bool bEntriesHoldMany = false;
+	/** With EntriesHoldCommands: the `default:` holds anything (it's a bypass, not one more entry). See DefaultHoldsAnything. */
+	bool bDefaultHoldsAnything = false;
 	/** What's wrong with how the signature was built (a type parameter that doesn't exist, ...): FBangoCommandTable::Add fails with it. */
 	FString BuildError;
 	/**
@@ -304,6 +308,14 @@ struct BANGOSCRIPTS_API FBangoCommandSignature
 	 * that nothing else in an entry runs when its condition is false.
 	 */
 	FBangoCommandSignature& EntriesHold(const FString& CommandName);
+	/**
+	 * With Entries: each entry holds calls of the commands named and nothing else (comments, disabled statements and
+	 * reroutes aside): with bMany any number of them, in any order and mix; without, one, or none. Each call's own
+	 * block, if it takes one, is ordinary code.
+	 */
+	FBangoCommandSignature& EntriesHold(const TArray<FString>& CommandNames, bool bMany);
+	/** With EntriesHold: the `default:` entry holds ordinary statements, as a bypass (a goto, ending a conversation). */
+	FBangoCommandSignature& DefaultHoldsAnything();
 	FBangoCommandSignature& InCategory(const FString& InCategory);
 	FBangoCommandSignature& Describe(const FString& InDescription);
 };
