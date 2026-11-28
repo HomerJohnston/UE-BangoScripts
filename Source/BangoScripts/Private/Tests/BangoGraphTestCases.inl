@@ -9,6 +9,9 @@
  * must change nothing: the same graph, and the same text. Returns an empty string on success.
  * Sources that don't parse are skipped, and so are sources whose declarations the graph can't hold.
  */
+/** How many entries the round trips folded (to check that some do). */
+static int32 GBangoGraphFoldedEntries = 0;
+
 static FString BangoCheckGraphRoundTrip(const TCHAR* Name, const FString& Source)
 {
 	FBangoScript Original;
@@ -149,6 +152,70 @@ static FString BangoCheckGraphRoundTrip(const TCHAR* Name, const FString& Source
 		|| !CompactText2.Equals(CompactText, ESearchCase::CaseSensitive))
 	{
 		return FString::Printf(TEXT("[%s] reading the compact text back and writing it again changed it: %s\n--- first ---\n%s--- second ---\n%s"), Name, *Error.ToString(), *CompactText, *CompactText2);
+	}
+
+	// Every entry whose statements are all calls folded into its row (as the graph editor draws them), and put back:
+	// the same text, but for the reroutes between them, which aren't kept.
+	{
+		FBangoGraphDocument Folded = Doc1;
+		bool bDroppedReroutes = false;
+		FBangoEntryHold Hold; // the callback's answer, used before it's asked again
+		auto FoldGraph = [&](FBangoGraph& Graph, TArray<FBangoFoldedNode>& OutFolded)
+		{
+			Bango::FoldEntries(Graph, [&](const FBangoGraphNode& Node, int32 Entry) -> const FBangoEntryHold*
+			{
+				// Hold whatever commands the entry calls.
+				Hold = FBangoEntryHold();
+				Hold.bMany = true;
+				const int32 Index = Graph.Nodes.IndexOfByPredicate([&Node](const FBangoGraphNode& Each) { return &Each == &Node; });
+				for (int32 At = Node.Branches[Entry]; At != INDEX_NONE && Graph.Nodes.IsValidIndex(At); At = Graph.Nodes[At].Next)
+				{
+					const FString Command = Bango::GetNodeCommandName(Graph.Nodes[At]);
+					if (!Command.IsEmpty())
+					{
+						Hold.Commands.AddUnique(Command);
+					}
+				}
+				if (Hold.Commands.IsEmpty())
+				{
+					Hold.Commands.Add(TEXT("Nothing"));
+				}
+				TArray<int32> Reroutes;
+				if (Bango::CanFoldEntry(Graph, Index, Entry, Hold, nullptr, &Reroutes))
+				{
+					bDroppedReroutes |= Reroutes.Num() > 0;
+					GBangoGraphFoldedEntries++;
+				}
+				return &Hold;
+			}, OutFolded);
+		};
+		TArray<TArray<FBangoFoldedNode>> AllFolded;
+		AllFolded.SetNum(Folded.Functions.Num() + 1);
+		FoldGraph(Folded.Main, AllFolded[0]);
+		for (int32 Index = 0; Index < Folded.Functions.Num(); ++Index)
+		{
+			FoldGraph(Folded.Functions[Index], AllFolded[Index + 1]);
+		}
+		FString UnfoldError;
+		bool bUnfolded = Bango::UnfoldEntries(Folded.Main, AllFolded[0], UnfoldError);
+		for (int32 Index = 0; bUnfolded && Index < Folded.Functions.Num(); ++Index)
+		{
+			bUnfolded = Bango::UnfoldEntries(Folded.Functions[Index], AllFolded[Index + 1], UnfoldError);
+		}
+		FString FoldedText;
+		if (!bUnfolded || !Bango::WriteGraphText(Folded, FoldedText, WriteError))
+		{
+			return FString::Printf(TEXT("[%s] folding entries and putting them back failed: %s%s"), Name, *UnfoldError, *WriteError);
+		}
+		if (!bDroppedReroutes && !FoldedText.Equals(Text1, ESearchCase::CaseSensitive))
+		{
+			return FString::Printf(TEXT("[%s] folding entries and putting them back changed the text.\n--- before ---\n%s--- after ---\n%s"), Name, *Text1, *FoldedText);
+		}
+		FBangoScript FoldedScript;
+		if (!Bango::ParseScript(FoldedText, TEXT("test.bango"), FoldedScript, Error))
+		{
+			return FString::Printf(TEXT("[%s] the text after folding doesn't parse: %s\n--- text ---\n%s"), Name, *Error.ToString(), *FoldedText);
+		}
 	}
 	return FString();
 }
@@ -986,6 +1053,149 @@ static void BangoRunGraphScenarios(TArray<FString>& OutFailures)
 		Expect(Bango::ValidateEntryCondition(TEXT(""), ConditionError) && Bango::ValidateEntryCondition(TEXT("_a > 1 && Ready()"), ConditionError),
 			FString(TEXT("entries: valid conditions: ")) + ConditionError);
 		Expect(!Bango::ValidateEntryCondition(TEXT("_a == \"open"), ConditionError), TEXT("entries: a condition that doesn't read"));
+	}
+	{
+		// Entries drawn in their rows (the graph editor): which can be, taking their statements out, and putting them back.
+		const TCHAR* FoldSource =
+			TEXT("Prompt()            //@1(20, 0)\n")
+			TEXT("{\n")
+			TEXT("\tentry if (_a):\n")
+			TEXT("\t{\n")
+			TEXT("\t\t// first\n")
+			TEXT("\t\tOpt(1)          //@2(40, 0)\n")
+			TEXT("\t\t{\n")
+			TEXT("\t\t\tLog(\"x\");   //@3(60, 0)\n")
+			TEXT("\t\t}\n")
+			TEXT("\t\t                //@9(41, 1)\n")
+			TEXT("\t\t/* Say(2); */   //@4(40, 2)\n")
+			TEXT("\t}\n")
+			TEXT("\tentry:\n")
+			TEXT("\t{\n")
+			TEXT("\t\tif (_b)         //@5(40, 4)\n")
+			TEXT("\t\t{\n")
+			TEXT("\t\t}\n")
+			TEXT("\t}\n")
+			TEXT("\tentry if (_c):\n")
+			TEXT("\t{\n")
+			TEXT("\t}\n")
+			TEXT("}\n")
+			TEXT("Speech()            //@6(20, 8)\n")
+			TEXT("{\n")
+			TEXT("\tentry if (_a):\n")
+			TEXT("\t{\n")
+			TEXT("\t\tSay(3);         //@7(40, 8)\n")
+			TEXT("\t}\n")
+			TEXT("\tdefault:\n")
+			TEXT("\t{\n")
+			TEXT("\t\tSay(4);         //@8(40, 10)\n")
+			TEXT("\t}\n")
+			TEXT("}\n");
+		FBangoCompileError Error;
+		FString WriteError;
+		FBangoGraphDocument FoldDoc;
+		const bool bFoldBuilt = Bango::BuildGraph(FoldSource, TEXT("fold.bango"), FoldDoc, Error);
+		Expect(bFoldBuilt, FString(TEXT("fold: builds: ")) + Error.ToString());
+		if (bFoldBuilt)
+		{
+			FBangoGraph& Graph = FoldDoc.Main;
+			const int32 Prompt = Graph.Nodes.IndexOfByPredicate([](const FBangoGraphNode& Each) { return Each.NodeID == 1; });
+			const int32 Speech = Graph.Nodes.IndexOfByPredicate([](const FBangoGraphNode& Each) { return Each.NodeID == 6; });
+			FBangoEntryHold Hold;
+			Hold.Commands = { TEXT("Opt"), TEXT("Say") };
+			Hold.bMany = true;
+			Hold.bDefaultHoldsAnything = true;
+			TArray<int32> Statements;
+			TArray<int32> Reroutes;
+			Expect(Bango::GetNodeCommandName(Graph.Nodes[Prompt]) == TEXT("Prompt") && Bango::GetNodeCommandName(Graph.Nodes[0]).IsEmpty(), TEXT("fold: a node's command"));
+			Expect(Bango::CanFoldEntry(Graph, Prompt, 0, Hold, &Statements, &Reroutes) && Statements.Num() == 2 && Reroutes.Num() == 1,
+				FString::Printf(TEXT("fold: calls of held commands (one disabled), and a reroute between (%d, %d)"), Statements.Num(), Reroutes.Num()));
+			Expect(!Bango::CanFoldEntry(Graph, Prompt, 1, Hold), TEXT("fold: not an entry with an if"));
+			Expect(Bango::CanFoldEntry(Graph, Prompt, 2, Hold, &Statements) && Statements.Num() == 0, TEXT("fold: an empty entry"));
+			Expect(!Bango::CanFoldEntry(Graph, Speech, 1, Hold), TEXT("fold: not a default that holds anything"));
+			FBangoEntryHold OneHold = Hold;
+			OneHold.bMany = false;
+			OneHold.bDefaultHoldsAnything = false;
+			Expect(!Bango::CanFoldEntry(Graph, Prompt, 0, OneHold) && Bango::CanFoldEntry(Graph, Speech, 1, OneHold), TEXT("fold: one call without bMany; a default like the others"));
+			FBangoEntryHold OptOnly = Hold;
+			OptOnly.Commands = { TEXT("Opt") };
+			Expect(!Bango::CanFoldEntry(Graph, Prompt, 0, OptOnly), TEXT("fold: not a command it doesn't hold"));
+			Expect(!Bango::CanFoldEntry(Graph, 0, 0, Hold), TEXT("fold: not a node without entries"));
+
+			FString BeforeText;
+			Bango::WriteGraphText(FoldDoc, BeforeText, WriteError);
+			const int32 NodesBefore = Graph.Nodes.Num();
+			TArray<FBangoFoldedNode> Folded;
+			Bango::FoldEntries(Graph, [&Hold](const FBangoGraphNode&, int32) { return &Hold; }, Folded);
+			const FBangoFoldedNode* PromptFold = Folded.FindByPredicate([](const FBangoFoldedNode& Each) { return Each.NodeID == 1; });
+			const FBangoFoldedNode* SpeechFold = Folded.FindByPredicate([](const FBangoFoldedNode& Each) { return Each.NodeID == 6; });
+			const int32 NewPrompt = Graph.Nodes.IndexOfByPredicate([](const FBangoGraphNode& Each) { return Each.NodeID == 1; });
+			const bool bShape = PromptFold && SpeechFold && PromptFold->Entries.Num() == 2 && SpeechFold->Entries.Num() == 1
+				&& PromptFold->Entries[0].Entry == 0 && PromptFold->Entries[0].Statements.Num() == 2 && PromptFold->Entries[1].Entry == 2 && PromptFold->Entries[1].Statements.Num() == 0
+				&& Graph.Nodes.Num() == NodesBefore - 4 && NewPrompt != INDEX_NONE && Graph.Nodes[NewPrompt].Branches[0] == INDEX_NONE && Graph.Nodes[NewPrompt].Branches[1] != INDEX_NONE;
+			Expect(bShape, FString::Printf(TEXT("fold: what's taken out (%d nodes left of %d)"), Graph.Nodes.Num(), NodesBefore));
+			if (bShape)
+			{
+				const FBangoGraphNode& Opt = PromptFold->Entries[0].Statements[0];
+				const FBangoGraphNode& Say = PromptFold->Entries[0].Statements[1];
+				Expect(Opt.NodeID == 2 && Opt.Kind == EBangoGraphNodeKind::BlockCall && Opt.Comment == TEXT("first") && Graph.Nodes.IsValidIndex(Opt.Branches[0])
+					&& Graph.Nodes[Opt.Branches[0]].Text == TEXT("Log(\"x\")") && Say.NodeID == 4 && Say.bDisabled,
+					TEXT("fold: each statement as it was, its Body wired to the smaller graph"));
+				FString FoldedError;
+				Expect(Bango::UnfoldEntries(Graph, Folded, FoldedError), FString(TEXT("fold: put back: ")) + FoldedError);
+				FString AfterText;
+				const bool bWritten = Bango::WriteGraphText(FoldDoc, AfterText, WriteError);
+				// The text before, without the reroute's line.
+				FString Expected;
+				{
+					TArray<FString> Lines;
+					BeforeText.ParseIntoArray(Lines, TEXT("\n"), false);
+					for (const FString& Line : Lines)
+					{
+						if (!Line.Contains(TEXT("//@9(")))
+						{
+							Expected += Line + TEXT("\n");
+						}
+					}
+					Expected = Expected.Left(Expected.Len() - 1);
+				}
+				Expect(bWritten && AfterText == Expected,
+					FString::Printf(TEXT("fold: put back, the same text without the reroute (%s).\n--- before ---\n%s--- after ---\n%s"), *WriteError, *BeforeText, *AfterText));
+				FString TwiceError;
+				Expect(!Bango::UnfoldEntries(Graph, Folded, TwiceError) && TwiceError.Contains(TEXT("wired already")), FString(TEXT("fold: not put back twice: ")) + TwiceError);
+			}
+		}
+
+		// A statement typed for a row.
+		FBangoEntryHold Hold;
+		Hold.Commands = { TEXT("Opt"), TEXT("Say") };
+		Hold.bMany = true;
+		FBangoGraphNode Typed;
+		FString TypedError;
+		Expect(Bango::ValidateEntryStatement(TEXT("  hojo Say(TEXT(\"XMS700\", \"Hi\"));  "), Hold, Typed, TypedError)
+			&& Typed.Kind == EBangoGraphNodeKind::Call && Typed.Text == TEXT("hojo Say(TEXT(\"XMS700\", \"Hi\"))"),
+			FString(TEXT("fold: a line typed in: ")) + TypedError + TEXT(" / ") + Typed.Text);
+		Expect(Bango::ValidateEntryStatement(TEXT("\"hojo\" Opt(TEXT_INV(\"\"), nil) { }"), Hold, Typed, TypedError)
+			&& Typed.Kind == EBangoGraphNodeKind::BlockCall && Typed.Text == TEXT("\"hojo\" Opt(TEXT_INV(\"\"), nil)"),
+			FString(TEXT("fold: an option typed in, with its empty block: ")) + TypedError + TEXT(" / ") + Typed.Text);
+		Expect(!Bango::ValidateEntryStatement(TEXT("Opt(1) { Log(1); }"), Hold, Typed, TypedError) && TypedError.Contains(TEXT("empty block")), FString(TEXT("fold: not a block with something in it: ")) + TypedError);
+		Expect(!Bango::ValidateEntryStatement(TEXT("Log(1)"), Hold, Typed, TypedError) && TypedError == TEXT("This entry holds only calls of Opt or Say."), FString(TEXT("fold: not a command it doesn't hold: ")) + TypedError);
+		Expect(!Bango::ValidateEntryStatement(TEXT("_x = 1"), Hold, Typed, TypedError) && TypedError.Contains(TEXT("only calls of")), FString(TEXT("fold: not an assignment: ")) + TypedError);
+		Expect(!Bango::ValidateEntryStatement(TEXT("Say(1"), Hold, Typed, TypedError) && !TypedError.IsEmpty(), TEXT("fold: not one that doesn't read"));
+		Expect(!Bango::ValidateEntryStatement(TEXT("Say(1);\nSay(2);"), Hold, Typed, TypedError), TEXT("fold: not two lines"));
+		struct FFoldLookup : IBangoCommandLookup
+		{
+			FBangoCommandSignature Opt = FBangoCommandSignature::Make(TEXT("Opt")).Param(TEXT("N"), FBangoType::Int()).Block();
+			FBangoCommandSignature Say = FBangoCommandSignature::Make(TEXT("Say")).Param(TEXT("N"), FBangoType::Int());
+			virtual const FBangoCommandSignature* FindCommand(const FString& Name) const override
+			{
+				return Name == TEXT("Opt") ? &Opt : Name == TEXT("Say") ? &Say : nullptr;
+			}
+		};
+		const FFoldLookup Lookup;
+		Expect(Bango::ValidateEntryStatement(TEXT("Opt(1)"), Hold, Typed, TypedError, &Lookup) && Typed.Kind == EBangoGraphNodeKind::BlockCall,
+			FString(TEXT("fold: a command with a block, typed without its braces: ")) + TypedError);
+		Expect(!Bango::ValidateEntryStatement(TEXT("Say(1) { }"), Hold, Typed, TypedError, &Lookup) && TypedError.Contains(TEXT("doesn't take a block")),
+			FString(TEXT("fold: braces on one that doesn't take a block: ")) + TypedError);
 	}
 	{
 		// A switch: a row per case (its values as written) with an output, Default last, and Next for what follows.

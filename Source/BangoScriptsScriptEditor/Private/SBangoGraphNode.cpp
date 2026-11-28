@@ -94,7 +94,9 @@ TSharedRef<SWidget> SBangoGraphNode::CreateNodeContentArea()
 	// at the same place on nodes with no input pin (Script Start).
 	const FMargin BodyInset = GetDefault<UGraphEditorSettings>()->GetNonPinNodeBodyPadding();
 	const float HalfPin = SBangoGraphPin::PinSize * 0.5f;
-	// A switch's case boxes are made with their pins (AddPin), which comes after this.
+	// A switch's case boxes are made with their pins (AddPin), which comes after this; so are statement pins.
+	StatementPinWidgets.Reset();
+	PlacedStatementPins.Reset();
 	CaseEditBoxes.Reset();
 	CaseEditBoxes.SetNum(BangoNode && BangoNode->HasCaseRows() ? BangoNode->CaseValues.Num() : 0);
 	EditingCase = INDEX_NONE;
@@ -293,6 +295,15 @@ void SBangoGraphNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 	PinToAdd->SetOwner(SharedThis(this));
 	const FMargin BodyInset = GetDefault<UGraphEditorSettings>()->GetNonPinNodeBodyPadding();
 	const float HalfPin = SBangoGraphPin::PinSize * 0.5f;
+	int32 StatementEntry = INDEX_NONE;
+	int32 StatementIndex = INDEX_NONE;
+	if (BangoNode && BangoNode->FindStatementOfPin(PinToAdd->GetPinObj(), StatementEntry, StatementIndex))
+	{
+		// A statement's output, for its entry's row to place (MakeCaseRow, from its entry's pin, which comes later).
+		StatementPinWidgets.Add(PinToAdd->GetPinObj()->PinName, PinToAdd);
+		OutputPins.Add(PinToAdd);
+		return;
+	}
 	if (PinToAdd->GetDirection() == EGPD_Output && PinToAdd->GetPinObj() && PinToAdd->GetPinObj()->PinName == UBangoEdGraphNode::NextPinName)
 	{
 		AddAddPinButton(RightNodeBox); // a sequence's or switch's Add pin goes after its other outputs, above Then
@@ -321,6 +332,10 @@ void SBangoGraphNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 		// (MakeEntryRowWidget) is as tall as it wants.
 		bDecoratedRow = false;
 		const TSharedRef<SWidget> RowContent = Case != INDEX_NONE ? MakeCaseRow(Case) : MakeDefaultCaseBox();
+		if (Case != INDEX_NONE && BangoNode->IsEntryInRow(Case))
+		{
+			PinToAdd->SetVisibility(EVisibility::Collapsed); // its statements follow it, in the row: nothing is wired to it
+		}
 		RightNodeBox->AddSlot()
 			.AutoHeight()
 			.HAlign(HAlign_Right)
@@ -422,8 +437,44 @@ TSharedRef<SWidget> SBangoGraphNode::MakeCaseRow(int32 Case)
 				}
 				return This.IsValid() && This->CaseEditBoxes.IsValidIndex(Entry) ? This->MakeCaseValueBox(Entry) : SNullWidget::NullWidget;
 			};
+			Context.MakeEntryStatementPinWidget = [WeakThis](int32 Entry, int32 Statement) -> TSharedRef<SWidget>
+			{
+				const TSharedPtr<SBangoGraphNode> This = WeakThis.Pin();
+				return This.IsValid() ? This->TakeStatementPinWidget(Entry, Statement) : SNullWidget::NullWidget;
+			};
 			Row = RowDecorator->MakeEntryRowWidget(Context, Case);
 			bDecoratedRow = Row.IsValid();
+		}
+	}
+	if (BangoNode && BangoNode->IsEntryInRow(Case))
+	{
+		if (!Row.IsValid())
+		{
+			Row = MakeRowStatements(Case);
+		}
+		bDecoratedRow = true; // as tall as its statements
+		// Any statement pin the row didn't place goes at its right, so no wire is lost.
+		TSharedRef<SVerticalBox> Unplaced = SNew(SVerticalBox);
+		bool bAnyUnplaced = false;
+		for (int32 Index = 0; Index < BangoNode->EntryRows[Case].Statements.Num(); ++Index)
+		{
+			const UEdGraphPin* Pin = BangoNode->GetStatementPin(Case, Index);
+			if (Pin && !PlacedStatementPins.Contains(Pin->PinName) && StatementPinWidgets.Contains(Pin->PinName))
+			{
+				Unplaced->AddSlot().AutoHeight().Padding(0.0f, 2.0f)[TakeStatementPinWidget(Case, Index)];
+				bAnyUnplaced = true;
+			}
+		}
+		if (bAnyUnplaced)
+		{
+			Row = SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth()[Row.ToSharedRef()]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4.0f, 0.0f, 0.0f, 0.0f)[Unplaced];
+		}
+		if (BangoNode->FocusStatementEntry == Case)
+		{
+			BangoNode->FocusStatementEntry = INDEX_NONE; // told once
+			BangoNode->FocusStatementIndex = INDEX_NONE;
 		}
 	}
 	const TSharedRef<SWidget> Content = Row.IsValid() ? Row.ToSharedRef()
@@ -445,6 +496,60 @@ TSharedRef<SWidget> SBangoGraphNode::MakeCaseRow(int32 Case)
 		[
 			Content
 		];
+}
+
+TSharedRef<SWidget> SBangoGraphNode::TakeStatementPinWidget(int32 Entry, int32 Index)
+{
+	const UEdGraphPin* Pin = BangoNode ? BangoNode->GetStatementPin(Entry, Index) : nullptr;
+	const TSharedPtr<SGraphPin>* Widget = Pin ? StatementPinWidgets.Find(Pin->PinName) : nullptr;
+	if (!Widget || !Widget->IsValid() || PlacedStatementPins.Contains(Pin->PinName))
+	{
+		return SNullWidget::NullWidget;
+	}
+	PlacedStatementPins.Add(Pin->PinName);
+	return Widget->ToSharedRef();
+}
+
+TSharedRef<SWidget> SBangoGraphNode::MakeRowStatements(int32 Entry)
+{
+	using namespace BangoGraphNodeStyle;
+	TSharedRef<SVerticalBox> Box = SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Right)
+		[
+			BangoNode->IsDefaultEntry(Entry) ? MakeDefaultCaseBox(/*bEntry*/ true) : MakeCaseValueBox(Entry)
+		];
+	const TArray<FBangoEdStatement>& Statements = BangoNode->EntryRows[Entry].Statements;
+	for (int32 Index = 0; Index < Statements.Num(); ++Index)
+	{
+		const FBangoEdStatement& Statement = Statements[Index];
+		const bool bRunning = BangoNode->DebugStatementEntry == Entry && BangoNode->DebugStatementIndex == Index;
+		const FLinearColor Color = !Statement.ErrorMessage.IsEmpty() ? BangoGraphNodeStyle::ErrorColor : bRunning ? FLinearColor(1.0f, 0.72f, 0.1f) : FLinearColor::White;
+		Box->AddSlot()
+			.AutoHeight()
+			.HAlign(HAlign_Right)
+			.Padding(0.0f, 2.0f, 0.0f, 0.0f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(Statement.bDisabled ? FString(TEXT("/* ")) + Statement.Text + TEXT(" */") : Statement.Text))
+					.Font(FCoreStyle::GetDefaultFontStyle("Mono", 8))
+					.ColorAndOpacity(FSlateColor(Color.CopyWithNewOpacity(Statement.bDisabled ? 0.45f : 1.0f)))
+					.ToolTipText(FText::FromString(!Statement.ErrorMessage.IsEmpty() ? Statement.ErrorMessage : Statement.Comment))
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(4.0f, 0.0f, 0.0f, 0.0f)
+				[
+					TakeStatementPinWidget(Entry, Index)
+				]
+			];
+	}
+	return Box;
 }
 
 TSharedRef<SWidget> SBangoGraphNode::MakeCaseValueBox(int32 Case)
@@ -472,7 +577,7 @@ TSharedRef<SWidget> SBangoGraphNode::MakeCaseValueBox(int32 Case)
 		: LOCTEXT("CaseValuesTip", "This case's values: the switch runs this output when its value equals one of them.\nAn int like 3, a string like \"north\" or a Bango ID like @guard; separate several with commas, like 1, 2.\nRight-click the pin to remove the case.");
 	TSharedRef<SBorder> Box = SNew(SBorder)
 		.BorderImage(FAppStyle::GetBrush(bHasError ? "WhiteBrush" : "NoBorder"))
-		.BorderBackgroundColor(FSlateColor(ErrorColor))
+		.BorderBackgroundColor(FSlateColor(BangoGraphNodeStyle::ErrorColor))
 		.Padding(bHasError ? FMargin(1.0f) : FMargin(0.0f))
 		.ToolTipText(Tip)
 		.ColorAndOpacity(FLinearColor(1.0f, 1.0f, 1.0f, bEntryDisabled ? 0.45f : 1.0f))
@@ -915,7 +1020,7 @@ TSharedRef<SWidget> SBangoGraphNode::MakeFieldValue(int32 FieldIndex)
 		: FText::FromString(ValueTip);
 	TSharedRef<SBorder> DisplayBox = SNew(SBorder)
 		.BorderImage(FAppStyle::GetBrush(bOutlined ? "WhiteBrush" : "NoBorder"))
-		.BorderBackgroundColor(FSlateColor(bHasError ? ErrorColor : WarningColor))
+		.BorderBackgroundColor(FSlateColor(bHasError ? BangoGraphNodeStyle::ErrorColor : WarningColor))
 		.Padding(bOutlined ? FMargin(1.0f) : FMargin(0.0f))
 		.ToolTipText(OutlineTip)
 		[

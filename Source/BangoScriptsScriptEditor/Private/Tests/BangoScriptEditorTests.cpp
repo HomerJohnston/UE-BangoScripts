@@ -20,6 +20,7 @@
 #include "UObject/StrongObjectPtr.h"
 #include "BangoCommand.h"
 #include "BangoNodeDecorator.h"
+#include "Misc/ScopeExit.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoEdGraphBuilderTest, "Bango.ScriptEditor.EdGraph",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -493,6 +494,163 @@ bool FBangoEdGraphEntriesTest::RunTest(const FString& Parameters)
 	Plain->UsePlainBlock();
 	TestTrue(TEXT("Use a Plain Block: back"), !Plain->IsEntries() && Plain->CaseValues.Num() == 0 && LinkedNode(Plain->GetBranchPin(0)) == PlainBody);
 	ReadsBack(TEXT("after Use Entries and back"));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBangoEdGraphEntryRowsTest, "Bango.ScriptEditor.EdGraphEntryRows",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FBangoEdGraphEntryRowsTest::RunTest(const FString& Parameters)
+{
+	// Entries drawn in their rows: a decorator asks, and the command's entries hold only certain commands.
+	FBangoCommandTable Table;
+	FString TableError;
+	TestTrue(TEXT("RowAsk"), Table.Add(FBangoCommandSignature::Make(TEXT("RowAsk")).Block().Entries()
+		.EntriesHold({ TEXT("RowOpt"), TEXT("RowLine") }, /*bMany*/ true).DefaultHoldsAnything(), TableError));
+	TestTrue(TEXT("RowOpt"), Table.Add(FBangoCommandSignature::Make(TEXT("RowOpt")).Param(TEXT("N"), FBangoType::Int()).Inside(TEXT("RowAsk"), true).Block(), TableError));
+	TestTrue(TEXT("RowLine"), Table.Add(FBangoCommandSignature::Make(TEXT("RowLine")).Param(TEXT("N"), FBangoType::Int()), TableError));
+	TestTrue(TEXT("RowLog"), Table.Add(FBangoCommandSignature::Make(TEXT("RowLog")).Param(TEXT("N"), FBangoType::Int()), TableError));
+
+	class FRowDecorator : public IBangoNodeDecorator
+	{
+	public:
+		virtual bool DrawsEntryStatements(const FBangoNodeDecoratorContext&, int32) const override { return true; }
+	};
+	Bango::RegisterNodeDecorator(TEXT("RowAsk"), MakeShared<FRowDecorator>());
+	ON_SCOPE_EXIT
+	{
+		Bango::UnregisterNodeDecorator(TEXT("RowAsk"));
+	};
+
+	const TCHAR* Source =
+		TEXT("RowAsk()                //@1(10, 0)\n")
+		TEXT("{\n")
+		TEXT("\tentry if (true):\n")
+		TEXT("\t{\n")
+		TEXT("\t\t// first\n")
+		TEXT("\t\tRowOpt(1)           //@2(20, 0)\n")
+		TEXT("\t\t{\n")
+		TEXT("\t\t\tRowLog(1);      //@3(30, 0)\n")
+		TEXT("\t\t}\n")
+		TEXT("\t\tRowLine(2);         //@4(20, 2)\n")
+		TEXT("\t}\n")
+		TEXT("\tentry if (false):\n")
+		TEXT("\t{\n")
+		TEXT("\t\tRowLog(5);          //@5(20, 4)\n")
+		TEXT("\t}\n")
+		TEXT("\tdefault:\n")
+		TEXT("\t{\n")
+		TEXT("\t\tRowLog(6);          //@6(20, 6)\n")
+		TEXT("\t}\n")
+		TEXT("}\n");
+	FBangoGraphDocument Doc;
+	FBangoCompileError Error;
+	if (!TestTrue(TEXT("build"), Bango::BuildGraph(Source, TEXT("rows.bango"), Doc, Error)))
+	{
+		AddError(Error.ToString());
+		return false;
+	}
+	FString OriginalText;
+	FString WriteError;
+	TestTrue(TEXT("written"), Bango::WriteGraphText(Doc, OriginalText, WriteError));
+	const TSharedPtr<FBangoNodeLayoutContext> Context = MakeShared<FBangoNodeLayoutContext>(Bango::MakeNodeLayoutContext(Doc, &Table));
+	TStrongObjectPtr<UEdGraph> Graph(BangoScriptEditor::CreateEdGraph(Doc.Main, Context));
+	// The entry node, RowAsk and the three RowLogs: RowOpt and RowLine are drawn in the first entry's row.
+	if (!TestEqual(TEXT("node count"), Graph->Nodes.Num(), 5))
+	{
+		return false;
+	}
+	UBangoEdGraphNode* Ask = nullptr;
+	TMap<int64, UBangoEdGraphNode*> ById;
+	for (UEdGraphNode* EdNode : Graph->Nodes)
+	{
+		if (UBangoEdGraphNode* Node = Cast<UBangoEdGraphNode>(EdNode))
+		{
+			ById.Add(Node->NodeID, Node);
+			Ask = Node->IsEntries() ? Node : Ask;
+		}
+	}
+	if (!TestTrue(TEXT("RowAsk and the RowLogs"), Ask && ById.Contains(3) && ById.Contains(5) && ById.Contains(6)))
+	{
+		return false;
+	}
+	auto LinkedNode = [](UEdGraphPin* Pin) -> UEdGraphNode*
+	{
+		return Pin && Pin->LinkedTo.Num() == 1 ? Pin->LinkedTo[0]->GetOwningNode() : nullptr;
+	};
+	TestTrue(TEXT("only the first entry is drawn in its row (the second holds a RowLog; the default may hold anything)"),
+		Ask->IsEntryInRow(0) && !Ask->IsEntryInRow(1) && !Ask->IsEntryInRow(2));
+	TestTrue(TEXT("its statements, as written"), Ask->EntryRows[0].Statements.Num() == 2 && Ask->EntryRows[0].Statements[0].NodeID == 2
+		&& Ask->EntryRows[0].Statements[0].Comment == TEXT("first") && Ask->EntryRows[0].Statements[0].HasBlock()
+		&& Ask->EntryRows[0].Statements[1].Text == TEXT("RowLine(2)") && !Ask->EntryRows[0].Statements[1].HasBlock());
+	TestTrue(TEXT("the option's block on its own pin; the entry's own pin unwired"), LinkedNode(Ask->GetStatementPin(0, 0)) == ById[3]
+		&& !Ask->GetStatementPin(0, 1) && Ask->GetBranchPin(0)->LinkedTo.Num() == 0 && LinkedNode(Ask->GetBranchPin(1)) == ById[5]);
+	TestEqual(TEXT("a statement pin isn't an entry's"), Ask->GetCaseOfPin(Ask->GetStatementPin(0, 0)), (int32)INDEX_NONE);
+	const UBangoEdGraphSchema* Schema = GetDefault<UBangoEdGraphSchema>();
+	TestEqual(TEXT("nothing is wired to an entry drawn in its row"), (int32)Schema->CanCreateConnection(Ask->GetBranchPin(0), ById[6]->GetInputPin()).Response, (int32)CONNECT_RESPONSE_DISALLOW);
+
+	auto ReadsBack = [&](const TCHAR* What, FString& OutText)
+	{
+		FBangoGraphDocument Back;
+		FString BuildError;
+		TArray<UEdGraph*> Graphs = { Graph.Get() };
+		TArray<TArray<UBangoEdGraphNode*>> BackNodes;
+		const bool bBuilt = BangoScriptEditor::BuildDocument(Graphs, Back, &BackNodes, BuildError);
+		const bool bWritten = bBuilt && Bango::WriteGraphText(Back, OutText, WriteError);
+		FBangoScript Script;
+		FBangoCompileError ParseError;
+		const bool bParsed = bWritten && Bango::ParseScript(OutText, TEXT("back.bango"), Script, ParseError);
+		TestTrue(*FString::Printf(TEXT("%s: reads back, and its text parses (%s%s)"), What, *BuildError, bWritten && !bParsed ? *ParseError.ToString() : TEXT("")), bParsed);
+		TestTrue(*FString::Printf(TEXT("%s: every node of the document has its editor node"), What), BackNodes.Num() == 1 && BackNodes[0].Num() == Back.Main.Nodes.Num());
+		return Back;
+	};
+	FString BackText;
+	ReadsBack(TEXT("as built"), BackText);
+	TestEqual(TEXT("the same text as before"), BackText, OriginalText);
+
+	// What the decorator is told.
+	{
+		const FBangoNodeDecoratorContext Told = Ask->MakeDecoratorContext();
+		TestTrue(TEXT("decorator: which entries are in rows"), Told.EntryDrawsStatements == TArray<bool>({ true, false, false }));
+		TestTrue(TEXT("decorator: the statements"), Told.EntryStatements.Num() == 3 && Told.EntryStatements[0].Num() == 2 && Told.EntryStatements[1].Num() == 0
+			&& Told.EntryStatements[0][0]->CommandName == TEXT("RowOpt") && Told.EntryStatements[0][0]->bBlock && Told.EntryStatements[0][0]->Comment == TEXT("first")
+			&& Told.EntryStatements[0][1]->Layout && Told.EntryStatements[0][1]->Layout->Fields.Num() > 0);
+		FString SetError;
+		TestTrue(TEXT("decorator: a statement's field set"), Told.EntryStatements[0][1]->SetFieldValue && Told.EntryStatements[0][1]->SetFieldValue(0, TEXT("9"), SetError)
+			&& Ask->EntryRows[0].Statements[1].Text == TEXT("RowLine(9)"));
+	}
+
+	// Editing from the row.
+	FString EditError;
+	TestTrue(TEXT("insert a line"), Ask->InsertEntryStatement(0, 2, TEXT("RowLine(7);"), EditError) && Ask->EntryRows[0].Statements.Num() == 3
+		&& Ask->EntryRows[0].Statements[2].Text == TEXT("RowLine(7)") && Ask->EntryRows[0].Statements[2].NodeID == 0);
+	TestTrue(TEXT("the inserted one is to be focused"), Ask->FocusStatementEntry == 0 && Ask->FocusStatementIndex == 2);
+	TestFalse(TEXT("not a command it doesn't hold"), Ask->InsertEntryStatement(0, 0, TEXT("RowLog(1)"), EditError));
+	TestFalse(TEXT("not into an entry drawn as nodes"), Ask->InsertEntryStatement(1, 0, TEXT("RowLine(1)"), EditError));
+	const int32 PinsBefore = Ask->Pins.Num();
+	TestTrue(TEXT("insert an option, with its own pin"), Ask->InsertEntryStatement(0, 0, TEXT("RowOpt(8) { }"), EditError) && Ask->Pins.Num() == PinsBefore + 1
+		&& Ask->GetStatementPin(0, 0) && Ask->GetStatementPin(0, 0)->LinkedTo.Num() == 0 && LinkedNode(Ask->GetStatementPin(0, 1)) == ById[3]);
+	TestTrue(TEXT("move a statement, its wire with it"), Ask->MoveEntryStatement(0, 1, 0, 3, EditError) && Ask->EntryRows[0].Statements[3].NodeID == 2
+		&& LinkedNode(Ask->GetStatementPin(0, 3)) == ById[3]);
+	TestFalse(TEXT("not to an entry drawn as nodes"), Ask->MoveEntryStatement(0, 0, 1, 0, EditError));
+	TestTrue(TEXT("disable a statement"), Ask->SetEntryStatementDisabled(0, 1, true, EditError) && Ask->EntryRows[0].Statements[1].bDisabled);
+	TestTrue(TEXT("remove the option with no wire"), Ask->RemoveEntryStatement(0, 0, EditError) && Ask->Pins.Num() == PinsBefore && Ask->EntryRows[0].Statements.Num() == 3);
+	{
+		ReadsBack(TEXT("after editing"), BackText);
+		TestTrue(TEXT("the edits are in the text"), BackText.Contains(TEXT("/* RowLine(9); */")) && BackText.Contains(TEXT("RowLine(7);")) && !BackText.Contains(TEXT("RowOpt(8)")));
+		TestTrue(TEXT("a new statement gets a NodeID"), Ask->EntryRows[0].Statements[1].NodeID > 6);
+	}
+
+	// A new entry is drawn in its row too; a removed one takes its statements' pins with it.
+	Ask->AddSwitchCase();
+	TestTrue(TEXT("Add Entry: above the default, drawn in its row"), Ask->CaseValues.Num() == 4 && Ask->IsDefaultEntry(3) && Ask->IsEntryInRow(2) && !Ask->IsEntryInRow(3));
+	// An 'entry:' beside a default never lets it pass, so it's refused: give the new one a condition.
+	TestTrue(TEXT("the new entry's condition"), Ask->SetCaseValues(2, TEXT("1 > 0"), EditError));
+	TestTrue(TEXT("move a statement to another entry"), Ask->MoveEntryStatement(0, 0, 2, 0, EditError) && Ask->EntryRows[2].Statements.Num() == 1 && Ask->EntryRows[0].Statements.Num() == 2);
+	Ask->RemoveSwitchCase(0);
+	TestTrue(TEXT("Remove Entry: its option's pin goes, the node on it stays"), Ask->Pins.Num() == PinsBefore - 1 && ById[3]->GetInputPin()->LinkedTo.Num() == 0
+		&& Ask->EntryRows.Num() == 3 && Ask->IsEntryInRow(1) && Ask->EntryRows[1].Statements.Num() == 1);
+	ReadsBack(TEXT("after removing an entry"), BackText);
 	return true;
 }
 

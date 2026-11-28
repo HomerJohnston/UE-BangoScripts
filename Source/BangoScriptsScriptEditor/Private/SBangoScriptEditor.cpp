@@ -5354,7 +5354,28 @@ void SBangoScriptEditor::ApplyDebugStates()
 			if (UBangoEdGraphNode* Node = Cast<UBangoEdGraphNode>(GraphNode))
 			{
 				const EBangoNodeDebugState* State = States.Find(Node->NodeID);
+				// A statement drawn in a row: its command's node shows its state, and its row the statement.
+				int32 StatementEntry = INDEX_NONE;
+				int32 StatementIndex = INDEX_NONE;
+				for (int32 Entry = 0; !State && Entry < Node->EntryRows.Num(); ++Entry)
+				{
+					for (int32 Index = 0; !State && Node->IsEntryInRow(Entry) && Index < Node->EntryRows[Entry].Statements.Num(); ++Index)
+					{
+						State = States.Find(Node->EntryRows[Entry].Statements[Index].NodeID);
+						if (State)
+						{
+							StatementEntry = Entry;
+							StatementIndex = Index;
+						}
+					}
+				}
 				Node->DebugState = State ? *State : EBangoNodeDebugState::None;
+				if (Node->DebugStatementEntry != StatementEntry || Node->DebugStatementIndex != StatementIndex)
+				{
+					Node->DebugStatementEntry = StatementEntry;
+					Node->DebugStatementIndex = StatementIndex;
+					Graph->NotifyGraphChanged(); // its row marks the statement
+				}
 			}
 		}
 	}
@@ -5533,7 +5554,9 @@ void SBangoScriptEditor::ShowNodeByID(int64 NodeID)
 		for (UEdGraphNode* GraphNode : EdGraphs[GraphIndex]->Nodes)
 		{
 			UBangoEdGraphNode* Node = Cast<UBangoEdGraphNode>(GraphNode);
-			if (Node && Node->NodeID == NodeID)
+			int32 StatementEntry = INDEX_NONE;
+			int32 StatementIndex = INDEX_NONE;
+			if (Node && (Node->NodeID == NodeID || Node->FindStatement(NodeID, StatementEntry, StatementIndex))) // (a statement drawn in a row: its command's node)
 			{
 				if (GraphIndex != ShownGraph)
 				{
@@ -5989,10 +6012,17 @@ void SBangoScriptEditor::CompileQuietly(FString* OutError)
 		return;
 	}
 	int32 NumWarnings = 0;
+	TSet<const UBangoEdGraphNode*> Counted; // (a statement drawn in a row is listed as its command's node)
 	for (const TArray<UBangoEdGraphNode*>& GraphNodes : Nodes)
 	{
 		for (const UBangoEdGraphNode* Node : GraphNodes)
 		{
+			bool bCounted = false;
+			Counted.Add(Node, &bCounted);
+			if (bCounted)
+			{
+				continue;
+			}
 			TArray<Bango::FBangoFieldWarning> Warnings;
 			Bango::GetNodeWarnings(Node->Layout, Warnings);
 			NumWarnings += Warnings.Num();
@@ -6034,10 +6064,17 @@ FReply SBangoScriptEditor::OnCompileClicked()
 	int32 NumWarnings = 0;
 	UBangoEdGraphNode* FirstWarned = nullptr;
 	int32 FirstWarnedGraph = INDEX_NONE;
+	TSet<const UBangoEdGraphNode*> Warned; // (a statement drawn in a row is listed as its command's node)
 	for (int32 GraphIndex = 0; GraphIndex < Nodes.Num(); ++GraphIndex)
 	{
 		for (UBangoEdGraphNode* Node : Nodes[GraphIndex])
 		{
+			bool bSeen = false;
+			Warned.Add(Node, &bSeen);
+			if (bSeen)
+			{
+				continue;
+			}
 			const int32 NodeWarnings = Node->UpdateCompileWarnings();
 			if (NodeWarnings > 0 && !FirstWarned)
 			{
@@ -6080,8 +6117,19 @@ FReply SBangoScriptEditor::OnCompileClicked()
 		if (Nodes.IsValidIndex(GraphIndex) && Nodes[GraphIndex].IsValidIndex(Place.Node))
 		{
 			UBangoEdGraphNode* Node = Nodes[GraphIndex][Place.Node];
-			const int32 Field = Place.Offset == INDEX_NONE || Place.Case != INDEX_NONE ? INDEX_NONE : Bango::FindFieldAt(Node->Layout, Place.Offset);
-			Node->SetCompileError(CompileError.Message, Field, Place.Case);
+			const FBangoGraph& PlaceGraph = GraphIndex == 0 ? Document.Main : Document.Functions[GraphIndex - 1];
+			const int64 PlaceID = PlaceGraph.Nodes.IsValidIndex(Place.Node) ? PlaceGraph.Nodes[Place.Node].NodeID : Node->NodeID;
+			int32 StatementEntry = INDEX_NONE;
+			int32 StatementIndex = INDEX_NONE;
+			if (PlaceID != Node->NodeID && Node->FindStatement(PlaceID, StatementEntry, StatementIndex))
+			{
+				Node->SetStatementError(StatementEntry, StatementIndex, CompileError.Message); // a statement drawn in its row
+			}
+			else
+			{
+				const int32 Field = Place.Offset == INDEX_NONE || Place.Case != INDEX_NONE ? INDEX_NONE : Bango::FindFieldAt(Node->Layout, Place.Offset);
+				Node->SetCompileError(CompileError.Message, Field, Place.Case);
+			}
 			if (GraphIndex != ShownGraph)
 			{
 				ShowGraph(GraphIndex);
@@ -6644,6 +6692,13 @@ void SBangoScriptEditor::PasteNodesHere(const FVector2f& Location)
 		Node->CreateNewGuid();
 		// NodeID 0: each gets a free ID the next time the editor reads the graph (BangoScriptEditor::BuildDocument).
 		Node->NodeID = 0;
+		for (FBangoEdEntryRow& Row : Node->EntryRows)
+		{
+			for (FBangoEdStatement& Statement : Row.Statements)
+			{
+				Statement.NodeID = 0; // statements drawn in rows too
+			}
+		}
 		Node->bInFunctionGraph = Entry->bInFunctionGraph;
 		Node->LayoutContext = Entry->LayoutContext;
 		Node->ExpandedTextFields.Reset();

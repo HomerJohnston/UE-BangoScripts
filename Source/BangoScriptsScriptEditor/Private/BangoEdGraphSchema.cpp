@@ -63,6 +63,16 @@ const FPinConnectionResponse UBangoEdGraphSchema::CanCreateConnection(const UEdG
 		return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, LOCTEXT("Directions", "Connect an output to an input."));
 	}
 
+	// An entry drawn in its row has no wire of its own: its statements follow it, in the row.
+	if (const UBangoEdGraphNode* Owner = Cast<UBangoEdGraphNode>(OutputPin->GetOwningNode()))
+	{
+		const int32 Entry = Owner->GetCaseOfPin(OutputPin);
+		if (Entry != INDEX_NONE && Owner->IsEntryInRow(Entry))
+		{
+			return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, LOCTEXT("EntryInRow", "This entry's statements are drawn in its row: add to it there."));
+		}
+	}
+
 	// Wires can't go round in a circle: that's what loops and goto are for.
 	if (LeadsTo(InputPin->GetOwningNode(), OutputPin->GetOwningNode()))
 	{
@@ -232,6 +242,15 @@ UEdGraphNode* FBangoSchemaAction_NewNode::PerformAction(UEdGraph* ParentGraph, U
 	Node->NodePosX = FMath::RoundToInt(Position.X / BangoGraphGridSize) * BangoGraphGridSize;
 	Node->NodePosY = FMath::RoundToInt(Position.Y / BangoGraphGridSize) * BangoGraphGridSize;
 	Node->UpdateLayout();
+	if (Node->IsEntries())
+	{
+		// Its entry drawn in its row, if its decorator draws them so.
+		Node->EntryRows.SetNum(Node->CaseValues.Num());
+		for (int32 Entry = 0; Entry < Node->EntryRows.Num(); ++Entry)
+		{
+			Node->EntryRows[Entry].bInRow = Node->WouldDrawEntryInRow(Entry);
+		}
+	}
 	Node->AllocateDefaultPins();
 	ParentGraph->AddNode(Node, /*bUserAction*/ true, bSelectNewNode);
 

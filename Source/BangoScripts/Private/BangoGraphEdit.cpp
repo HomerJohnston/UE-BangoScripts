@@ -1418,4 +1418,342 @@ namespace Bango
 		return true;
 	}
 
+	FString GetNodeCommandName(const FBangoGraphNode& Node)
+	{
+		if ((Node.Kind != EBangoGraphNodeKind::Call && Node.Kind != EBangoGraphNodeKind::BlockCall) || BangoGraphEditPrivate::HasLineBreak(Node.Text))
+		{
+			return FString();
+		}
+		FBangoScript Script;
+		FBangoCompileError Error;
+		const bool bBlock = Node.Kind == EBangoGraphNodeKind::BlockCall;
+		if (!ParseScript(Node.Text + (bBlock ? TEXT("\n{\n}") : TEXT(";")), TEXT("node"), Script, Error) || Script.TopLevel.Num() != 1)
+		{
+			return FString();
+		}
+		const FBangoExpr* CallExpr = nullptr;
+		if (const FBangoCallStmt* CallStmt = Script.TopLevel[0]->As<FBangoCallStmt>())
+		{
+			CallExpr = CallStmt->Call.Get();
+		}
+		else if (const FBangoBlockCallStmt* BlockStmt = Script.TopLevel[0]->As<FBangoBlockCallStmt>())
+		{
+			CallExpr = BlockStmt->Call.Get();
+		}
+		const FBangoCallExpr* Call = CallExpr ? CallExpr->As<FBangoCallExpr>() : nullptr;
+		return Call && !Call->bReflect ? Call->Name : FString();
+	}
+
+	bool CanFoldEntry(const FBangoGraph& Graph, int32 NodeIndex, int32 Entry, const FBangoEntryHold& Hold, TArray<int32>* OutStatements, TArray<int32>* OutReroutes)
+	{
+		if (OutStatements)
+		{
+			OutStatements->Reset();
+		}
+		if (OutReroutes)
+		{
+			OutReroutes->Reset();
+		}
+		if (!Graph.Nodes.IsValidIndex(NodeIndex) || Hold.Commands.IsEmpty())
+		{
+			return false;
+		}
+		const FBangoGraphNode& Node = Graph.Nodes[NodeIndex];
+		if (Node.Kind != EBangoGraphNodeKind::BlockCall || !Node.bEntries || !Node.Branches.IsValidIndex(Entry))
+		{
+			return false;
+		}
+		if (Hold.bDefaultHoldsAnything && Node.bEntryDefault && Entry == Node.Branches.Num() - 1)
+		{
+			return false; // the default is a bypass: ordinary nodes
+		}
+		TArray<int32> Statements;
+		TArray<int32> Reroutes;
+		TSet<int32> Seen;
+		for (int32 At = Node.Branches[Entry]; At != INDEX_NONE; At = Graph.Nodes[At].Next)
+		{
+			if (!Graph.Nodes.IsValidIndex(At) || At == 0 || Seen.Contains(At))
+			{
+				return false;
+			}
+			Seen.Add(At);
+			const FBangoGraphNode& Statement = Graph.Nodes[At];
+			if (Statement.Kind == EBangoGraphNodeKind::Reroute)
+			{
+				Reroutes.Add(At);
+				continue;
+			}
+			if ((Statement.Kind != EBangoGraphNodeKind::Call && Statement.Kind != EBangoGraphNodeKind::BlockCall) || Statement.bEntries)
+			{
+				return false;
+			}
+			const FString Name = GetNodeCommandName(Statement);
+			if (Name.IsEmpty() || !Hold.Commands.ContainsByPredicate([&Name](const FString& Held) { return Held.Equals(Name, ESearchCase::CaseSensitive); }))
+			{
+				return false;
+			}
+			Statements.Add(At);
+		}
+		if (!Hold.bMany && Statements.Num() > 1)
+		{
+			return false;
+		}
+		if (OutStatements)
+		{
+			*OutStatements = MoveTemp(Statements);
+		}
+		if (OutReroutes)
+		{
+			*OutReroutes = MoveTemp(Reroutes);
+		}
+		return true;
+	}
+
+	void FoldEntries(FBangoGraph& Graph, const TFunction<const FBangoEntryHold*(const FBangoGraphNode& Node, int32 Entry)>& HoldFor, TArray<FBangoFoldedNode>& OutFolded)
+	{
+		OutFolded.Reset();
+		TArray<bool> Removed;
+		Removed.Init(false, Graph.Nodes.Num());
+		struct FPending
+		{
+			int32 Owner = INDEX_NONE;
+			int32 Entry = INDEX_NONE;
+			TArray<int32> Statements;
+			TArray<int32> Reroutes;
+		};
+		TArray<FPending> Pending;
+		for (int32 Index = 1; Index < Graph.Nodes.Num(); ++Index)
+		{
+			const FBangoGraphNode& Node = Graph.Nodes[Index];
+			if (Node.Kind != EBangoGraphNodeKind::BlockCall || !Node.bEntries)
+			{
+				continue;
+			}
+			for (int32 Entry = 0; Entry < Node.Branches.Num(); ++Entry)
+			{
+				const FBangoEntryHold* Hold = HoldFor(Node, Entry);
+				FPending Fold;
+				if (Hold && CanFoldEntry(Graph, Index, Entry, *Hold, &Fold.Statements, &Fold.Reroutes))
+				{
+					Fold.Owner = Index;
+					Fold.Entry = Entry;
+					for (const int32 At : Fold.Statements)
+					{
+						Removed[At] = true;
+					}
+					for (const int32 At : Fold.Reroutes)
+					{
+						Removed[At] = true;
+					}
+					Pending.Add(MoveTemp(Fold));
+				}
+			}
+		}
+		if (Pending.IsEmpty())
+		{
+			return;
+		}
+
+		// The new index of every node that stays.
+		TArray<int32> NewIndex;
+		NewIndex.Init(INDEX_NONE, Graph.Nodes.Num());
+		int32 Kept = 0;
+		for (int32 Index = 0; Index < Graph.Nodes.Num(); ++Index)
+		{
+			if (!Removed[Index])
+			{
+				NewIndex[Index] = Kept++;
+			}
+		}
+		const auto Remap = [&NewIndex](int32 At) { return NewIndex.IsValidIndex(At) ? NewIndex[At] : INDEX_NONE; };
+
+		// The statements, with their Body wires renumbered; a reroute's comment goes to the statement after it.
+		for (const FPending& Fold : Pending)
+		{
+			const FBangoGraphNode& Owner = Graph.Nodes[Fold.Owner];
+			FBangoFoldedNode* Folded = OutFolded.FindByPredicate([&Owner](const FBangoFoldedNode& Each) { return Each.NodeID == Owner.NodeID; });
+			if (!Folded)
+			{
+				Folded = &OutFolded.AddDefaulted_GetRef();
+				Folded->NodeID = Owner.NodeID;
+			}
+			FBangoFoldedEntry& Entry = Folded->Entries.AddDefaulted_GetRef();
+			Entry.Entry = Fold.Entry;
+			FString CarriedComment;
+			for (int32 At = Owner.Branches[Fold.Entry]; At != INDEX_NONE; At = Graph.Nodes[At].Next)
+			{
+				const FBangoGraphNode& Node = Graph.Nodes[At];
+				if (Node.Kind == EBangoGraphNodeKind::Reroute)
+				{
+					if (!Node.Comment.IsEmpty())
+					{
+						CarriedComment = CarriedComment.IsEmpty() ? Node.Comment : CarriedComment + TEXT("\n") + Node.Comment;
+					}
+					continue;
+				}
+				FBangoGraphNode Statement = Node;
+				Statement.Next = INDEX_NONE;
+				for (int32& Branch : Statement.Branches)
+				{
+					Branch = Remap(Branch);
+				}
+				if (!CarriedComment.IsEmpty())
+				{
+					Statement.Comment = Statement.Comment.IsEmpty() ? CarriedComment : CarriedComment + TEXT("\n") + Statement.Comment;
+					CarriedComment.Reset();
+				}
+				Entry.Statements.Add(MoveTemp(Statement));
+			}
+			if (!CarriedComment.IsEmpty() && Entry.Statements.Num() > 0)
+			{
+				FString& Last = Entry.Statements.Last().Comment;
+				Last = Last.IsEmpty() ? CarriedComment : Last + TEXT("\n") + CarriedComment;
+			}
+		}
+
+		// The graph without them.
+		TArray<FBangoGraphNode> Nodes;
+		Nodes.Reserve(Kept);
+		for (int32 Index = 0; Index < Graph.Nodes.Num(); ++Index)
+		{
+			if (Removed[Index])
+			{
+				continue;
+			}
+			FBangoGraphNode Node = MoveTemp(Graph.Nodes[Index]);
+			Node.Next = Remap(Node.Next);
+			for (int32& Branch : Node.Branches)
+			{
+				Branch = Remap(Branch); // a folded entry's output was its first statement: it's left unwired
+			}
+			Nodes.Add(MoveTemp(Node));
+		}
+		Graph.Nodes = MoveTemp(Nodes);
+	}
+
+	bool UnfoldEntries(FBangoGraph& Graph, const TArray<FBangoFoldedNode>& Folded, FString& OutError)
+	{
+		const int32 Existing = Graph.Nodes.Num();
+		for (const FBangoFoldedNode& Node : Folded)
+		{
+			const int32 Owner = Graph.Nodes.IndexOfByPredicate([&Node](const FBangoGraphNode& Each) { return Each.NodeID == Node.NodeID && Each.Kind == EBangoGraphNodeKind::BlockCall; });
+			if (Owner == INDEX_NONE || !Graph.Nodes[Owner].bEntries)
+			{
+				OutError = FString::Printf(TEXT("Folded entries for node %lld, which isn't a command with entries in this graph."), (long long)Node.NodeID);
+				return false;
+			}
+			for (const FBangoFoldedEntry& Entry : Node.Entries)
+			{
+				if (!Graph.Nodes[Owner].Branches.IsValidIndex(Entry.Entry) || Graph.Nodes[Owner].Branches[Entry.Entry] != INDEX_NONE)
+				{
+					OutError = FString::Printf(TEXT("Node %lld's entry %d doesn't exist, or is wired already."), (long long)Node.NodeID, Entry.Entry);
+					return false;
+				}
+				int32 Previous = INDEX_NONE;
+				for (const FBangoGraphNode& Statement : Entry.Statements)
+				{
+					for (const int32 Branch : Statement.Branches)
+					{
+						if (Branch != INDEX_NONE && (Branch <= 0 || Branch >= Existing))
+						{
+							OutError = FString::Printf(TEXT("A folded statement of node %lld wires to a node that isn't in the graph."), (long long)Node.NodeID);
+							return false;
+						}
+					}
+					const int32 At = Graph.Nodes.Add(Statement);
+					Graph.Nodes[At].Next = INDEX_NONE;
+					if (Previous == INDEX_NONE)
+					{
+						Graph.Nodes[Owner].Branches[Entry.Entry] = At;
+					}
+					else
+					{
+						Graph.Nodes[Previous].Next = At;
+					}
+					Previous = At;
+				}
+			}
+		}
+		return true;
+	}
+
+	bool ValidateEntryStatement(const FString& Statement, const FBangoEntryHold& Hold, FBangoGraphNode& OutNode, FString& OutError, const IBangoCommandLookup* Commands)
+	{
+		using namespace BangoGraphEditPrivate;
+		FString Text = Statement.TrimStartAndEnd();
+		if (Text.EndsWith(TEXT(";")))
+		{
+			Text = Text.Left(Text.Len() - 1).TrimStartAndEnd();
+		}
+		if (HasLineBreak(Text))
+		{
+			OutError = TEXT("A statement in an entry must be one line.");
+			return false;
+		}
+		// `Name(...) { }`: a command with a block, whose block must be empty.
+		bool bBraces = false;
+		if (Text.EndsWith(TEXT("}")))
+		{
+			int32 Open = Text.Len() - 1;
+			while (Open >= 0 && Text[Open] != TEXT('{'))
+			{
+				--Open;
+			}
+			Open = Open < 0 ? INDEX_NONE : Open;
+			const FString Inside = Open == INDEX_NONE ? FString() : Text.Mid(Open + 1, Text.Len() - Open - 2).TrimStartAndEnd();
+			if (Open == INDEX_NONE || !Inside.IsEmpty())
+			{
+				OutError = TEXT("A statement added to an entry has an empty block: write '{ }', and add to it in the graph.");
+				return false;
+			}
+			bBraces = true;
+			Text = Text.Left(Open).TrimStartAndEnd();
+		}
+		FBangoGraphNode Node;
+		Node.Kind = bBraces ? EBangoGraphNodeKind::BlockCall : EBangoGraphNodeKind::Call;
+		Node.Text = Text;
+		FBangoScript Script;
+		FBangoCompileError Error;
+		if (!ParseScript(Text + (bBraces ? TEXT("\n{\n}") : TEXT(";")), TEXT("node"), Script, Error))
+		{
+			OutError = Error.Message;
+			return false;
+		}
+		const FString Name = Script.TopLevel.Num() == 1 && Script.Functions.Num() == 0 ? GetNodeCommandName(Node) : FString();
+		FString Allowed;
+		for (int32 Index = 0; Index < Hold.Commands.Num(); ++Index)
+		{
+			Allowed += Index == 0 ? TEXT("") : Index + 1 == Hold.Commands.Num() ? FString(TEXT(" or ")) : FString(TEXT(", "));
+			Allowed += Hold.Commands[Index];
+		}
+		if (Name.IsEmpty() || !Hold.Commands.ContainsByPredicate([&Name](const FString& Held) { return Held.Equals(Name, ESearchCase::CaseSensitive); }))
+		{
+			OutError = FString::Printf(TEXT("This entry holds only calls of %s."), *Allowed);
+			return false;
+		}
+		if (Commands)
+		{
+			const FBangoCommandSignature* Signature = Commands->FindCommand(Name);
+			if (Signature && Signature->bBlock)
+			{
+				Node.Kind = EBangoGraphNodeKind::BlockCall;
+			}
+			else if (Signature && bBraces)
+			{
+				OutError = FString::Printf(TEXT("%s doesn't take a block: leave out the '{ }'."), *Name);
+				return false;
+			}
+		}
+		OutNode = MoveTemp(Node);
+		return true;
+	}
+}
+
+FBangoEntryHold FBangoEntryHold::FromSignature(const FBangoCommandSignature& Signature)
+{
+	FBangoEntryHold Hold;
+	Hold.Commands = Signature.EntriesHoldCommands;
+	Hold.bMany = Signature.bEntriesHoldMany;
+	Hold.bDefaultHoldsAnything = Signature.bDefaultHoldsAnything;
+	return Hold;
 }

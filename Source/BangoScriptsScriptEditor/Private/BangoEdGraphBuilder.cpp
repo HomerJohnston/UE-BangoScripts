@@ -4,6 +4,8 @@
 #include "BangoEdGraphSchema.h"
 #include "BangoGraph.h"
 #include "BangoGraphLayout.h"
+#include "BangoGraphEdit.h"
+#include "BangoNodeDecorator.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphPin.h"
 #include "UObject/Package.h"
@@ -19,10 +21,61 @@ namespace BangoScriptEditor
 		}
 	}
 
-	UEdGraph* CreateEdGraph(const FBangoGraph& Graph, const TSharedPtr<const FBangoNodeLayoutContext>& LayoutContext)
+	/**
+	 * Takes out of Graph the statements of the entries their command's decorator draws in their rows
+	 * (IBangoNodeDecorator::DrawsEntryStatements), where they hold only what the command's entries may hold.
+	 */
+	static void FoldEntriesForRows(FBangoGraph& Graph, const TSharedPtr<const FBangoNodeLayoutContext>& LayoutContext, TArray<FBangoFoldedNode>& OutFolded)
+	{
+		OutFolded.Reset();
+		const IBangoCommandLookup* Commands = LayoutContext.IsValid() ? LayoutContext->Commands : nullptr;
+		if (!Commands)
+		{
+			return;
+		}
+		TMap<FString, FBangoEntryHold> Holds;
+		Bango::FoldEntries(Graph, [&Holds, Commands](const FBangoGraphNode& Node, int32 Entry) -> const FBangoEntryHold*
+		{
+			const FString Name = Bango::GetNodeCommandName(Node);
+			const FBangoCommandSignature* Signature = Name.IsEmpty() ? nullptr : Commands->FindCommand(Name);
+			const TSharedPtr<IBangoNodeDecorator> Decorator = Signature && Signature->bEntries && !Signature->EntriesHoldCommands.IsEmpty()
+				? Bango::FindNodeDecorator(Name) : nullptr;
+			if (!Decorator.IsValid())
+			{
+				return nullptr;
+			}
+			FBangoNodeDecoratorContext Context;
+			Context.CommandName = Name;
+			Context.NodeText = Node.Text;
+			Context.bBlock = true;
+			Context.bDisabled = Node.bDisabled;
+			Context.Comment = Node.Comment;
+			Context.bEntries = true;
+			Context.EntryConditions = Node.CaseValues;
+			Context.EntryDisabled = Node.EntryDisabled;
+			Context.EntryDisabled.SetNum(Node.CaseValues.Num());
+			Context.DefaultEntry = Node.bEntryDefault && Node.CaseValues.Num() > 0 ? Node.CaseValues.Num() - 1 : INDEX_NONE;
+			if (!Decorator->DrawsEntryStatements(Context, Entry))
+			{
+				return nullptr;
+			}
+			if (!Holds.Contains(Name))
+			{
+				Holds.Add(Name, FBangoEntryHold::FromSignature(*Signature));
+			}
+			return Holds.Find(Name);
+		}, OutFolded);
+	}
+
+	UEdGraph* CreateEdGraph(const FBangoGraph& SourceGraph, const TSharedPtr<const FBangoNodeLayoutContext>& LayoutContext)
 	{
 		UEdGraph* EdGraph = NewObject<UEdGraph>(GetTransientPackage(), NAME_None, RF_Transactional);
 		EdGraph->Schema = UBangoEdGraphSchema::StaticClass();
+
+		// Entries drawn in their rows: their statements aren't nodes here; they're kept on their command's node.
+		FBangoGraph Graph = SourceGraph;
+		TArray<FBangoFoldedNode> Folded;
+		FoldEntriesForRows(Graph, LayoutContext, Folded);
 
 		TArray<UBangoEdGraphNode*> Nodes;
 		for (const FBangoGraphNode& Source : Graph.Nodes)
@@ -46,6 +99,31 @@ namespace BangoScriptEditor
 				Node->EntryDisabled = Source.EntryDisabled;
 				Node->EntryDisabled.SetNum(Node->CaseValues.Num());
 				Node->bEntryDefault = Source.bEntryDefault && Node->CaseValues.Num() > 0;
+				Node->EntryRows.SetNum(Node->CaseValues.Num());
+				if (const FBangoFoldedNode* FoldedNode = Folded.FindByPredicate([&Source](const FBangoFoldedNode& Each) { return Each.NodeID == Source.NodeID; }))
+				{
+					for (const FBangoFoldedEntry& FoldedEntry : FoldedNode->Entries)
+					{
+						if (!Node->EntryRows.IsValidIndex(FoldedEntry.Entry))
+						{
+							continue;
+						}
+						FBangoEdEntryRow& Row = Node->EntryRows[FoldedEntry.Entry];
+						Row.bInRow = true;
+						for (const FBangoGraphNode& Statement : FoldedEntry.Statements)
+						{
+							FBangoEdStatement& Kept = Row.Statements.AddDefaulted_GetRef();
+							Kept.KindValue = (uint8)Statement.Kind;
+							Kept.NodeID = Statement.NodeID;
+							Kept.Text = Statement.Text;
+							Kept.Comment = Statement.Comment;
+							Kept.bDisabled = Statement.bDisabled;
+							Kept.X = Statement.X;
+							Kept.Y = Statement.Y;
+							Kept.PinKey = Kept.HasBlock() ? Node->NextStatementPinKey++ : 0;
+						}
+					}
+				}
 			}
 			Node->bInFunctionGraph = Graph.bIsFunction;
 			Node->LayoutContext = LayoutContext;
@@ -84,6 +162,26 @@ namespace BangoScriptEditor
 				if (Nodes.IsValidIndex(Source.Branches[Branch]))
 				{
 					Link(Nodes[i]->GetBranchPin(Branch), Nodes[Source.Branches[Branch]]);
+				}
+			}
+		}
+		// The blocks of statements drawn in rows, from their own pins.
+		for (const FBangoFoldedNode& FoldedNode : Folded)
+		{
+			const int32 Owner = Graph.Nodes.IndexOfByPredicate([&FoldedNode](const FBangoGraphNode& Each) { return Each.NodeID == FoldedNode.NodeID; });
+			if (!Nodes.IsValidIndex(Owner))
+			{
+				continue;
+			}
+			for (const FBangoFoldedEntry& FoldedEntry : FoldedNode.Entries)
+			{
+				for (int32 Index = 0; Index < FoldedEntry.Statements.Num(); ++Index)
+				{
+					const int32 Body = FoldedEntry.Statements[Index].Branches.IsValidIndex(0) ? FoldedEntry.Statements[Index].Branches[0] : INDEX_NONE;
+					if (Nodes.IsValidIndex(Body))
+					{
+						Link(Nodes[Owner]->GetStatementPin(FoldedEntry.Entry, Index), Nodes[Body]);
+					}
 				}
 			}
 		}
@@ -165,6 +263,7 @@ namespace BangoScriptEditor
 	{
 		int64 MaxId = 0;
 		TArray<UBangoEdGraphNode*> New;
+		TArray<FBangoEdStatement*> NewStatements; // statements drawn in rows are nodes in the text too
 		for (const UEdGraph* EdGraph : EdGraphs)
 		{
 			for (UEdGraphNode* EdNode : EdGraph ? EdGraph->Nodes : TArray<TObjectPtr<UEdGraphNode>>())
@@ -179,11 +278,26 @@ namespace BangoScriptEditor
 					New.Add(Node);
 				}
 				MaxId = Node->NodeID > MaxId ? Node->NodeID : MaxId;
+				for (FBangoEdEntryRow& Row : Node->EntryRows)
+				{
+					for (FBangoEdStatement& Statement : Row.Statements)
+					{
+						if (Statement.NodeID <= 0)
+						{
+							NewStatements.Add(&Statement);
+						}
+						MaxId = Statement.NodeID > MaxId ? Statement.NodeID : MaxId;
+					}
+				}
 			}
 		}
 		for (UBangoEdGraphNode* Node : New)
 		{
 			Node->NodeID = ++MaxId;
+		}
+		for (FBangoEdStatement* Statement : NewStatements)
+		{
+			Statement->NodeID = ++MaxId;
 		}
 	}
 
@@ -261,6 +375,59 @@ namespace BangoScriptEditor
 					Out.Branches[Branch] = Target(Node->GetBranchPin(Branch), Index);
 				}
 			}
+			// The statements drawn in rows, put back as the nodes they are in the text (OutNodes gives their command's node for each).
+			TArray<FBangoFoldedNode> Folded;
+			TArray<UBangoEdGraphNode*> FoldedOwners;
+			for (UBangoEdGraphNode* Node : Nodes)
+			{
+				FBangoFoldedNode* FoldedNode = nullptr;
+				for (int32 Entry = 0; Node->IsEntries() && Entry < Node->EntryRows.Num(); ++Entry)
+				{
+					if (!Node->IsEntryInRow(Entry))
+					{
+						continue;
+					}
+					if (!FoldedNode)
+					{
+						FoldedNode = &Folded.AddDefaulted_GetRef();
+						FoldedNode->NodeID = Node->NodeID;
+					}
+					FBangoFoldedEntry& FoldedEntry = FoldedNode->Entries.AddDefaulted_GetRef();
+					FoldedEntry.Entry = Entry;
+					for (int32 Position = 0; Position < Node->EntryRows[Entry].Statements.Num(); ++Position)
+					{
+						const FBangoEdStatement& Kept = Node->EntryRows[Entry].Statements[Position];
+						FBangoGraphNode& Statement = FoldedEntry.Statements.AddDefaulted_GetRef();
+						Statement.Kind = Kept.GetKind();
+						Statement.NodeID = Kept.NodeID;
+						Statement.X = Kept.X;
+						Statement.Y = Kept.Y;
+						Statement.Text = Kept.Text;
+						Statement.Comment = Kept.Comment;
+						Statement.bDisabled = Kept.bDisabled;
+						Statement.Branches[0] = Kept.HasBlock() ? Target(Node->GetStatementPin(Entry, Position), Index) : INDEX_NONE;
+						FoldedOwners.Add(Node);
+					}
+				}
+			}
+			for (FBangoGraphNode& Out : Graph.Nodes)
+			{
+				// An entry drawn in its row has nothing wired to its own output: its statements follow it.
+				const FBangoFoldedNode* FoldedNode = Folded.FindByPredicate([&Out](const FBangoFoldedNode& Each) { return Each.NodeID == Out.NodeID; });
+				for (const FBangoFoldedEntry& FoldedEntry : FoldedNode ? FoldedNode->Entries : TArray<FBangoFoldedEntry>())
+				{
+					if (Out.Branches.IsValidIndex(FoldedEntry.Entry))
+					{
+						Out.Branches[FoldedEntry.Entry] = INDEX_NONE;
+					}
+				}
+			}
+			if (!Bango::UnfoldEntries(Graph, Folded, OutError))
+			{
+				return false;
+			}
+			Nodes.Append(FoldedOwners);
+
 			for (const FBangoEdDecl& Local : Nodes[0]->ScriptVars)
 			{
 				Graph.ScriptVars.Add(Local.ToGraphDecl());

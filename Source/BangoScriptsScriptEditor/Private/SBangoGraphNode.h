@@ -180,6 +180,16 @@ private:
 	TSharedRef<SWidget> MakeCaseRow(int32 Case);
 	/** Set by MakeCaseRow: the row it made is a decorator's, so it isn't held to a pin row's height. */
 	bool bDecoratedRow = false;
+
+	// ---- Entries drawn in their rows (statements that aren't nodes) ----
+
+	/** The statements' output pins, made before their rows (AddPin), by pin name; and those a row has placed. */
+	TMap<FName, TSharedPtr<SGraphPin>> StatementPinWidgets;
+	TSet<FName> PlacedStatementPins;
+	/** Statement Index's pin of entry Entry, for its row to place (once), or an empty widget. */
+	TSharedRef<SWidget> TakeStatementPinWidget(int32 Entry, int32 Index);
+	/** An entry drawn in its row without a decorator's row: its condition box, then a line per statement with its pin. */
+	TSharedRef<SWidget> MakeRowStatements(int32 Entry);
 	bool IsSwitchDefaultPin(const UEdGraphPin* Pin) const;
 	void BeginEditingCase(int32 Case);
 	void OnCaseCommitted(const FText& NewText, ETextCommit::Type CommitType, int32 Case);

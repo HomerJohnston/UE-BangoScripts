@@ -46,6 +46,10 @@ struct FBangoNodeDecoratorContext
 	 * where the node can't be changed, as for a title.
 	 */
 	TFunction<bool(int32 FieldIndex, const FString& Value, FString& OutError)> SetFieldValue;
+	/** Its comment (the `//` lines above it, without the slashes; lines separated by '\n'), or empty. */
+	FString Comment;
+	/** Its compile error, from the last Compile, or empty (a row can outline its line in red). */
+	FString ErrorMessage;
 
 	// ---- A command with entries (its block is an entry list: a row per entry, each with its condition) ----
 
@@ -76,6 +80,44 @@ struct FBangoNodeDecoratorContext
 	bool bHasEntryDebug = false;
 	TArray<bool> DebugEntryPassed;
 	int32 DebugRunningEntry = -1;
+	/** Remove entry Entry (its wire goes; the nodes on it stay), move it up (Delta -1) or down (+1), disable or enable it: each one undoable change, as the entry's menu does. */
+	TFunction<void(int32 Entry)> RemoveEntry;
+	TFunction<void(int32 Entry, int32 Delta)> MoveEntry;
+	TFunction<void(int32 Entry, bool bDisabled)> SetEntryDisabled;
+
+	// ---- Entries drawn in their rows (IBangoNodeDecorator::DrawsEntryStatements) ----
+
+	/** Whether each entry's statements are drawn in its row (the decorator asked, and the entry holds only what it may). */
+	TArray<bool> EntryDrawsStatements;
+	/**
+	 * For an entry drawn in its row: its statements, in order (an empty list for the others), each a context as a
+	 * node's is (CommandName, Layout, NodeText, bBlock, bDisabled, Comment, ErrorMessage, SetFieldValue), so the row
+	 * can draw and edit each one as the command's own node would be.
+	 */
+	TArray<TArray<TSharedPtr<FBangoNodeDecoratorContext>>> EntryStatements;
+	/**
+	 * In MakeEntryRowWidget only: the output pin of statement Statement of entry Entry (one with a block of its own),
+	 * to put beside it in the row; wired, it leads to that statement's block. Call it once per pin; don't keep it.
+	 * A pin the row doesn't place is put at the row's right.
+	 */
+	TFunction<TSharedRef<SWidget>(int32 Entry, int32 Statement)> MakeEntryStatementPinWidget;
+	/**
+	 * Editing the statements of an entry drawn in its row, each one undoable change; the node is drawn again after it.
+	 * Insert: one statement as written in the script, with or without its ';' (`hojo Say(TEXT("XMS700", "Hi"))`, or
+	 * `hojo AddPrompt(TEXT_INV(""), nil) { }` for one with a block, which must be empty), before Index (Index = the
+	 * count adds it last). Move: in an entry, or to another drawn in its row (ToIndex counted without the one moved).
+	 * False, with why, if it can't be done.
+	 */
+	TFunction<bool(int32 Entry, int32 Index, const FString& Statement, FString& OutError)> InsertEntryStatement;
+	TFunction<bool(int32 Entry, int32 Index, FString& OutError)> RemoveEntryStatement;
+	TFunction<bool(int32 FromEntry, int32 FromIndex, int32 ToEntry, int32 ToIndex, FString& OutError)> MoveEntryStatement;
+	TFunction<bool(int32 Entry, int32 Index, bool bDisabled, FString& OutError)> SetEntryStatementDisabled;
+	/** While the debugger follows a copy at one of the statements drawn in a row: that statement, else -1 for both. */
+	int32 DebugStatementEntry = -1;
+	int32 DebugStatementIndex = -1;
+	/** The statement just inserted or moved, for the row to give keyboard focus to (once), else -1 for both. */
+	int32 FocusStatementEntry = -1;
+	int32 FocusStatementIndex = -1;
 };
 
 /** Changes how one command's nodes are drawn. Every function is optional: by default the node is drawn as usual. */
@@ -109,6 +151,14 @@ public:
 	 * Made again whenever the node is drawn again.
 	 */
 	virtual TSharedPtr<SWidget> MakeEntryRowWidget(const FBangoNodeDecoratorContext& Context, int32 Entry) { return nullptr; }
+	/**
+	 * For a command whose entries hold only certain commands (FBangoCommandSignature::EntriesHold): true to draw entry
+	 * Entry's statements in its row (Context.EntryStatements, in MakeEntryRowWidget) rather than as nodes wired from
+	 * its output. Asked when the graph is made, and for a new entry. An entry holding anything else (or the default,
+	 * when it may hold anything) is drawn as nodes all the same. Context has the node's text and entries, but not
+	 * yet its statements.
+	 */
+	virtual bool DrawsEntryStatements(const FBangoNodeDecoratorContext& Context, int32 Entry) const { return false; }
 };
 
 namespace Bango

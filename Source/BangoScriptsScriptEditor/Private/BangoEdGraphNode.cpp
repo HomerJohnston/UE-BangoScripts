@@ -70,8 +70,9 @@ void UBangoEdGraphNode::AddSwitchCase()
 	AddCaseRow();
 	if (HasDefaultEntry() && CaseValues.Num() >= 2)
 	{
-		// The default stays last: the new entry goes just above it.
+		// The default stays last: the new entry goes just above it (drawn in its row if it would be, there).
 		SwapEntryRows(CaseValues.Num() - 2, CaseValues.Num() - 1);
+		EntryRows[CaseValues.Num() - 2].bInRow = WouldDrawEntryInRow(CaseValues.Num() - 2);
 	}
 	UpdateLayout();
 	if (UEdGraph* Graph = GetGraph())
@@ -106,6 +107,7 @@ void UBangoEdGraphNode::AddDefaultEntry()
 	Modify();
 	AddCaseRow();
 	bEntryDefault = true;
+	EntryRows.Last().bInRow = WouldDrawEntryInRow(CaseValues.Num() - 1); // (a default that may hold anything is nodes)
 	UpdateLayout();
 	if (UEdGraph* Graph = GetGraph())
 	{
@@ -121,6 +123,9 @@ void UBangoEdGraphNode::AddCaseRow()
 	{
 		EntryDisabled.SetNum(Case);
 		EntryDisabled.Add(false);
+		EntryRows.SetNum(Case);
+		FBangoEdEntryRow& Row = EntryRows.AddDefaulted_GetRef();
+		Row.bInRow = WouldDrawEntryInRow(Case);
 	}
 	UEdGraphPin* Pin = CreatePin(EGPD_Output, UBangoEdGraphSchema::PC_BangoExec, GetBranchPinName(Case));
 	// After the other cases, above Default (an entry: after the other entries, above Then).
@@ -161,6 +166,18 @@ void UBangoEdGraphNode::RemoveSwitchCase(int32 Case)
 	if (UEdGraphPin* Last = FindPin(GetBranchPinName(Count - 1), EGPD_Output))
 	{
 		RemovePin(Last);
+	}
+	if (EntryRows.IsValidIndex(Case))
+	{
+		// Its statements' pins go too (their wires' nodes stay, unwired).
+		for (const FBangoEdStatement& Statement : EntryRows[Case].Statements)
+		{
+			if (Statement.HasBlock())
+			{
+				RemoveStatementPin(Statement.PinKey);
+			}
+		}
+		EntryRows.RemoveAt(Case);
 	}
 	if (IsDefaultEntry(Case))
 	{
@@ -284,6 +301,8 @@ void UBangoEdGraphNode::SwapEntryRows(int32 Entry, int32 Other)
 	CaseValues.Swap(Entry, Other);
 	EntryDisabled.SetNum(CaseValues.Num());
 	EntryDisabled.Swap(Entry, Other);
+	EntryRows.SetNum(CaseValues.Num());
+	EntryRows.Swap(Entry, Other);
 }
 
 void UBangoEdGraphNode::SetEntryDisabled(int32 Entry, bool bDisabled)
@@ -320,6 +339,8 @@ void UBangoEdGraphNode::UseEntries()
 	bEntryDefault = false;
 	CaseValues = { FString() };
 	EntryDisabled = { false };
+	EntryRows.SetNum(1); // its nodes stay nodes, wired from the entry's output
+	EntryRows[0] = FBangoEdEntryRow();
 	UpdateLayout();
 	if (UEdGraph* Graph = GetGraph())
 	{
@@ -339,6 +360,7 @@ void UBangoEdGraphNode::UsePlainBlock()
 	bEntryDefault = false;
 	CaseValues.Reset();
 	EntryDisabled.Reset();
+	EntryRows.Reset();
 	UpdateLayout();
 	if (UEdGraph* Graph = GetGraph())
 	{
@@ -423,6 +445,17 @@ void UBangoEdGraphNode::AllocateDefaultPins()
 	{
 		CreatePin(EGPD_Input, UBangoEdGraphSchema::PC_BangoExec, InPinName);
 	}
+	// The outputs of statements drawn in rows come first, so the node has their pins ready when it draws the rows.
+	for (int32 Entry = 0; IsEntries() && Entry < EntryRows.Num(); ++Entry)
+	{
+		for (const FBangoEdStatement& Statement : EntryRows[Entry].bInRow ? EntryRows[Entry].Statements : TArray<FBangoEdStatement>())
+		{
+			if (Statement.HasBlock())
+			{
+				CreatePin(EGPD_Output, UBangoEdGraphSchema::PC_BangoExec, GetStatementPinName(Statement.PinKey));
+			}
+		}
+	}
 	for (int32 Branch = 0; Branch < GetBranchCount(); ++Branch)
 	{
 		const bool bDefault = IsSwitch() && Branch == CaseValues.Num();
@@ -441,6 +474,18 @@ void UBangoEdGraphNode::UpdateLayout()
 	ErrorField = INDEX_NONE;
 	ErrorCase = INDEX_NONE;
 	FieldWarnings.Reset();
+	for (FBangoEdEntryRow& Row : EntryRows)
+	{
+		for (FBangoEdStatement& Statement : Row.Statements)
+		{
+			FBangoGraphNode StatementSource;
+			StatementSource.Kind = Statement.GetKind();
+			StatementSource.Text = Statement.Text;
+			StatementSource.NodeID = Statement.NodeID;
+			Statement.Layout = Bango::GetNodeLayout(StatementSource, bInFunctionGraph, LayoutContext.IsValid() ? *LayoutContext : FBangoNodeLayoutContext(), false);
+			Statement.ErrorMessage = Statement.Layout.Error;
+		}
+	}
 	bHasCompilerMessage = !Layout.Error.IsEmpty();
 	ErrorType = EMessageSeverity::Error;
 	ErrorMsg = Layout.Error;
@@ -595,30 +640,51 @@ void UBangoEdGraphNode::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeCon
 					FUIAction(FExecuteAction::CreateLambda([MutableThis]() { MutableThis->AddDefaultEntry(); }),
 						FCanExecuteAction::CreateLambda([MutableThis]() { return MutableThis->CanAddDefaultEntry(); })));
 			}
-			const int32 Entry = GetCaseOfPin(Context->Pin);
-			if (Entry != INDEX_NONE)
+			// Remove, move or disable one entry (right-clicking its output; or, for an entry drawn in its row, whose
+			// output is hidden, from the node's menu).
+			const auto AddEntryItems = [this, MutableThis](FToolMenuSection& Into, int32 Entry)
 			{
 				const bool bEntryDisabled = EntryDisabled.IsValidIndex(Entry) && EntryDisabled[Entry];
 				const bool bIsDefault = IsDefaultEntry(Entry);
-				Section.AddMenuEntry(TEXT("RemoveEntry"), bIsDefault ? LOCTEXT("RemoveDefaultEntryItem", "Remove Default") : FText::Format(LOCTEXT("RemoveEntryItem", "Remove Entry {0}"), FText::AsNumber(Entry)),
+				Into.AddMenuEntry(TEXT("RemoveEntry"), bIsDefault ? LOCTEXT("RemoveDefaultEntryItem", "Remove Default") : FText::Format(LOCTEXT("RemoveEntryItem", "Remove Entry {0}"), FText::AsNumber(Entry)),
 					LOCTEXT("RemoveEntryTooltip", "Removes this entry and its wire (the nodes on it stay, unwired). The entries after it move up."), FSlateIcon(),
 					FUIAction(FExecuteAction::CreateLambda([MutableThis, Entry]() { MutableThis->RemoveSwitchCase(Entry); })));
 				const int32 Count = CaseValues.Num();
 				const int32 Movable = HasDefaultEntry() ? Count - 1 : Count; // the default stays last
 				if (!bIsDefault)
 				{
-					Section.AddMenuEntry(TEXT("MoveEntryUp"), LOCTEXT("MoveEntryUpItem", "Move Entry Up"),
+					Into.AddMenuEntry(TEXT("MoveEntryUp"), LOCTEXT("MoveEntryUpItem", "Move Entry Up"),
 						LOCTEXT("MoveEntryUpTooltip", "Swaps this entry with the one above it, wires and all. The order matters to a command that runs the first that passes, or each in turn."), FSlateIcon(),
 						FUIAction(FExecuteAction::CreateLambda([MutableThis, Entry]() { MutableThis->MoveEntry(Entry, -1); }),
 							FCanExecuteAction::CreateLambda([Entry]() { return Entry > 0; })));
-					Section.AddMenuEntry(TEXT("MoveEntryDown"), LOCTEXT("MoveEntryDownItem", "Move Entry Down"),
+					Into.AddMenuEntry(TEXT("MoveEntryDown"), LOCTEXT("MoveEntryDownItem", "Move Entry Down"),
 						LOCTEXT("MoveEntryDownTooltip", "Swaps this entry with the one below it, wires and all. (The default stays last.)"), FSlateIcon(),
 						FUIAction(FExecuteAction::CreateLambda([MutableThis, Entry]() { MutableThis->MoveEntry(Entry, 1); }),
 							FCanExecuteAction::CreateLambda([Entry, Movable]() { return Entry + 1 < Movable; })));
 				}
-				Section.AddMenuEntry(TEXT("ToggleEntryDisabled"), bEntryDisabled ? LOCTEXT("EnableEntryItem", "Enable Entry") : LOCTEXT("DisableEntryItem", "Disable Entry"),
+				Into.AddMenuEntry(TEXT("ToggleEntryDisabled"), bEntryDisabled ? LOCTEXT("EnableEntryItem", "Enable Entry") : LOCTEXT("DisableEntryItem", "Disable Entry"),
 					LOCTEXT("ToggleEntryDisabledTooltip", "A disabled entry is left out: its condition isn't worked out, and the command isn't told of it."), FSlateIcon(),
 					FUIAction(FExecuteAction::CreateLambda([MutableThis, Entry, bEntryDisabled]() { MutableThis->SetEntryDisabled(Entry, !bEntryDisabled); })));
+			};
+			const int32 PinEntry = GetCaseOfPin(Context->Pin);
+			if (PinEntry != INDEX_NONE)
+			{
+				AddEntryItems(Section, PinEntry);
+			}
+			for (int32 RowEntry = 0; !Context->Pin && RowEntry < CaseValues.Num(); ++RowEntry)
+			{
+				if (!IsEntryInRow(RowEntry))
+				{
+					continue;
+				}
+				Section.AddSubMenu(FName(*FString::Printf(TEXT("Entry%d"), RowEntry)),
+					IsDefaultEntry(RowEntry) ? LOCTEXT("DefaultEntrySubMenu", "Default") : FText::Format(LOCTEXT("EntrySubMenu", "Entry {0}"), FText::AsNumber(RowEntry)),
+					LOCTEXT("EntrySubMenuTooltip", "Remove, move or disable this entry."),
+					FNewToolMenuDelegate::CreateLambda([AddEntryItems, RowEntry](UToolMenu* SubMenu)
+					{
+						FToolMenuSection& SubSection = SubMenu->AddSection(TEXT("BangoEntry"));
+						AddEntryItems(SubSection, RowEntry);
+					}));
 			}
 			if (TakesOptionalEntries())
 			{
@@ -667,6 +733,279 @@ void UBangoEdGraphNode::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeCon
 	Section.AddMenuEntry(FBangoGraphCommands::Get().ToggleNodesDisabled, Label);
 }
 
+// ---- Entries drawn in their rows ----
+
+FName UBangoEdGraphNode::GetStatementPinName(int32 PinKey)
+{
+	return FName(*FString::Printf(TEXT("Statement%d"), PinKey));
+}
+
+bool UBangoEdGraphNode::GetEntryHold(FBangoEntryHold& OutHold) const
+{
+	const FBangoCommandSignature* Signature = GetKind() == EBangoGraphNodeKind::BlockCall && LayoutContext.IsValid() && LayoutContext->Commands
+		? LayoutContext->Commands->FindCommand(Layout.CallName) : nullptr;
+	if (!Signature || !Signature->bEntries || Signature->EntriesHoldCommands.IsEmpty())
+	{
+		return false;
+	}
+	OutHold = FBangoEntryHold::FromSignature(*Signature);
+	return true;
+}
+
+bool UBangoEdGraphNode::WouldDrawEntryInRow(int32 Entry) const
+{
+	FBangoEntryHold Hold;
+	const TSharedPtr<IBangoNodeDecorator> Decorator = IsEntries() ? GetNodeDecorator() : nullptr;
+	if (!Decorator.IsValid() || !GetEntryHold(Hold) || (Hold.bDefaultHoldsAnything && IsDefaultEntry(Entry)))
+	{
+		return false;
+	}
+	return Decorator->DrawsEntryStatements(MakeDecoratorContext(), Entry);
+}
+
+bool UBangoEdGraphNode::FindStatementOfPin(const UEdGraphPin* Pin, int32& OutEntry, int32& OutIndex) const
+{
+	if (!Pin || Pin->Direction != EGPD_Output || !IsEntries())
+	{
+		return false;
+	}
+	for (int32 Entry = 0; Entry < EntryRows.Num(); ++Entry)
+	{
+		for (int32 Index = 0; EntryRows[Entry].bInRow && Index < EntryRows[Entry].Statements.Num(); ++Index)
+		{
+			const FBangoEdStatement& Statement = EntryRows[Entry].Statements[Index];
+			if (Statement.HasBlock() && Pin->PinName == GetStatementPinName(Statement.PinKey))
+			{
+				OutEntry = Entry;
+				OutIndex = Index;
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+UEdGraphPin* UBangoEdGraphNode::GetStatementPin(int32 Entry, int32 Index) const
+{
+	if (!IsEntryInRow(Entry) || !EntryRows[Entry].Statements.IsValidIndex(Index) || !EntryRows[Entry].Statements[Index].HasBlock())
+	{
+		return nullptr;
+	}
+	return FindPin(GetStatementPinName(EntryRows[Entry].Statements[Index].PinKey), EGPD_Output);
+}
+
+bool UBangoEdGraphNode::FindStatement(int64 InNodeID, int32& OutEntry, int32& OutIndex) const
+{
+	for (int32 Entry = 0; InNodeID > 0 && Entry < EntryRows.Num(); ++Entry)
+	{
+		for (int32 Index = 0; EntryRows[Entry].bInRow && Index < EntryRows[Entry].Statements.Num(); ++Index)
+		{
+			if (EntryRows[Entry].Statements[Index].NodeID == InNodeID)
+			{
+				OutEntry = Entry;
+				OutIndex = Index;
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+void UBangoEdGraphNode::SetStatementError(int32 Entry, int32 Index, const FString& Message)
+{
+	if (IsEntryInRow(Entry) && EntryRows[Entry].Statements.IsValidIndex(Index))
+	{
+		EntryRows[Entry].Statements[Index].ErrorMessage = Message;
+	}
+	SetCompileError(Message, INDEX_NONE);
+}
+
+UEdGraphPin* UBangoEdGraphNode::CreateStatementPin(int32 PinKey)
+{
+	UEdGraphPin* Pin = CreatePin(EGPD_Output, UBangoEdGraphSchema::PC_BangoExec, GetStatementPinName(PinKey));
+	// Statement outputs go just after the input (see AllocateDefaultPins).
+	Pins.Remove(Pin);
+	int32 At = 0;
+	while (Pins.IsValidIndex(At) && (Pins[At]->Direction == EGPD_Input || Pins[At]->PinName.ToString().StartsWith(TEXT("Statement"))))
+	{
+		++At;
+	}
+	Pins.Insert(Pin, At);
+	return Pin;
+}
+
+void UBangoEdGraphNode::RemoveStatementPin(int32 PinKey)
+{
+	if (UEdGraphPin* Pin = FindPin(GetStatementPinName(PinKey), EGPD_Output))
+	{
+		for (UEdGraphPin* Linked : Pin->LinkedTo)
+		{
+			if (Linked && Linked->GetOwningNode())
+			{
+				Linked->GetOwningNode()->Modify();
+			}
+		}
+		Pin->BreakAllPinLinks();
+		RemovePin(Pin);
+	}
+}
+
+bool UBangoEdGraphNode::InsertEntryStatement(int32 Entry, int32 Index, const FString& Statement, FString& OutError)
+{
+	FBangoEntryHold Hold;
+	if (!IsEntryInRow(Entry) || !GetEntryHold(Hold))
+	{
+		OutError = TEXT("That entry isn't drawn in its row.");
+		return false;
+	}
+	FBangoGraphNode Node;
+	if (!Bango::ValidateEntryStatement(Statement, Hold, Node, OutError, LayoutContext.IsValid() ? LayoutContext->Commands : nullptr))
+	{
+		return false;
+	}
+	TArray<FBangoEdStatement>& Statements = EntryRows[Entry].Statements;
+	if (!Hold.bMany && Statements.Num() > 0)
+	{
+		OutError = FString::Printf(TEXT("A %s's entries each hold one %s: remove the one there first."), *Layout.CallName, *Bango::GetNodeCommandName(Node));
+		return false;
+	}
+	const FScopedTransaction Transaction(LOCTEXT("InsertEntryStatement", "Add to Entry"));
+	Modify();
+	FBangoEdStatement Added;
+	Added.KindValue = (uint8)Node.Kind;
+	Added.Text = Node.Text;
+	// Where BuildGraph would place it: a step right of the node, a step down per entry, and a little per line.
+	Index = FMath::Clamp(Index, 0, Statements.Num());
+	Added.X = FMath::RoundToInt((float)NodePosX / BangoGraphGridSize) + 20;
+	Added.Y = FMath::RoundToInt((float)NodePosY / BangoGraphGridSize) + 10 * (Entry + 1) + 2 * Index;
+	if (Added.HasBlock())
+	{
+		Added.PinKey = NextStatementPinKey++;
+		CreateStatementPin(Added.PinKey);
+	}
+	Statements.Insert(Added, Index);
+	FocusStatementEntry = Entry;
+	FocusStatementIndex = Index;
+	UpdateLayout();
+	if (UEdGraph* Graph = GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
+	return true;
+}
+
+bool UBangoEdGraphNode::RemoveEntryStatement(int32 Entry, int32 Index, FString& OutError)
+{
+	if (!IsEntryInRow(Entry) || !EntryRows[Entry].Statements.IsValidIndex(Index))
+	{
+		OutError = TEXT("That entry has no such statement.");
+		return false;
+	}
+	const FScopedTransaction Transaction(LOCTEXT("RemoveEntryStatement", "Remove from Entry"));
+	Modify();
+	const FBangoEdStatement& Statement = EntryRows[Entry].Statements[Index];
+	if (Statement.HasBlock())
+	{
+		RemoveStatementPin(Statement.PinKey);
+	}
+	EntryRows[Entry].Statements.RemoveAt(Index);
+	UpdateLayout();
+	if (UEdGraph* Graph = GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
+	return true;
+}
+
+bool UBangoEdGraphNode::MoveEntryStatement(int32 FromEntry, int32 FromIndex, int32 ToEntry, int32 ToIndex, FString& OutError)
+{
+	FBangoEntryHold Hold;
+	if (!IsEntryInRow(FromEntry) || !IsEntryInRow(ToEntry) || !EntryRows[FromEntry].Statements.IsValidIndex(FromIndex) || !GetEntryHold(Hold))
+	{
+		OutError = TEXT("Statements can only be moved between entries drawn in their rows.");
+		return false;
+	}
+	if (FromEntry != ToEntry && !Hold.bMany && EntryRows[ToEntry].Statements.Num() > 0)
+	{
+		OutError = FString::Printf(TEXT("A %s's entries each hold one: that entry has its one already."), *Layout.CallName);
+		return false;
+	}
+	if (FromEntry == ToEntry && FromIndex == FMath::Clamp(ToIndex, 0, EntryRows[ToEntry].Statements.Num() - 1))
+	{
+		return true; // already there
+	}
+	const FScopedTransaction Transaction(LOCTEXT("MoveEntryStatement", "Move in Entries"));
+	Modify();
+	const FBangoEdStatement Moved = EntryRows[FromEntry].Statements[FromIndex];
+	EntryRows[FromEntry].Statements.RemoveAt(FromIndex);
+	TArray<FBangoEdStatement>& Target = EntryRows[ToEntry].Statements;
+	ToIndex = FMath::Clamp(ToIndex, 0, Target.Num());
+	Target.Insert(Moved, ToIndex); // its pin (by its key) and wire go with it
+	FocusStatementEntry = ToEntry;
+	FocusStatementIndex = ToIndex;
+	UpdateLayout();
+	if (UEdGraph* Graph = GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
+	return true;
+}
+
+bool UBangoEdGraphNode::SetEntryStatementDisabled(int32 Entry, int32 Index, bool bDisabled, FString& OutError)
+{
+	if (!IsEntryInRow(Entry) || !EntryRows[Entry].Statements.IsValidIndex(Index))
+	{
+		OutError = TEXT("That entry has no such statement.");
+		return false;
+	}
+	if (EntryRows[Entry].Statements[Index].bDisabled == bDisabled)
+	{
+		return true;
+	}
+	const FScopedTransaction Transaction(bDisabled ? LOCTEXT("DisableEntryStatement", "Disable in Entry") : LOCTEXT("EnableEntryStatement", "Enable in Entry"));
+	Modify();
+	EntryRows[Entry].Statements[Index].bDisabled = bDisabled;
+	if (UEdGraph* Graph = GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
+	return true;
+}
+
+bool UBangoEdGraphNode::SetStatementFieldValue(int32 Entry, int32 Index, int32 FieldIndex, const FString& Value, FString& OutError)
+{
+	FBangoEntryHold Hold;
+	if (!IsEntryInRow(Entry) || !EntryRows[Entry].Statements.IsValidIndex(Index) || !GetEntryHold(Hold))
+	{
+		OutError = TEXT("That entry has no such statement.");
+		return false;
+	}
+	FBangoEdStatement& Statement = EntryRows[Entry].Statements[Index];
+	FBangoGraphNode Edited;
+	Edited.Kind = Statement.GetKind();
+	Edited.Text = Statement.Text;
+	Edited.NodeID = Statement.NodeID;
+	const FBangoNodeLayoutContext NoContext;
+	if (!Bango::SetNodeField(Edited, bInFunctionGraph, LayoutContext.IsValid() ? *LayoutContext : NoContext, FieldIndex, Value, OutError))
+	{
+		return false;
+	}
+	if (Edited.Text.Equals(Statement.Text, ESearchCase::CaseSensitive) && Edited.Kind == Statement.GetKind())
+	{
+		return true;
+	}
+	if (Edited.Kind != Statement.GetKind() || !Hold.Commands.Contains(Bango::GetNodeCommandName(Edited)))
+	{
+		OutError = TEXT("That would make it something its entry can't hold.");
+		return false;
+	}
+	const FScopedTransaction Transaction(LOCTEXT("EditEntryStatement", "Edit Bango Node"));
+	Modify();
+	Statement.Text = Edited.Text;
+	UpdateLayout();
+	return true;
+}
+
 TSharedPtr<IBangoNodeDecorator> UBangoEdGraphNode::GetNodeDecorator() const
 {
 	const bool bCallsCommand = Layout.Style == EBangoNodeStyle::Command || GetKind() == EBangoGraphNodeKind::BlockCall;
@@ -681,6 +1020,8 @@ FBangoNodeDecoratorContext UBangoEdGraphNode::MakeDecoratorContext() const
 	Context.NodeText = Text;
 	Context.bBlock = GetKind() == EBangoGraphNodeKind::BlockCall;
 	Context.bDisabled = IsDisabledNode();
+	Context.Comment = NodeComment;
+	Context.ErrorMessage = bHasCompilerMessage && ErrorType == EMessageSeverity::Error ? ErrorMsg : FString();
 	TWeakObjectPtr<UBangoEdGraphNode> WeakNode(const_cast<UBangoEdGraphNode*>(this));
 	Context.SetFieldValue = [WeakNode](int32 FieldIndex, const FString& Value, FString& OutError)
 	{
@@ -725,6 +1066,76 @@ FBangoNodeDecoratorContext UBangoEdGraphNode::MakeDecoratorContext() const
 		Context.bHasEntryDebug = bHasEntryDebug;
 		Context.DebugEntryPassed = DebugEntryPassed;
 		Context.DebugRunningEntry = DebugRunningEntry;
+		Context.RemoveEntry = [WeakNode](int32 Entry) { if (UBangoEdGraphNode* Node = WeakNode.Get()) { Node->RemoveSwitchCase(Entry); } };
+		Context.MoveEntry = [WeakNode](int32 Entry, int32 Delta) { if (UBangoEdGraphNode* Node = WeakNode.Get()) { Node->MoveEntry(Entry, Delta); } };
+		Context.SetEntryDisabled = [WeakNode](int32 Entry, bool bOff) { if (UBangoEdGraphNode* Node = WeakNode.Get()) { Node->SetEntryDisabled(Entry, bOff); } };
+
+		// The statements of entries drawn in their rows, each told about as a node of its own would be.
+		Context.EntryDrawsStatements.Init(false, CaseValues.Num());
+		Context.EntryStatements.SetNum(CaseValues.Num());
+		for (int32 Entry = 0; Entry < CaseValues.Num(); ++Entry)
+		{
+			if (!IsEntryInRow(Entry))
+			{
+				continue;
+			}
+			Context.EntryDrawsStatements[Entry] = true;
+			for (int32 Index = 0; Index < EntryRows[Entry].Statements.Num(); ++Index)
+			{
+				const FBangoEdStatement& Statement = EntryRows[Entry].Statements[Index];
+				const TSharedPtr<FBangoNodeDecoratorContext> StatementContext = MakeShared<FBangoNodeDecoratorContext>();
+				StatementContext->CommandName = Statement.Layout.CallName;
+				StatementContext->Layout = &Statement.Layout;
+				StatementContext->NodeText = Statement.Text;
+				StatementContext->bBlock = Statement.HasBlock();
+				StatementContext->bDisabled = Statement.bDisabled;
+				StatementContext->Comment = Statement.Comment;
+				StatementContext->ErrorMessage = Statement.ErrorMessage;
+				StatementContext->SetFieldValue = [WeakNode, Entry, Index](int32 FieldIndex, const FString& Value, FString& OutError)
+				{
+					UBangoEdGraphNode* Node = WeakNode.Get();
+					if (!Node)
+					{
+						OutError = TEXT("The node is gone.");
+						return false;
+					}
+					if (!Node->SetStatementFieldValue(Entry, Index, FieldIndex, Value, OutError))
+					{
+						return false;
+					}
+					if (UEdGraph* Graph = Node->GetGraph())
+					{
+						Graph->NotifyGraphChanged();
+					}
+					return true;
+				};
+				Context.EntryStatements[Entry].Add(StatementContext);
+			}
+		}
+		Context.InsertEntryStatement = [WeakNode](int32 Entry, int32 Index, const FString& Statement, FString& OutError)
+		{
+			UBangoEdGraphNode* Node = WeakNode.Get();
+			return Node ? Node->InsertEntryStatement(Entry, Index, Statement, OutError) : false;
+		};
+		Context.RemoveEntryStatement = [WeakNode](int32 Entry, int32 Index, FString& OutError)
+		{
+			UBangoEdGraphNode* Node = WeakNode.Get();
+			return Node ? Node->RemoveEntryStatement(Entry, Index, OutError) : false;
+		};
+		Context.MoveEntryStatement = [WeakNode](int32 FromEntry, int32 FromIndex, int32 ToEntry, int32 ToIndex, FString& OutError)
+		{
+			UBangoEdGraphNode* Node = WeakNode.Get();
+			return Node ? Node->MoveEntryStatement(FromEntry, FromIndex, ToEntry, ToIndex, OutError) : false;
+		};
+		Context.SetEntryStatementDisabled = [WeakNode](int32 Entry, int32 Index, bool bOff, FString& OutError)
+		{
+			UBangoEdGraphNode* Node = WeakNode.Get();
+			return Node ? Node->SetEntryStatementDisabled(Entry, Index, bOff, OutError) : false;
+		};
+		Context.DebugStatementEntry = DebugStatementEntry;
+		Context.DebugStatementIndex = DebugStatementIndex;
+		Context.FocusStatementEntry = FocusStatementEntry;
+		Context.FocusStatementIndex = FocusStatementIndex;
 	}
 	return Context;
 }

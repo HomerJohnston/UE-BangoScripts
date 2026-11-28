@@ -203,3 +203,79 @@ namespace Bango
 	 */
 	BANGOSCRIPTS_API bool HoistLateGlobals(const FString& Source, FString& OutSource, FBangoCompileError& OutError);
 }
+
+/** What a block command's entries may hold (its signature's EntriesHold), for drawing an entry's statements in its row. */
+struct BANGOSCRIPTS_API FBangoEntryHold
+{
+	/** The commands an entry holds calls of (FBangoCommandSignature::EntriesHoldCommands). */
+	TArray<FString> Commands;
+	/** Any number of their calls (bEntriesHoldMany); else one, or none. */
+	bool bMany = false;
+	/** The default holds anything (bDefaultHoldsAnything): it's never drawn in its row. */
+	bool bDefaultHoldsAnything = false;
+
+	static FBangoEntryHold FromSignature(const FBangoCommandSignature& Signature);
+};
+
+/** An entry's statements, taken out of the graph to be drawn in its row (Bango::FoldEntries). */
+struct BANGOSCRIPTS_API FBangoFoldedEntry
+{
+	int32 Entry = INDEX_NONE;
+	/**
+	 * Its statements, in order: Call and BlockCall nodes, each with its NodeID, text, comment, disabled flag and
+	 * position. Next isn't used. A BlockCall's Branches[0] (Body) is an index into the graph's Nodes, or INDEX_NONE.
+	 */
+	TArray<FBangoGraphNode> Statements;
+};
+
+/** The folded entries of one block command node, which is found by its NodeID. */
+struct BANGOSCRIPTS_API FBangoFoldedNode
+{
+	int64 NodeID = 0;
+	TArray<FBangoFoldedEntry> Entries;
+};
+
+/**
+ * Drawing an entry's statements in its row (the graph editor). The text keeps every statement as a node; the editor
+ * takes an entry's statements out of the graph it shows (FoldEntries) and puts them back before writing
+ * (UnfoldEntries), so the text written is the same, but for the reroutes between them, which aren't kept.
+ */
+namespace Bango
+{
+	/** The command a Call or BlockCall node calls (`@john Speech(0)` -> `Speech`), or empty (another kind, a `call`, text that doesn't read). */
+	BANGOSCRIPTS_API FString GetNodeCommandName(const FBangoGraphNode& Node);
+
+	/**
+	 * Whether entry Entry of the block command node at NodeIndex can be drawn in its row: the node takes entries;
+	 * the entry isn't a default that holds anything; and its statements, one after another, are all calls of the
+	 * commands Hold names (enabled or disabled; reroutes between them don't count), at most one without bMany. An
+	 * empty entry can. OutStatements gets the statements' indices, in order, and OutReroutes the reroutes'.
+	 */
+	BANGOSCRIPTS_API bool CanFoldEntry(const FBangoGraph& Graph, int32 NodeIndex, int32 Entry, const FBangoEntryHold& Hold,
+		TArray<int32>* OutStatements = nullptr, TArray<int32>* OutReroutes = nullptr);
+
+	/**
+	 * Takes the statements of every entry HoldFor says to draw in its row (it returns what the entry may hold, or null
+	 * to leave it as nodes) out of Graph: they go into OutFolded, the entry's output is left unwired, and the reroutes
+	 * between them are dropped (a reroute's comment goes to the statement after it, or before it). The other nodes'
+	 * wires are kept, numbered for the smaller graph, and so are the folded statements' Body wires.
+	 */
+	BANGOSCRIPTS_API void FoldEntries(FBangoGraph& Graph, const TFunction<const FBangoEntryHold*(const FBangoGraphNode& Node, int32 Entry)>& HoldFor,
+		TArray<FBangoFoldedNode>& OutFolded);
+
+	/**
+	 * Puts folded statements back into Graph: each entry's statements, chained in order from its output. False, with
+	 * OutError, if a node isn't found, an entry doesn't exist or is wired already, or a Body is out of range.
+	 */
+	BANGOSCRIPTS_API bool UnfoldEntries(FBangoGraph& Graph, const TArray<FBangoFoldedNode>& Folded, FString& OutError);
+
+	/**
+	 * Checks one statement typed for an entry drawn in its row, as written in the script (with or without its ';'):
+	 * `hojo Say(TEXT("XMS700", "Hi"))`, or `hojo AddPrompt(TEXT_INV(""), nil) { }` for a command with a block (its
+	 * block must be empty). It must be one call of a command Hold names. On success OutNode is its node (Call or
+	 * BlockCall, text without ';' or braces; no NodeID or position yet). With Commands, a command that takes a block
+	 * becomes a BlockCall even without its braces, and one that doesn't can't have them.
+	 */
+	BANGOSCRIPTS_API bool ValidateEntryStatement(const FString& Statement, const FBangoEntryHold& Hold, FBangoGraphNode& OutNode, FString& OutError,
+		const IBangoCommandLookup* Commands = nullptr);
+}

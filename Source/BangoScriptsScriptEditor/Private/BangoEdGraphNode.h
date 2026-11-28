@@ -64,6 +64,56 @@ struct FBangoEdDecl
 };
 
 /**
+ * One statement of an entry drawn in its row (IBangoNodeDecorator::DrawsEntryStatements): it isn't a node of its own
+ * in the graph editor, but it's still a node in the text, with its NodeID, kept here so undo, copy and paste carry it.
+ */
+USTRUCT()
+struct FBangoEdStatement
+{
+	GENERATED_BODY()
+
+	/** EBangoGraphNodeKind: Call, or BlockCall for one with a block of its own. */
+	UPROPERTY()
+	uint8 KindValue = (uint8)EBangoGraphNodeKind::Call;
+	/** Its NodeID in the text; 0 until the editor gives it one (BangoScriptEditor::BuildDocument). */
+	UPROPERTY()
+	int64 NodeID = 0;
+	UPROPERTY()
+	FString Text;
+	UPROPERTY()
+	FString Comment;
+	UPROPERTY()
+	bool bDisabled = false;
+	/** Its position in the text's metadata, in grid units (not shown: it's drawn in its row). */
+	UPROPERTY()
+	int32 X = 0;
+	UPROPERTY()
+	int32 Y = 0;
+	/** For one with a block: its output pin on the node is UBangoEdGraphNode::GetStatementPinName(PinKey). */
+	UPROPERTY()
+	int32 PinKey = 0;
+
+	/** How it's laid out (its fields), from Text; and its compile error. Not saved. */
+	FBangoNodeLayout Layout;
+	FString ErrorMessage;
+
+	EBangoGraphNodeKind GetKind() const { return (EBangoGraphNodeKind)KindValue; }
+	bool HasBlock() const { return GetKind() == EBangoGraphNodeKind::BlockCall; }
+};
+
+/** An entry of a command node: whether its statements are drawn in its row, and if so, the statements. */
+USTRUCT()
+struct FBangoEdEntryRow
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	bool bInRow = false;
+	UPROPERTY()
+	TArray<FBangoEdStatement> Statements;
+};
+
+/**
  * One Bango statement in the graph editor. Mirrors an FBangoGraphNode: its kind, NodeID, text and comment.
  * Pins: an exec input (except on entry nodes), then the True/False or Body outputs, then the main output
  * (Then/Completed, or an unnamed exec out).
@@ -117,6 +167,17 @@ public:
 	/** With bEntries: the last entry is `default:` (no condition), which passes when none of the others does. */
 	UPROPERTY()
 	bool bEntryDefault = false;
+
+	/**
+	 * With bEntries: one per entry. An entry drawn in its row has its statements here (they aren't nodes), its own
+	 * output is hidden and unwired, and each of its statements with a block has an output pin of its own.
+	 */
+	UPROPERTY()
+	TArray<FBangoEdEntryRow> EntryRows;
+
+	/** The next free key for a statement's output pin (FBangoEdStatement::PinKey). */
+	UPROPERTY()
+	int32 NextStatementPinKey = 1;
 
 	/** True for nodes in a function's graph (a function graph's entry node's Text is the signature). */
 	UPROPERTY()
@@ -172,6 +233,12 @@ public:
 	bool bHasEntryDebug = false;
 	TArray<bool> DebugEntryPassed;
 	int32 DebugRunningEntry = -1;
+	/** The statement drawn in a row the debugged copy is at, else -1 for both. Not saved. */
+	int32 DebugStatementEntry = -1;
+	int32 DebugStatementIndex = -1;
+	/** The statement drawn in a row that was just inserted or moved, for its row to focus once, else -1 for both. Not saved. */
+	int32 FocusStatementEntry = -1;
+	int32 FocusStatementIndex = -1;
 	/** For the debugger's trail: when the script being debugged last ran this node (FPlatformTime::Seconds), or 0. Fades out. */
 	double DebugPingTime = 0.0;
 
@@ -283,7 +350,8 @@ public:
 	void UseEntries();
 	/** The other way, for one entry with no condition. */
 	void UsePlainBlock();
-	bool CanUsePlainBlock() const { return IsEntries() && !bEntryDefault && TakesOptionalEntries() && CaseValues.Num() == 1 && CaseValues[0].IsEmpty() && !(EntryDisabled.IsValidIndex(0) && EntryDisabled[0]); }
+	bool CanUsePlainBlock() const { return IsEntries() && !bEntryDefault && TakesOptionalEntries() && CaseValues.Num() == 1 && CaseValues[0].IsEmpty() && !(EntryDisabled.IsValidIndex(0) && EntryDisabled[0])
+		&& !(IsEntryInRow(0) && EntryRows[0].Statements.Num() > 0); }
 	/** The entries end with `default:`, and whether Entry is it. */
 	bool HasDefaultEntry() const { return IsEntries() && bEntryDefault && CaseValues.Num() > 0; }
 	bool IsDefaultEntry(int32 Entry) const { return HasDefaultEntry() && Entry == CaseValues.Num() - 1; }
@@ -293,6 +361,35 @@ public:
 	/** (In an edit that's under way:) adds a row at the end, with its output pin above Then (or Default); swaps two entries' rows, wires and all. */
 	void AddCaseRow();
 	void SwapEntryRows(int32 Entry, int32 Other);
+
+	// ---- Entries drawn in their rows (IBangoNodeDecorator::DrawsEntryStatements) ----
+
+	/** The output pin name of a statement drawn in a row. */
+	static FName GetStatementPinName(int32 PinKey);
+	/** Whether entry Entry's statements are drawn in its row. */
+	bool IsEntryInRow(int32 Entry) const { return IsEntries() && EntryRows.IsValidIndex(Entry) && EntryRows[Entry].bInRow; }
+	/** What the command's entries may hold (its signature's EntriesHold); false if it doesn't say. */
+	bool GetEntryHold(FBangoEntryHold& OutHold) const;
+	/** Whether a new, empty entry Entry would be drawn in its row: the command says what its entries hold, and its decorator asks. */
+	bool WouldDrawEntryInRow(int32 Entry) const;
+	/** The statement whose output Pin is, or false. */
+	bool FindStatementOfPin(const UEdGraphPin* Pin, int32& OutEntry, int32& OutIndex) const;
+	/** The output pin of a statement drawn in a row (one with a block), or null. */
+	UEdGraphPin* GetStatementPin(int32 Entry, int32 Index) const;
+	/** The statement drawn in a row whose NodeID is NodeID, or false. */
+	bool FindStatement(int64 NodeID, int32& OutEntry, int32& OutIndex) const;
+	/** Shows a compile error on a statement drawn in a row (and on the node, as for any error). */
+	void SetStatementError(int32 Entry, int32 Index, const FString& Message);
+	/** The statement edits a row makes (FBangoNodeDecoratorContext): each an undoable change. False, with why, if refused. */
+	bool InsertEntryStatement(int32 Entry, int32 Index, const FString& Statement, FString& OutError);
+	bool RemoveEntryStatement(int32 Entry, int32 Index, FString& OutError);
+	bool MoveEntryStatement(int32 FromEntry, int32 FromIndex, int32 ToEntry, int32 ToIndex, FString& OutError);
+	bool SetEntryStatementDisabled(int32 Entry, int32 Index, bool bDisabled, FString& OutError);
+	bool SetStatementFieldValue(int32 Entry, int32 Index, int32 FieldIndex, const FString& Value, FString& OutError);
+	/** (In an edit:) puts a new output pin for a statement just after the input, where statement pins go. */
+	UEdGraphPin* CreateStatementPin(int32 PinKey);
+	/** (In an edit:) takes out a statement's output pin, its wire too (the nodes on it stay). */
+	void RemoveStatementPin(int32 PinKey);
 
 	/** The decorator another module registered for the command this node calls (Bango::RegisterNodeDecorator), or null. */
 	TSharedPtr<class IBangoNodeDecorator> GetNodeDecorator() const;
